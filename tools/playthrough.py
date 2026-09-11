@@ -13,6 +13,150 @@ from playwright.sync_api import sync_playwright
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 INDEX = (ROOT / 'index.html').as_uri()
 
+# =====================================================================
+# 魔王房的玩家模型（R4 / QA R3-P1-01「兩支工具對同一隻魔王的結論相反」）
+# ---------------------------------------------------------------------
+# Round 3 的問題：這支工具用「每 2 幀來回一次 evaluate、每 24 幀揮一次劍、沒有任何閃避」打魔王，
+# 於是 boss_test --curve 說迪迪迪被打掉 90%、洛洛洛 100%，playthrough 卻只打掉 0~2% / 30%
+# ⇒ 「w5 deaths=4」量到的是工具笨，不是關卡難度。
+# 這裡把 tools/boss_test.py 的 [fight]／[mid] 玩家模型整段搬過來（同一份判斷、同樣逐幀驅動），
+# 兩支工具對同一隻魔王才會給出同一個量級的答案。模型內容：
+#   ① 距離：貼到「魔王框外 stopGap px」為止（預設 14px —— 劍的判定框從卡比中心往前 28px、
+#      身體半寬 7px ⇒ 有效射程約 21px，14px 打得到又不會走進魔王身體），太近就退開，
+#      維持 14~40px 的中距離前後游走（strafe）。
+#   ② 面向：靠攏用的左右鍵本身就會轉身，揮劍前一定先面向魔王。
+#   ③ 攻擊節奏：每 attackEvery 幀揮一次、每 jumpEvery 幀站定跳一次。
+#   ④ 反射動作：魔王跳到頭上／高速衝過來就往旁邊閃、貼地飛來的攻擊在 44px 內跳過、
+#      威斯比竄根的預警出現在腳下就走開、魔王張嘴吸就往反方向走、被逼到牆角往中央鑽、
+#      劍掉了先撿能力星、沒武器就吸附近的彈藥走近吐回去。
+# =====================================================================
+BOSS_MODEL_JS = r"""
+window.__pt = (function () {
+  function targets() {
+    const out = [];
+    for (const e of KB.game.entities) if (!e.dead && e.type === 'boss' && !e.ko && !e.hidden && !e.untouchable) out.push(e);
+    return out;
+  }
+  function nearest() {
+    const p = KB.player; let best = null, bd = 1e9;
+    for (const e of targets()) { const d = Math.abs(e.cx - p.cx) + Math.abs(e.cy - p.cy) * 0.5; if (d < bd) { bd = d; best = e; } }
+    return best || KB.game.boss;
+  }
+  function enemyAttacks() {
+    const a = [];
+    for (const e of KB.game.entities) if (!e.dead && ((e.type === 'proj' && e.owner === 'enemy') || (e.type === 'hitbox' && e.owner === 'enemy'))) a.push(e);
+    return a;
+  }
+  function abilityStar() { return KB.game.entities.find(e => !e.dead && e.name === 'abilitystar') || null; }
+  function ammoNear(p) {
+    let best = null, bd = 1e9;
+    for (const e of KB.game.entities) {
+      if (e.dead || e === p || !e.inhalable || e.name === 'abilitystar') continue;
+      if (!(e.type === 'enemy' || e.type === 'proj' || e.type === 'item')) continue;
+      const dx = Math.abs(e.cx - p.cx), dy = Math.abs(e.cy - p.cy); if (dx > 80 || dy > 48) continue;
+      const d = dx + dy; if (d < bd) { bd = d; best = e; }
+    }
+    return best;
+  }
+  return {
+    // 前方 1~3 格的腳邊 / 身體那一列有沒有尖刺（R4）。
+    // 尖刺是「看得到就該跳」的地形傷害，人類玩家一定會跳；原本的機器人只有「每 45 幀跳一次」，
+    // 所以 w3 r2 的尖刺床（縮短到 3 格之後仍然）是最大的死亡熱點 —— 那是工具看不見障礙，不是關卡不公平。
+    spikeAhead(dir) {
+      const p = KB.player, m = KB.game.map, T = 16;
+      const fy = Math.floor((p.bottom + 1) / T);
+      const fx = Math.floor((dir > 0 ? p.x + p.w - 1 : p.x) / T);
+      for (let k = 0; k <= 3; k++) {   // k=0：前緣已經踩進去的那一格（磁磚 16px、卡比 14px，貼上去時前緣早就在裡面了）
+        const tx = fx + dir * k;
+        if (m.get(tx, fy) === '^' || m.get(tx, fy - 1) === '^') return k + 1;
+      }
+      return 0;
+    },
+    // 跑最多 o.frames 幀的魔王戰；遇到魔王死 / 玩家死 / 過關 / 場景切換就提早回傳。
+    bossRun(o) {
+      o = o || {};
+      const out = { frames: 0, ended: 'frames', bossHp: null, bossMinHp: null, bossMaxHp: 0, bossDead: false, hurt: 0, playerHp: 0 };
+      let jumpHold = 0, prevAttack = false, escaping = 0, waitT = 0, inhaleT = 0;
+      const jump = (force) => { if (force || Math.abs(KB.player.vx) < 0.5) jumpHold = 12; };
+      const ph = o.phase || 0, stopGap = o.stopGap !== undefined ? o.stopGap : 14;
+      const strafe = o.strafe || 20, attackEvery = o.attackEvery || 15, jumpEvery = o.jumpEvery || 90;
+      let lastHp = KB.player.hp;
+      const n = o.frames || 120;
+      for (let i = 0; i < n; i++) {
+        if (!KB.scene || KB.scene.constructor.name !== 'GameScene') { out.ended = 'scene'; break; }
+        const g = KB.game, p = KB.player, b = g.boss;
+        if (!b) { out.ended = 'noboss'; break; }
+        if (g.clearT >= 0) { out.ended = 'clear'; break; }
+        if (b.dead) { out.ended = 'bossdead'; break; }
+        if (p.state === 'dead') { out.ended = 'died'; break; }
+        const inp = {};
+        const t = nearest(); const dx = t.cx - p.cx, gap = Math.abs(dx) - (t.w / 2 + p.w / 2);
+        const mw = g.map.pw;
+        const awayDir = (d) => { const cornered = (d < 0 && p.x < 10) || (d > 0 && p.x + p.w > mw - 10); return cornered ? -d : d; };
+        const falling = t.solid && t.grav && !t.onGround && t.bottom < p.bottom - 2 && Math.abs(dx) < t.w / 2 + 24;
+        const bvx = (window.__ptLastBx !== undefined && window.__ptLastBid === t.id) ? (t.x - window.__ptLastBx) : 0;
+        window.__ptLastBx = t.x; window.__ptLastBid = t.id;
+        const charging = Math.abs(bvx) > 1.6 && (bvx > 0) === (dx < 0) && Math.abs(dx) < 120 && t.bottom > p.y - 8 && t.y < p.bottom + 8;
+        let incoming = false;
+        for (const e of enemyAttacks()) { const ex = e.cx - p.cx; if (Math.abs(ex) < 44 && e.vx && Math.sign(e.vx) === -Math.sign(ex) && e.bottom > p.y + 6) { incoming = true; break; } }
+        if (incoming && p.onGround) jump(true);
+        let rootX = null;
+        if (t.roots) for (const rt of t.roots) if (rt.t < rt.warn && Math.abs(rt.x - p.cx) < 24) { rootX = rt.x; break; }
+        const sucking = (t.state === 'inhale' || t.state === 'rampage') && Math.abs(dx) < 120;
+        if (escaping && (Math.abs(dx) > 70 || p.ability)) escaping = 0;
+        if (!p.ability && !escaping && (p.x < 10 || p.x + p.w > mw - 10) && Math.abs(dx) < 70) escaping = p.x < 10 ? 1 : -1;
+        const star0 = !p.ability && !p.mouth ? abilityStar() : null;
+        if (rootX !== null) inp[awayDir(p.cx < rootX ? -1 : 1) > 0 ? 'right' : 'left'] = true;
+        else if (falling || charging) { inp[awayDir(dx > 0 ? -1 : 1) > 0 ? 'right' : 'left'] = true; if (charging && p.onGround) jump(true); }
+        else if (sucking && !star0) inp[awayDir(dx > 0 ? -1 : 1) > 0 ? 'right' : 'left'] = true;
+        else if (escaping && !star0) inp[escaping > 0 ? 'right' : 'left'] = true;
+        else if (p.ability) {
+          if (gap > stopGap) inp[dx > 0 ? 'right' : 'left'] = true;                                   // 靠到框外 stopGap px
+          else if (gap < stopGap - 10) inp[awayDir(dx > 0 ? -1 : 1) > 0 ? 'right' : 'left'] = true;   // 太近就退開
+          else { const c = i % (strafe * 2); inp[(c < strafe) === (dx > 0) ? 'left' : 'right'] = true; }   // 中距離前後游走
+          if ((i + ph * 7) % attackEvery === 0) inp.attack = true;
+          if ((i + ph * 31) % jumpEvery === 0 && p.onGround) jump();
+          if (t.bottom < p.y - 10 && t.bottom > p.y - 70 && gap < 48 && p.onGround && (i + ph * 3) % 48 === 0) jump();   // 魔王飄在高處
+        } else if (p.mouth) {
+          const sameH = t.y < p.bottom + 8 && t.bottom > p.y - 12, above = t.bottom <= p.y - 12 && t.bottom > p.y - 70;
+          if (Math.abs(dx) > 100) inp[dx > 0 ? 'right' : 'left'] = true;
+          else if (prevAttack) { /* 吐出需要按鍵「按下」邊緣：上一幀按著就先放開一幀 */ }
+          else if (sameH || ++waitT > 240) { inp.attack = true; waitT = 0; }
+          else if (above) { if (p.onGround && (i % 30 === 0)) jump(); else if (!p.onGround && p.vy > -0.6 && p.state !== 'float') inp.attack = true; }
+        } else {
+          const star = abilityStar(), ammo = ammoNear(p);
+          if (star) {
+            const sx = star.cx - p.cx; if (Math.abs(sx) > 3) inp[sx > 0 ? 'right' : 'left'] = true;
+            if (star.bottom < p.y - 6 && p.onGround && Math.abs(sx) < 12 && i % 20 === 0) jump();
+          } else if (ammo) {
+            const ax = ammo.cx - p.cx;
+            if (Math.abs(ax) > 44 || (ax > 0) !== (p.dir > 0)) { inp[ax > 0 ? 'right' : 'left'] = true; inhaleT = 0; }
+            else { inp.attack = true; inhaleT++; }
+          } else if (gap < 40) inp[awayDir(dx > 0 ? -1 : 1) > 0 ? 'right' : 'left'] = true;
+        }
+        if (jumpHold > 0) { inp.jump = true; jumpHold--; }
+        prevAttack = !!inp.attack;
+        KB.input.setVirtual(inp, true); __kb.step(1); out.frames++;
+        if (o.godmode && KB.player && KB.player.state !== 'dead') {
+          KB.player.hp = KB.player.maxHp;
+          if (o.ability && o.ability !== 'none' && !KB.player.ability && !KB.player.mouth && KB.ABILITIES[o.ability]) KB.player.ability = o.ability;
+        }
+        const bb = KB.game.boss;
+        if (bb && !bb.introducing) {
+          out.bossMaxHp = Math.max(out.bossMaxHp, bb.maxHp);
+          out.bossMinHp = out.bossMinHp === null ? bb.hp : Math.min(out.bossMinHp, bb.hp);
+        }
+        if (KB.player.hp < lastHp) out.hurt++; lastHp = KB.player.hp;
+      }
+      KB.input.clearVirtual();
+      const b = KB.game.boss;
+      out.bossHp = b ? b.hp : null; out.bossDead = !!(b && b.dead); out.playerHp = KB.player.hp;
+      return out;
+    },
+  };
+})();
+"""
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--level', default='w1')
@@ -22,6 +166,9 @@ def main():
     ap.add_argument('--room', type=int, default=0)
     ap.add_argument('--godmode', action='store_true', help='不會死（hp 固定 + 不會摔死）')
     ap.add_argument('--collect', action='store_true', help='順路去撿大星星（bigstar）')
+    ap.add_argument('--boss-gap', type=float, default=14, help='魔王戰保持的距離（魔王框外幾 px；劍的有效射程約 21px）')
+    ap.add_argument('--boss-strafe', type=int, default=20, help='魔王戰前後游走的半週期（幀）')
+    ap.add_argument('--boss-attack-every', type=int, default=15, help='魔王戰每幾幀揮一次')
     a = ap.parse_args()
     logs = []
     outdir = ROOT / 'shots' / 'play' / a.level
@@ -32,6 +179,7 @@ def main():
         pg.on('console', lambda m: logs.append('[console] ' + m.text) if m.type == 'error' else None)
         pg.goto(INDEX + '?debug=1&mute=1&norun=1')
         pg.wait_for_function('()=>window.__kb && KB.LEVELS')
+        pg.evaluate(BOSS_MODEL_JS)
         pg.evaluate("([l,r,ab])=>__kb.goto('game',{level:l,room:r,ability:ab,nofade:true})", [a.level, a.room, a.ability])
         pg.evaluate("()=>__kb.step(2)")
 
@@ -79,6 +227,8 @@ def main():
               return {dx:d.cx-p.cx,dy:d.cy-p.cy}}""")
 
         frames = 0; deaths = 0; rooms_seen = []; last_x = None; stuck = 0; dir_ = 1; lastRoom = -1; bossSeen = False; cleared = False; jumpT = 0
+        bossPhase = 0; bossMinHp = None; bossMaxHp = 0   # 魔王戰量測：整場（含死亡重來）魔王掉到的最低血量
+        spikeJump = 0   # R4：看到前方尖刺後的連續跳躍幀數
         shots_taken = 0; roomFrames = 0; maxX = {}; starChase = 0; starBlock = 0; bsChase = 0; bsBlock = 0
         essChase = 0; essBlock = 0; mbStuck = 0; mbLastX = None
         while frames < a.maxframes:
@@ -87,7 +237,7 @@ def main():
             if s['scene'] != 'GameScene': print(f'scene changed to {s["scene"]} at frame {frames}'); shot('scene_' + s['scene']); break
             if g['room'] != lastRoom:
                 lastRoom = g['room']; rooms_seen.append(g['room']); roomFrames = 0; stuck = 0; last_x = None; dir_ = 1
-                essChase = 0; essBlock = 0; mbStuck = 0; mbLastX = None
+                essChase = 0; essBlock = 0; mbStuck = 0; mbLastX = None; spikeJump = 0
                 print(f'[room {g["room"]}] enter at frame {frames}, x={pl["x"]}, y={pl["y"]}, ents={g["ents"]}')
                 shot(f'room{g["room"]}_enter')
             if a.godmode:
@@ -116,28 +266,25 @@ def main():
                         press(keys); step(2); frames += 2; continue
                 else: starChase = 0
             else: starChase = 0
-            # 魔王房：往魔王靠近並攻擊
+            # 魔王房：整段交給 __pt.bossRun（＝ boss_test 的玩家模型，逐幀在頁面內跑）
+            # R4 / QA R3-P1-01：原本這裡是「每 2 幀 round-trip、每 24 幀揮一次劍、沒有任何閃避」的土砲打法，
+            #   對同一隻魔王的結論和 boss_test 差一個數量級（迪迪迪 0~2% vs 90%）。
             if g['boss'] and not g['boss']['dead']:
                 if not bossSeen: bossSeen = True; print(f'  boss appears hp={g["boss"]["hp"]} at frame {frames}'); shot('boss_intro')
-                B = g['boss']; bl = B['x']; br = B['x'] + (B.get('w') or 40); pcx = pl['x'] + 7
-                dx = (bl - 14 - pcx) if pcx < bl else ((br + 14 - pcx) if pcx > br else 0)   # 靠到魔王框邊緣外 14px
-                keys = {}
-                if abs(dx) > 6: keys['right' if dx > 0 else 'left'] = True
-                elif (frames % 24) < 3: keys['right' if (bl + br) / 2 > pcx else 'left'] = True   # 先轉身面向魔王（與揮劍的視窗錯開）
-                high = B.get('y') is not None and (pl['y'] - B['y']) > 30
-                if high and jumpT == 0 and pl['onGround'] and abs(dx) <= 30: jumpT = 22          # 魔王在上方：單次跳躍（不漂浮）
-                if jumpT > 0:
-                    keys['jump'] = jumpT > 10
-                    if 12 <= jumpT <= 13 and pl['ability']: keys['attack'] = True                # 跳躍頂點揮劍
-                    jumpT -= 2
-                elif pl['ability']: keys['attack'] = 4 <= (frames % 24) < 6   # 轉身後才揮劍，否則會朝反方向砍空
-                else:
-                    # 沒能力：吸入（按住 30 幀）/ 吐出（需邊緣觸發）
-                    if pl['mouth']: keys['attack'] = (frames % 8) < 2
-                    else: keys['attack'] = (frames % 60) < 30
-                if frames % 90 < 15 and abs(dx) < 60: keys['jump'] = True
-                press(keys); step(2); frames += 2
-                if frames % 600 == 0: print(f'  boss hp={g["boss"]["hp"]} player hp={pl["hp"]} x={pl["x"]}'); shot(f'boss_f{frames}')
+                r = pg.evaluate("(o)=>__pt.bossRun(o)", {
+                    'frames': 300, 'stopGap': a.boss_gap, 'strafe': a.boss_strafe,
+                    'attackEvery': a.boss_attack_every, 'jumpEvery': 90,
+                    'phase': bossPhase, 'godmode': a.godmode, 'ability': a.ability,
+                })
+                frames += r['frames']; bossPhase += 1
+                if r['bossMaxHp']:
+                    bossMaxHp = max(bossMaxHp, r['bossMaxHp'])
+                    bossMinHp = r['bossMinHp'] if bossMinHp is None else min(bossMinHp, r['bossMinHp'])
+                if bossPhase % 3 == 0 or r['ended'] != 'frames':
+                    print(f'  boss hp={r["bossHp"]}/{r["bossMaxHp"]} (min {bossMinHp}) player hp={r["playerHp"]} '
+                          f'hurt={r["hurt"]} ended={r["ended"]} at frame {frames}')
+                    shot(f'boss_f{frames}')
+                if r['frames'] == 0 and r['ended'] == 'frames': step(10); frames += 10   # 保險：不會空轉
                 continue
             if g['boss'] and g['boss']['dead']:
                 # 找出口門
@@ -191,6 +338,12 @@ def main():
                         else: keys['attack'] = (frames % 70) < 46
                         if frames % 150 < 8: keys['jump'] = True
                     if mbStuck > 30: keys['jump'] = (frames % 8) < 3
+                    # R4：走向中魔王的路上一樣要閃尖刺（w3 r2 的出口被 gatekeeper 鎖住 ⇒ 整間房都走這條分支，
+                    #   原本完全沒有尖刺意識，4 段尖刺床就是這一關的死亡熱點）
+                    if spikeJump > 0:
+                        keys['jump'] = (spikeJump % 4) >= 2; spikeJump -= 2
+                    elif pl['state'] not in ('hurt', 'dead') and pg.evaluate("(d)=>__pt.spikeAhead(d)", 1 if d > 0 else -1):
+                        spikeJump = 24; keys['jump'] = True
                     if falling(pl): keys['jump'] = (frames % 4) < 2
                     press(keys); step(2); frames += 2; continue
             # 順路撿大星星（有追星上限：藏在可破壞方塊後 / 水底的星星機器人不一定拿得到，追太久就放棄繼續主線）
@@ -242,6 +395,11 @@ def main():
                     keys['down'] = True
                     keys['attack'] = (frames % 20) < 3
                 else: dir_ *= -1; stuck = 0
+            # R4：看到前方有尖刺就「連按跳」漂浮過去（按住只會跳一次，尖刺床有 3 格寬，要靠漂浮才飛得完）
+            if spikeJump > 0:
+                keys['jump'] = (spikeJump % 4) >= 2; spikeJump -= 2
+            elif pl['state'] not in ('hurt', 'dead') and pg.evaluate("(d)=>__pt.spikeAhead(d)", dir_):
+                spikeJump = 24; keys['jump'] = True
             # 隨機跳過坑 / 打敵人
             if frames % 45 == 0 and not pl['mouth']: keys['jump'] = True
             if pl['mouth']: keys['attack'] = (frames % 8) < 2
@@ -252,7 +410,10 @@ def main():
         press({})
         s = st()
         print('---')
+        bossPct = (100.0 * (bossMaxHp - bossMinHp) / bossMaxHp) if (bossMaxHp and bossMinHp is not None) else None
         print(f'level={a.level} frames={frames} rooms={rooms_seen} deaths={deaths} cleared={cleared} boss={s["game"]["boss"] if s["game"] else None} maxX={maxX}')
+        # 魔王被打掉幾 %（整場最低血量／最大血量，和 boss_test --curve 同一個定義）
+        print(f'bossDamage={bossPct if bossPct is None else round(bossPct)}% (min {bossMinHp} / max {bossMaxHp})')
         if a.collect:
             print('stars:', pg.evaluate("()=>JSON.stringify(KB.save.stars||{})"))
         print('missing sprites:', s['missing'])

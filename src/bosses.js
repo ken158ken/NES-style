@@ -250,6 +250,7 @@
       this.setSize(40, 96);
       this.cycle = 0; this.puffs = 0; this.apples = 0; this.rootX = 0; this.rootY = 0;
       this.contactCD = 0;   // 接觸傷害的自身冷卻（玩家 invuln 之外再加一層，見 get contactDamage）
+      this.blowCD = 0;      // R4：吹風期間的接觸傷害冷卻（60 幀 1 點，見 get contactDamage）
       this.roots = []; this.rageColor = '#ff3020'; this.phase2Msg = '威斯比的樹根開始暴走！';
       this.setState('idle');
     }
@@ -260,15 +261,20 @@
     //   ② 除了玩家自己的 invuln 之外，威斯比再帶一個 45 幀的 contactCD；
     //   ③ 吹風（blow）期間完全不扣接觸傷害，改成把玩家往樹外推（給玩家「脫離」的動作提示）。
     // 實作成 getter：game.js 的碰觸傷害判定會在「玩家確實重疊、而且沒有無敵」時才讀這個值。
+    // Round 4（QA R3-P1-02「曲線不遞增：w1 反而是最好打的一隻」）：②③ 兩層各放寬一級 ——
+    //   ② contactCD 45 → 30 幀；
+    //   ③ 吹風期間恢復接觸傷害，但用獨立的 60 幀冷卻（推開仍然照做）。
+    //   ⇒ 貼著樹幹站著砍不再是零風險，但比 Round 2「每 12 幀被扣一次血」還是溫和很多（①的 24px 樹幹框不動）。
     get trunk() { const w = 24; return { x: this.cx - w / 2, y: this.bottom - 48, w: w, h: 48 }; }
     get contactDamage() {
       if (this.dead || this.introducing) return false;
-      if (this.state === 'blow') return false;          // 吹風時只推人不扣血
-      if (this.contactCD > 0) return false;
       const p = this.player; if (!p || p.state === 'dead') return false;
       const t = this.trunk;
       if (!p.overlapsRect(t.x, t.y, t.w, t.h)) return false;
-      this.contactCD = 45;
+      // R4：吹風時仍然以推開為主，但每 60 幀會扣 1 點（站在樹幹裡不動就會慢慢掉血）
+      if (this.state === 'blow') { if (this.blowCD > 0) return false; this.blowCD = 60; return true; }
+      if (this.contactCD > 0) return false;
+      this.contactCD = 30;   // R4：45 → 30
       return true;
     }
     set contactDamage(v) { /* Boss 建構式會寫 true；這裡改用 getter 算，忽略寫入 */ }
@@ -337,6 +343,7 @@
       const p = this.player; if (!p) return;
       if (this.hurtT > 0 && this.stateT % 4 === 0) KB.particles(this.x + 12, this.y + 34, '#80c0ff', 1, { spread: 0.3, grav: 0.2, life: 22, up: 0.4 }); // 流淚
       if (this.contactCD > 0) this.contactCD--;
+      if (this.blowCD > 0) this.blowCD--;
       this.updateRoots();
       switch (this.state) {
         case 'idle':
@@ -726,7 +733,9 @@
     constructor(x, y) {
       super(x, y);
       this.displayName = '魅塔騎士'; this.subtitle = 'META KNIGHT'; this.name = 'metaknight';
-      this.hp = this.maxHp = 45; this.score = 8000; this.color = '#3040a0';
+      // R4（QA R3-P1-02）：兩種玩家模型 10/10 樣本都 100%、平均 838 幀就被殺完（比 w2 的 1225 幀還快）
+      //   ⇒ maxHp 45 → 55（拉長戰鬥），二階段的揮劍改成 2 點（見 case 'slash'）。
+      this.hp = this.maxHp = 55; this.score = 8000; this.color = '#3040a0';
       this.solid = true; this.grav = KB.GRAV; this.spr = 'metaknight_idle'; this.setSize(20, 26);
       this.swordStar = null; this.decisions = 0; this.dashBox = null; this.dir = -1; this.stunCD = 0;
       // QA P0-01：迴避（vanish / backstep）不能無限連發，否則普通玩家永遠打不到他
@@ -768,6 +777,11 @@
       } else this.setState('idle');
     }
     get canVanish() { return this.vanishCD <= 0 && this.evadeLock <= 0; }
+    // R4（QA R3-P1-02）：二階段「拔出真劍」之後揮劍 1 → 2 點（一階段維持 1 點，仍是學招式的階段）。
+    //   只有揮劍（slash）吃這個加成 —— 實測把 dash / 劍氣 / 龍捲一起加到 2 點，
+    //   中距離（刀刃）玩家模型會被遠程彈幕直接三振（boss_test [mid] 0/1），那是「打不到也躲不掉」而不是難度。
+    get rageDmg() { return this.phase === 2 ? 2 : 1; }
+    // 二階段門檻維持基底的 40%（改成 50% / 65% 都實測過：曲線沒變、但 fight / mid 會開始 FAIL）
     onPhase2() { this.vanishCD = Math.max(this.vanishCD, 90); this.setState('tornado'); }
     decide() {
       const p = this.player, dist = this.playerDist(), r = this.rng();
@@ -815,13 +829,18 @@
           this.facePlayer(); this.vx = this.dir * (this.phase === 2 ? 1.7 : 1.3);
           if (this.hitWall || dist < 26 || this.stateT > this.iv(70)) this.setState('idle');
           break;
-        case 'slash':
+        case 'slash': {
+          // R4：二階段的「真劍」揮砍 1 → 2 點（貼身互砍的玩家必須開始閃，不能站著對砍）
+          const sdmg = this.rageDmg;
           this.vx *= 0.8;
           if (this.stateT === 1) this.facePlayer();
-          if (this.stateT === 8) { KB.hitbox({ x: 0, y: 0, w: 24, h: 24, dmg: 1, owner: 'enemy', type: 'sword', follow: this, ox: 2, oy: 0, life: 10, pierce: true }); KB.audio.sfx('sword'); }
-          if (this.phase === 2 && this.stateT === 20) { KB.hitbox({ x: 0, y: 0, w: 26, h: 24, dmg: 1, owner: 'enemy', type: 'sword', follow: this, ox: 2, oy: 0, life: 10, pierce: true }); KB.audio.sfx('sword'); }
-          if (this.stateT > this.iv(26)) this.setState((this.rng() < 0.6 && this.evadeLock <= 0) ? 'backstep' : 'idle');   // 砍完多半往後跳開，留出空檔
+          if (this.stateT === 8) { KB.hitbox({ x: 0, y: 0, w: 24, h: 24, dmg: sdmg, owner: 'enemy', type: 'sword', follow: this, ox: 2, oy: 0, life: 10, pierce: true }); KB.audio.sfx('sword'); }
+          if (this.phase === 2 && this.stateT === 20) { KB.hitbox({ x: 0, y: 0, w: 26, h: 24, dmg: sdmg, owner: 'enemy', type: 'sword', follow: this, ox: 2, oy: 0, life: 10, pierce: true }); KB.audio.sfx('sword'); }
+          // R4：二階段的揮劍變成 2 點，相對地「砍完一定往後跳開」（backstep → recover 的 16 幀是玩家的固定攻擊窗），
+          //   否則貼身互砍會變成純粹的比血量長短，而不是「看準破綻再上」。
+          if (this.stateT > this.iv(26)) this.setState(((this.phase === 2 || this.rng() < 0.6) && this.evadeLock <= 0) ? 'backstep' : 'idle');
           break;
+        }
         case 'backstep':   // 往後跳開一小段，落地後有硬直
           if (this.stateT === 1) { this.facePlayer(); this.vx = -this.dir * 2.0; this.vy = -3.0; }
           if (this.stateT > 6 && this.onGround) { this.vx = 0; this.setState('recover'); }

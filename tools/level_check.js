@@ -135,6 +135,23 @@ for (const lv of KB.LEVELS) {
       if (isSolid(b) && !isSolid(a) && a !== '.' && a !== '^' && a !== '~' && a !== '/' && a !== '\\' && a !== '=' && a !== 'H') warn(`${tag}: x=${x} 底部第二列 '${a}'`);
     }
     if (pits) console.log(`  (info) ${tag}: ${pits} 格無底洞`);
+    // R4（QA R3-P2-06）：「掉得出地圖」的底部開口寬度必須 >= 2 格。
+    // 卡比的碰撞框寬 14px、磁磚 16px ⇒ 一格寬的洞是「走過去一定掉進去、進去了又跳不出來」的必死點，
+    // 而且玩家從上面完全看不出它是洞還是地板。兩格寬才有起跳 / 漂浮自救的空間。
+    // 判定用「最底列站不住」（'.'、'^'…），最底列鋪了單向雲平台 '=' 的洞不算開口（掉下去有得踩）。
+    {
+      const runs = [];
+      for (let x = 0; x < w; x++) {
+        if (isStand(get(x, h - 1))) continue;
+        const last = runs[runs.length - 1];
+        if (last && last[1] === x - 1) last[1] = x; else runs.push([x, x]);
+      }
+      for (const [x0, x1] of runs) {
+        const n = x1 - x0 + 1;
+        if (n < 2) err(`${tag}: x=${x0} 的底部開口只有 ${n} 格寬（掉出地圖即死，必須 >= 2 格，或在最底列鋪 '=' 雲平台）`);
+      }
+      if (runs.length) console.log(`  (info) ${tag}: 底部開口 ${runs.map(r => r[0] === r[1] ? `x=${r[0]}` : `x=${r[0]}~${r[1]}`).join(' ')}`);
+    }
     // 位置檢查
     const inMap = (x, y) => x >= 0 && x < w && y >= 0 && y < h;
     const checkPos = (what, x, y, needGround, tallRows, wideCols) => {
