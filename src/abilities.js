@@ -9,6 +9,15 @@
 (function () {
   KB.ABILITIES = KB.ABILITIES || {};
   const P = KB.PHYS;
+
+  // ---------- 蓄力必殺的門檻（fix5b / R5-P1-03）----------
+  // 這些數字就是招式表 / 圖鑑上寫給玩家看的「按住 N 幀放開」，
+  // **從按下攻擊鍵的那一幀算起**。各招內部的計數器起點不同（有的要等收招動作演完才開始加），
+  // 所以下面使用時會扣掉各自的偏移量；改數字時只改這裡，招式表文案也用同一個值。
+  // 驗證：tools/enemy_test.py 的「蓄力門檻」段（按住 N+2 幀觸發、N-6 幀不觸發）。
+  const HAMMER_SPIN = 40;   // 鐵鎚・大迴旋（招式表：按住 40 幀放開）
+  const BEAM_WAVE = 45;   // 光束・星潮光束（招式表：按住 45 幀放開）
+  const SPARK_BURST = 45;   // 電擊・電擊波（招式表：按住 45 幀放開）
   const def = (key, o) => {
     o.key = key; o.name = o.name || KB.ABILITY_NAMES[key]; o.hudName = o.hudName || KB.ABILITY_HUD[key];
     o.hat = o.hat || ('hat_' + key); o.icon = o.icon || ('ui_ability_' + key);
@@ -318,11 +327,12 @@
         if (t < 10) KB.particles(p.cx + p.dir * 12, p.cy - 2, ['#ffe040', '#ffffff'], 1, { spread: 1.2, grav: 0, life: 10, up: 0, size: 1 });
         return;
       }
-      // 光鞭：16 幀後若仍按住 → 進入蓄力；放開時累計 ≥45 幀就放出星潮光束
+      // 光鞭：16 幀後若仍按住 → 進入蓄力；**從按下那一幀算起滿 45 幀**放開就放出星潮光束
+      // （fix5b / R5-P1-03：原本寫 t >= 45，實測門檻 46 幀 —— d.t 在招式開始的下一幀才 ++）
       if (t >= 16) {
         if (d.whip) { d.whip.dead = true; d.whip = null; d.box = null; }
         if (held) {
-          if (t >= 45) {
+          if (t >= BEAM_WAVE - 1) {
             if (!d.charged) chargeFx(p, '#ffe040');
             d.charged = true;
             if (t % 3 === 0) KB.particles(p.cx + p.dir * 10, p.cy - 2, ['#ffffff', '#ffe040'], 2, { spread: 1.6, grav: 0, life: 12, up: 0, size: 1 });
@@ -533,7 +543,7 @@
       if (d.t % 2 === 0) KB.fx('fx_spark_field', p.cx + rnd(-20, 20), p.cy + rnd(-14, 18) + 8, { life: 4, flip: Math.random() < 0.5, fps: 15 });
       KB.particles(p.cx + rnd(-22, 22), p.cy + rnd(-18, 18), ['#ffffff', '#80d0ff', '#c0f0ff'], 1, { spread: 1.2, grav: 0, life: 8, up: 0, size: 1 });
       if (d.t % 10 === 0) KB.audio.sfx('spark');
-      if (p.stateT >= 45) {
+      if (p.stateT >= SPARK_BURST - 1) {   // fix5b：實際 = 招式表的 45 幀（原本 >= 45 實測要 46 幀）
         if (!d.charged) chargeFx(p, '#60c0ff');
         d.charged = true;
         if (d.t % 4 === 0) KB.particles(p.cx, p.y - 6, ['#ffffff', '#ffe040'], 2, { spread: 1, grav: 0, life: 12, up: 0.4, size: 1 });
@@ -815,12 +825,14 @@
           vx('textPop', p.cx, p.bottom - 26, 'SMASH!', { color: '#ffe040', frames: 36 });
         }
       }
-      // 掄鎚動作結束後仍按住 → 進入蓄力；放開時累計 ≥40 幀就放出大迴旋
+      // 掄鎚動作結束後仍按住 → 進入蓄力；**從按下那一幀算起滿 40 幀**就放出大迴旋。
+      // fix5b / R5-P1-03：d.charge 是從 t>=24（掄鎚動作演完）才開始加，所以實際門檻是 24+40=64 幀，
+      //                   照招式表按住 40 幀放開完全沒反應。門檻改成 HAMMER_SPIN - 24，實際 = 標示。
       if (!smash && t >= 24) {
         if (b && !b.dead) { b.dead = true; d.box = null; }
         if (held) {
           d.charge++;
-          if (d.charge >= 40) {
+          if (d.charge >= HAMMER_SPIN - 24) {
             if (!d.ready) { d.ready = true; chargeFx(p, '#e08040'); }
             if (d.charge % 3 === 0) KB.particles(p.cx + rnd(-10, 10), p.y - 4, ['#ffffff', '#ffe040'], 2, { spread: 1, grav: 0, life: 12, up: 0.5, size: 1 });
           } else {

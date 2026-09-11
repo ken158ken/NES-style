@@ -13,6 +13,14 @@
   const P = KB.PHYS;
   const T = KB.TILE;
 
+  // ---------- 蓄力必殺的門檻（fix5b / R5-P1-03）----------
+  // 這些數字就是招式表 / 圖鑑上寫給玩家看的「按住 N 幀放開」，
+  // **從按下攻擊鍵的那一幀算起**。各招內部的計數器起點不同（有的要等收招動作演完才開始加），
+  // 所以下面使用時會扣掉各自的偏移量；改數字時只改這裡，招式表文案也用同一個值。
+  // 驗證：tools/test_forms.py 的「蓄力門檻」段（按住 N+2 幀觸發、N-6 幀不觸發）。
+  const DRAGON_NOVA = 60;   // 龍化・龍炎彈（招式表：按住 60 幀放開）
+  const MECH_BARRAGE = 50;   // 機甲・全彈發射（招式表：按住 50 幀放開）
+
   // ---------- 註冊表 ----------
   const NAMES = { giant: '巨大化', dragon: '龍化', mech: '機甲', ghost: '幽靈' };
   const HUD = { giant: 'GIANT', dragon: 'DRAGON', mech: 'MECH', ghost: 'GHOST' };
@@ -100,20 +108,23 @@
   //     X      巨腳踩踏：躍起後落地，兩側各一道衝擊波（hit-stop）
   //     ↓+X    巨人衝撞：前衝 30 幀全身判定 dmg 6，可撞破硬磚 X
   //     空中 X  屁股墜落：vy 8 直落，落地大衝擊環
-  //     被動    體型 ×2、吸入範圍 ×2、可直接吞下中魔王
+  //     被動    體型 ×2、吸入範圍 ×2、可直接吞下中魔王、裝甲 3（armor 1）
   // ======================================================================
   const GIANT_TIME = 900, GIANT_WARN = 120;
   def('giant', {
     color: '#ff8040', duration: 20, lockMove: true, canJump: false, fps: 8,
     hat: 'hat_giant',
-    desc: '吞下巨大花的花粉，身體膨脹成兩倍大；限時 900 幀，走一步地都在抖。',
+    desc: '吞下巨大花的花粉，身體膨脹成兩倍大；撐得住三下攻擊，走一步地都在抖。',
     flavour: ['吸一大口氣——啵！整隻膨脹成兩倍。', '這個大小，連中魔王都能一口吞掉。'],
-    moves: [['X', '巨腳踩踏'], ['↓+X', '巨人衝撞（破硬磚）'], ['空中 X', '屁股墜落'], ['↑+X（按住）', '大口吸：範圍 ×2・可吞中魔王'], ['限時', '900 幀後自動縮小']],
+    moves: [['X', '巨腳踩踏'], ['↓+X', '巨人衝撞（破硬磚）'], ['空中 X', '屁股墜落'], ['↑+X（按住）', '大口吸（可吞中魔王）'], ['被動', '裝甲 3・受傷不掉能力'], ['限時', '900 幀後自動縮小']],
     onGet(p) {
       const d = data(p);
       d.timer = GIANT_TIME; d.step = 0; d.warned = false; d.mode = null;
       p.setForm({
-        key: 'giant', scale: 2, inhaleAll: true,
+        // fix5b / R5-P2-13：原本 armor 0 ⇒ 隨便被 waddledee 碰一下就 clearForm + 掉能力，
+        // 900 幀的限時與「最後 120 幀閃爍」在實戰裡根本走不到。改成和 mech 同樣的裝甲機制：
+        // armor 1（每下只扣 1 點裝甲、不扣 HP、不掉能力），裝甲 3 點打光才提前解除。
+        key: 'giant', scale: 2, inhaleAll: true, armor: 1, hp: 3,
         // 巨大化沿用既有卡比精靈（scale 2）；攻擊幀：衝撞＝跑步、屁股墜落＝蹲下、
         // 踩踏＝專用的 kirby_attack_giant（fix5 新增，art/kirby_forms.js）
         spr(pp, anim, opts) {
@@ -247,7 +258,7 @@
     hat: null,
     desc: '長出蝠翼、尾巴與金角；按住跳就能一直飛，張口就是一條火河。',
     flavour: ['背後「啪」地張開一對紅色蝠翼，', '吸一口氣，喉嚨深處已經燒起來了。'],
-    moves: [['按住跳', '飛行'], ['X（可按住）', '龍息'], ['↓+X', '尾擊（前後）'], ['空中 X', '俯衝'], ['X 蓄滿放開', '必殺：龍炎彈']],
+    moves: [['按住跳', '飛行'], ['X（可按住）', '龍息'], ['↓+X', '尾擊（前後）'], ['空中 X', '俯衝'], ['按住 60 幀放開', '必殺：龍炎彈']],
     onGet(p) {
       const d = data(p); d.flap = 0;
       p.setForm({
@@ -382,7 +393,7 @@
       }
       if (held) {
         d.charge = (d.charge || 0) + 1;
-        if (d.charge === 60) { d.ready = true; sfx('charge_ready'); vf('chargeReady', p.cx, p.cy, '#ff9020'); }
+        if (d.charge === DRAGON_NOVA - 1) { d.ready = true; sfx('charge_ready'); vf('chargeReady', p.cx, p.cy, '#ff9020'); }
         if (d.ready && d.charge % 4 === 0) KB.particles(p.cx + rnd(-12, 12), p.y - 2, ['#ffffff', '#ffe040'], 2, { spread: 1, grav: 0, life: 12, up: 0.5, size: 1 });
       } else if (d.ready) { startMove(p, 'nova'); return; }
     },
@@ -492,7 +503,7 @@
     hat: null,
     desc: '穿上重裝甲：裝甲值 6，受傷先扣裝甲不掉能力；火箭拳、追蹤飛彈與噴射一應俱全。',
     flavour: ['「喀鏘」一聲，整組裝甲扣上身。', '胸口的動力爐亮起來——全系統正常。'],
-    moves: [['X', '火箭拳（來回判定）'], ['↑+X', '追蹤飛彈 ×2'], ['空中 X', '噴射墜踩'], ['按住跳', '噴射跳'], ['X 蓄滿放開', '必殺：全彈發射']],
+    moves: [['X', '火箭拳（來回判定）'], ['↑+X', '追蹤飛彈 ×2'], ['空中 X', '噴射墜踩'], ['按住跳', '噴射跳'], ['按住 50 幀放開', '必殺：全彈發射']],
     onGet(p) {
       const d = data(p); d.jetT = 0; d.stepT = 0;
       p.setForm({
@@ -594,7 +605,7 @@
       if (d.t >= 18) {
         if (held) {
           d.charge = (d.charge || 0) + 1;
-          if (d.charge === 50) { d.ready = true; sfx('charge_ready'); vf('chargeReady', p.cx, p.cy, '#78e8ff'); }
+          if (d.charge === MECH_BARRAGE - 18) { d.ready = true; sfx('charge_ready'); vf('chargeReady', p.cx, p.cy, '#78e8ff'); }
           if (d.ready && d.charge % 4 === 0) KB.particles(p.cx + rnd(-10, 10), p.y - 2, ['#ffffff', '#78e8ff'], 2, { spread: 1, grav: 0, life: 12, up: 0.5, size: 1 });
           else if (d.charge % 8 === 1) sfx('charge');
           p.attackTimer = Math.max(p.attackTimer, 2);
@@ -623,12 +634,46 @@
     while (n < 8 && KB.TileMap.isSolid(map.get(x, ty))) { n++; x++; }
     return n;
   }
+  /**
+   * noclip 結束時把卡比從實心磁磚裡推出來（fix5b / R5-P1-02）。
+   * 原本只往左右各找 64px，按住 ↓ 沉進地板時左右都是實心 → 迴圈跑完人還在地形裡，
+   * noclip 一關掉就直接墜落 state=dead（掉一條命 + 掉能力）。
+   * 現在改成：先左右 24px（保留「穿薄牆被推回來」的手感）→ 再一格一格往上找最近的空位 → 最後往下找。
+   */
+  function unstickFromWall(p) {
+    const map = KB.game && KB.game.map; if (!map) return;
+    const freeAt = (cx, bottom) => {
+      if (bottom - p.h < 0) return false;
+      const x0 = Math.floor((cx - p.w / 2) / T), x1 = Math.floor((cx + p.w / 2 - 1) / T);
+      const y0 = Math.floor((bottom - p.h) / T), y1 = Math.floor((bottom - 1) / T);
+      for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++) {
+        if (tx < 0 || tx >= map.w || ty >= map.h) return false;
+        if (KB.TileMap.isSolid(map.get(tx, ty))) return false;
+      }
+      return true;
+    };
+    if (freeAt(p.cx, p.bottom)) return;
+    for (let k = 1; k <= 24; k++) {
+      if (freeAt(p.cx + k, p.bottom)) { p.x += k; return; }
+      if (freeAt(p.cx - k, p.bottom)) { p.x -= k; return; }
+    }
+    for (let k = 1; k <= map.h; k++) {                   // 往上找最近的空格（沉進地板時走這條）
+      const b = p.bottom - k * T;
+      if (b - p.h < 0) break;
+      if (freeAt(p.cx, b)) { p.bottom = b; p.vy = 0; return; }
+    }
+    for (let k = 1; k <= map.h; k++) {                   // 保險：上面全是實心就往下找
+      const b = p.bottom + k * T;
+      if (b > map.ph - T) break;
+      if (freeAt(p.cx, b)) { p.bottom = b; p.vy = 0; return; }
+    }
+  }
   def('ghost', {
     color: '#c4ccec', duration: 20, lockMove: false, moveSpeed: P.walk, canJump: true, fps: 8,
     hat: null,
     desc: '變成半透明的白色被單；能穿過薄牆、附身敵人，還能發出讓人僵直的哀嚎。',
     flavour: ['身體變得輕飄飄、涼颼颼的，', '牆壁看起來也沒那麼硬了。'],
-    moves: [['X', '穿牆開關（最多 2 格厚）'], ['↓+X', '附身敵人'], ['空中 X', '幽靈哀嚎（stun）'], ['↑+X', '隱身 180 幀'], ['穿牆中 ↑↓', '上下飄浮']],
+    moves: [['X', '穿牆開關（2 格內）'], ['↓+X', '附身敵人'], ['空中 X', '幽靈哀嚎（stun）'], ['↑+X', '隱身 180 幀'], ['穿牆中 ↑↓', '上下飄浮']],
     onGet(p) {
       const d = data(p);
       d.phaseT = GHOST_PHASE; d.invisT = 0; d.possessT = 0; d.guard = null;
@@ -656,13 +701,8 @@
         vf('afterimage', p, { frames: 50, every: 3, color: '#c4ccec', alpha: 0.45 });
         vf('ring', p.cx, p.cy, { r0: 2, r1: 34, frames: 16, color: '#ffffff', width: 2 });
       } else {
-        const map = KB.game && KB.game.map;
-        if (map && map.isSolidPx(p.cx, p.cy)) {
-          for (let k = 1; k <= 64; k++) {
-            if (!map.isSolidPx(p.cx + k, p.cy)) { p.x += k; break; }
-            if (!map.isSolidPx(p.cx - k, p.cy)) { p.x -= k; break; }
-          }
-        }
+        if (p.clampToRoom) p.clampToRoom();
+        unstickFromWall(p);
         p.grav = P.grav;
         sfx('unpossess');
         KB.particles(p.cx, p.cy, ['#ffffff', '#c4ccec'], 6, { spread: 1.4, life: 16 });
@@ -673,6 +713,9 @@
       const d = data(p);
       p.possessed = e; d.possessT = GHOST_POSSESS;
       if (p.form) p.form.hidden = true;
+      // fix5b / R5-P1-04：附身期間卡比不受傷。原本只在 formUpdate 裡補 invuln 3，
+      // 附身「那一幀」還是 0 ⇒ 貼在敵人身上按 ↓+X 會先吃接觸傷害 → 掉能力 → onLose → 附身 <8 幀就解除。
+      p.invuln = Math.max(p.invuln, 12);
       p.setState(p.onGround ? 'idle' : 'fall');
       sfx('possess');
       hitstop(4); shake(4);
@@ -710,7 +753,7 @@
         if (e.dead || d.possessT <= 0 || inp.pressed('select')) { this.unpossess(p, !e.dead && d.possessT <= 0); return true; }
         p.setCenter(e.cx, e.cy);
         p.vx = 0; p.vy = 0; p.onGround = e.onGround;
-        p.invuln = Math.max(p.invuln, 3);
+        p.invuln = Math.max(p.invuln, 12);   // 附身期間完全不受傷（fix5b / R5-P1-04）
         e.beingInhaled = false;
         const dx = (inp.down('right') ? 1 : 0) - (inp.down('left') ? 1 : 0);
         if (dx) { e.dir = dx; p.dir = dx; e.vx = dx * 1.5; } else e.vx *= 0.6;
@@ -774,13 +817,17 @@
           : (!p.onGround && !phasing) ? 'wail' : 'phase');
       if (d.mode === 'possess') {
         setup(p, { dur: 18, fps: 10, lock: true });
-        // 找重疊（或非常靠近）的敵人
-        let tgt = null, bd = 26;
+        // 找目標：**判定框重疊就一定成立**（fix5b / R5-P1-04 —— 原本只看中心距 < 26px，
+        // 高瘦 / 巨大的敵人明明整隻疊在卡比身上卻會跳「沒有目標」），重疊的優先，
+        // 其次才是 26px 內最近的那隻。
+        let tgt = null, bd = 26, over = null, od = 1e9;
         for (const e of KB.game.entities) {
           if (e.dead || e.type !== 'enemy' || e.active === false) continue;
           const dd = Math.hypot(e.cx - p.cx, e.cy - p.cy);
+          if (p.overlaps(e)) { if (dd < od) { od = dd; over = e; } continue; }
           if (dd < bd) { bd = dd; tgt = e; }
         }
+        if (over) tgt = over;
         if (tgt) this.possess(p, tgt);
         else {
           sfx('unpossess');

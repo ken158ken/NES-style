@@ -6,6 +6,13 @@
   KB.ABILITIES = KB.ABILITIES || {};
   const P = KB.PHYS, T = KB.TILE;
 
+  // ---------- 蓄力必殺的門檻（fix5b / R5-P1-03）----------
+  // 這些數字就是招式表 / 圖鑑上寫給玩家看的「按住 N 幀放開」，
+  // **從按下攻擊鍵的那一幀算起**。各招內部的計數器起點不同（有的要等收招動作演完才開始加），
+  // 所以下面使用時會扣掉各自的偏移量；改數字時只改這裡，招式表文案也用同一個值。
+  // 驗證：tools/test_magic.py 的「蓄力門檻」段（按住 N+2 幀觸發、N-6 幀不觸發）。
+  const MAGIC_ULT = 60;   // mage 元素風暴 / gravity 奇點 / clone 百裂分身（招式表：按住 60 幀放開）
+
   // ---------- 共用工具 ----------
   const rnd = (a, b) => a + Math.random() * (b - a);
   const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
@@ -268,6 +275,7 @@
     name: '元素法師', hudName: 'MAGE', color: '#a860f0',
     duration: 22, hold: true, maxHold: 0, lockMove: true, canJump: false, fps: 10,
     desc: '戴上星辰尖帽、握住元素法杖，火冰雷風任你差遣；蓄滿魔力還能喚來元素風暴。',
+    flavour: ['尖帽一戴，指尖就有火星。', '火冰雷風，想要哪個都行。'],
     moves: [['X', '火球（爆炸）'], ['↑+X', '冰牆（可站上去）'], ['↓+X', '雷擊召喚'], ['空中 X', '風刃三連'], ['按住 60 幀放開', '必殺：元素風暴']],
     hatOffset: { attack: [0, 0] },
     onGet(p) { data(p).t = 0; },
@@ -373,7 +381,7 @@
       if (d.t >= 18) {
         if (held) {
           D.anim = 'kirby_attack_mage_storm'; p.attackFps = 10;
-          if (d.t >= 60) {
+          if (d.t >= MAGIC_ULT - 1) {   // fix5b：實際 = 招式表的 60 幀（原本 >= 60 實測要 61 幀）
             if (!d.charged) { sfx('charge_ready'); V('aura', p, { color: '#d8b0ff', r: 22, frames: 240 }); }
             d.charged = true;
             if (d.t % 3 === 0) KB.particles(p.cx + rnd(-12, 12), p.y + rnd(-6, 10), ['#ffffff', '#a860f0', '#ffe040'], 2, { spread: 1.4, grav: 0, life: 14, up: 0.4, size: 1 });
@@ -401,6 +409,10 @@
   //    空中 X  回溯      ：回到 60 幀前的位置（殘影逆放）
   // ======================================================================
   const TIME_CD = 600;
+  // 回溯的冷卻（fix5b）：回溯會把卡比拉回 60 幀前的座標，26 幀就能再放一次 ⇒
+  // 空中連按 X 等於「自己把自己釘在原地」（playthrough 機器人每 30 幀按一次攻擊，
+  // w1 要跑 32000 幀，其中大半是被自己回溯拉回去的）。冷卻中改成空中近身拳，按下去仍然有反應。
+  const TIME_REWIND_CD = 240;
 
   // 位置歷史（回溯用）：取得能力時開始記錄；以 --ability 直接開場時，第一次攻擊會補開
   function timeHistory(p) {
@@ -416,6 +428,21 @@
       },
     });
     return d.hist;
+  }
+
+  // ---- 時停中的身體接觸傷害（fix5b / R5-P1-01）----
+  // game.js 的「敵人身體接觸 → 玩家」判定不看 timeStopT，所以時停期間被凍結的敵人
+  // 既不會移動也不會被推開，卻仍然每隔無敵幀就扣一次血；卡比又只能用 0 傷害的近身拳，
+  // 於是「撞到 → 掉能力 → 撿回 → 再撞到」無限循環（playthrough w1 實測掉 25 顆能力星 → 卡在 r0）。
+  // 修法：凍結期間把所有敵方的 hurtsPlayer 暫存起來關掉，時間恢復 / 計時器結束時還原。
+  function timeFreezeContact() {
+    for (const e of ents()) {
+      if (!isFoe(e) || !e.hurtsPlayer || e._tsHurt) continue;
+      e._tsHurt = true; e.hurtsPlayer = false;
+    }
+  }
+  function timeRestoreContact() {
+    for (const e of ents()) if (e._tsHurt) { e._tsHurt = false; e.hurtsPlayer = true; }
   }
 
   function timeStopResolve(p) {
@@ -444,6 +471,7 @@
     //       連打時卡比幾乎走不動（playthrough 機器人 w1 r0 要 18753 幀，是 sword 的 10 倍，最後超時卡關）。
     duration: 30, hold: false, maxHold: 0, lockMove: true, canJump: true, fps: 8,
     desc: '懷錶指針一停，世界就跟著停；時停中打出的傷害會在時間恢復的瞬間一起爆開。',
+    flavour: ['喀。懷錶的指針停住了。', '接下來的事，等等再算。'],
     moves: [['X', '時間停止（180 幀）'], ['時停中 X', '近身連拳（解除時結算）'], ['↓+X', '慢動作'], ['↑+X', '加速'], ['空中 X', '回溯（60 幀前）']],
     hatOffset: { attack: [0, 0] },
     onGet(p) { data(p).t = 0; timeHistory(p); },
@@ -454,6 +482,10 @@
       const g = KB.game;
       let mode = pickMode(p, 'rewind', 'haste', 'stop');
       if (mode === 'stop' && g && g.timeStopT > 0) mode = 'punch';
+      if (mode === 'rewind' && g && d.rewindAt !== undefined && g.frame - d.rewindAt < TIME_REWIND_CD) {
+        mode = 'punch';
+        V('textPop', p.cx, p.y - 16, '充能中', { color: '#8090c0', frames: 40 });
+      }
       if (mode === 'stop' && g && d.stopAt !== undefined && g.frame - d.stopAt < TIME_CD) {
         // 冷卻中：退回近身拳並提示
         mode = 'punch';
@@ -481,17 +513,19 @@
         tick(p, 'stop', {
           life: 260, key: null,
           fn: (pp, t) => {
-            const gg = KB.game; if (!gg) { t.finish(); return; }
+            const gg = KB.game; if (!gg) { timeRestoreContact(); t.finish(); return; }
             if (gg.timeStopT > 0) {
+              timeFreezeContact();   // 新啟動 / 剛進畫面的敵人也要一起關掉接觸傷害
               if (t.tick % 6 === 0) {
                 const cam = gg.cam;
                 KB.particles(cam.x + rnd(0, KB.W), cam.y + rnd(0, KB.VIEW_H), ['#ffffff', '#8090c0'], 1, { spread: 0.2, grav: 0, life: 20, up: 0, size: 1 });
               }
               if (t.tick % 20 === 0) KB.fx('fx_gear', pp.cx + rnd(-40, 40), pp.cy + rnd(-30, 20), { life: 20, alpha: 0.6 });
-            } else { timeStopResolve(pp); t.finish(); }
+            } else { timeRestoreContact(); timeStopResolve(pp); t.finish(); }
           },
-          end: () => { },
+          end: () => { timeRestoreContact(); },
         });
+        timeFreezeContact();   // tick() 會先結束上一個 stop 計時器（還原），所以要在它之後才凍結
       } else if (mode === 'punch') {
         setup(p, { anim: 'kirby_attack_time_punch', dur: 14, fps: 14, lock: false });
         const stopped = !!(g && g.timeStopT > 0);
@@ -540,6 +574,7 @@
         });
       } else if (mode === 'rewind') {
         setup(p, { anim: 'kirby_attack_time_rewind', dur: 26, fps: 14, lock: true });
+        d.rewindAt = g ? g.frame : 0;
         const hist = timeHistory(p);
         const idx = Math.max(0, hist.length - 60);
         const tgt = hist.length > 8 ? hist[idx] : [p.x - p.dir * 42, p.y - 16];
@@ -665,6 +700,7 @@
     name: '重力', hudName: 'GRAVITY', color: '#a860f0',
     duration: 24, hold: true, maxHold: 0, lockMove: true, canJump: false, fps: 10,
     desc: '把黑洞戴在頭上的瘋狂發明：吸進來、浮起來、砸下去，最後連空間一起壓成奇點。',
+    flavour: ['頭上那顆，是真的黑洞。', '上跟下，由我來決定。'],
     moves: [['X', '黑洞（引力點）'], ['↓+X', '反重力（敵人浮空）'], ['空中 X', '隕石三連'], ['↑+X', '浮空 240 幀'], ['按住 60 幀放開', '必殺：奇點']],
     hatOffset: { attack: [0, 0] },
     onGet(p) { data(p).t = 0; },
@@ -814,7 +850,7 @@
       if (d.t >= 20) {
         if (held) {
           D.anim = 'kirby_attack_gravity_singularity'; p.attackFps = 10;
-          if (d.t >= 60) {
+          if (d.t >= MAGIC_ULT - 1) {   // fix5b：實際 = 招式表的 60 幀（原本 >= 60 實測要 61 幀）
             if (!d.charged) { sfx('charge_ready'); V('aura', p, { color: '#d8b0ff', r: 24, frames: 240 }); }
             d.charged = true;
             if (d.t % 3 === 0) KB.particles(p.cx + rnd(-14, 14), p.cy + rnd(-12, 12), ['#a860f0', '#ffffff'], 2, { spread: 1.2, grav: 0, life: 14, up: 0.2, size: 1 });
@@ -945,6 +981,7 @@
     name: '分身', hudName: 'CLONE', color: '#ffb0d0',
     duration: 20, hold: true, maxHold: 0, lockMove: true, canJump: false, fps: 12,
     desc: '一人分成三人打：兩個小分身會自動掩護射擊，還能踩著它們二段跳。',
+    flavour: ['一個不夠，那就三個。', '兩個小分身，替我打。'],
     moves: [['X', '全員吐星（三道）'], ['↓+X', '交換位置'], ['空中 X', '分身墊腳（再跳一次）'], ['按住 60 幀放開', '必殺：百裂分身'], ['被動', '分身自動射擊']],
     hatOffset: { attack: [0, 0] },
     onGet(p) { data(p).t = 0; ensureClones(p); sfx('clone_summon', 'ability'); },
@@ -1036,7 +1073,7 @@
       if (d.t >= 16) {
         if (held) {
           D.anim = 'kirby_attack_clone_rush'; p.attackFps = 10;
-          if (d.t >= 60) {
+          if (d.t >= MAGIC_ULT - 1) {   // fix5b：實際 = 招式表的 60 幀（原本 >= 60 實測要 61 幀）
             if (!d.charged) { sfx('charge_ready'); V('aura', p, { color: '#ffb0d0', r: 22, frames: 240 }); }
             d.charged = true;
             if (d.t % 3 === 0) {

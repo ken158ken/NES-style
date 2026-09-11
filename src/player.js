@@ -1,6 +1,6 @@
 // 卡比 —— 玩家狀態機
 (function () {
-  const P = KB.PHYS;
+  const P = KB.PHYS, T = KB.TILE;
   KB.HAT_OFFSET = { default: [0, 0], crouch: [0, -1], slide: [2, 1], full: [0, -1], float: [0, -2],
     inhale: [0, -1], spit: [0, -1], swallow: [0, -1], exhale: [0, -1], dance: [0, -1],
     swim: [2, 1], hurt: [0, 0], climb: [0, 0], attack: [0, 0], ride: [0, -2],
@@ -106,7 +106,10 @@
       if (this.x < 0) { this.x = 0; if (this.vx < 0) this.vx = 0; }
       if (this.x + this.w > map.pw) { this.x = map.pw - this.w; if (this.vx > 0) this.vx = 0; }
       if (this.y < 0) { this.y = 0; if (this.vy < 0) this.vy = 0; }
-      if (this.y + this.h > map.ph) { this.y = map.ph - this.h; if (this.vy > 0) this.vy = 0; }
+      // 底部留 1 格（fix5b / R5-P1-02）：原本只夾到房間框（bottom ≤ ph），幽靈按住 ↓ 會沉進最底下那排
+      // 地板磁磚裡，noclip 一到期人就在地形外 → 直接墜落 state=dead。房間最底一排一律當成「不可進入」。
+      const maxB = map.ph - T;
+      if (this.bottom > maxB) { this.bottom = maxB; if (this.vy > 0) this.vy = 0; }
     }
     physics() {
       const f = this.form;
@@ -117,7 +120,7 @@
         this.x += this.vx; this.y += this.vy;
         const map = KB.game && KB.game.map;
         this.clampToRoom();
-        this.onGround = !!(map && this.y + this.h >= map.ph - 0.5);
+        this.onGround = !!(map && this.bottom >= map.ph - T - 0.5);
         this.fellOut = false;
         return;
       }

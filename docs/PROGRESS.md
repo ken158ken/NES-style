@@ -1635,3 +1635,158 @@ git 已初始化，基線 commit `c382e2a`。Playwright venv：`.venv/bin/python
   P1 四項：**R5-P1-01 time 過不了 w1（magic）**、**R5-P1-02 幽靈 noclip 按住 ↓ 沉出地圖 → 死亡＋掉能力（forms）**、**R5-P1-03 蓄力門檻與招式表不符（weapons/forms/magic/abilities）**、**R5-P1-04 附身 <8 幀就解除且要貼到會吃傷害的距離（forms）**。
   工具與數據都留在 `shots/agent_qa5/`：`mshot.py`／`grid.py`／`tshot.py`／`tgrid.py`／`eshot.py`／`probe1~7_*.py`、`moves.json`／`charge.json`／`levels.json`。
   未做：非無敵（不加 --godmode）的新能力難度量測、w2~w5 的 12 能力 playthrough（只跑 w1）、競技場實戰。src/ 全程唯讀，未跑 build.py、未 commit。
+
+## fix5b
+
+> Round 5 第二輪除錯（qa5 的 P1×4 + P2×8）。擁有檔案：`src/abilities.js`、`src/abilities_weapons.js`、
+> `src/abilities_magic.js`、`src/abilities_forms.js`、`src/vfx.js`、`src/ui.js`、`src/menu.js`、`src/arena.js`、
+> `src/player.js`（僅 `clampToRoom` / noclip 的 onGround 判斷）、`tools/test_*.py`（新增 `tools/test_charge.py`）。
+> **沒有動 levels.js / game.js / enemies*.js**。截圖目錄 `shots/agent_fix5b/`。
+
+### 1. R5-P1-01　time 過不了 w1（30000 幀卡在 r0、現場堆 25 顆能力星）
+- **根因（兩層）**：
+  1. **時停中的身體接觸傷害沒有被凍結**。`game.js collisions()` 的「敵人身體接觸 → 玩家」只看
+     `hurtsPlayer / beingInhaled / freezeT`，**完全不看 `timeStopT`**。時停期間敵人不更新＝不會移動也不會被推開，
+     卻仍然每過一輪無敵幀就扣一次血；而卡比在時停中只能打 **0 傷害**的近身拳（傷害累積到解除才結算），
+     於是變成「撞到 → 掉能力 → 撿回 → 再撞到」的無限循環（實測 25 顆 `abilitystar` 疊在 (1285,130)）。
+     修法（`abilities_magic.js`，不動 game.js）：時停計時器每幀把所有敵方的 `hurtsPlayer` 存起來關掉
+     （`timeFreezeContact()`），時間恢復 / 計時器結束 / 玩家死亡時還原（`timeRestoreContact()`）。
+     **時停手感沒有變**：凍結時間仍是 180 幀、傷害仍在解除瞬間一次爆開。
+  2. **回溯（空中 X）可以無限連按**。回溯把卡比拉回 **60 幀前**的座標，而招式只有 26 幀 ⇒
+     空中連按 X 等於「自己把自己釘在原地」。機器人每 30 幀按一次攻擊、常常在空中 ⇒ 走三步退兩步。
+     修法：加 `TIME_REWIND_CD = 240` 冷卻，冷卻中按空中 X 改成近身拳並跳「充能中」（與時停冷卻同一套提示）。
+- **結果**：`--level w1 --ability time --godmode`（預設 maxframes 30000）
+  **30000 幀 not cleared → 6987 幀 cleared / bossDamage 100% / deaths 0**（只修 ① 是 32928 幀，勉強過但沒餘裕）。
+- 證據：`shots/agent_fix5b/p1_01_timestop_nocontact.png`（卡比整隻疊在凍結的 waddledee 上，HP 6/6、能力還在、
+  0 顆能力星；時停中 10 隻敵人 `hurtsPlayer` 全 false，解除後全部回 true）。
+
+### 2. R5-P1-02　幽靈 noclip 按住 ↓ 沉出房底 → 到期墜落死亡
+- **根因**：`player.js clampToRoom()` 只夾到房間框（`bottom ≤ map.ph`），按住 ↓ 會沉進最底下那排地板磁磚裡；
+  noclip 到期時 `setPhase(p,false)` 只往左右各找 64px 的空位（左右都是實心 ⇒ 找不到），人留在地形外 → `state=dead`
+  → lives 3→2、能力歸零。
+- **修法**：
+  - `clampToRoom()` 改夾 `bottom ≤ map.ph − 16`（最底一排一律視為不可進入）；noclip 的 `onGround` 判斷同步改成
+    `bottom >= map.ph − T − 0.5`。
+  - `abilities_forms.js` 新增 `unstickFromWall(p)`：先左右 24px（保留「穿薄牆被推回來」的手感）→ 再一格一格
+    **往上**找最近的整身淨空位置 → 保險再往下找。`setPhase(p,false)` 改用它。
+- 實測（w1 r0 按住 ↓ 150 幀）：沉到 `bottom=176`（房高 192）→ noclip 到期 → 自動推回 `bottom=160` 站在地面上，
+  **hp 6 / lives 3 / ability=ghost，沒有死亡**。截圖 `ghost_sink_bottom.png`、`ghost_sink_recover.png`。
+
+### 3. R5-P1-03　10 個蓄力必殺「按住 N 幀」標示比實際低
+- **根因**：每一招的蓄力計數器**起點都不是「按下那一幀」**——
+  鐵鎚要等掄鎚動作演完（`t >= 24`）才開始加、居合要等第 1 段斬揮完（`t > 12`）、機甲要等火箭拳收回（`t >= 18`），
+  法師 / 重力 / 分身 / 龍化 / 槍手則是差 1~2 幀的 off-by-one。於是招式表寫 40，實際要按 64。
+- **量測工具**：二分搜尋「按住 N 幀放開後 60 幀內 `abilityData.mode` 有沒有變成必殺模式」（不看特效數量，不會誤判）。
+  修前 / 修後（標示）：
+
+  | 能力 | 必殺 | 修前實際 | 修後實際 | 標示 |
+  |---|---|---|---|---|
+  | hammer | 大迴旋 | 64 | **40** | 40 |
+  | beam | 星潮光束 | 46 | **45** | 45 |
+  | spark | 電擊波 | 46 | **45** | 45 |
+  | blade | 居合一閃 | 63 | **50** | 50 |
+  | mech | 全彈發射 | 68 | **50** | 50 |
+  | gunner | 子彈時間 | 61 | **60** | 60 |
+  | mage | 元素風暴 | 61 | **60** | 60 |
+  | gravity | 奇點 | 61 | **60** | 60 |
+  | clone | 百裂分身 | 61 | **60** | 60 |
+  | dragon | 龍炎彈 | 61 | **60** | 60 |
+  | bow | 流星箭 | 80 | 80 | 80（本來就對，當基準）|
+
+- **修法**：四個檔案各開一組具名常數（`HAMMER_SPIN / BEAM_WAVE / SPARK_BURST`、`GUNNER_ULT / BLADE_IAI /
+  BOW_PIERCE / BOW_METEOR`、`MAGIC_ULT`、`DRAGON_NOVA / MECH_BARRAGE`），**常數就是招式表寫給玩家看的數字**，
+  使用時各自扣掉自己的起點偏移（例如鐵鎚 `d.charge >= HAMMER_SPIN - 24`、居合 `d.chargeT === BLADE_IAI - 13`）。
+  同時把招式表上沒寫幀數的四招補上數字：gunner / blade「蓄力放開」→「按住 60 / 50 幀放開」，
+  dragon / mech「X 蓄滿放開」→「按住 60 / 50 幀放開」。
+- **新增測試 `tools/test_charge.py`**：`run_charge()` 對每招驗證「按住 N+2 觸發 / 只按 N−6 不觸發 / 招式表有寫出 N」。
+  hammer / beam / spark 由 `test_charge.py` 自己跑（abilities.js 的家 enemy_test.py 不在本 agent 範圍），
+  gunner / blade / bow 在 `test_weapons.py`、mage / gravity / clone 在 `test_magic.py`、dragon / mech 在 `test_forms.py`
+  各加一個 `charge` 階段匯入同一支 `run_charge()`。
+  （踩到的坑：變身演出的 hitstop 期間 `game.update` 直接 return，`__kb.step()` 不會推進玩家 ⇒
+  量測前要先把 `game.freezeT` 跑完，否則 forms 系會少算 6~10 幀。）
+
+### 4. R5-P1-04　幽靈附身只維持 <8 幀、要貼到會吃傷害的距離
+- **根因**：附身期間的無敵只在 `formUpdate` 裡補 `invuln = 3`，**附身那一幀本身是 0** ⇒ 貼在敵人身上按 ↓+X，
+  同一幀的身體接觸判定照樣打中卡比 → 掉能力 → `onLose` → `unpossess`，所以「8 幀就解除」。
+  目標搜尋又只看中心距 < 26px，整隻疊在卡比身上的高瘦 / 大型敵人會跳「沒有目標」。
+- **修法**：`possess()` 當場 `p.invuln = max(p.invuln, 12)`、`formUpdate` 每幀續 12；
+  目標搜尋改成 **判定框重疊就一定成立**（重疊的優先，其次才是 26px 內最近的）。
+- 實測：重疊的 waddledee 按 1 幀 ↓+X → 附身成立，**維持滿 300 幀**自動解除、途中再按 ↓+X 可提前解除，
+  全程 `hp 6 / ability=ghost`。截圖 `ghost_possess_40f.png`、`p1_04_possess_120f.png`。
+
+### 5. P2 修正（8 項）
+
+| # | 問題 | 根因 / 修法 | 證據 |
+|---|---|---|---|
+| **R5-P2-05** | 競技場說明第 3 行被面板切半 | 面板 y 88~164，但 12px 3 行是從 y 127 起、行高 13 ⇒ 第 3 行落在 153~165。起點上移到 **124**、行高改 **12** ⇒ 第 3 行 148~160（`arena.js`）| `ui_arena_dragon.png`（「一條火河。」完整）|
+| **R5-P2-06** | 圖鑑 / 競技場大預覽對 dragon / mech / ghost 只畫普通粉紅卡比 | `ui.js` 新增 `UI.previewForm(key)` / `UI.drawPreview(ctx,key,x,y,o)`：有 `def.previewSpr` 或 `kirby_<key>_idle` 就優先畫（dragon / mech / ghost），giant 沒有專屬 idle ⇒「一般卡比 + hat_giant」整體放大 1.35 倍；未發現時仍是全黑剪影。`menu.js` 圖鑑與 `arena.js` 選能力框都改呼叫它 | `ui_gallery_dragon/mech/ghost/giant.png`、`ui_arena_dragon.png`、`ui_gallery_silhouette.png` |
+| **R5-P2-07** | magic 4 種沒有 `flavour`，暫停卡留一條空白帶 | `abilities_magic.js` 補 mage / time / gravity / clone 各 2 行（每行 ≤ 13 字）| `ui_pause_mage/time/gravity/clone.png` |
+| **R5-P2-08** | 必殺技名 `textPop` 貼邊被切（gunner 只剩「ULLET TIME」）| `vfx.js textPop` 把整串字夾回畫面內，**而且連必殺演出的 zoom 一起算**（'w' 層是以卡比為中心放大後才畫的，只夾未放大的座標仍會被推出畫面）：解出 `px ∈ [zx+(1−zx)/k+half, zx+(W−1−zx)/k−half]`。位置仍跟著角色 | `p2_08_gunner_ult_text.png`（BULLET TIME 完整）|
+| **R5-P2-09** | worldTint 把「WORLD n」開場橫幅一起染色 | `game.js` 的順序是 `drawLevelBanner → VFX.postWorld → drawGameHint`（**不能動 game.js**）。改成 `UI.drawLevelBanner` 只記狀態、新增 `UI.paintLevelBanner(ctx)` 真正繪製，由 `menu.js drawGameHint` 的**第一行**（在 hints 設定判斷之前）呼叫 ⇒ 橫幅畫在 postWorld 之後 | `p2_09_timestop_banner.png`（世界灰藍、橫幅乾淨）、`p1_01_timestop_nocontact.png` |
+| **R5-P2-13** | 巨大化被碰一下就解除 | `giant` 的 `setForm` 補 `armor: 1, hp: 3`（與 mech 同一套機制）：每下只扣 1 點裝甲、不扣 HP、不掉能力，**3 下**才提前縮小；招式表補「被動：裝甲 3・受傷不掉能力」 | `p2_13_giant_hurt1.png`（被打 1 下後仍是 GIANT、HP 6/6）＋ `test_forms.py` 新增 3 條 |
+| **R5-P2-14** | 連續取得能力舊橫幅殘留 10~20 幀 | `vfx.js` 給效果加 `kind` 標籤＋`dropKind()`：`V.banner` 先收掉舊 banner、`V.transform` 先收掉舊 banner **與還沒放出橫幅的舊 transform**（橫幅是 `ctrl.t === 2` 才放的，只清 banner 不夠）| `p2_14_banner_b_mech30.png`（HUD MECH / 橫幅 機甲 MECH 同步）|
+| **R5-P2-12** | 忍者壁跳全 5 個世界只有 1 面牆可用 | 原本只靠 physics 的 `hitWall`。新增 `ninjaWallSide(p)` 主動探測身體側面：**任何實心磁磚（硬磚 / 冰磚 / 斜坡實心半邊）與單向平台 `'='` 的側面、房間左右邊界都算牆**，一格高的台階邊也踢得到；只認「正在推的方向」或「面向」那側。起跳後前 2 幀不探測（否則貼牆站著起跳時，同一幀的跳會被吃成壁跳而跳不起來）。**沒有改關卡** | `p2_12_ninja_wallslide.png` / `p2_12_ninja_wallkick.png`（w1 r1 的 2 格星星方塊邊）＋ `test_weapons.py` 新增 2 條 |
+
+順手修掉的文案截斷（同 P2-11 類）：giant「大口吸：範圍 ×2・可吞中魔王」→「大口吸（可吞中魔王）」、
+ghost「穿牆開關（最多 2 格厚）」→「穿牆開關（2 格內）」。
+
+**沒有做**：R5-P2-10（開場 90 幀內取得能力 ⇒ 黑邊 + 兩條橫幅同框，視覺很擠）不在本輪分工內；
+R5-7a 的觀察項（gravity ↑+X 文案不一致、圖鑑剪影露出帽子輪廓、bow 流星箭過亮）也未處理。
+
+### 6. 驗證
+
+- **測試全綠**：`engine_test 118/118`、`enemy_test 393/393`、`boss_test ALL PASS`、
+  `test_weapons 105/105`（+2 壁跳、+9 蓄力）、`test_magic 119/119`（+9 蓄力）、
+  `test_forms 153/153`（+3 giant 裝甲、+6 蓄力）、**新增 `test_charge 10/10`**；
+  `node tools/level_check.js` 0 error / 1 warning（既有拉拉拉出生點）；`node --check` src 全數通過。
+- **12 種新能力 `playthrough --level w1 --ability <key> --godmode`（預設 maxframes 30000）全部 cleared**：
+
+  | 能力 | 幀數 | cleared | bossDamage | deaths | missing |
+  |---|---|---|---|---|---|
+  | gunner | 4446 | ✅ | 100% | 0 | [] |
+  | ninja | 4241 | ✅ | 100% | 0 | [] |
+  | blade | 5037 | ✅ | 100% | 0 | [] |
+  | bow | 5578 | ✅ | 100% | 0 | [] |
+  | mage | 5176 | ✅ | 100% | 0 | [] |
+  | **time** | **6987** | ✅（修前 30000 not cleared）| 100% | 0 | [] |
+  | gravity | 5847 | ✅ | 100% | 0 | [] |
+  | clone | 6607 | ✅ | 100% | 0 | [] |
+  | giant | 6414 | ✅ | 100% | 0 | [] |
+  | dragon | 5322 | ✅ | 100% | 0 | [] |
+  | mech | 10570 | ✅ | 100% | 0 | [] |
+  | ghost | 6845 | ✅ | 100% | 0 | [] |
+
+- **截圖（全部用 Read 開圖確認過）**：`shots/agent_fix5b/` —
+  `p1_01_timestop_nocontact.png`、`ghost_sink_bottom.png` / `ghost_sink_recover.png`、
+  `ghost_possess_40f.png` / `p1_04_possess_120f.png`、
+  `p2_08_gunner_ult_text.png`、`p2_09_timestop_banner.png`、`p2_12_ninja_wallslide.png` / `p2_12_ninja_wallkick.png`、
+  `p2_13_giant_hurt1.png`、`p2_14_banner_a_fire.png` / `p2_14_banner_b_mech.png` / `p2_14_banner_b_mech30.png`、
+  `ui_gallery_giant/dragon/mech/ghost.png`、`ui_gallery_silhouette.png`、`ui_arena_gunner/dragon/mech.png`、
+  `ui_pause_mage/time/gravity/clone.png`。
+
+### 已知問題 / 未完成（fix5b）
+- `time` 的回溯現在有 240 幀冷卻（冷卻中空中 X 改成近身拳並跳「充能中」）。這是**行為改動**，
+  招式表仍寫「空中 X：回溯（60 幀前）」沒有標出冷卻——要不要在招式表寫出來，請總控決定。
+- giant 從「碰一下就解除」變成「裝甲 3」，實質難度下降；`FORM_SPEC` 已同步改成 `armor=1`。
+  若覺得太強，把 `setForm` 的 `hp: 3` 調成 2 即可（門檻集中在一處）。
+- 忍者壁跳的主動探測會讓「任何牆邊下落」都進入貼牆滑行（`vy ≤ 1.1`），手感比以前黏一點；
+  若嫌太黏可以把探測限制成「連續 ≥2 格實心」。
+- **沒有跑 `tools/build.py`**（沿用 levels5 / fix5 的作法，等總控收尾統一重建 `dist/`）。未 commit。
+- 未做：w2~w5 的 12 能力 playthrough（只跑 w1）、非 godmode 的難度量測、競技場實戰、R5-P2-10。
+
+---
+# Round 5 總結（總控，2026-09-12）— 變身大爆發完成
+最終驗證：`node --check` 全過、`level_check` 0 error、`audio_check` 全過、`engine_test` 118/118、`enemy_test` 393/393、`boss_test --runs 3` ALL PASS、`test_weapons` 105/105、`test_magic` 119/119、`test_forms` 153/153、`test_charge` 10/10、`playthrough w1~w5 --godmode` 全 cleared deaths=0、12 新能力 w1 全 cleared、`build.py` 1117KB。
+
+## 成果
+- **能力 8 → 20**：槍手 / 忍者 / 居合 / 弓、元素法師 / 時間 / 重力 / 分身、巨大化 / 龍化 / 機甲 / 幽靈；每種 4~5 招含蓄力必殺，共 93 招（qa5 驗收 93 招無殘留無缺圖）。
+- **KB.VFX 特效系統**（24 API）：閃光、zoom、黑邊、斬擊弧、彈道、閃電、魔法陣、殘影、光環、衝擊波、文字彈出、變身演出；既有 8 能力也全部加特效；設定頁可調特效強度。
+- **player 變身鉤子**：p.form（scale / noclip / fly / armor / 附身）、p.sizeMul、KB.save.seen 能力發現。
+- **12 種新敵人**放進 5 世界（每種 3 世界共 40 隻）、22 座能力台座、W5 武器庫；47 個新音效、2 首新曲。
+- **UI**：圖鑑 / 競技場分頁至 20 能力、未發現剪影、發現進度 n/20、暫停卡 6 列、變身預覽。
+
+## 已知問題 / 下一輪建議
+1. 通關機器人偶發：特效用 Math.random 改變 RNG 序列，同一世界偶爾 30000 幀未通關（重跑即過）；建議 VFX 改用獨立 RNG。
+2. R5-P2-10：變身時「黑邊 + 變身橫幅 + WORLD 橫幅」同框（無重疊但畫面擁擠）；可讓開場橫幅期間延後變身橫幅。
+3. 時間能力的回溯冷卻 240 幀未寫進招式表；巨大化改為裝甲 3 次（難度下降）；忍者貼牆滑行手感偏黏，可再調。
+4. 未做：新能力的分世界強度（新敵人皆 tier 3 行為）、Extra 模式關卡差異、競技場對 20 能力的平衡測試、非無敵難度量測（使用者表示目前難度剛好）。

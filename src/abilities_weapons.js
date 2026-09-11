@@ -5,6 +5,16 @@
   'use strict';
   const P = KB.PHYS;
 
+  // ---------- 蓄力必殺的門檻（fix5b / R5-P1-03）----------
+  // 這些數字就是招式表 / 圖鑑上寫給玩家看的「按住 N 幀放開」，
+  // **從按下攻擊鍵的那一幀算起**。各招內部的計數器起點不同（有的要等收招動作演完才開始加），
+  // 所以下面使用時會扣掉各自的偏移量；改數字時只改這裡，招式表文案也用同一個值。
+  // 驗證：tools/test_weapons.py 的「蓄力門檻」段（按住 N+2 幀觸發、N-6 幀不觸發）。
+  const GUNNER_ULT = 60;   // 槍手・子彈時間（招式表：按住 60 幀放開）
+  const BLADE_IAI = 50;   // 居合・居合一閃（招式表：按住 50 幀放開）
+  const BOW_PIERCE = 40;   // 弓・貫穿箭（招式表：蓄力 40）
+  const BOW_METEOR = 80;   // 弓・流星箭（招式表：蓄力 80）
+
   // ---------- 註冊表 ----------
   const NEW_KEYS = [
     ['gunner', '槍手', 'GUNNER'],
@@ -121,7 +131,7 @@
     color: '#d8dce8', duration: 10, hold: true, maxHold: 600, lockMove: false, moveSpeed: P.walk, fps: 14, canJump: true,
     desc: '雙手各握一把星塵左輪，一邊走一邊把彈幕鋪滿整個房間。',
     flavour: '彈匣裡裝的是勇氣，退膛的是恐懼。',
-    moves: [['X 按住', '雙槍連射'], ['↓+X', '蓄力霰彈'], ['空中 X', '俯衝掃射'], ['↑+X', '對空三連'], ['蓄力放開', '必殺・子彈時間']],
+    moves: [['X 按住', '雙槍連射'], ['↓+X', '蓄力霰彈'], ['空中 X', '俯衝掃射'], ['↑+X', '對空三連'], ['按住 60 幀放開', '必殺・子彈時間']],
     onGet(p) { const d = data(p); d.t = 0; d.charged = false; },
     onCrouchAttack(p) { startMove(p, 'shotgun'); },
     onAttack(p) {
@@ -138,7 +148,7 @@
       const A = p.dir > 0 ? 0 : Math.PI;
       if (d.mode === 'rapid') {
         if (d.t <= 60 && d.t % 6 === 1) { gunShot(p, A, 6.4, 2); d.fired++; }
-        if (d.t === 62) { d.charged = true; sfx('reload'); textPop(p.cx, p.y - 14, 'LOAD!', { color: '#fff8c0', size: 8, frames: 30, rise: 0.5 }); }
+        if (d.t === GUNNER_ULT + 1) { d.charged = true; sfx('reload'); textPop(p.cx, p.y - 14, 'LOAD!', { color: '#fff8c0', size: 8, frames: 30, rise: 0.5 }); }
         if (d.charged) {
           if (d.t % 8 === 0) aura(p, { color: '#fff8c0', r: 18, frames: 12 });
           if (d.t % 3 === 0) KB.particles(p.cx + rnd(-11, 11), p.cy + rnd(-10, 10), ['#fff8c0', '#ffffff'], 1, { spread: 0.3, grav: -0.05, life: 12, up: 0.4, size: 1 });
@@ -214,13 +224,37 @@
     ring(p.cx - p.dir * 7, p.cy + 4, { r0: 2, r1: 14, frames: 10, color: '#b070f0', width: 1 });
     afterimage(p, { frames: 14, color: '#b070f0', every: 2, alpha: 0.5 });
   }
+  // 身體側面探測（fix5b / R5-P2-12）：只靠 physics 的 hitWall 判「貼牆」，主線幾乎沒有牆可用 ——
+  // qa5 掃過全部 25 個房間，符合「連續 ≥5 格實心 + 側面淨空」的直牆只有 w3 r1 一處。
+  // 改成主動探測：**任何實心磁磚的側面（硬磚 / 冰磚 / 斜坡的實心半邊）與單向平台 '=' 的側面都算牆**，
+  // 一格高的平台邊、台階邊、房間左右邊界都踢得到，不必動關卡。
+  // 只認「玩家正在推的方向」或「面向」那一側，背後的牆不會誤觸發。
+  function ninjaWallSide(p) {
+    const map = KB.game && KB.game.map; if (!map) return 0;
+    const at = (dir) => {
+      const px = dir > 0 ? p.x + p.w + 1 : p.x - 1;
+      for (const py of [p.y + 2, p.cy, p.bottom - 3]) {
+        if (map.at(px, py) === '=' || map.isSolidPx(px, py)) return dir;
+      }
+      return 0;
+    };
+    const inp = KB.input;
+    const want = (inp.down('right') ? 1 : 0) - (inp.down('left') ? 1 : 0);
+    return (want && at(want)) || at(p.dir) || 0;
+  }
   // 貼牆偵測：physics 的 hitWall 只有「真的被牆擋住那一幀」才是 true（推牆會每 2~3 幀出現一次），
   // 所以用 wallT 做 8 幀的記憶窗，窗內按跳就能壁跳。
   function ninjaTick(p) {
     const d = data(p);
-    if (p.onGround || p.state === 'stone' || p.state === 'dead' || p.state === 'door' || p.state === 'ride') { d.wallT = 0; d.wallDir = 0; return; }
+    if (p.onGround || p.state === 'stone' || p.state === 'dead' || p.state === 'door' || p.state === 'ride') { d.wallT = 0; d.wallDir = 0; d.airT = 0; return; }
+    d.airT = (d.airT || 0) + 1;
     if (p.hitWall) { d.wallT = 8; d.wallDir = p.dir; }
-    else if (d.wallT > 0) d.wallT--;
+    else {
+      // 起跳後前 2 幀不做主動探測：貼著牆站著起跳時，同一幀的「跳」會被吃成壁跳（跳不起來）
+      const ws = d.airT >= 3 ? ninjaWallSide(p) : 0;
+      if (ws) { d.wallT = 8; d.wallDir = ws; }
+      else if (d.wallT > 0) d.wallT--;
+    }
     if (d.wallT <= 0) return;
     if (p.vy > 1.1) p.vy = 1.1;                                  // 貼牆滑行
     if (KB.game && KB.game.frame % 4 === 0) KB.particles(p.cx + (d.wallDir || p.dir) * 7, p.cy + rnd(-4, 6), ['#ffffff', '#b070f0'], 1, { spread: 0.4, grav: 0.05, life: 10, up: 0.3, size: 1 });
@@ -271,7 +305,7 @@
     color: '#5460a0', duration: 26, hold: true, maxHold: 600, lockMove: false, moveSpeed: P.walk, fps: 14, canJump: true,
     desc: '身法快得只看得見殘影，手裡劍與替身術一氣呵成。',
     flavour: '影子先到，本體後到。',
-    moves: [['X', '手裡剎三連'], ['↓+X', '替身瞬移'], ['空中 X', '飛踢'], ['貼牆＋跳', '壁跳'], ['蓄力放開', '必殺・影分身斬']],
+    moves: [['X', '手裡剎三連'], ['↓+X', '替身瞬移'], ['空中 X', '飛踢'], ['貼牆＋跳', '壁跳（任何牆面）'], ['蓄力放開', '必殺・影分身斬']],
     onGet(p) { const d = data(p); d.t = 0; d.wallT = 0; ensureTicker(p); },
     onCrouchAttack(p) { startMove(p, 'warp'); },
     onAttack(p) {
@@ -381,7 +415,7 @@
     color: '#eef2ff', duration: 20, hold: true, maxHold: 600, lockMove: false, moveSpeed: P.walk, fps: 12, canJump: true,
     desc: '一柄比身體還長的大太刀，出鞘的瞬間連空氣都被切開。',
     flavour: '刀在鞘中時最快。',
-    moves: [['X', '三段連斬'], ['按住 X', '居合蓄力'], ['蓄力放開', '必殺・居合一閃'], ['空中 X', '落下斬'], ['↑+X', '上撩斬']],
+    moves: [['X', '三段連斬'], ['按住 X', '居合蓄力'], ['按住 50 幀放開', '必殺・居合一閃'], ['空中 X', '落下斬'], ['↑+X', '上撩斬']],
     onGet(p) { const d = data(p); d.combo = 0; d.cut = []; },
     onAttack(p) {
       const d = data(p); killBox(p); d.t = 0; d.charging = false; d.charged = false; d.chargeT = 0;
@@ -457,7 +491,12 @@
             p.vx *= 0.82;
             if (d.chargeT % 8 === 1) aura(p, { color: d.charged ? '#ffffff' : '#9aa6c0', r: 16, frames: 12 });
             if (d.chargeT % 3 === 0) KB.particles(p.cx + rnd(-12, 12), p.cy + rnd(-10, 12), d.charged ? ['#ffffff', '#eef2ff'] : ['#9aa6c0', '#eef2ff'], 1, { spread: 0.3, grav: -0.06, life: 14, up: 0.5, size: 1 });
-            if (d.chargeT === 50) { d.charged = true; flash('#ffffff', 4, 0.3); sfx('sword'); textPop(p.cx, p.y - 14, '居合', { color: '#ffffff', size: 8, frames: 30, rise: 0.4 }); }
+            // fix5b / R5-P1-03：居合架式是從 t=13（第 1 段斬揮完）才開始計 chargeT，
+            // 所以原本的 chargeT === 50 實測要按住 63 幀。扣掉那 13 幀，實際 = 招式表的 50 幀。
+            if (d.chargeT === BLADE_IAI - 13) {
+              d.charged = true; flash('#ffffff', 4, 0.3); sfx('sword');
+              textPop(p.cx, p.y - 14, '居合', { color: '#ffffff', size: 8, frames: 30, rise: 0.4 });
+            }
             if (!held) { if (d.charged) { startMove(p, 'iai'); return; } p.attackTimer = Math.min(p.attackTimer, 6); }
           }
         }
@@ -602,8 +641,8 @@
       const d = data(p); d.t++; light(46);
       if (d.mode === 'shot') {
         if (d.t === 4) { fireArrow(p, p.dir * 5.4, -0.9, { oy: 2, grav: 0.085 }); sfx('bow'); burst(p.cx + p.dir * 12, p.cy - 2, { n: 5, colors: ['#48c048', '#ffffff'], speed: 1.6, life: 9, grav: 0 }); }
-        if (d.t === 40) { d.lv = 1; setAnim(p, 'kirby_attack_bow_charge', 10); flash('#fff8c0', 3, 0.25); sfx('bow'); textPop(p.cx, p.y - 14, '貫穿', { color: '#fff8c0', size: 8, frames: 26, rise: 0.4 }); }
-        if (d.t === 80) { d.lv = 2; setAnim(p, 'kirby_attack_bow_meteor', 10); flash('#ffffff', 5, 0.4); textPop(p.cx, p.y - 16, '流星', { color: '#ffffff', size: 8, frames: 30, rise: 0.4 }); }
+        if (d.t === BOW_PIERCE) { d.lv = 1; setAnim(p, 'kirby_attack_bow_charge', 10); flash('#fff8c0', 3, 0.25); sfx('bow'); textPop(p.cx, p.y - 14, '貫穿', { color: '#fff8c0', size: 8, frames: 26, rise: 0.4 }); }
+        if (d.t === BOW_METEOR) { d.lv = 2; setAnim(p, 'kirby_attack_bow_meteor', 10); flash('#ffffff', 5, 0.4); textPop(p.cx, p.y - 16, '流星', { color: '#ffffff', size: 8, frames: 30, rise: 0.4 }); }
         if (d.lv > 0) {
           if (d.t % 8 === 0) aura(p, { color: d.lv > 1 ? '#ffffff' : '#fff8c0', r: 14 + d.lv * 4, frames: 12 });
           p.vx *= 0.86;

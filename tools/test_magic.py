@@ -16,6 +16,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from playwright.sync_api import sync_playwright
 import enemy_test as ET
 from enemy_test import Harness, HOOK_JS, TEST_LEVEL, check
+from test_charge import run_charge
 
 try:
     sys.stdout.reconfigure(encoding='utf-8')
@@ -475,6 +476,13 @@ def phase_registry(h):
 
 
 # ---------------------------------------------------------------------------
+# 蓄力必殺門檻（fix5b / QA R5-P1-03）：招式表寫「按住 60 幀放開」就要真的是 60 幀
+# ---------------------------------------------------------------------------
+def phase_charge(h):
+    run_charge(h, ['mage', 'gravity', 'clone'])
+
+
+# ---------------------------------------------------------------------------
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--only', default='')
@@ -485,7 +493,8 @@ def main():
     ET.VERBOSE = a.v
     ET.SHOTS = SHOTS
     phases = [('registry', phase_registry), ('mage', phase_mage), ('time', phase_time),
-              ('gravity', phase_gravity), ('clone', phase_clone), ('enemies', phase_enemies)]
+              ('gravity', phase_gravity), ('clone', phase_clone), ('charge', phase_charge),
+              ('enemies', phase_enemies)]
     only = [k for k in a.only.split(',') if k]
     if only:
         phases = [p for p in phases if p[0] in only]

@@ -3470,6 +3470,12 @@ window.KB = window.KB || {};
   }
   V.push = push;
   V.clear = function () { V.list.length = 0; V._pending.length = 0; };
+  /** 立刻結束所有 kind 相同的效果（同一時間只該有一條橫幅 / 一次變身演出）*/
+  function dropKind(kind) {
+    for (const e of V.list) if (e.kind === kind) e.dead = true;
+    for (const e of V._pending) if (e.kind === kind) e.dead = true;
+  }
+  V.dropKind = dropKind;
 
   V.update = function (game) {
     game = game || KB.game;
@@ -3907,7 +3913,20 @@ window.KB = window.KB || {};
         const f = this.t / this.life;
         const pop = this.t < 5 ? 1.7 - 0.7 * (this.t / 5) : 1;
         const a = f > 0.7 ? (1 - f) / 0.3 : 1;
-        const px = Math.round(this.x - cam.x);
+        // fix5b / R5-P2-08：世界座標的文字靠近房間左右邊界時會被畫面切掉
+        // （gunner 的「BULLET TIME」實測只剩「ULLET TIME」）。這裡把整串字夾回畫面內 ——
+        // 而且要連「必殺演出的 zoom」一起算：'w' 層是以卡比為中心放大後才畫的，
+        // 光夾住未放大的座標，放大後照樣會被推出畫面。位置仍跟著角色，手感不變。
+        const TW = (KB.UI && KB.UI.textWidth) ? KB.UI.textWidth : KB.textWidth;
+        let px = Math.round(this.x - cam.x);
+        if (TW) {
+          const half = TW(this.text, { size }) * pop / 2 + 2;
+          const k = zoomK();
+          const pl = KB.game && KB.game.player;
+          const zx = pl ? Math.round(pl.cx - cam.x) : KB.W / 2;
+          const lo = zx + (1 - zx) / k + half, hi = zx + (KB.W - 1 - zx) / k - half;
+          px = lo > hi ? Math.round((lo + hi) / 2) : Math.round(Math.max(lo, Math.min(hi, px)));
+        }
         const py = Math.round(this.y - cam.y - rise * Math.min(1, this.t / (this.life * 0.7)));
         ctx.save();
         ctx.globalAlpha = clamp01(a);
@@ -4013,6 +4032,10 @@ window.KB = window.KB || {};
     // 注意：hitstop 期間 game.update 直接 return，KB.VFX.update 不會被呼叫，
     // 所以「白閃 / 黑邊 / 橫幅」延到 ctrl.t === 2（＝停格結束後的第 2 個更新幀）才放，
     // 停格那 10 幀看到的是「放射光線 + 白色剪影 + ring + 粒子」定格畫面。
+    // fix5b / R5-P2-14：台座密集處（w5 r4 武器庫 4 座並排）連續取得兩個能力時，
+    // 舊橫幅要 10~20 幀後才換掉，會出現「橫幅寫 FIRE、HUD 已經是 MECH」。
+    // 新的變身先把上一輪的橫幅與還沒放出橫幅的變身演出一起收掉。
+    dropKind('banner'); dropKind('transform');
     if (o.hitstop !== false) V.hitstop(10);
     V.shake(o.hitstop === false ? 4 : 7);
     V.zoom(1.18, 14);
@@ -4023,7 +4046,7 @@ window.KB = window.KB || {};
 
     // 主控效果：剪影閃 3 次 + 12 條放射光線 + 第二圈 ring
     const ctrl = push({
-      layer: 'w', life: 46, p, color, cx, cy, name, hud,
+      layer: 'w', kind: 'transform', life: 46, p, color, cx, cy, name, hud,
       up() {
         const pp = this.p;
         if (pp && !pp.dead) { this.cx = pp.cx; this.cy = pp.cy; }
@@ -4075,8 +4098,9 @@ window.KB = window.KB || {};
   V.banner = function (name, sub, color) {
     color = color || '#ffe040';
     const IN = 10, HOLD = 40, OUT = 12;
+    dropKind('banner');   // fix5b / R5-P2-14：同時間只留一條橫幅（連續取得能力時舊的要馬上換掉）
     return push({
-      layer: 's', life: IN + HOLD + OUT, name: String(name || ''), sub: String(sub || ''),
+      layer: 's', kind: 'banner', life: IN + HOLD + OUT, name: String(name || ''), sub: String(sub || ''),
       draw(ctx) {
         let k = 1, a = 1;
         if (this.t < IN) { const f = this.t / IN; k = 0.25 + 0.85 * f; if (f > 0.8) k = 1.1 - (f - 0.8) * 0.5; a = f; }
@@ -12807,7 +12831,7 @@ window.KB = window.KB || {};
 <script>/* src/player.js */
 // 卡比 —— 玩家狀態機
 (function () {
-  const P = KB.PHYS;
+  const P = KB.PHYS, T = KB.TILE;
   KB.HAT_OFFSET = { default: [0, 0], crouch: [0, -1], slide: [2, 1], full: [0, -1], float: [0, -2],
     inhale: [0, -1], spit: [0, -1], swallow: [0, -1], exhale: [0, -1], dance: [0, -1],
     swim: [2, 1], hurt: [0, 0], climb: [0, 0], attack: [0, 0], ride: [0, -2],
@@ -12913,7 +12937,10 @@ window.KB = window.KB || {};
       if (this.x < 0) { this.x = 0; if (this.vx < 0) this.vx = 0; }
       if (this.x + this.w > map.pw) { this.x = map.pw - this.w; if (this.vx > 0) this.vx = 0; }
       if (this.y < 0) { this.y = 0; if (this.vy < 0) this.vy = 0; }
-      if (this.y + this.h > map.ph) { this.y = map.ph - this.h; if (this.vy > 0) this.vy = 0; }
+      // 底部留 1 格（fix5b / R5-P1-02）：原本只夾到房間框（bottom ≤ ph），幽靈按住 ↓ 會沉進最底下那排
+      // 地板磁磚裡，noclip 一到期人就在地形外 → 直接墜落 state=dead。房間最底一排一律當成「不可進入」。
+      const maxB = map.ph - T;
+      if (this.bottom > maxB) { this.bottom = maxB; if (this.vy > 0) this.vy = 0; }
     }
     physics() {
       const f = this.form;
@@ -12924,7 +12951,7 @@ window.KB = window.KB || {};
         this.x += this.vx; this.y += this.vy;
         const map = KB.game && KB.game.map;
         this.clampToRoom();
-        this.onGround = !!(map && this.y + this.h >= map.ph - 0.5);
+        this.onGround = !!(map && this.bottom >= map.ph - T - 0.5);
         this.fellOut = false;
         return;
       }
@@ -13766,6 +13793,15 @@ window.KB = window.KB || {};
 (function () {
   KB.ABILITIES = KB.ABILITIES || {};
   const P = KB.PHYS;
+
+  // ---------- 蓄力必殺的門檻（fix5b / R5-P1-03）----------
+  // 這些數字就是招式表 / 圖鑑上寫給玩家看的「按住 N 幀放開」，
+  // **從按下攻擊鍵的那一幀算起**。各招內部的計數器起點不同（有的要等收招動作演完才開始加），
+  // 所以下面使用時會扣掉各自的偏移量；改數字時只改這裡，招式表文案也用同一個值。
+  // 驗證：tools/enemy_test.py 的「蓄力門檻」段（按住 N+2 幀觸發、N-6 幀不觸發）。
+  const HAMMER_SPIN = 40;   // 鐵鎚・大迴旋（招式表：按住 40 幀放開）
+  const BEAM_WAVE = 45;   // 光束・星潮光束（招式表：按住 45 幀放開）
+  const SPARK_BURST = 45;   // 電擊・電擊波（招式表：按住 45 幀放開）
   const def = (key, o) => {
     o.key = key; o.name = o.name || KB.ABILITY_NAMES[key]; o.hudName = o.hudName || KB.ABILITY_HUD[key];
     o.hat = o.hat || ('hat_' + key); o.icon = o.icon || ('ui_ability_' + key);
@@ -14075,11 +14111,12 @@ window.KB = window.KB || {};
         if (t < 10) KB.particles(p.cx + p.dir * 12, p.cy - 2, ['#ffe040', '#ffffff'], 1, { spread: 1.2, grav: 0, life: 10, up: 0, size: 1 });
         return;
       }
-      // 光鞭：16 幀後若仍按住 → 進入蓄力；放開時累計 ≥45 幀就放出星潮光束
+      // 光鞭：16 幀後若仍按住 → 進入蓄力；**從按下那一幀算起滿 45 幀**放開就放出星潮光束
+      // （fix5b / R5-P1-03：原本寫 t >= 45，實測門檻 46 幀 —— d.t 在招式開始的下一幀才 ++）
       if (t >= 16) {
         if (d.whip) { d.whip.dead = true; d.whip = null; d.box = null; }
         if (held) {
-          if (t >= 45) {
+          if (t >= BEAM_WAVE - 1) {
             if (!d.charged) chargeFx(p, '#ffe040');
             d.charged = true;
             if (t % 3 === 0) KB.particles(p.cx + p.dir * 10, p.cy - 2, ['#ffffff', '#ffe040'], 2, { spread: 1.6, grav: 0, life: 12, up: 0, size: 1 });
@@ -14290,7 +14327,7 @@ window.KB = window.KB || {};
       if (d.t % 2 === 0) KB.fx('fx_spark_field', p.cx + rnd(-20, 20), p.cy + rnd(-14, 18) + 8, { life: 4, flip: Math.random() < 0.5, fps: 15 });
       KB.particles(p.cx + rnd(-22, 22), p.cy + rnd(-18, 18), ['#ffffff', '#80d0ff', '#c0f0ff'], 1, { spread: 1.2, grav: 0, life: 8, up: 0, size: 1 });
       if (d.t % 10 === 0) KB.audio.sfx('spark');
-      if (p.stateT >= 45) {
+      if (p.stateT >= SPARK_BURST - 1) {   // fix5b：實際 = 招式表的 45 幀（原本 >= 45 實測要 46 幀）
         if (!d.charged) chargeFx(p, '#60c0ff');
         d.charged = true;
         if (d.t % 4 === 0) KB.particles(p.cx, p.y - 6, ['#ffffff', '#ffe040'], 2, { spread: 1, grav: 0, life: 12, up: 0.4, size: 1 });
@@ -14572,12 +14609,14 @@ window.KB = window.KB || {};
           vx('textPop', p.cx, p.bottom - 26, 'SMASH!', { color: '#ffe040', frames: 36 });
         }
       }
-      // 掄鎚動作結束後仍按住 → 進入蓄力；放開時累計 ≥40 幀就放出大迴旋
+      // 掄鎚動作結束後仍按住 → 進入蓄力；**從按下那一幀算起滿 40 幀**就放出大迴旋。
+      // fix5b / R5-P1-03：d.charge 是從 t>=24（掄鎚動作演完）才開始加，所以實際門檻是 24+40=64 幀，
+      //                   照招式表按住 40 幀放開完全沒反應。門檻改成 HAMMER_SPIN - 24，實際 = 標示。
       if (!smash && t >= 24) {
         if (b && !b.dead) { b.dead = true; d.box = null; }
         if (held) {
           d.charge++;
-          if (d.charge >= 40) {
+          if (d.charge >= HAMMER_SPIN - 24) {
             if (!d.ready) { d.ready = true; chargeFx(p, '#e08040'); }
             if (d.charge % 3 === 0) KB.particles(p.cx + rnd(-10, 10), p.y - 4, ['#ffffff', '#ffe040'], 2, { spread: 1, grav: 0, life: 12, up: 0.5, size: 1 });
           } else {
@@ -14606,6 +14645,16 @@ window.KB = window.KB || {};
 (function () {
   'use strict';
   const P = KB.PHYS;
+
+  // ---------- 蓄力必殺的門檻（fix5b / R5-P1-03）----------
+  // 這些數字就是招式表 / 圖鑑上寫給玩家看的「按住 N 幀放開」，
+  // **從按下攻擊鍵的那一幀算起**。各招內部的計數器起點不同（有的要等收招動作演完才開始加），
+  // 所以下面使用時會扣掉各自的偏移量；改數字時只改這裡，招式表文案也用同一個值。
+  // 驗證：tools/test_weapons.py 的「蓄力門檻」段（按住 N+2 幀觸發、N-6 幀不觸發）。
+  const GUNNER_ULT = 60;   // 槍手・子彈時間（招式表：按住 60 幀放開）
+  const BLADE_IAI = 50;   // 居合・居合一閃（招式表：按住 50 幀放開）
+  const BOW_PIERCE = 40;   // 弓・貫穿箭（招式表：蓄力 40）
+  const BOW_METEOR = 80;   // 弓・流星箭（招式表：蓄力 80）
 
   // ---------- 註冊表 ----------
   const NEW_KEYS = [
@@ -14723,7 +14772,7 @@ window.KB = window.KB || {};
     color: '#d8dce8', duration: 10, hold: true, maxHold: 600, lockMove: false, moveSpeed: P.walk, fps: 14, canJump: true,
     desc: '雙手各握一把星塵左輪，一邊走一邊把彈幕鋪滿整個房間。',
     flavour: '彈匣裡裝的是勇氣，退膛的是恐懼。',
-    moves: [['X 按住', '雙槍連射'], ['↓+X', '蓄力霰彈'], ['空中 X', '俯衝掃射'], ['↑+X', '對空三連'], ['蓄力放開', '必殺・子彈時間']],
+    moves: [['X 按住', '雙槍連射'], ['↓+X', '蓄力霰彈'], ['空中 X', '俯衝掃射'], ['↑+X', '對空三連'], ['按住 60 幀放開', '必殺・子彈時間']],
     onGet(p) { const d = data(p); d.t = 0; d.charged = false; },
     onCrouchAttack(p) { startMove(p, 'shotgun'); },
     onAttack(p) {
@@ -14740,7 +14789,7 @@ window.KB = window.KB || {};
       const A = p.dir > 0 ? 0 : Math.PI;
       if (d.mode === 'rapid') {
         if (d.t <= 60 && d.t % 6 === 1) { gunShot(p, A, 6.4, 2); d.fired++; }
-        if (d.t === 62) { d.charged = true; sfx('reload'); textPop(p.cx, p.y - 14, 'LOAD!', { color: '#fff8c0', size: 8, frames: 30, rise: 0.5 }); }
+        if (d.t === GUNNER_ULT + 1) { d.charged = true; sfx('reload'); textPop(p.cx, p.y - 14, 'LOAD!', { color: '#fff8c0', size: 8, frames: 30, rise: 0.5 }); }
         if (d.charged) {
           if (d.t % 8 === 0) aura(p, { color: '#fff8c0', r: 18, frames: 12 });
           if (d.t % 3 === 0) KB.particles(p.cx + rnd(-11, 11), p.cy + rnd(-10, 10), ['#fff8c0', '#ffffff'], 1, { spread: 0.3, grav: -0.05, life: 12, up: 0.4, size: 1 });
@@ -14816,13 +14865,37 @@ window.KB = window.KB || {};
     ring(p.cx - p.dir * 7, p.cy + 4, { r0: 2, r1: 14, frames: 10, color: '#b070f0', width: 1 });
     afterimage(p, { frames: 14, color: '#b070f0', every: 2, alpha: 0.5 });
   }
+  // 身體側面探測（fix5b / R5-P2-12）：只靠 physics 的 hitWall 判「貼牆」，主線幾乎沒有牆可用 ——
+  // qa5 掃過全部 25 個房間，符合「連續 ≥5 格實心 + 側面淨空」的直牆只有 w3 r1 一處。
+  // 改成主動探測：**任何實心磁磚的側面（硬磚 / 冰磚 / 斜坡的實心半邊）與單向平台 '=' 的側面都算牆**，
+  // 一格高的平台邊、台階邊、房間左右邊界都踢得到，不必動關卡。
+  // 只認「玩家正在推的方向」或「面向」那一側，背後的牆不會誤觸發。
+  function ninjaWallSide(p) {
+    const map = KB.game && KB.game.map; if (!map) return 0;
+    const at = (dir) => {
+      const px = dir > 0 ? p.x + p.w + 1 : p.x - 1;
+      for (const py of [p.y + 2, p.cy, p.bottom - 3]) {
+        if (map.at(px, py) === '=' || map.isSolidPx(px, py)) return dir;
+      }
+      return 0;
+    };
+    const inp = KB.input;
+    const want = (inp.down('right') ? 1 : 0) - (inp.down('left') ? 1 : 0);
+    return (want && at(want)) || at(p.dir) || 0;
+  }
   // 貼牆偵測：physics 的 hitWall 只有「真的被牆擋住那一幀」才是 true（推牆會每 2~3 幀出現一次），
   // 所以用 wallT 做 8 幀的記憶窗，窗內按跳就能壁跳。
   function ninjaTick(p) {
     const d = data(p);
-    if (p.onGround || p.state === 'stone' || p.state === 'dead' || p.state === 'door' || p.state === 'ride') { d.wallT = 0; d.wallDir = 0; return; }
+    if (p.onGround || p.state === 'stone' || p.state === 'dead' || p.state === 'door' || p.state === 'ride') { d.wallT = 0; d.wallDir = 0; d.airT = 0; return; }
+    d.airT = (d.airT || 0) + 1;
     if (p.hitWall) { d.wallT = 8; d.wallDir = p.dir; }
-    else if (d.wallT > 0) d.wallT--;
+    else {
+      // 起跳後前 2 幀不做主動探測：貼著牆站著起跳時，同一幀的「跳」會被吃成壁跳（跳不起來）
+      const ws = d.airT >= 3 ? ninjaWallSide(p) : 0;
+      if (ws) { d.wallT = 8; d.wallDir = ws; }
+      else if (d.wallT > 0) d.wallT--;
+    }
     if (d.wallT <= 0) return;
     if (p.vy > 1.1) p.vy = 1.1;                                  // 貼牆滑行
     if (KB.game && KB.game.frame % 4 === 0) KB.particles(p.cx + (d.wallDir || p.dir) * 7, p.cy + rnd(-4, 6), ['#ffffff', '#b070f0'], 1, { spread: 0.4, grav: 0.05, life: 10, up: 0.3, size: 1 });
@@ -14873,7 +14946,7 @@ window.KB = window.KB || {};
     color: '#5460a0', duration: 26, hold: true, maxHold: 600, lockMove: false, moveSpeed: P.walk, fps: 14, canJump: true,
     desc: '身法快得只看得見殘影，手裡劍與替身術一氣呵成。',
     flavour: '影子先到，本體後到。',
-    moves: [['X', '手裡剎三連'], ['↓+X', '替身瞬移'], ['空中 X', '飛踢'], ['貼牆＋跳', '壁跳'], ['蓄力放開', '必殺・影分身斬']],
+    moves: [['X', '手裡剎三連'], ['↓+X', '替身瞬移'], ['空中 X', '飛踢'], ['貼牆＋跳', '壁跳（任何牆面）'], ['蓄力放開', '必殺・影分身斬']],
     onGet(p) { const d = data(p); d.t = 0; d.wallT = 0; ensureTicker(p); },
     onCrouchAttack(p) { startMove(p, 'warp'); },
     onAttack(p) {
@@ -14983,7 +15056,7 @@ window.KB = window.KB || {};
     color: '#eef2ff', duration: 20, hold: true, maxHold: 600, lockMove: false, moveSpeed: P.walk, fps: 12, canJump: true,
     desc: '一柄比身體還長的大太刀，出鞘的瞬間連空氣都被切開。',
     flavour: '刀在鞘中時最快。',
-    moves: [['X', '三段連斬'], ['按住 X', '居合蓄力'], ['蓄力放開', '必殺・居合一閃'], ['空中 X', '落下斬'], ['↑+X', '上撩斬']],
+    moves: [['X', '三段連斬'], ['按住 X', '居合蓄力'], ['按住 50 幀放開', '必殺・居合一閃'], ['空中 X', '落下斬'], ['↑+X', '上撩斬']],
     onGet(p) { const d = data(p); d.combo = 0; d.cut = []; },
     onAttack(p) {
       const d = data(p); killBox(p); d.t = 0; d.charging = false; d.charged = false; d.chargeT = 0;
@@ -15059,7 +15132,12 @@ window.KB = window.KB || {};
             p.vx *= 0.82;
             if (d.chargeT % 8 === 1) aura(p, { color: d.charged ? '#ffffff' : '#9aa6c0', r: 16, frames: 12 });
             if (d.chargeT % 3 === 0) KB.particles(p.cx + rnd(-12, 12), p.cy + rnd(-10, 12), d.charged ? ['#ffffff', '#eef2ff'] : ['#9aa6c0', '#eef2ff'], 1, { spread: 0.3, grav: -0.06, life: 14, up: 0.5, size: 1 });
-            if (d.chargeT === 50) { d.charged = true; flash('#ffffff', 4, 0.3); sfx('sword'); textPop(p.cx, p.y - 14, '居合', { color: '#ffffff', size: 8, frames: 30, rise: 0.4 }); }
+            // fix5b / R5-P1-03：居合架式是從 t=13（第 1 段斬揮完）才開始計 chargeT，
+            // 所以原本的 chargeT === 50 實測要按住 63 幀。扣掉那 13 幀，實際 = 招式表的 50 幀。
+            if (d.chargeT === BLADE_IAI - 13) {
+              d.charged = true; flash('#ffffff', 4, 0.3); sfx('sword');
+              textPop(p.cx, p.y - 14, '居合', { color: '#ffffff', size: 8, frames: 30, rise: 0.4 });
+            }
             if (!held) { if (d.charged) { startMove(p, 'iai'); return; } p.attackTimer = Math.min(p.attackTimer, 6); }
           }
         }
@@ -15204,8 +15282,8 @@ window.KB = window.KB || {};
       const d = data(p); d.t++; light(46);
       if (d.mode === 'shot') {
         if (d.t === 4) { fireArrow(p, p.dir * 5.4, -0.9, { oy: 2, grav: 0.085 }); sfx('bow'); burst(p.cx + p.dir * 12, p.cy - 2, { n: 5, colors: ['#48c048', '#ffffff'], speed: 1.6, life: 9, grav: 0 }); }
-        if (d.t === 40) { d.lv = 1; setAnim(p, 'kirby_attack_bow_charge', 10); flash('#fff8c0', 3, 0.25); sfx('bow'); textPop(p.cx, p.y - 14, '貫穿', { color: '#fff8c0', size: 8, frames: 26, rise: 0.4 }); }
-        if (d.t === 80) { d.lv = 2; setAnim(p, 'kirby_attack_bow_meteor', 10); flash('#ffffff', 5, 0.4); textPop(p.cx, p.y - 16, '流星', { color: '#ffffff', size: 8, frames: 30, rise: 0.4 }); }
+        if (d.t === BOW_PIERCE) { d.lv = 1; setAnim(p, 'kirby_attack_bow_charge', 10); flash('#fff8c0', 3, 0.25); sfx('bow'); textPop(p.cx, p.y - 14, '貫穿', { color: '#fff8c0', size: 8, frames: 26, rise: 0.4 }); }
+        if (d.t === BOW_METEOR) { d.lv = 2; setAnim(p, 'kirby_attack_bow_meteor', 10); flash('#ffffff', 5, 0.4); textPop(p.cx, p.y - 16, '流星', { color: '#ffffff', size: 8, frames: 30, rise: 0.4 }); }
         if (d.lv > 0) {
           if (d.t % 8 === 0) aura(p, { color: d.lv > 1 ? '#ffffff' : '#fff8c0', r: 14 + d.lv * 4, frames: 12 });
           p.vx *= 0.86;
@@ -15293,6 +15371,13 @@ window.KB = window.KB || {};
   'use strict';
   KB.ABILITIES = KB.ABILITIES || {};
   const P = KB.PHYS, T = KB.TILE;
+
+  // ---------- 蓄力必殺的門檻（fix5b / R5-P1-03）----------
+  // 這些數字就是招式表 / 圖鑑上寫給玩家看的「按住 N 幀放開」，
+  // **從按下攻擊鍵的那一幀算起**。各招內部的計數器起點不同（有的要等收招動作演完才開始加），
+  // 所以下面使用時會扣掉各自的偏移量；改數字時只改這裡，招式表文案也用同一個值。
+  // 驗證：tools/test_magic.py 的「蓄力門檻」段（按住 N+2 幀觸發、N-6 幀不觸發）。
+  const MAGIC_ULT = 60;   // mage 元素風暴 / gravity 奇點 / clone 百裂分身（招式表：按住 60 幀放開）
 
   // ---------- 共用工具 ----------
   const rnd = (a, b) => a + Math.random() * (b - a);
@@ -15556,6 +15641,7 @@ window.KB = window.KB || {};
     name: '元素法師', hudName: 'MAGE', color: '#a860f0',
     duration: 22, hold: true, maxHold: 0, lockMove: true, canJump: false, fps: 10,
     desc: '戴上星辰尖帽、握住元素法杖，火冰雷風任你差遣；蓄滿魔力還能喚來元素風暴。',
+    flavour: ['尖帽一戴，指尖就有火星。', '火冰雷風，想要哪個都行。'],
     moves: [['X', '火球（爆炸）'], ['↑+X', '冰牆（可站上去）'], ['↓+X', '雷擊召喚'], ['空中 X', '風刃三連'], ['按住 60 幀放開', '必殺：元素風暴']],
     hatOffset: { attack: [0, 0] },
     onGet(p) { data(p).t = 0; },
@@ -15661,7 +15747,7 @@ window.KB = window.KB || {};
       if (d.t >= 18) {
         if (held) {
           D.anim = 'kirby_attack_mage_storm'; p.attackFps = 10;
-          if (d.t >= 60) {
+          if (d.t >= MAGIC_ULT - 1) {   // fix5b：實際 = 招式表的 60 幀（原本 >= 60 實測要 61 幀）
             if (!d.charged) { sfx('charge_ready'); V('aura', p, { color: '#d8b0ff', r: 22, frames: 240 }); }
             d.charged = true;
             if (d.t % 3 === 0) KB.particles(p.cx + rnd(-12, 12), p.y + rnd(-6, 10), ['#ffffff', '#a860f0', '#ffe040'], 2, { spread: 1.4, grav: 0, life: 14, up: 0.4, size: 1 });
@@ -15689,6 +15775,10 @@ window.KB = window.KB || {};
   //    空中 X  回溯      ：回到 60 幀前的位置（殘影逆放）
   // ======================================================================
   const TIME_CD = 600;
+  // 回溯的冷卻（fix5b）：回溯會把卡比拉回 60 幀前的座標，26 幀就能再放一次 ⇒
+  // 空中連按 X 等於「自己把自己釘在原地」（playthrough 機器人每 30 幀按一次攻擊，
+  // w1 要跑 32000 幀，其中大半是被自己回溯拉回去的）。冷卻中改成空中近身拳，按下去仍然有反應。
+  const TIME_REWIND_CD = 240;
 
   // 位置歷史（回溯用）：取得能力時開始記錄；以 --ability 直接開場時，第一次攻擊會補開
   function timeHistory(p) {
@@ -15704,6 +15794,21 @@ window.KB = window.KB || {};
       },
     });
     return d.hist;
+  }
+
+  // ---- 時停中的身體接觸傷害（fix5b / R5-P1-01）----
+  // game.js 的「敵人身體接觸 → 玩家」判定不看 timeStopT，所以時停期間被凍結的敵人
+  // 既不會移動也不會被推開，卻仍然每隔無敵幀就扣一次血；卡比又只能用 0 傷害的近身拳，
+  // 於是「撞到 → 掉能力 → 撿回 → 再撞到」無限循環（playthrough w1 實測掉 25 顆能力星 → 卡在 r0）。
+  // 修法：凍結期間把所有敵方的 hurtsPlayer 暫存起來關掉，時間恢復 / 計時器結束時還原。
+  function timeFreezeContact() {
+    for (const e of ents()) {
+      if (!isFoe(e) || !e.hurtsPlayer || e._tsHurt) continue;
+      e._tsHurt = true; e.hurtsPlayer = false;
+    }
+  }
+  function timeRestoreContact() {
+    for (const e of ents()) if (e._tsHurt) { e._tsHurt = false; e.hurtsPlayer = true; }
   }
 
   function timeStopResolve(p) {
@@ -15732,6 +15837,7 @@ window.KB = window.KB || {};
     //       連打時卡比幾乎走不動（playthrough 機器人 w1 r0 要 18753 幀，是 sword 的 10 倍，最後超時卡關）。
     duration: 30, hold: false, maxHold: 0, lockMove: true, canJump: true, fps: 8,
     desc: '懷錶指針一停，世界就跟著停；時停中打出的傷害會在時間恢復的瞬間一起爆開。',
+    flavour: ['喀。懷錶的指針停住了。', '接下來的事，等等再算。'],
     moves: [['X', '時間停止（180 幀）'], ['時停中 X', '近身連拳（解除時結算）'], ['↓+X', '慢動作'], ['↑+X', '加速'], ['空中 X', '回溯（60 幀前）']],
     hatOffset: { attack: [0, 0] },
     onGet(p) { data(p).t = 0; timeHistory(p); },
@@ -15742,6 +15848,10 @@ window.KB = window.KB || {};
       const g = KB.game;
       let mode = pickMode(p, 'rewind', 'haste', 'stop');
       if (mode === 'stop' && g && g.timeStopT > 0) mode = 'punch';
+      if (mode === 'rewind' && g && d.rewindAt !== undefined && g.frame - d.rewindAt < TIME_REWIND_CD) {
+        mode = 'punch';
+        V('textPop', p.cx, p.y - 16, '充能中', { color: '#8090c0', frames: 40 });
+      }
       if (mode === 'stop' && g && d.stopAt !== undefined && g.frame - d.stopAt < TIME_CD) {
         // 冷卻中：退回近身拳並提示
         mode = 'punch';
@@ -15769,17 +15879,19 @@ window.KB = window.KB || {};
         tick(p, 'stop', {
           life: 260, key: null,
           fn: (pp, t) => {
-            const gg = KB.game; if (!gg) { t.finish(); return; }
+            const gg = KB.game; if (!gg) { timeRestoreContact(); t.finish(); return; }
             if (gg.timeStopT > 0) {
+              timeFreezeContact();   // 新啟動 / 剛進畫面的敵人也要一起關掉接觸傷害
               if (t.tick % 6 === 0) {
                 const cam = gg.cam;
                 KB.particles(cam.x + rnd(0, KB.W), cam.y + rnd(0, KB.VIEW_H), ['#ffffff', '#8090c0'], 1, { spread: 0.2, grav: 0, life: 20, up: 0, size: 1 });
               }
               if (t.tick % 20 === 0) KB.fx('fx_gear', pp.cx + rnd(-40, 40), pp.cy + rnd(-30, 20), { life: 20, alpha: 0.6 });
-            } else { timeStopResolve(pp); t.finish(); }
+            } else { timeRestoreContact(); timeStopResolve(pp); t.finish(); }
           },
-          end: () => { },
+          end: () => { timeRestoreContact(); },
         });
+        timeFreezeContact();   // tick() 會先結束上一個 stop 計時器（還原），所以要在它之後才凍結
       } else if (mode === 'punch') {
         setup(p, { anim: 'kirby_attack_time_punch', dur: 14, fps: 14, lock: false });
         const stopped = !!(g && g.timeStopT > 0);
@@ -15828,6 +15940,7 @@ window.KB = window.KB || {};
         });
       } else if (mode === 'rewind') {
         setup(p, { anim: 'kirby_attack_time_rewind', dur: 26, fps: 14, lock: true });
+        d.rewindAt = g ? g.frame : 0;
         const hist = timeHistory(p);
         const idx = Math.max(0, hist.length - 60);
         const tgt = hist.length > 8 ? hist[idx] : [p.x - p.dir * 42, p.y - 16];
@@ -15953,6 +16066,7 @@ window.KB = window.KB || {};
     name: '重力', hudName: 'GRAVITY', color: '#a860f0',
     duration: 24, hold: true, maxHold: 0, lockMove: true, canJump: false, fps: 10,
     desc: '把黑洞戴在頭上的瘋狂發明：吸進來、浮起來、砸下去，最後連空間一起壓成奇點。',
+    flavour: ['頭上那顆，是真的黑洞。', '上跟下，由我來決定。'],
     moves: [['X', '黑洞（引力點）'], ['↓+X', '反重力（敵人浮空）'], ['空中 X', '隕石三連'], ['↑+X', '浮空 240 幀'], ['按住 60 幀放開', '必殺：奇點']],
     hatOffset: { attack: [0, 0] },
     onGet(p) { data(p).t = 0; },
@@ -16102,7 +16216,7 @@ window.KB = window.KB || {};
       if (d.t >= 20) {
         if (held) {
           D.anim = 'kirby_attack_gravity_singularity'; p.attackFps = 10;
-          if (d.t >= 60) {
+          if (d.t >= MAGIC_ULT - 1) {   // fix5b：實際 = 招式表的 60 幀（原本 >= 60 實測要 61 幀）
             if (!d.charged) { sfx('charge_ready'); V('aura', p, { color: '#d8b0ff', r: 24, frames: 240 }); }
             d.charged = true;
             if (d.t % 3 === 0) KB.particles(p.cx + rnd(-14, 14), p.cy + rnd(-12, 12), ['#a860f0', '#ffffff'], 2, { spread: 1.2, grav: 0, life: 14, up: 0.2, size: 1 });
@@ -16233,6 +16347,7 @@ window.KB = window.KB || {};
     name: '分身', hudName: 'CLONE', color: '#ffb0d0',
     duration: 20, hold: true, maxHold: 0, lockMove: true, canJump: false, fps: 12,
     desc: '一人分成三人打：兩個小分身會自動掩護射擊，還能踩著它們二段跳。',
+    flavour: ['一個不夠，那就三個。', '兩個小分身，替我打。'],
     moves: [['X', '全員吐星（三道）'], ['↓+X', '交換位置'], ['空中 X', '分身墊腳（再跳一次）'], ['按住 60 幀放開', '必殺：百裂分身'], ['被動', '分身自動射擊']],
     hatOffset: { attack: [0, 0] },
     onGet(p) { data(p).t = 0; ensureClones(p); sfx('clone_summon', 'ability'); },
@@ -16324,7 +16439,7 @@ window.KB = window.KB || {};
       if (d.t >= 16) {
         if (held) {
           D.anim = 'kirby_attack_clone_rush'; p.attackFps = 10;
-          if (d.t >= 60) {
+          if (d.t >= MAGIC_ULT - 1) {   // fix5b：實際 = 招式表的 60 幀（原本 >= 60 實測要 61 幀）
             if (!d.charged) { sfx('charge_ready'); V('aura', p, { color: '#ffb0d0', r: 22, frames: 240 }); }
             d.charged = true;
             if (d.t % 3 === 0) {
@@ -16365,6 +16480,14 @@ window.KB = window.KB || {};
   'use strict';
   const P = KB.PHYS;
   const T = KB.TILE;
+
+  // ---------- 蓄力必殺的門檻（fix5b / R5-P1-03）----------
+  // 這些數字就是招式表 / 圖鑑上寫給玩家看的「按住 N 幀放開」，
+  // **從按下攻擊鍵的那一幀算起**。各招內部的計數器起點不同（有的要等收招動作演完才開始加），
+  // 所以下面使用時會扣掉各自的偏移量；改數字時只改這裡，招式表文案也用同一個值。
+  // 驗證：tools/test_forms.py 的「蓄力門檻」段（按住 N+2 幀觸發、N-6 幀不觸發）。
+  const DRAGON_NOVA = 60;   // 龍化・龍炎彈（招式表：按住 60 幀放開）
+  const MECH_BARRAGE = 50;   // 機甲・全彈發射（招式表：按住 50 幀放開）
 
   // ---------- 註冊表 ----------
   const NAMES = { giant: '巨大化', dragon: '龍化', mech: '機甲', ghost: '幽靈' };
@@ -16453,20 +16576,23 @@ window.KB = window.KB || {};
   //     X      巨腳踩踏：躍起後落地，兩側各一道衝擊波（hit-stop）
   //     ↓+X    巨人衝撞：前衝 30 幀全身判定 dmg 6，可撞破硬磚 X
   //     空中 X  屁股墜落：vy 8 直落，落地大衝擊環
-  //     被動    體型 ×2、吸入範圍 ×2、可直接吞下中魔王
+  //     被動    體型 ×2、吸入範圍 ×2、可直接吞下中魔王、裝甲 3（armor 1）
   // ======================================================================
   const GIANT_TIME = 900, GIANT_WARN = 120;
   def('giant', {
     color: '#ff8040', duration: 20, lockMove: true, canJump: false, fps: 8,
     hat: 'hat_giant',
-    desc: '吞下巨大花的花粉，身體膨脹成兩倍大；限時 900 幀，走一步地都在抖。',
+    desc: '吞下巨大花的花粉，身體膨脹成兩倍大；撐得住三下攻擊，走一步地都在抖。',
     flavour: ['吸一大口氣——啵！整隻膨脹成兩倍。', '這個大小，連中魔王都能一口吞掉。'],
-    moves: [['X', '巨腳踩踏'], ['↓+X', '巨人衝撞（破硬磚）'], ['空中 X', '屁股墜落'], ['↑+X（按住）', '大口吸：範圍 ×2・可吞中魔王'], ['限時', '900 幀後自動縮小']],
+    moves: [['X', '巨腳踩踏'], ['↓+X', '巨人衝撞（破硬磚）'], ['空中 X', '屁股墜落'], ['↑+X（按住）', '大口吸（可吞中魔王）'], ['被動', '裝甲 3・受傷不掉能力'], ['限時', '900 幀後自動縮小']],
     onGet(p) {
       const d = data(p);
       d.timer = GIANT_TIME; d.step = 0; d.warned = false; d.mode = null;
       p.setForm({
-        key: 'giant', scale: 2, inhaleAll: true,
+        // fix5b / R5-P2-13：原本 armor 0 ⇒ 隨便被 waddledee 碰一下就 clearForm + 掉能力，
+        // 900 幀的限時與「最後 120 幀閃爍」在實戰裡根本走不到。改成和 mech 同樣的裝甲機制：
+        // armor 1（每下只扣 1 點裝甲、不扣 HP、不掉能力），裝甲 3 點打光才提前解除。
+        key: 'giant', scale: 2, inhaleAll: true, armor: 1, hp: 3,
         // 巨大化沿用既有卡比精靈（scale 2）；攻擊幀：衝撞＝跑步、屁股墜落＝蹲下、
         // 踩踏＝專用的 kirby_attack_giant（fix5 新增，art/kirby_forms.js）
         spr(pp, anim, opts) {
@@ -16600,7 +16726,7 @@ window.KB = window.KB || {};
     hat: null,
     desc: '長出蝠翼、尾巴與金角；按住跳就能一直飛，張口就是一條火河。',
     flavour: ['背後「啪」地張開一對紅色蝠翼，', '吸一口氣，喉嚨深處已經燒起來了。'],
-    moves: [['按住跳', '飛行'], ['X（可按住）', '龍息'], ['↓+X', '尾擊（前後）'], ['空中 X', '俯衝'], ['X 蓄滿放開', '必殺：龍炎彈']],
+    moves: [['按住跳', '飛行'], ['X（可按住）', '龍息'], ['↓+X', '尾擊（前後）'], ['空中 X', '俯衝'], ['按住 60 幀放開', '必殺：龍炎彈']],
     onGet(p) {
       const d = data(p); d.flap = 0;
       p.setForm({
@@ -16735,7 +16861,7 @@ window.KB = window.KB || {};
       }
       if (held) {
         d.charge = (d.charge || 0) + 1;
-        if (d.charge === 60) { d.ready = true; sfx('charge_ready'); vf('chargeReady', p.cx, p.cy, '#ff9020'); }
+        if (d.charge === DRAGON_NOVA - 1) { d.ready = true; sfx('charge_ready'); vf('chargeReady', p.cx, p.cy, '#ff9020'); }
         if (d.ready && d.charge % 4 === 0) KB.particles(p.cx + rnd(-12, 12), p.y - 2, ['#ffffff', '#ffe040'], 2, { spread: 1, grav: 0, life: 12, up: 0.5, size: 1 });
       } else if (d.ready) { startMove(p, 'nova'); return; }
     },
@@ -16845,7 +16971,7 @@ window.KB = window.KB || {};
     hat: null,
     desc: '穿上重裝甲：裝甲值 6，受傷先扣裝甲不掉能力；火箭拳、追蹤飛彈與噴射一應俱全。',
     flavour: ['「喀鏘」一聲，整組裝甲扣上身。', '胸口的動力爐亮起來——全系統正常。'],
-    moves: [['X', '火箭拳（來回判定）'], ['↑+X', '追蹤飛彈 ×2'], ['空中 X', '噴射墜踩'], ['按住跳', '噴射跳'], ['X 蓄滿放開', '必殺：全彈發射']],
+    moves: [['X', '火箭拳（來回判定）'], ['↑+X', '追蹤飛彈 ×2'], ['空中 X', '噴射墜踩'], ['按住跳', '噴射跳'], ['按住 50 幀放開', '必殺：全彈發射']],
     onGet(p) {
       const d = data(p); d.jetT = 0; d.stepT = 0;
       p.setForm({
@@ -16947,7 +17073,7 @@ window.KB = window.KB || {};
       if (d.t >= 18) {
         if (held) {
           d.charge = (d.charge || 0) + 1;
-          if (d.charge === 50) { d.ready = true; sfx('charge_ready'); vf('chargeReady', p.cx, p.cy, '#78e8ff'); }
+          if (d.charge === MECH_BARRAGE - 18) { d.ready = true; sfx('charge_ready'); vf('chargeReady', p.cx, p.cy, '#78e8ff'); }
           if (d.ready && d.charge % 4 === 0) KB.particles(p.cx + rnd(-10, 10), p.y - 2, ['#ffffff', '#78e8ff'], 2, { spread: 1, grav: 0, life: 12, up: 0.5, size: 1 });
           else if (d.charge % 8 === 1) sfx('charge');
           p.attackTimer = Math.max(p.attackTimer, 2);
@@ -16976,12 +17102,46 @@ window.KB = window.KB || {};
     while (n < 8 && KB.TileMap.isSolid(map.get(x, ty))) { n++; x++; }
     return n;
   }
+  /**
+   * noclip 結束時把卡比從實心磁磚裡推出來（fix5b / R5-P1-02）。
+   * 原本只往左右各找 64px，按住 ↓ 沉進地板時左右都是實心 → 迴圈跑完人還在地形裡，
+   * noclip 一關掉就直接墜落 state=dead（掉一條命 + 掉能力）。
+   * 現在改成：先左右 24px（保留「穿薄牆被推回來」的手感）→ 再一格一格往上找最近的空位 → 最後往下找。
+   */
+  function unstickFromWall(p) {
+    const map = KB.game && KB.game.map; if (!map) return;
+    const freeAt = (cx, bottom) => {
+      if (bottom - p.h < 0) return false;
+      const x0 = Math.floor((cx - p.w / 2) / T), x1 = Math.floor((cx + p.w / 2 - 1) / T);
+      const y0 = Math.floor((bottom - p.h) / T), y1 = Math.floor((bottom - 1) / T);
+      for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++) {
+        if (tx < 0 || tx >= map.w || ty >= map.h) return false;
+        if (KB.TileMap.isSolid(map.get(tx, ty))) return false;
+      }
+      return true;
+    };
+    if (freeAt(p.cx, p.bottom)) return;
+    for (let k = 1; k <= 24; k++) {
+      if (freeAt(p.cx + k, p.bottom)) { p.x += k; return; }
+      if (freeAt(p.cx - k, p.bottom)) { p.x -= k; return; }
+    }
+    for (let k = 1; k <= map.h; k++) {                   // 往上找最近的空格（沉進地板時走這條）
+      const b = p.bottom - k * T;
+      if (b - p.h < 0) break;
+      if (freeAt(p.cx, b)) { p.bottom = b; p.vy = 0; return; }
+    }
+    for (let k = 1; k <= map.h; k++) {                   // 保險：上面全是實心就往下找
+      const b = p.bottom + k * T;
+      if (b > map.ph - T) break;
+      if (freeAt(p.cx, b)) { p.bottom = b; p.vy = 0; return; }
+    }
+  }
   def('ghost', {
     color: '#c4ccec', duration: 20, lockMove: false, moveSpeed: P.walk, canJump: true, fps: 8,
     hat: null,
     desc: '變成半透明的白色被單；能穿過薄牆、附身敵人，還能發出讓人僵直的哀嚎。',
     flavour: ['身體變得輕飄飄、涼颼颼的，', '牆壁看起來也沒那麼硬了。'],
-    moves: [['X', '穿牆開關（最多 2 格厚）'], ['↓+X', '附身敵人'], ['空中 X', '幽靈哀嚎（stun）'], ['↑+X', '隱身 180 幀'], ['穿牆中 ↑↓', '上下飄浮']],
+    moves: [['X', '穿牆開關（2 格內）'], ['↓+X', '附身敵人'], ['空中 X', '幽靈哀嚎（stun）'], ['↑+X', '隱身 180 幀'], ['穿牆中 ↑↓', '上下飄浮']],
     onGet(p) {
       const d = data(p);
       d.phaseT = GHOST_PHASE; d.invisT = 0; d.possessT = 0; d.guard = null;
@@ -17009,13 +17169,8 @@ window.KB = window.KB || {};
         vf('afterimage', p, { frames: 50, every: 3, color: '#c4ccec', alpha: 0.45 });
         vf('ring', p.cx, p.cy, { r0: 2, r1: 34, frames: 16, color: '#ffffff', width: 2 });
       } else {
-        const map = KB.game && KB.game.map;
-        if (map && map.isSolidPx(p.cx, p.cy)) {
-          for (let k = 1; k <= 64; k++) {
-            if (!map.isSolidPx(p.cx + k, p.cy)) { p.x += k; break; }
-            if (!map.isSolidPx(p.cx - k, p.cy)) { p.x -= k; break; }
-          }
-        }
+        if (p.clampToRoom) p.clampToRoom();
+        unstickFromWall(p);
         p.grav = P.grav;
         sfx('unpossess');
         KB.particles(p.cx, p.cy, ['#ffffff', '#c4ccec'], 6, { spread: 1.4, life: 16 });
@@ -17026,6 +17181,9 @@ window.KB = window.KB || {};
       const d = data(p);
       p.possessed = e; d.possessT = GHOST_POSSESS;
       if (p.form) p.form.hidden = true;
+      // fix5b / R5-P1-04：附身期間卡比不受傷。原本只在 formUpdate 裡補 invuln 3，
+      // 附身「那一幀」還是 0 ⇒ 貼在敵人身上按 ↓+X 會先吃接觸傷害 → 掉能力 → onLose → 附身 <8 幀就解除。
+      p.invuln = Math.max(p.invuln, 12);
       p.setState(p.onGround ? 'idle' : 'fall');
       sfx('possess');
       hitstop(4); shake(4);
@@ -17063,7 +17221,7 @@ window.KB = window.KB || {};
         if (e.dead || d.possessT <= 0 || inp.pressed('select')) { this.unpossess(p, !e.dead && d.possessT <= 0); return true; }
         p.setCenter(e.cx, e.cy);
         p.vx = 0; p.vy = 0; p.onGround = e.onGround;
-        p.invuln = Math.max(p.invuln, 3);
+        p.invuln = Math.max(p.invuln, 12);   // 附身期間完全不受傷（fix5b / R5-P1-04）
         e.beingInhaled = false;
         const dx = (inp.down('right') ? 1 : 0) - (inp.down('left') ? 1 : 0);
         if (dx) { e.dir = dx; p.dir = dx; e.vx = dx * 1.5; } else e.vx *= 0.6;
@@ -17127,13 +17285,17 @@ window.KB = window.KB || {};
           : (!p.onGround && !phasing) ? 'wail' : 'phase');
       if (d.mode === 'possess') {
         setup(p, { dur: 18, fps: 10, lock: true });
-        // 找重疊（或非常靠近）的敵人
-        let tgt = null, bd = 26;
+        // 找目標：**判定框重疊就一定成立**（fix5b / R5-P1-04 —— 原本只看中心距 < 26px，
+        // 高瘦 / 巨大的敵人明明整隻疊在卡比身上卻會跳「沒有目標」），重疊的優先，
+        // 其次才是 26px 內最近的那隻。
+        let tgt = null, bd = 26, over = null, od = 1e9;
         for (const e of KB.game.entities) {
           if (e.dead || e.type !== 'enemy' || e.active === false) continue;
           const dd = Math.hypot(e.cx - p.cx, e.cy - p.cy);
+          if (p.overlaps(e)) { if (dd < od) { od = dd; over = e; } continue; }
           if (dd < bd) { bd = dd; tgt = e; }
         }
+        if (over) tgt = over;
         if (tgt) this.possess(p, tgt);
         else {
           sfx('unpossess');
@@ -23017,6 +23179,32 @@ window.KB = window.KB || {};
     KB.rect(ctx, x - 3, y - 12, 2, 4, '#202848'); KB.rect(ctx, x + 1, y - 12, 2, 4, '#202848');
     KB.rect(ctx, x - 6, y - 7, 2, 1, '#f27090'); KB.rect(ctx, x + 4, y - 7, 2, 1, '#f27090');
   }
+  // ---------- 圖鑑 / 競技場的大預覽（fix5b / R5-P2-06）----------
+  // dragon / mech / ghost 是「整體換精靈」的變身，沒有 hat_*，原本只畫普通粉紅卡比 ⇒
+  // 玩家在圖鑑裡完全看不出變身長什麼樣。有 kirby_<key>_idle（或 def.previewSpr）就優先畫它；
+  // giant 沒有專屬 idle，改用「一般卡比 + hat_giant」整體放大來表現體型。
+  function previewForm(key) {
+    const d = (KB.ABILITIES && KB.ABILITIES[key]) || null;
+    const spr = (d && d.previewSpr) || (key ? 'kirby_' + key + '_idle' : null);
+    if (spr && has(spr)) return { spr, scale: (d && d.previewScale) || 1, hat: false };
+    if (key === 'giant') return { spr: 'kirby_idle', scale: 1.35, hat: true };
+    return null;
+  }
+  /** 在 (x, y=腳底) 畫一隻「這個能力的卡比」。o: { t, tint（剪影用，會退回普通卡比）} */
+  function drawPreview(ctx, key, x, y, o) {
+    o = o || {};
+    const fm = o.tint ? null : previewForm(key);
+    const k = fm ? fm.scale : 1;
+    const info = UI.abilityInfo ? UI.abilityInfo(key) : null;
+    ctx.save();
+    ctx.translate(Math.round(x), Math.round(y));
+    if (k !== 1) ctx.scale(k, k);
+    drawKirby(ctx, fm ? fm.spr : 'kirby_idle', 0, 0, { t: o.t || 0, frame: fm && !fm.hat ? undefined : 0, tint: o.tint });
+    if ((!fm || fm.hat) && !o.tint && info && info.hat && has(info.hat)) sprAt(ctx, info.hat, 0, -15, 'b', { t: o.t || 0 });
+    ctx.restore();
+  }
+  UI.previewForm = previewForm; UI.drawPreview = drawPreview;
+
   // 場景淡入 / 淡出（leave 於全黑後執行 cb）
   function stepFade(sc) {
     if (sc.leaving) { sc.fade = Math.min(1, sc.fade + 0.07); if (sc.fade >= 1) { const cb = sc.leaving; sc.leaving = null; cb(); } return true; }
@@ -23529,8 +23717,8 @@ window.KB = window.KB || {};
   // ---------- 關卡開場橫幅（WORLD n + 關名）----------
   // 進入關卡第一房時滑入 → 停 90 幀 → 滑出；純繪製，完全不阻擋操作。
   const BANNER = { slideIn: 20, hold: 90, slideOut: 20, dist: 320, y: 32, h: 48 };
-  const bn = { game: null, start: -1e9 };
-  UI.resetLevelBanner = function () { bn.game = null; bn.start = -1e9; };
+  const bn = { game: null, start: -1e9, paint: null };
+  UI.resetLevelBanner = function () { bn.game = null; bn.start = -1e9; bn.paint = null; };
   // 橫幅目前是否在畫面上；有的話回傳橫幅底部 y（game.js 把 toast 讓到底下，避免兩行字互相蓋掉 → R2-P2-13）
   // 必須在 drawLevelBanner 之後呼叫（bn.game 由它初始化）。
   UI.bannerBottom = function (game) {
@@ -23551,6 +23739,17 @@ window.KB = window.KB || {};
     if (game.paused || game.clearT >= 0) return;
     const age = (game.frame || 0) - bn.start, span = BANNER.slideIn + BANNER.hold + BANNER.slideOut;
     if (age < 0 || age > span) return;
+    // fix5b / R5-P2-09：game.js 的順序是 drawLevelBanner → VFX.postWorld → drawGameHint，
+    // 而 worldTint（時停 / 慢動作 / 子彈時間 / 元素風暴）是「視窗層」，會蓋滿 y 0~192、
+    // 把先畫好的開場橫幅一起染色到看不清字。所以這裡只記下「這一幀要畫橫幅」，
+    // 真正的繪製交給 UI.paintLevelBanner()，由 drawGameHint（postWorld 之後）第一行呼叫。
+    bn.paint = { age, game };
+  };
+  /** 真正畫出開場橫幅（在 VFX.postWorld 之後呼叫，才不會被 worldTint 染到）*/
+  UI.paintLevelBanner = function (ctx) {
+    const q = bn.paint; bn.paint = null;
+    if (!q || !ctx) return;
+    const { age, game } = q;
     let off = 0;
     if (age < BANNER.slideIn) { const u = age / BANNER.slideIn; off = -BANNER.dist * Math.pow(1 - u, 3); }
     else if (age > BANNER.slideIn + BANNER.hold) { const u = (age - BANNER.slideIn - BANNER.hold) / BANNER.slideOut; off = BANNER.dist * u * u * u; }
@@ -24071,8 +24270,8 @@ window.KB = window.KB || {};
       // 左：戴帽子的卡比（未發現 → 全黑剪影、不戴帽子）
       KB.rect(ctx, 14, 26, 52, 34, '#101828'); KB.rect(ctx, 15, 27, 50, 32, '#20304c');
       const gy = 57;
-      drawKirby(ctx, 'kirby_idle', 40, gy, { t: this.t, frame: 0, tint: seen ? undefined : '#0c1220' });
-      if (seen && info.hat && has(info.hat)) sprAt(ctx, info.hat, 40, gy - 15, 'b', { t: this.t });
+      // fix5b / R5-P2-06：dragon / mech / ghost / giant 畫變身後的外型（未發現時仍是全黑剪影）
+      UI.drawPreview(ctx, seen ? key : null, 40, gy, { t: this.t, tint: seen ? undefined : '#0c1220' });
       KB.rect(ctx, 26, gy + 1, 28, 2, 'rgba(0,0,0,0.35)');
       // 右：圖示 + 名稱 + 英文名
       if (!seen) {
@@ -24288,6 +24487,10 @@ window.KB = window.KB || {};
   const hint = { game: null, level: null, at: -1e9, abAt: -1e9, lastAbility: undefined };
   UI.resetGameHint = function () { hint.game = null; hint.level = null; hint.at = -1e9; hint.abAt = -1e9; hint.lastAbility = undefined; };
   UI.drawGameHint = function (ctx, game) {
+    // fix5b / R5-P2-09：開場橫幅改由這裡畫（game.js 的順序是 drawLevelBanner → VFX.postWorld →
+    // drawGameHint，橫幅若在 postWorld 之前畫就會被 worldTint 一起染色）。
+    // 必須放在 hints 設定的判斷之前——關掉提示時橫幅還是要出現。
+    if (UI.paintLevelBanner) UI.paintLevelBanner(ctx);
     if (!UI.settings().hints) return;
     const p = game.player, f = game.frame || 0;
     // 新的 GameScene（＝進入關卡）且在第一房 → 從第 0 幀起算，顯示 3 秒提示
@@ -24533,17 +24736,20 @@ window.KB = window.KB || {};
       // 左：戴帽子的卡比
       KB.rect(ctx, 16, 108, 56, 50, '#101828'); KB.rect(ctx, 17, 109, 54, 48, '#241c3c');
       const gy = 152, hop = Math.abs(Math.sin(this.t * 3)) * 3;
-      drawKirby(ctx, 'kirby_idle', 44, gy - Math.round(hop), { t: this.t, frame: 0 });
-      if (info.hat && has(info.hat)) sprAt(ctx, info.hat, 44, gy - 15 - Math.round(hop), 'b', { t: this.t });
+      // fix5b / R5-P2-06：dragon / mech / ghost / giant 畫變身後的外型
+      UI.drawPreview(ctx, this.keys[this.i] || null, 44, gy - Math.round(hop), { t: this.t });
       KB.rect(ctx, 34, gy + 1, 20, 2, 'rgba(0,0,0,0.4)');
       // 右：圖示 + 名稱 + 說明
       if (!sprAt(ctx, info.icon, 80, 110, 'tl')) { KB.rect(ctx, 80, 110, 24, 16, '#181c28'); KB.rect(ctx, 81, 111, 22, 14, info.color); }
       T(ctx, info.name, 112, 106, { color: C.yellow, size: 16 });
       KB.text(ctx, info.en, 240, 112, { color: info.color, align: 'right' });
       let ds = ms, dl = info.desc ? UI.wrapLines(info.desc, 156, { size: ds }, 2) : [];
-      let lh = 15;
-      if (info.desc && dl.join('').replace(/…/g, '').length < info.desc.length) { ds = 12; lh = 13; dl = UI.wrapLines(info.desc, 158, { size: ds }, 3); }
-      for (let i = 0; i < dl.length; i++) T(ctx, dl[i], 80, 127 + i * lh, { color: '#c8d8f0', size: ds });
+      let lh = 15, dy = 127;
+      // fix5b / R5-P2-05：降級成 12px 3 行時，原本（起點 127、行高 13）第 3 行落在 y 153~165，
+      // 但面板下緣只到 y 164（88+76）⇒ 最後一行被切掉半截（gunner「…整個房間。」、dragon「…一條火河。」）。
+      // 起點上移到 124、行高縮成 12 ⇒ 第 3 行 148~160，完整留在面板內。
+      if (info.desc && dl.join('').replace(/…/g, '').length < info.desc.length) { ds = 12; lh = 12; dy = 124; dl = UI.wrapLines(info.desc, 158, { size: ds }, 3); }
+      for (let i = 0; i < dl.length; i++) T(ctx, dl[i], 80, dy + i * lh, { color: '#c8d8f0', size: ds });
       // 左右箭頭
       const ax = ((f >> 3) & 1) ? 1 : 0;
       KB.text(ctx, '<', 12 - ax, 128, { color: C.cyan });

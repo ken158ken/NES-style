@@ -209,17 +209,20 @@
       // 左：戴帽子的卡比
       KB.rect(ctx, 16, 108, 56, 50, '#101828'); KB.rect(ctx, 17, 109, 54, 48, '#241c3c');
       const gy = 152, hop = Math.abs(Math.sin(this.t * 3)) * 3;
-      drawKirby(ctx, 'kirby_idle', 44, gy - Math.round(hop), { t: this.t, frame: 0 });
-      if (info.hat && has(info.hat)) sprAt(ctx, info.hat, 44, gy - 15 - Math.round(hop), 'b', { t: this.t });
+      // fix5b / R5-P2-06：dragon / mech / ghost / giant 畫變身後的外型
+      UI.drawPreview(ctx, this.keys[this.i] || null, 44, gy - Math.round(hop), { t: this.t });
       KB.rect(ctx, 34, gy + 1, 20, 2, 'rgba(0,0,0,0.4)');
       // 右：圖示 + 名稱 + 說明
       if (!sprAt(ctx, info.icon, 80, 110, 'tl')) { KB.rect(ctx, 80, 110, 24, 16, '#181c28'); KB.rect(ctx, 81, 111, 22, 14, info.color); }
       T(ctx, info.name, 112, 106, { color: C.yellow, size: 16 });
       KB.text(ctx, info.en, 240, 112, { color: info.color, align: 'right' });
       let ds = ms, dl = info.desc ? UI.wrapLines(info.desc, 156, { size: ds }, 2) : [];
-      let lh = 15;
-      if (info.desc && dl.join('').replace(/…/g, '').length < info.desc.length) { ds = 12; lh = 13; dl = UI.wrapLines(info.desc, 158, { size: ds }, 3); }
-      for (let i = 0; i < dl.length; i++) T(ctx, dl[i], 80, 127 + i * lh, { color: '#c8d8f0', size: ds });
+      let lh = 15, dy = 127;
+      // fix5b / R5-P2-05：降級成 12px 3 行時，原本（起點 127、行高 13）第 3 行落在 y 153~165，
+      // 但面板下緣只到 y 164（88+76）⇒ 最後一行被切掉半截（gunner「…整個房間。」、dragon「…一條火河。」）。
+      // 起點上移到 124、行高縮成 12 ⇒ 第 3 行 148~160，完整留在面板內。
+      if (info.desc && dl.join('').replace(/…/g, '').length < info.desc.length) { ds = 12; lh = 12; dy = 124; dl = UI.wrapLines(info.desc, 158, { size: ds }, 3); }
+      for (let i = 0; i < dl.length; i++) T(ctx, dl[i], 80, dy + i * lh, { color: '#c8d8f0', size: ds });
       // 左右箭頭
       const ax = ((f >> 3) & 1) ? 1 : 0;
       KB.text(ctx, '<', 12 - ax, 128, { color: C.cyan });

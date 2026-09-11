@@ -252,6 +252,32 @@
     KB.rect(ctx, x - 3, y - 12, 2, 4, '#202848'); KB.rect(ctx, x + 1, y - 12, 2, 4, '#202848');
     KB.rect(ctx, x - 6, y - 7, 2, 1, '#f27090'); KB.rect(ctx, x + 4, y - 7, 2, 1, '#f27090');
   }
+  // ---------- 圖鑑 / 競技場的大預覽（fix5b / R5-P2-06）----------
+  // dragon / mech / ghost 是「整體換精靈」的變身，沒有 hat_*，原本只畫普通粉紅卡比 ⇒
+  // 玩家在圖鑑裡完全看不出變身長什麼樣。有 kirby_<key>_idle（或 def.previewSpr）就優先畫它；
+  // giant 沒有專屬 idle，改用「一般卡比 + hat_giant」整體放大來表現體型。
+  function previewForm(key) {
+    const d = (KB.ABILITIES && KB.ABILITIES[key]) || null;
+    const spr = (d && d.previewSpr) || (key ? 'kirby_' + key + '_idle' : null);
+    if (spr && has(spr)) return { spr, scale: (d && d.previewScale) || 1, hat: false };
+    if (key === 'giant') return { spr: 'kirby_idle', scale: 1.35, hat: true };
+    return null;
+  }
+  /** 在 (x, y=腳底) 畫一隻「這個能力的卡比」。o: { t, tint（剪影用，會退回普通卡比）} */
+  function drawPreview(ctx, key, x, y, o) {
+    o = o || {};
+    const fm = o.tint ? null : previewForm(key);
+    const k = fm ? fm.scale : 1;
+    const info = UI.abilityInfo ? UI.abilityInfo(key) : null;
+    ctx.save();
+    ctx.translate(Math.round(x), Math.round(y));
+    if (k !== 1) ctx.scale(k, k);
+    drawKirby(ctx, fm ? fm.spr : 'kirby_idle', 0, 0, { t: o.t || 0, frame: fm && !fm.hat ? undefined : 0, tint: o.tint });
+    if ((!fm || fm.hat) && !o.tint && info && info.hat && has(info.hat)) sprAt(ctx, info.hat, 0, -15, 'b', { t: o.t || 0 });
+    ctx.restore();
+  }
+  UI.previewForm = previewForm; UI.drawPreview = drawPreview;
+
   // 場景淡入 / 淡出（leave 於全黑後執行 cb）
   function stepFade(sc) {
     if (sc.leaving) { sc.fade = Math.min(1, sc.fade + 0.07); if (sc.fade >= 1) { const cb = sc.leaving; sc.leaving = null; cb(); } return true; }
@@ -764,8 +790,8 @@
   // ---------- 關卡開場橫幅（WORLD n + 關名）----------
   // 進入關卡第一房時滑入 → 停 90 幀 → 滑出；純繪製，完全不阻擋操作。
   const BANNER = { slideIn: 20, hold: 90, slideOut: 20, dist: 320, y: 32, h: 48 };
-  const bn = { game: null, start: -1e9 };
-  UI.resetLevelBanner = function () { bn.game = null; bn.start = -1e9; };
+  const bn = { game: null, start: -1e9, paint: null };
+  UI.resetLevelBanner = function () { bn.game = null; bn.start = -1e9; bn.paint = null; };
   // 橫幅目前是否在畫面上；有的話回傳橫幅底部 y（game.js 把 toast 讓到底下，避免兩行字互相蓋掉 → R2-P2-13）
   // 必須在 drawLevelBanner 之後呼叫（bn.game 由它初始化）。
   UI.bannerBottom = function (game) {
@@ -786,6 +812,17 @@
     if (game.paused || game.clearT >= 0) return;
     const age = (game.frame || 0) - bn.start, span = BANNER.slideIn + BANNER.hold + BANNER.slideOut;
     if (age < 0 || age > span) return;
+    // fix5b / R5-P2-09：game.js 的順序是 drawLevelBanner → VFX.postWorld → drawGameHint，
+    // 而 worldTint（時停 / 慢動作 / 子彈時間 / 元素風暴）是「視窗層」，會蓋滿 y 0~192、
+    // 把先畫好的開場橫幅一起染色到看不清字。所以這裡只記下「這一幀要畫橫幅」，
+    // 真正的繪製交給 UI.paintLevelBanner()，由 drawGameHint（postWorld 之後）第一行呼叫。
+    bn.paint = { age, game };
+  };
+  /** 真正畫出開場橫幅（在 VFX.postWorld 之後呼叫，才不會被 worldTint 染到）*/
+  UI.paintLevelBanner = function (ctx) {
+    const q = bn.paint; bn.paint = null;
+    if (!q || !ctx) return;
+    const { age, game } = q;
     let off = 0;
     if (age < BANNER.slideIn) { const u = age / BANNER.slideIn; off = -BANNER.dist * Math.pow(1 - u, 3); }
     else if (age > BANNER.slideIn + BANNER.hold) { const u = (age - BANNER.slideIn - BANNER.hold) / BANNER.slideOut; off = BANNER.dist * u * u * u; }

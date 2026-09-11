@@ -61,6 +61,12 @@
   }
   V.push = push;
   V.clear = function () { V.list.length = 0; V._pending.length = 0; };
+  /** 立刻結束所有 kind 相同的效果（同一時間只該有一條橫幅 / 一次變身演出）*/
+  function dropKind(kind) {
+    for (const e of V.list) if (e.kind === kind) e.dead = true;
+    for (const e of V._pending) if (e.kind === kind) e.dead = true;
+  }
+  V.dropKind = dropKind;
 
   V.update = function (game) {
     game = game || KB.game;
@@ -498,7 +504,20 @@
         const f = this.t / this.life;
         const pop = this.t < 5 ? 1.7 - 0.7 * (this.t / 5) : 1;
         const a = f > 0.7 ? (1 - f) / 0.3 : 1;
-        const px = Math.round(this.x - cam.x);
+        // fix5b / R5-P2-08：世界座標的文字靠近房間左右邊界時會被畫面切掉
+        // （gunner 的「BULLET TIME」實測只剩「ULLET TIME」）。這裡把整串字夾回畫面內 ——
+        // 而且要連「必殺演出的 zoom」一起算：'w' 層是以卡比為中心放大後才畫的，
+        // 光夾住未放大的座標，放大後照樣會被推出畫面。位置仍跟著角色，手感不變。
+        const TW = (KB.UI && KB.UI.textWidth) ? KB.UI.textWidth : KB.textWidth;
+        let px = Math.round(this.x - cam.x);
+        if (TW) {
+          const half = TW(this.text, { size }) * pop / 2 + 2;
+          const k = zoomK();
+          const pl = KB.game && KB.game.player;
+          const zx = pl ? Math.round(pl.cx - cam.x) : KB.W / 2;
+          const lo = zx + (1 - zx) / k + half, hi = zx + (KB.W - 1 - zx) / k - half;
+          px = lo > hi ? Math.round((lo + hi) / 2) : Math.round(Math.max(lo, Math.min(hi, px)));
+        }
         const py = Math.round(this.y - cam.y - rise * Math.min(1, this.t / (this.life * 0.7)));
         ctx.save();
         ctx.globalAlpha = clamp01(a);
@@ -604,6 +623,10 @@
     // 注意：hitstop 期間 game.update 直接 return，KB.VFX.update 不會被呼叫，
     // 所以「白閃 / 黑邊 / 橫幅」延到 ctrl.t === 2（＝停格結束後的第 2 個更新幀）才放，
     // 停格那 10 幀看到的是「放射光線 + 白色剪影 + ring + 粒子」定格畫面。
+    // fix5b / R5-P2-14：台座密集處（w5 r4 武器庫 4 座並排）連續取得兩個能力時，
+    // 舊橫幅要 10~20 幀後才換掉，會出現「橫幅寫 FIRE、HUD 已經是 MECH」。
+    // 新的變身先把上一輪的橫幅與還沒放出橫幅的變身演出一起收掉。
+    dropKind('banner'); dropKind('transform');
     if (o.hitstop !== false) V.hitstop(10);
     V.shake(o.hitstop === false ? 4 : 7);
     V.zoom(1.18, 14);
@@ -614,7 +637,7 @@
 
     // 主控效果：剪影閃 3 次 + 12 條放射光線 + 第二圈 ring
     const ctrl = push({
-      layer: 'w', life: 46, p, color, cx, cy, name, hud,
+      layer: 'w', kind: 'transform', life: 46, p, color, cx, cy, name, hud,
       up() {
         const pp = this.p;
         if (pp && !pp.dead) { this.cx = pp.cx; this.cy = pp.cy; }
@@ -666,8 +689,9 @@
   V.banner = function (name, sub, color) {
     color = color || '#ffe040';
     const IN = 10, HOLD = 40, OUT = 12;
+    dropKind('banner');   // fix5b / R5-P2-14：同時間只留一條橫幅（連續取得能力時舊的要馬上換掉）
     return push({
-      layer: 's', life: IN + HOLD + OUT, name: String(name || ''), sub: String(sub || ''),
+      layer: 's', kind: 'banner', life: IN + HOLD + OUT, name: String(name || ''), sub: String(sub || ''),
       draw(ctx) {
         let k = 1, a = 1;
         if (this.t < IN) { const f = this.t / IN; k = 0.25 + 0.85 * f; if (f > 0.8) k = 1.1 - (f - 0.8) * 0.5; a = f; }

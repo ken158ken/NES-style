@@ -15,6 +15,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import enemy_test as ET
 from enemy_test import (Harness, HOOK_JS, TEST_LEVEL, INDEX, GROUND_TOP, PLAYER_H,
                         spawned_of, run_move, inhale_until)
+from test_charge import run_charge
 
 try:
     sys.stdout.reconfigure(encoding='utf-8')
@@ -126,6 +127,18 @@ def phase_wallkick(h):
     h.release()
     S3 = h.run(40, 10)
     check('ninja [壁跳]: 壁跳後回到正常狀態', S3[-1]['p']['state'] in NORMAL_STATES, S3[-1]['p']['state'])
+    # fix5b / R5-P2-12：一格高的單向平台側面（測試地圖 row 8, col 56~59）也要踢得到
+    h.goto(53, 9, immune=True)
+    h.ev("()=>{ KB.player.giveAbility('ninja'); }")
+    h.run(4, 4)
+    h.ev("()=>{const p=KB.player; p.x=55*16+2; p.bottom=8*16+14; p.vy=0.5; p.dir=1; __kb.step(1);}")
+    h.run(4, 1, keys='right')
+    wt = h.ev("()=>KB.player.abilityData.wallT|0")
+    check('ninja [壁跳]: 單向平台側面也算牆（wallT 開啟）', wt > 0, dict(wallT=wt, x=h.player()['x']))
+    h.ev("()=>{__kb.press({right:true, jump:true}); __kb.step(1);}")
+    vy2 = h.ev("()=>+KB.player.vy.toFixed(2)")
+    check('ninja [壁跳]: 單向平台側面可壁跳', h.player()['dir'] == -1 and vy2 < -3, dict(dir=h.player()['dir'], vy=vy2))
+    h.release(); h.run(30, 30)
 
 
 # ---------------------------------------------------------------------------
@@ -214,6 +227,13 @@ def phase_defs(h):
     check('enemies registered in KB.ENEMIES', all(x[1] for x in ens), ens)
 
 
+# 蓄力必殺門檻（fix5b / QA R5-P1-03）：招式表寫的幀數 = 真實門檻
+def phase_charge(h, only):
+    keys = [k for k in ('gunner', 'blade', 'bow') if not only or k in only]
+    if keys:
+        run_charge(h, keys)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--only', default='')
@@ -238,6 +258,9 @@ def main():
             print('-' * 8, 'defs'); phase_defs(h)
         print('-' * 8, 'moves')
         phase_moves(h, [o for o in only if o in ('gunner', 'ninja', 'blade', 'bow')])
+        print('-' * 8, 'charge')
+        try: phase_charge(h, [o for o in only if o in ('gunner', 'blade', 'bow')])
+        except Exception as ex: check('charge: raised', False, repr(ex))
         if not only or 'ninja' in only:
             print('-' * 8, 'wallkick')
             try: phase_wallkick(h)

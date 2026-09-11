@@ -256,8 +256,8 @@
       // 左：戴帽子的卡比（未發現 → 全黑剪影、不戴帽子）
       KB.rect(ctx, 14, 26, 52, 34, '#101828'); KB.rect(ctx, 15, 27, 50, 32, '#20304c');
       const gy = 57;
-      drawKirby(ctx, 'kirby_idle', 40, gy, { t: this.t, frame: 0, tint: seen ? undefined : '#0c1220' });
-      if (seen && info.hat && has(info.hat)) sprAt(ctx, info.hat, 40, gy - 15, 'b', { t: this.t });
+      // fix5b / R5-P2-06：dragon / mech / ghost / giant 畫變身後的外型（未發現時仍是全黑剪影）
+      UI.drawPreview(ctx, seen ? key : null, 40, gy, { t: this.t, tint: seen ? undefined : '#0c1220' });
       KB.rect(ctx, 26, gy + 1, 28, 2, 'rgba(0,0,0,0.35)');
       // 右：圖示 + 名稱 + 英文名
       if (!seen) {
@@ -473,6 +473,10 @@
   const hint = { game: null, level: null, at: -1e9, abAt: -1e9, lastAbility: undefined };
   UI.resetGameHint = function () { hint.game = null; hint.level = null; hint.at = -1e9; hint.abAt = -1e9; hint.lastAbility = undefined; };
   UI.drawGameHint = function (ctx, game) {
+    // fix5b / R5-P2-09：開場橫幅改由這裡畫（game.js 的順序是 drawLevelBanner → VFX.postWorld →
+    // drawGameHint，橫幅若在 postWorld 之前畫就會被 worldTint 一起染色）。
+    // 必須放在 hints 設定的判斷之前——關掉提示時橫幅還是要出現。
+    if (UI.paintLevelBanner) UI.paintLevelBanner(ctx);
     if (!UI.settings().hints) return;
     const p = game.player, f = game.frame || 0;
     // 新的 GameScene（＝進入關卡）且在第一房 → 從第 0 幀起算，顯示 3 秒提示

@@ -18,6 +18,9 @@
 import sys, json, pathlib, base64, argparse
 from playwright.sync_api import sync_playwright
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from test_charge import run_charge
+
 try:
     sys.stdout.reconfigure(encoding='utf-8')
 except Exception:
@@ -208,7 +211,7 @@ def spawned_of(sp, **kw):
 # 階段 1：變身生效
 # ---------------------------------------------------------------------------
 FORM_SPEC = {
-    'giant':  dict(scale=2, fly=False, armor=0, noclip=False, inhaleAll=True),
+    'giant':  dict(scale=2, fly=False, armor=1, noclip=False, inhaleAll=True),   # fix5b R5-P2-13：裝甲 1/hp 3
     'dragon': dict(scale=1, fly=True, armor=0, noclip=False, inhaleAll=False),
     'mech':   dict(scale=1, fly=False, armor=1, noclip=False, inhaleAll=False),
     'ghost':  dict(scale=1, fly=False, armor=0, noclip=True, inhaleAll=False),
@@ -337,6 +340,17 @@ def phase_giant(h):
         pl = h.player()
         if pl['mouth']: got = pl['mouth']; break
     check(n + '對照組：沒變身時吸不動 bonkers', got is None, got)
+    # 裝甲（fix5b / R5-P2-13）：受傷只扣 1 點裝甲、不扣 HP、不掉能力；3 下才提前解除
+    h.goto(3, 9, ability='giant')
+    p0 = h.player()
+    r1 = h.hurt(1)
+    check(n + '受傷扣裝甲、不扣 HP、不解除變身',
+          r1['ability'] == 'giant' and r1['hp'] == p0['hp'] and r1['form'] and r1['form']['hp'] == 2, r1)
+    h.run(60, 60); r2 = h.hurt(1)
+    check(n + '第 2 下仍是巨大化', r2['ability'] == 'giant' and r2['form'] and r2['form']['hp'] == 1, r2)
+    h.run(60, 60); h.hurt(1); h.run(6, 6)
+    r3 = h.player()
+    check(n + '第 3 下裝甲歸零 → 解除變身', r3['form'] is None and r3['w'] == 14, r3)
     # ↓+X 衝撞可破硬磚 X
     h.goto(HARD_X - 5, 9, ability='giant', immune=True)
     h.run(3, 3, keys='down'); h.run(3, 3, keys='down,attack'); h.run(40, 5)
@@ -559,6 +573,11 @@ def phase_data(h):
 
 
 # ---------------------------------------------------------------------------
+# 蓄力必殺門檻（fix5b / QA R5-P1-03）：招式表寫的幀數 = 真實門檻
+def phase_charge(h):
+    run_charge(h, ['dragon', 'mech'], check)
+
+
 def main():
     global VERBOSE
     ap = argparse.ArgumentParser()
@@ -587,6 +606,7 @@ def main():
             ('dragon', lambda: phase_dragon(h) if not only or 'dragon' in only else None),
             ('mech', lambda: phase_mech(h) if not only or 'mech' in only else None),
             ('ghost', lambda: phase_ghost(h) if not only or 'ghost' in only else None),
+            ('charge', lambda: phase_charge(h) if not only or 'dragon' in only or 'mech' in only else None),
             ('enemies', lambda: phase_enemies(h) if not only else None),
             ('data', lambda: phase_data(h) if not only else None),
         ]
