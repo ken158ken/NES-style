@@ -33,7 +33,7 @@
       KB.game = this; KB.session = KB.session || {};
       const o = this.opts;
       this.loadRoom(o.room || 0, o.x, o.y, true);
-      if (o.ability && KB.ABILITIES[o.ability]) { this.player.ability = o.ability; }
+      if (o.ability && KB.ABILITIES[o.ability]) { this.player.ability = o.ability; this.player.abilityData = {}; const ad = KB.ABILITIES[o.ability]; try { if (ad.onGet) ad.onGet(this.player); } catch (e) { } }
       if (o.hp) this.player.hp = o.hp;
       this.fade = 1; this.fadeDir = -1;
     }
