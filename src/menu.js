@@ -328,6 +328,7 @@
     { id: 'sfx', label: '音效音量', vol: 'sfx' },
     { id: 'hints', label: '按鍵提示' },
     { id: 'scale', label: '畫面縮放', cycle: [0, 2, 3, 4], names: ['自動', '2x', '3x', '4x'] },
+    { id: 'vfx', label: '特效強度', cycle: ['high', 'mid', 'low'], names: ['高', '中', '低'], str: true },
   ];
   function slider(ctx, x, y, level) {
     for (let i = 0; i < 10; i++) {
@@ -351,7 +352,7 @@
         const step = d || (inp.pressed('jump') || inp.pressed('attack') ? 1 : 0);
         if (step) {
           const st = UI.settings(), n = it.cycle.length;
-          let i = it.cycle.indexOf(st[it.id] | 0); if (i < 0) i = 0;
+          let i = it.cycle.indexOf(it.str ? (st[it.id] || it.cycle[0]) : (st[it.id] | 0)); if (i < 0) i = 0;
           st[it.id] = it.cycle[(i + step + n) % n];
           UI.saveSettings(); sfx('menu');
           if (KB.resizeCanvas) KB.resizeCanvas();
@@ -370,12 +371,12 @@
       KB.rect(ctx, 34, 64, 188, 1, '#405070');
       const st = UI.settings();
       for (let i = 0; i < SET_ITEMS.length; i++) {
-        const it = SET_ITEMS[i], y = 72 + i * 22, sel = this.sel === i;
+        const it = SET_ITEMS[i], y = 70 + i * 18, sel = this.sel === i;
         if (sel) cursor(ctx, 34, y + 3, this.frame);
         fit(ctx, it.label, 48, y, 66, { color: sel ? C.yellow : '#fff', size: ms });
         if (it.vol) { slider(ctx, 122, y + 2, UI.volLevel(it.vol)); KB.text(ctx, String(UI.volLevel(it.vol)), 222, y + 3, { color: '#c8d8f0', align: 'right' }); }
         else if (it.cycle) {
-          let k = it.cycle.indexOf(st[it.id] | 0); if (k < 0) k = 0;
+          let k = it.cycle.indexOf(it.str ? (st[it.id] || it.cycle[0]) : (st[it.id] | 0)); if (k < 0) k = 0;
           T(ctx, it.names[k], 222, y, { color: k === 0 ? '#c8d8f0' : '#80e0a0', align: 'right', size: ms });
         } else T(ctx, onOff(st[it.id]), 222, y, { color: st[it.id] ? '#80e0a0' : C.grey, align: 'right', size: ms });
       }
