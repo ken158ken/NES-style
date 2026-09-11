@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>卡比之星 音訊試聽</title>
+<style>
+  body { font-family: system-ui, sans-serif; background: #1a1a2a; color: #eee; margin: 0; padding: 16px 20px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 18px 0 6px; color: #ffb0d0; }
+  .row { display: flex; flex-wrap: wrap; gap: 6px; }
+  button { background: #3a3a5a; color: #fff; border: 1px solid #666; border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 13px; }
+  button:hover { background: #55558a; }
+  button.on { background: #e07aa8; border-color: #ffb0d0; }
+  #status { font-family: monospace; font-size: 12px; color: #9f9; margin: 8px 0; white-space: pre; }
+  .hint { color: #aaa; font-size: 12px; }
+  #render { margin-top: 6px; font-family: monospace; font-size: 12px; color: #ccc; white-space: pre; }
+</style>
+</head>
+<body>
+<h1>卡比之星（同人版）— 音訊試聽</h1>
+<div class="hint">按鈕會先呼叫 KB.audio.unlock()。M 鍵切換靜音。所有聲音皆由 Web Audio 即時合成。</div>
+<div id="status"></div>
+<h2>控制</h2>
+<div class="row">
+  <button id="mute">靜音 (M)</button>
+  <button onclick="KB.audio.music(null)">停止音樂</button>
+  <button id="renderAll">離線渲染全部（檢查峰值）</button>
+</div>
+<h2>音效 sfx(name)</h2>
+<div class="row" id="sfx"></div>
+<h2>音樂 music(key)</h2>
+<div class="row" id="music"></div>
+<div id="render"></div>
+
+<script src="../src/const.js"></script>
+<script src="../src/audio.js"></script>
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  for (const n of KB.audio.SFX_NAMES) {
+    const b = document.createElement('button'); b.textContent = n;
+    b.onclick = () => { KB.audio.unlock(); KB.audio.sfx(n); };
+    $('sfx').appendChild(b);
+  }
+  for (const k of KB.audio.MUSIC_NAMES) {
+    const s = KB.audio.SONGS[k], c = KB.audio.compileSong(s);
+    const b = document.createElement('button'); b.textContent = `${k} (${s.bpm}bpm/${c.bars}小節${s.loop === false ? '/一次' : ''})`; b.dataset.key = k;
+    b.onclick = () => { KB.audio.unlock(); KB.audio.music(k); };
+    $('music').appendChild(b);
+  }
+  $('mute').onclick = () => { KB.audio.unlock(); KB.audio.toggleMute(); };
+  setInterval(() => {
+    const st = KB.audio.status();
+    $('status').textContent = JSON.stringify(st);
+    $('mute').classList.toggle('on', st.muted);
+    for (const b of $('music').children) b.classList.toggle('on', b.dataset.key === st.playing);
+  }, 200);
+
+  function stats(buf) {
+    const d = buf.getChannelData(0); let peak = 0, sum = 0;
+    for (let i = 0; i < d.length; i++) { const v = Math.abs(d[i]); if (v > peak) peak = v; sum += d[i] * d[i]; }
+    return { peak: +peak.toFixed(3), rms: +Math.sqrt(sum / d.length).toFixed(4), secs: +(d.length / buf.sampleRate).toFixed(2) };
+  }
+  $('renderAll').onclick = async () => {
+    const out = [];
+    for (const n of KB.audio.SFX_NAMES) { try { out.push('sfx   ' + n.padEnd(10) + JSON.stringify(stats(await KB.audio.renderSfx(n)))); } catch (e) { out.push('sfx   ' + n + ' ERROR ' + e); } $('render').textContent = out.join('\n'); }
+    for (const k of KB.audio.MUSIC_NAMES) { try { out.push('music ' + k.padEnd(10) + JSON.stringify(stats(await KB.audio.renderSong(k, 6)))); } catch (e) { out.push('music ' + k + ' ERROR ' + e); } $('render').textContent = out.join('\n'); }
+  };
+  // 供自動化測試呼叫
+  window.__audioStats = stats;
+})();
+</script>
+</body>
+</html>
