@@ -409,6 +409,12 @@ def main():
             if roomFrames % 600 == 0: shot(f'room{g["room"]}_f{roomFrames}')
         press({})
         s = st()
+        # 沒過關時把「卡在哪」印出來（玩家狀態 + 同房實體），省得每次都要重跑一次加 --shots
+        if not cleared:
+            print('  [stuck] player=', s['player'], 'room=', s['game']['room'] if s['game'] else None)
+            print('  [stuck] ents=', pg.evaluate(
+                "()=>JSON.stringify(KB.game.entities.filter(e=>!e.dead&&Math.abs(e.cx-KB.player.cx)<200)"
+                ".map(e=>({n:e.name||e.type,x:Math.round(e.x),y:Math.round(e.y),s:e.state})))"))
         print('---')
         bossPct = (100.0 * (bossMaxHp - bossMinHp) / bossMaxHp) if (bossMaxHp and bossMinHp is not None) else None
         print(f'level={a.level} frames={frames} rooms={rooms_seen} deaths={deaths} cleared={cleared} boss={s["game"]["boss"] if s["game"] else None} maxX={maxX}')

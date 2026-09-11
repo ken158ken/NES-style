@@ -16,7 +16,22 @@ const MECH_NEED = { X: ['hammer', 'stone'], F: ['fire'], I: ['fire'] };
 const ABILITY_FROM = {
   fire: ['hothead'], ice: ['chilly', 'mrfrosty', 'snowly'], spark: ['sparky'], beam: ['waddledoo'],
   cutter: ['sirkibble'], sword: ['bladeknight'], hammer: ['bonkers'], stone: ['rocky'],
+  // Round 5 的 12 種新能力（武器 / 魔法 / 變身），每種各有一隻專屬敵人
+  gunner: ['pistolo'], ninja: ['kagedee'], blade: ['ronin'], bow: ['archerwaddle'],
+  mage: ['wizzle'], time: ['tiktok'], gravity: ['gravitron'], clone: ['mimi'],
+  giant: ['bigbloom'], dragon: ['drako'], mech: ['bolt'], ghost: ['boodee'],
 };
+// Round 5 新能力（用於「新能力敵人統計」）：能力 key → 敵人 key
+const R5_ABILITY = {
+  gunner: 'pistolo', ninja: 'kagedee', blade: 'ronin', bow: 'archerwaddle',
+  mage: 'wizzle', time: 'tiktok', gravity: 'gravitron', clone: 'mimi',
+  giant: 'bigbloom', dragon: 'drako', mech: 'bolt', ghost: 'boodee',
+};
+const R5_ENEMY = {};   // 敵人 key → 能力 key
+for (const k of Object.keys(R5_ABILITY)) R5_ENEMY[R5_ABILITY[k]] = k;
+// 統計容器：r5stat[能力][世界 id] = 隻數 / r5ess[能力][世界 id] = 台座數
+const r5stat = {}, r5ess = {};
+for (const k of Object.keys(R5_ABILITY)) { r5stat[k] = {}; r5ess[k] = {}; }
 const ABILITY_KEYS = new Set(Object.keys(ABILITY_FROM));
 // 暗房的發光裝飾（game.js drawDark）
 const DARK_LIGHTS = { castle: 'r', dedede: 'tc', cloud: 's' };
@@ -24,17 +39,21 @@ const isSolid = ch => !!SOLID[ch];
 const isStand = ch => !!SOLID[ch] || !!SLOPE[ch] || ch === '=';
 
 // 實體分類（與 src/enemies.js 行為一致）
-const GROUND = new Set(['waddledee', 'waddledoo', 'hothead', 'sirkibble', 'sparky', 'rocky', 'chilly', 'bladeknight', 'bonkers', 'mrfrosty', 'poppybros', 'cappy', 'twizzy', 'kabu', 'glunk', 'spikeball', 'snowly', 'rollarmor']);
+const GROUND = new Set(['waddledee', 'waddledoo', 'hothead', 'sirkibble', 'sparky', 'rocky', 'chilly', 'bladeknight', 'bonkers', 'mrfrosty', 'poppybros', 'cappy', 'twizzy', 'kabu', 'glunk', 'spikeball', 'snowly', 'rollarmor',
+  // Round 5 新能力敵人（地面型）
+  'pistolo', 'kagedee', 'ronin', 'archerwaddle', 'wizzle', 'tiktok', 'mimi', 'bigbloom', 'bolt']);
 // 中魔王（可以解開 gatekeeper 的門鎖）
 const MINIBOSS = new Set(['bonkers', 'mrfrosty', 'rollarmor']);
 const WATER = new Set(['squishy', 'glunk']);
-const FLY = new Set(['brontoburt', 'scarfy', 'gordo', 'shotzo', 'dartwing']);
+const FLY = new Set(['brontoburt', 'scarfy', 'gordo', 'shotzo', 'dartwing',
+  // Round 5 新能力敵人（浮空型，grav 0）
+  'gravitron', 'drako', 'boodee']);
 const ITEMS = new Set(['tomato', 'food', 'oneup', 'candy', 'pointstar', 'bigstar']);
 // 機關類實體（不需要地面、也不算敵人密度）：大星星收集品 / 開關方塊 / 中魔王門鎖
 const GADGET = new Set(['bigstar', 'switchblock', 'gatekeeper', 'essence', 'warpstar']);
 const UNLOCKER = new Set(['switchblock', 'gatekeeper']);   // 可以解開 locked 門的實體
-const TALL = { bonkers: 2, mrfrosty: 2, bladeknight: 2, snowly: 2, rollarmor: 2 };   // 佔用的高度（格）
-const WIDE = { bonkers: 2, mrfrosty: 2, rollarmor: 2 };
+const TALL = { bonkers: 2, mrfrosty: 2, bladeknight: 2, snowly: 2, rollarmor: 2, wizzle: 2, bolt: 2, bigbloom: 2 };   // 佔用的高度（格）
+const WIDE = { bonkers: 2, mrfrosty: 2, rollarmor: 2, bigbloom: 2 };
 const BOSS = { whispywoods: { w: 3, h: 4, ground: true }, lololo: { w: 2, h: 2, ground: true }, kracko: { w: 4, h: 3, ground: false }, metaknight: { w: 2, h: 2, ground: true }, dedede: { w: 3, h: 4, ground: true } };
 const DECO = { green: 'tbfsgmrw', castle: 'pwrkacb', island: 'purghsb', cloud: 'csrbdm', dedede: 'pkwtscb' };
 
@@ -241,6 +260,9 @@ for (const lv of KB.LEVELS) {
       const what = `${e.t}#${ei}`;
       const known = GROUND.has(e.t) || WATER.has(e.t) || FLY.has(e.t) || ITEMS.has(e.t) || GADGET.has(e.t);
       if (!known) { err(`${tag}: ${what} 未知的實體 key`); return; }
+      // Round 5：新能力敵人 / 新能力台座統計
+      if (R5_ENEMY[e.t]) r5stat[R5_ENEMY[e.t]][lv.id] = (r5stat[R5_ENEMY[e.t]][lv.id] || 0) + 1;
+      if (e.t === 'essence' && r5ess[e.a]) r5ess[e.a][lv.id] = (r5ess[e.a][lv.id] || 0) + 1;
       if (!inMap(e.x, e.y)) { err(`${tag}: ${what} (${e.x},${e.y}) 超出地圖`); return; }
       const ch = get(e.x, e.y);
       if (isSolid(ch)) err(`${tag}: ${what} (${e.x},${e.y}) 在實心格 '${ch}' 內`);
@@ -321,5 +343,32 @@ for (const lv of KB.LEVELS) {
     }
   });
 }
+// ---- Round 5：新能力敵人統計（每種能力在幾個世界出現、各世界幾隻）----
+{
+  console.log('\n== Round 5 新能力敵人統計（12 種新能力）');
+  const WORLDS = KB.LEVELS.map(l => l.id).filter(id => !only.length || only.includes(id));
+  console.log('  能力      敵人           ' + WORLDS.map(w => w.padEnd(4)).join('') + ' 合計 世界數  台座');
+  const NAME = {
+    gunner: '槍手', ninja: '忍者', blade: '居合', bow: '弓', mage: '法師', time: '時間',
+    gravity: '重力', clone: '分身', giant: '巨大化', dragon: '龍化', mech: '機甲', ghost: '幽靈',
+  };
+  for (const k of Object.keys(R5_ABILITY)) {
+    const per = WORLDS.map(w => r5stat[k][w] || 0);
+    const total = per.reduce((a, b) => a + b, 0);
+    const nWorld = per.filter(n => n > 0).length;
+    const ess = WORLDS.map(w => (r5ess[k][w] || 0) ? w : null).filter(Boolean);
+    console.log(`  ${(k + '(' + NAME[k] + ')').padEnd(16)}${R5_ABILITY[k].padEnd(14)}` +
+      per.map(n => String(n).padEnd(4)).join('') + ` ${String(total).padEnd(4)} ${String(nWorld).padEnd(7)}` +
+      (ess.length ? ess.join(',') : '-'));
+    if (!only.length) {
+      if (nWorld < 3) warn(`新能力 ${k}（${R5_ABILITY[k]}）只出現在 ${nWorld} 個世界（設計目標：3 個世界、每個世界 1~2 隻）`);
+      for (const w of WORLDS) if ((r5stat[k][w] || 0) > 2) warn(`新能力 ${k} 在 ${w} 有 ${r5stat[k][w]} 隻（每個世界建議 1~2 隻）`);
+    }
+  }
+  const essPerWorld = WORLDS.map(w => Object.keys(R5_ABILITY).reduce((n, k) => n + (r5ess[k][w] || 0), 0));
+  console.log('  新能力台座 / 世界：' + WORLDS.map((w, i) => `${w}=${essPerWorld[i]}`).join(' '));
+  if (!only.length) WORLDS.forEach((w, i) => { if (essPerWorld[i] < 2) warn(`${w}: 新能力台座只有 ${essPerWorld[i]} 個（設計目標：每個世界 ≥ 2 個）`); });
+}
+
 console.log(`\n${errors} error(s), ${warns} warning(s)`);
 process.exit(errors ? 1 : 0);

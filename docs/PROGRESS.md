@@ -1387,7 +1387,151 @@ git 已初始化，基線 commit `c382e2a`。Playwright venv：`.venv/bin/python
 8. 能力「發現」由 ui5 在 `KB.drawHUD` 記錄（`KB.save.seen[key] = true`），**abilities agent 不需要做任何事**；若想在拿到能力當下就標記，呼叫 `KB.UI.markSeen(key)` 即可（會自動立 `seenNew` 旗標）。
 
 ## levels5
-（agent 在此追加）
+
+> 檔案：`src/levels.js`（檔尾新增 **Round 5 新能力層 `R5`**，用法同 MECH / BAL / R4，只用 `add`，完全不動地圖字串、
+> 不搬大星星 / 秘密房 / 主線補給）、`tools/level_check.js`、`tools/playthrough.py`。截圖目錄 `shots/agent_levels5/`。
+> 分配原則：每種新能力**剛好出現在 3 個世界**（介紹世界 + w4 + w5），每個世界 1~2 隻；w1 教學 4 種、w2 追加 3 種、
+> w3 追加 gravity + 變身系、w4 / w5 12 種全到齊。避開 QA 死亡熱點、主線番茄 / 食物 2 格內、出生點 6 格內、雲橋 '=' 上。
+
+- [R5] **w1 翠綠草原（教學 4 種，全在寬 ≥ 6 格的安全平地）**
+
+  | 敵人 | 能力 | 房 | 座標 | 說明 |
+  |---|---|---|---|---|
+  | pistolo | gunner | r0 起點草原 | (46,9) | (39~49) 11 格平地正中；離食物 (44,5) / 番茄 (72,9) 皆 > 2 格 |
+  | mimi | clone | r0 起點草原 | (20,9) | (18~29) 12 格平地，旁邊是點數星拱門，看得清楚牠在抄卡比的動作 |
+  | kagedee | ninja | r1 星星森林 | (14,9) | 開場 (0~19) 20 格長平地（w1 不瞬移，純教學）|
+  | wizzle | mage | r2 大樹前庭 | (22,9) | (15~31) 17 格平地前段；**x=30 會讓 clone 機器人飛出地圖**（見跨檔需求 1）|
+  | essence | gunner | r2 大樹前庭 | (50,2) | 秘密房門 (52,2) 旁的雲台（支線可重複拿）|
+  | essence | clone | r4 星星洞窟（秘密房）| (15,9) | 秘密房可反覆進出＝分身練習場 |
+
+- [R5] **w2 幽靜古堡（追加 blade / bow / time）**
+
+  | 敵人 | 能力 | 房 | 座標 | 說明 |
+  |---|---|---|---|---|
+  | ronin | blade | r0 古堡玄關 | (38,9) | (20~42) 23 格大廳中段，居合突進前後各 8 格以上 |
+  | archerwaddle | bow | r0 古堡玄關 | (16,7) | (13~18) 拱窗高台，俯射下面的長廊（射程 150px 的秀場）|
+  | tiktok | time | r0 古堡玄關 | (79,9) | 尾段 (75~95) 平地：沒有坑、沒有尖刺，被時間場拖慢也不會摔死 |
+  | ronin | blade | r2 炸彈迴廊 | (60,9) | Bonkers **之後**的 (54~79) 平地（那時玩家已有鐵鎚）|
+  | tiktok | time | r3 王座前廳 | (30,9) | 64 格長平地 |
+  | essence | bow | r1 螺旋塔 | (26,9) | 半塔側邊平台，拿大星星 (26,11) 的支線動線上 |
+  | essence | blade | r3 王座前廳 | (34,4) | 開關方塊 (40,4) 的上路支線＝開秘密房門 (52,9) 的必經路 |
+
+- [R5] **w3 漂浮群島（追加 gravity + 變身系；依總控指示變身系每世界各 1 隻）**
+  r2「浮島跳躍」是全專案最大的死亡熱點（尖刺床），**這一輪完全不放新敵人**。
+
+  | 敵人 | 能力 | 房 | 座標 | 說明 |
+  |---|---|---|---|---|
+  | bigbloom | giant | r0 海濱沙灘 | (35,9) | (32~51) 平地，2×2 格身體 + 上方 3 格淨空（不是 2 格高走廊）|
+  | gravitron | gravity | r0 海濱沙灘 | (30,5) | 沙灘上空（下面是實地不是深淵，被拉過去不會摔死）|
+  | drako | dragon | r0 海濱沙灘 | (33,3) | 高空 |
+  | bolt | mech | r1 珊瑚洞窟 | (50,9) | (43~64) 長平地，雷射是水平的、長廊正好 |
+  | boodee | ghost | r1 珊瑚洞窟 | (57,7) | 洞窟中段空中（穿牆，從礁石裡冒出來）|
+  | gravitron | gravity | r3 雲頂階梯 | (33,5) | 階梯上空 |
+  | essence | gravity | r1 珊瑚洞窟 | (46,5) | (46~50) 上路支線平台 |
+  | essence | giant | r3 雲頂階梯 | (22,6) | (18~22) 支線高台 |
+
+- [R5] **w4 泡泡雲海（12 種全到齊）**——到處是無底洞 ⇒ 地面型一律放在「row10 是 '#' 的實地段」，不放雲橋 '=' 上。
+
+  | 敵人 | 能力 | 房 | 座標 | 說明 |
+  |---|---|---|---|---|
+  | pistolo | gunner | r0 雲海入口 | (28,9) | (25~31) 實地 |
+  | mimi | clone | r0 雲海入口 | (73,9) | (68~75) 實地（離番茄 (70,9) 3 格）|
+  | bolt | mech | r0 雲海入口 | (84,9) | (78~95) 實地 |
+  | drako | dragon | r0 雲海入口 | (65,6) | 雲橋 (60~67) 上空 |
+  | wizzle | mage | r1 泡泡塔 | (28,18) | (21~30) 塔內平台，會瞬移不怕卡角落 |
+  | boodee | ghost | r1 泡泡塔 | (17,9) | 塔心空中（穿牆上下追）|
+  | ronin | blade | r2 風之迴廊 | (79,9) | 雲橋 (70~75) **之後**的實地 (76~83)，突進不會把人推下橋 |
+  | archerwaddle | bow | r2 風之迴廊 | (89,6) | 終點前的雲台 (88~91) 俯射 |
+  | kagedee | ninja | r3 魅塔之前 | (25,9) | (22~32) 實地，兩側坑底都有 R4 的雲平台（不是即死）|
+  | tiktok | time | r3 魅塔之前 | (29,9) | 同上 |
+  | bigbloom | giant | r3 魅塔之前 | (44,9) | (43~55) 實地 |
+  | gravitron | gravity | r3 魅塔之前 | (36,5) | 中段上空 |
+  | essence | ghost | r1 泡泡塔 | (24,6) | (24~28) 側邊雲台（拿 1UP / 番茄的支線）|
+  | essence | dragon | r2 風之迴廊 | (74,1) | 秘密房門 (75,1) 旁 |
+
+- [R5] **w5 迪迪迪城（12 種全到齊 + 王座階梯前的「武器庫」）**
+
+  | 敵人 | 能力 | 房 | 座標 | 說明 |
+  |---|---|---|---|---|
+  | bigbloom | giant | r0 城門 | (38,9) | 避開 x=27/31/35 的 Gordo 縱列與 x=23 的導火線 |
+  | archerwaddle | bow | r0 城門 | (51,7) | (50~52) 小丘頂＝城門長廊的制高點 |
+  | ronin | blade | r0 城門 | (62,9) | (55~95) 大平地 |
+  | pistolo | gunner | r0 城門 | (88,9) | 最後一段 |
+  | mimi | clone | r1 守衛長廊（暗房）| (27,9) | 暗房裡「跟著你動的黑影」|
+  | tiktok | time | r1 守衛長廊（暗房）| (44,9) | 暗房 + 變慢的壓迫感 |
+  | boodee | ghost | r1 守衛長廊（暗房）| (60,5) | 上空穿牆 |
+  | gravitron | gravity | r2 地下水牢 | (35,5) | 水牢上空（被拉過去最多掉進水裡，不會死）|
+  | wizzle | mage | r2 地下水牢 | (59,9) | (50~60) 平地 |
+  | drako | dragon | r2 地下水牢 | (66,4) | 右側上空 |
+  | bolt | mech | r3 雙小魔王之間 | (35,9) | 兩隻中魔王之間的空檔，離番茄 (38,9) 3 格 |
+  | kagedee | ninja | r3 雙小魔王之間 | (44,9) | 同上 |
+  | bolt | mech | r4 王座階梯 | (23,21) | 武器庫的守衛 |
+  | **essence ×4** | blade / gunner / mage / giant | r4 王座階梯 | **(6,21) (8,21) (10,21) (12,21)** | **武器庫演出**：階梯底部一排 4 個不同能力的台座，爬上去見迪迪迪之前自由挑一把 |
+  | essence | clone | r1 守衛長廊 | (66,9) | 秘密房門 (70,9) 前 |
+  | essence | gravity | r2 地下水牢 | (28,8) | 水池之間的支線小丘 |
+
+- [R5] **`tools/level_check.js` 擴充**：`GROUND` += pistolo / kagedee / ronin / archerwaddle / wizzle / tiktok / mimi / bigbloom / bolt；
+  `FLY` += gravitron / drako / boodee；`TALL` += wizzle 2 / bolt 2 / bigbloom 2、`WIDE` += bigbloom 2；
+  `ABILITY_FROM` 補上 12 種新能力（否則 `essence` 的 `a='gunner'` 會被判成非法能力 key）；
+  新增 **「Round 5 新能力敵人統計」**列印（每種能力在各世界幾隻 / 合計 / 世界數 / 台座在哪幾關），
+  並加兩條檢查：① 某種新能力出現的世界數 < 3 → warn；② 單一世界某種 > 2 隻 → warn；③ 每個世界的新能力台座 < 2 個 → warn。
+  統計結果（`node tools/level_check.js`）：
+
+  ```
+  能力      敵人           w1  w2  w3  w4  w5   合計 世界數  台座
+  gunner    pistolo       1   0   0   1   1    3    3      w1,w5
+  ninja     kagedee       1   0   0   1   1    3    3      -
+  blade     ronin         0   2   0   1   1    4    3      w2,w5
+  bow       archerwaddle  0   1   0   1   1    3    3      w2
+  mage      wizzle        1   0   0   1   1    3    3      w5
+  time      tiktok        0   2   0   1   1    4    3      -
+  gravity   gravitron     0   0   2   1   1    4    3      w3,w5
+  clone     mimi          1   0   0   1   1    3    3      w1,w5
+  giant     bigbloom      0   0   1   1   1    3    3      w3,w5
+  dragon    drako         0   0   1   1   1    3    3      w4
+  mech      bolt          0   0   1   1   2    4    3      -
+  ghost     boodee        0   0   1   1   1    3    3      w4
+  新能力台座 / 世界：w1=2 w2=2 w3=2 w4=2 w5=6（含武器庫 4 個）
+  ```
+  `node tools/level_check.js` → **0 error / 1 warning**（僅既有的「拉拉拉預設出生點」提示）。
+
+- [R5] **`tools/playthrough.py` 小擴充**：沒過關時多印一段 `[stuck] player=… / ents=…`（玩家狀態 + 同房 200px 內的實體），
+  不必重跑一次加 `--shots` 就看得出是「卡在門口」還是「飛出地圖」。這一輪就是靠它抓到 clone / time 的能力 bug。
+
+- [R5] **驗收**
+  - `tools/playthrough.py --level wN --ability sword --godmode --maxframes 45000` →
+    **5 世界全部 `cleared=True`、`deaths=0`、`missing sprites: []`**
+    （w1 4256 / w2 10893 / w3 6356 / w4 12047 / w5 12975 幀）。
+  - **w1 × 12 種新能力各跑一次（--godmode）**：**10 / 12 通關**（gunner 4446、ninja 4240、blade 5037、bow 5585、mage 5176、
+    gravity 5855、giant 7105、dragon 5159、mech 11777、ghost 6845 幀）。未通關的 2 種都是**能力側的 bug，不是放置問題**（見跨檔需求）。
+  - 截圖（皆已用 Read 確認敵人站在地面、沒卡牆、畫面合理）：
+    `shots/agent_levels5/` — `w1r0_pistolo.png`、`w1r0_mimi.png`、`w1r1_kagedee.png`、`w1r2_wizzle.png`、
+    `w2r0_ronin.png`、`w2r0_archer.png`（拱窗高台）、`w2r1_ess_bow.png`、`w2r3_tiktok.png`、
+    `w3r0_giant_grav_drako.png`（3 隻同框）、`w3r1_mech_ghost.png`、`w3r3_gravitron.png`、`w3r1_ess_gravity.png`、
+    `w4r0_mimi_drako.png`、`w4r2_ronin_archer.png`、`w4r3_ninja_time.png`（暗房）、`w4r3_giant_grav.png`、`w4r1_ess_ghost.png`、
+    `w5r0_giant_archer.png`、`w5r0_archer.png`、`w5r0_ronin.png`、`w5r2_mage_drako.png`、`w5r3_mech_ninja.png`、
+    **`w5r4_armory.png`（王座階梯前的 4 台座武器庫）**、`w5r1_ess_clone.png`。
+
+#### 跨檔需求（levels5 → 其他 agent）
+1. **magic — clone 的「空中 X 分身墊腳」沒有次數上限 ⇒ 可以無限上升飛出地圖**。
+   `--level w1 --ability clone --godmode` 時機器人在 w1 r2 一邊跳一邊按 X，`[stuck] player= {'x':935.4,'y':-8343.7,'state':'attack','onGround':False}`
+   ——卡比停在地圖上方 8000px，永遠回不來（有 --godmode 就不會死，等於軟鎖）。建議「每次滯空只能墊腳 1 次，落地才回復」。
+   本輪先把 w1 r2 的 wizzle 從 (30,9) 移到 (22,9) 繞開這個觸發點（移完 clone 能走完 r2），但**根因還在**：
+   clone 現在會卡在 w1 r3 威斯比房，`bossDamage=0%`（分身吐的小星星打不到威斯比的判定），30000 幀不結束。
+2. **magic — time 的「↑+X 加速」會把卡比推出地圖**。`--level w1 --ability time --godmode` → 玩家 x 跑到 6272（房寬只有 1024）。
+   **這一項和關卡無關**：把 `R5` 整層停掉跑對照組，一樣卡在 w1 r1（`maxX 448 → 30000 幀不動`）。
+   加速是「每幀補位移」實作的（見 magic 區段），建議改成夾在地圖範圍內 / 走正常的 `physics()` 位移。
+3. **forms — 缺 3 個攻擊精靈**：`tools/playthrough.py --level w1 --ability giant / dragon / ghost` 會印
+   `missing sprites: ['kirby_attack_giant'] / ['kirby_attack_dragon'] / ['kirby_attack_ghost']`（mech 沒有這個問題）。
+   關卡本身不受影響（能通關），但畫面上會出現洋紅方塊。
+4. **總控**：`R5` 疊加層在 `src/levels.js` 檔尾、`R4` 之後，只用 `add`（實體），地形完全沒動 ⇒ 要回溯只要刪掉整個 `R5` 陣列即可。
+   本輪**沒有跑 `tools/build.py`**（其他 Round 5 agent 還在寫檔），請收尾時重建 `dist/`。未 commit。
+
+#### 已知問題 / 未完成（levels5）
+- w1 只放 4 種新能力各 1 隻（教學世界刻意保守）；若 qa5 認為 w1 的新能力密度太低，可在 r0 / r1 各補 1 隻（平地空間還很多）。
+- 新敵人**沒有進秘密房 / 魔王房**（秘密房只放台座），魔王房與 `bigstar` / 主線補給的位置完全沒動。
+- `ui_ability_<key>` 圖示：essence 台座實測會畫出 `ui_ability_<key>_mini`（w2 r1 踩到 bow 台座後 HUD 顯示 `BOW` + 圖示，見 `w2r1_ess_bow.png`），
+  12 種新能力的 mini 圖示都已由 weapons / magic / forms 註冊，沒有洋紅方塊。
 
 ## qa5
 （agent 在此追加）
