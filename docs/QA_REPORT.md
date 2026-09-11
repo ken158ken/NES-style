@@ -391,3 +391,232 @@ for s in "w1 4" "w2 5" "w3 5" "w4 5" "w5 6"; do set -- $s;
 
 也就是說：**「能不能走完」沒有退步，退步的是「不用無敵能不能走完」——後者從來沒有被驗過。**
 建議把 `playthrough.py` 的驗收條件改成兩條：① `--godmode` 必須通關（路線完整性）；② **不加 `--godmode` 時，`deaths` 應該 ≤ 2**（難度合理性）。目前第 ② 條 5 個世界都不過。
+
+---
+# Round 3（qa3 agent）
+
+> 執行者：**qa3** agent　｜　執行時間：**2026-09-11 21:30 ~ 22:20**　｜　截圖目錄：`shots/agent_qa3/`
+> 本輪 `src/` **沒有其他 agent 在改**（開工與收工各跑一次 `node --check src/*.js src/art/*.js`，全部通過），所以數字可以直接比較。
+> 自製工具：`shots/agent_qa3/qshot.py`（＝ `tools/shot.py` 的 `--script/--seq/--state` ＋ qa2 `jshot.py` 的 `--prejs/--js`，再多一個 `--js2`＝截圖前注入）、
+> `shots/agent_qa3/zoom.py`（把 PNG 的某塊遊戲座標放大切出來，用來確認 1~2px 的重疊）。
+> **所有截圖都用 Read 工具實際看過**；每一次截圖工具都會印 `MISSING SPRITES` 與 console/pageerror ——
+> **本輪 60 餘次截圖 / 20 次 playthrough 全部是 `missing sprites: []`、`console: clean`、0 pageerror**。
+
+## R3-0. 執行摘要
+
+| 項目 | 結果 |
+|---|---|
+| Round 2 問題回歸（12 項）| **已修 12 / 未修 0**（P2-07 / P2-09 水域兩件事都修了：地圖硬邊 + `backgrounds.js` `hz` 112→**142**）|
+| 順手回歸到的另外 2 項 | **R2-P2-09（能力圖鑑說明被截斷）與 R2-P2-10（行首標點）仍未修**，而且從 6/8 頁惡化成 **7/8 頁** → R3-P1-03 |
+| 非無敵 playthrough（5 世界 × sword×3 ＋ fire×1 ＝ **20 次**）| **w1 3/3 通關（deaths=2）**、w2 1/3 通關、w3 / w4 / w5 0/3 通關。對照 Round 2 的 15/15 全滅是**大幅進步**，但 balance-levels 自訂的「sword deaths ≤ 2」只有 **1 / 5 世界**達標 |
+| 魔王曲線（`boss_test --curve --curve-runs 5`）| **5/5 達標**，但 **曲線不是遞增的**：sword 模型 100 / 100 / 96 / 100 / 90，w1 威斯比 10/10 樣本 100% 且最快（最短 701 幀）＝ 仍是最好打的魔王之一；w4 魅塔騎士兩種模型都還是 100% |
+| 全流程截圖（16 個畫面，共 23 張）| 文字全部可讀、無溢出、無洋紅、無 console error；**新發現 1 處版面重疊（選關關名標籤）** |
+| Round 3 新問題 | **P1 × 3、P2 × 5**（無 P0）|
+| 健康度 | `node tools/level_check.js` → **0 error / 1 warning**；`tools/engine_test.py` → **118/118 PASS**；`node --check` 全通過 |
+
+**最值得注意的一句話**：Round 3 的修復**全部有效**（12/12），主線難度從「機器人 15/15 全滅」變成「w1 穩定通關、w5 能走到最後的魔王房」；
+但**難度曲線仍然不是遞增的** —— 兩種玩家模型、10 個樣本，w1 的威斯比和 w4 的魅塔騎士都是 100% 被打死，
+而且 `playthrough.py` 的機器人與 `boss_test.py` 的機器人對同一隻魔王給出天差地遠的結果（迪迪迪：`boss_test` 90%、`playthrough` **0~2%**），
+**在這兩支工具的魔王戰打法統一之前，「deaths ≤ 2」這條驗收條件對 w2 / w5 其實量不到關卡本身的難度**（R3-P1-01）。
+
+---
+
+## R3-1. Round 2 問題逐項回歸（12 / 12 已修）
+
+| # | 問題（Round 2 描述）| 判定 | 證據截圖 / 量測 |
+|---|---|---|---|
+| **R2-P1-14** | 水中看不見卡比 | **已修** | `z_w3r0_01.png`（w3 r0 池底，卡比是明顯的粉紅色、看得到氣泡與水草）、`reg_water_w3r1.png`（w3 r1 水道，同框有 squishy / glunk 也能分辨）。註：第一次截到的 `reg_water_w3r0.png` 卡比是一塊白方塊，那是**受傷無敵閃白**（`hp=5`）不是水層問題，補拍 3 連張後確認 |
+| **R2-P1-15** | 新中魔王 `rollarmor` 沒進關卡 | **已修** | `reg_rollarmor_w4r2.png` ＋ `__kb.entities()` 掃描：w4 r2 有 `{t:'rollarmor', x:487.6, y:130, hp:12, state:'slam'}`，同房有 `gatekeeper@x=1472` 與上鎖出口門（`f08_lockeddoor.png`）|
+| **R2-P1-04** | 魔王房出生點與魔王只差 16px | **已修** | `reg_boss_w3r4.png` / `reg_boss_w4r4.png` / `reg_boss_w5r5.png` —— 三張都是「登場動畫結束、魔王與卡比同框、**HP 6/6 沒被碰到**」|
+| **R2-P2-13** | 開場橫幅與 toast 重疊 | **已修** | `reg_banner_toast.png`：「WORLD 1／翠綠草原」橫幅（y 32~80）＋ 下方「取得能力：火焰」（y≈84），兩行都完整可讀，右上角的「ENTER：暫停／說明」提示框（y 3~22）也沒有壓到橫幅 |
+| **R2-P2-16** | 標題選單面板壓住 logo 的「STAR」 | **已修** | `reg_title_menu.png`：6 項選單面板從 y=64 開始，「KIRBY STAR」完整露出，底部資訊列 / 提示列未被壓 |
+| **R2-P2-17** | 暗房裡看不見敵人 | **已修** | `reg_dark_w4r3.png`（dartwing / cappy / snowly 三隻各自有一圈挖出來的光暈，本體看得清楚）、`reg_dark_w5r1.png`（sirkibble、gordo 同樣可見）。`game.js drawDark` 確實照 balance-enemies 的跨檔需求對 `ent.glow` 挖了洞 |
+| **R2-P2-18** | 結算關名被面板上框線切到 | **已修** | `reg_result.png`：「W1 翠綠草原」在面板之上、完全沒被切；「大星星」後面已改成 3 顆 `uifb_star` 像素星（未取得的變暗）＋「0/3」|
+| **P2-07** | 水體是硬邊矩形、沒有過渡磚 | **已修** | `reg_water_w3r0.png` / `reg_water_w3r1.png` / `reg_water_w5r2.png`：左右兩岸的水面都沿著 `\` `/` 斜坡收邊，沒有直上直下的硬邊 |
+| **P2-09** | 背景海平線與實際水面高度不同（兩條水平線）| **已修** | `src/art/backgrounds.js:147` 的 `const hz = 142 - camY * 0.1;`（Round 2 是 112），水面磁磚在 y=144 ⇒ 背景海平線與水面切齊。`reg_water_w3r0.png` 只剩一條水平線 |
+| **P2-11 / R2-P2-12** | 出生點壓金柱（w5 r0 / r6）| **已修** | `reg_gold_w5r0.png`（卡比在 x≈7，金柱在 x≈23）、`reg_gold_w5r6.png`（卡比在 x≈6，金柱在 x≈20）|
+| **競技場結算魔王順序斷行** | 中文名被斷在字中間 | **已修** | `reg_arena_result.png`：第 1 行「大樹威斯比→洛洛洛 & 拉拉拉→克拉寇→」、第 2 行「魅塔騎士→迪迪迪大王」，只在「→」處換行。**提醒**：第 1 行實測寬度已經到 230px（上限 240），`orderLines` 的 `PER_LINE=3` 幾乎沒有餘裕 |
+| **競技場登場字幕 60 幀** | 原本 150 幀 | **已修** | runtime 量測：競技場第一戰 `bossIntroMax=60`、`arena=true`；一般關卡 w1 r3 `bossIntroMax=150`。截圖 `f14_arenaintro_00~04.png`（「大樹威斯比／WHISPY WOODS」字幕完整、置中）|
+
+### R3-1a. 順手回歸到、但**仍未修**的 Round 2 問題
+- **R2-P2-09（能力圖鑑說明被截成「…」）→ 未修，且惡化**：Round 2 是 6/8 頁，本輪 8 頁全拍（`gal_p1~p8.png`）後是 **7/8 頁**（只有第 1 頁「火焰」完整）。
+  最嚴重的是第 5 頁「電擊」，**說明 + 3 個招式名全部被截斷**（「放電（44px…」「放電中…」「按住 45…」「電擊波（96…」）。詳見 R3-P1-03。
+- **R2-P2-10（中文標點出現在行首）→ 未修**：第 7 頁「冰凍」第 2 行仍以「，」開頭（`gal_p7.png`）。
+
+---
+
+## R3-2. 非無敵 playthrough 量測（5 世界 × sword×3 ＋ fire×1 ＝ 20 次）
+
+指令（全部 **不加 `--godmode`**、3 條命、`--maxframes 30000`，5 個世界並行跑）：
+```bash
+for w in w1 w2 w3 w4 w5; do
+  for i in 1 2 3; do .venv/bin/python tools/playthrough.py --level $w --ability sword --maxframes 30000; done
+  .venv/bin/python tools/playthrough.py --level $w --ability fire  --maxframes 30000
+done
+```
+
+### R3-2a. 總表
+
+| 世界 | sword run1 | run2 | run3 | **平均 deaths** | **最佳** | sword 通關率 | fire（1 次）| Round 2 基準 |
+|---|---|---|---|---|---|---|---|---|
+| **w1 翠綠草原** | 2 / **cleared** | 2 / **cleared** | 2 / **cleared** | **2.0** | **2** | **3 / 3** | **0 死 / cleared** | 4 死 / 走不完 room 0 |
+| **w2 幽靜古堡** | 4 / ✗ | **1 / cleared** | 5 / ✗ | 3.3 | **1** | 1 / 3 | 5 死 / ✗（到 r4）| 4 死 / 走不完 room 0 |
+| **w3 漂浮群島** | 4 / ✗ | 4 / ✗ | 4 / ✗ | 4.0 | 4 | 0 / 3 | 4 死 / ✗（到 r2）| 4 死 / 到 r1 |
+| **w4 泡泡雲海** | 4 / ✗ | 4 / ✗ | 2 / ✗（吃滿 30000 幀）| 3.3 | 2 | 0 / 3 | 5 死 / ✗（到 r2）| 4 死 / 到 r2 |
+| **w5 迪迪迪城** | 4 / ✗ | 4 / ✗ | 4 / ✗ | 4.0 | 4 | 0 / 3 | 4 死 / ✗（**到 r5 魔王房**）| 4 死 / 走不完 room 0 |
+
+**和 Round 2 比**：Round 2 是 **15 / 15 全部 `cleared=False` 且 `deaths=4`**，其中 w1 / w2 / w5 連第一個房間都走不完。
+Round 3 的 20 次裡有 **5 次通關**（w1 ×4、w2 ×1），沒通關的也都走得遠很多（w5 從 room 0 走到 **room 5 拳擊台**、w3 / w4 走到 room 2）。
+**但 balance-levels 自己訂的驗收條件「不加 --godmode 時 sword 每世界 deaths ≤ 2」目前只有 w1 達標（1 / 5）。**
+（註：w1 的 3 次 sword 樣本完全相同 —— 這一關的隨機性剛好沒被觸發；w2 / w4 的樣本差異很大，單一樣本不可信，至少要 3 次。）
+
+### R3-2b. 剩餘死亡點（20 次合計 68 死）
+
+> 座標是 `playthrough.py` 印的世界像素座標，括號是磁磚座標（÷16）。已逐點用 `qshot.py --x --y` 截圖確認。
+
+| # | 世界 / 房 | 座標（磁磚）| 次數 | 直接死因 | **判定** | 建議 |
+|---|---|---|---|---|---|---|
+| 1 | **w5 r5 拳擊台（迪迪迪）** | 全房 | **9** | 3 次走到魔王房，離場時魔王 `hp=59~60 / 60` ⇒ 機器人**幾乎沒打到迪迪迪**。同一隻魔王 `boss_test --curve` 是 **90%**。截圖 `d_w5r5_boss.png` | **機器人笨（工具）** | 見 **R3-P1-01**：`playthrough.py` 的魔王戰打法要和 `boss_test.py` 的模型統一，否則 w5 的關卡難度量不到 |
+| 2 | **w3 r2 浮島跳躍・第 2 段尖刺床** | x=484~540（30~34, 9~10）| **7** | 5 格連續尖刺；上方雖然有 balance-levels 補的單向平台 (34,8)(35,8)，但機器人每 45 幀才跳一次，常常落在尖刺中間 | **機器人笨為主，關卡次之** | 上方平台從 2 格延長到 (32~36,8) 5 格，讓「上路」變成看得懂的主動線；或第 2 段再縮成 3 格 |
+| 3 | **w2 r4 洛洛洛 & 拉拉拉** | x=33~153 | **8** | 同 #1：run3 死 5 次時魔王還有 `hp=21/30`（只打掉 30%），`boss_test --curve` 卻是 100% | **機器人笨（工具）** | 同 R3-P1-01 |
+| 4 | **w1 r1 星星森林** | x=407.5（25.5, 6.3）與 x=542.8（33.9, 6.1）| **6**（每次 sword 跑各 2 次）| 漂浮越過 (24~27) 星星方塊時，方塊頂上的 `waddledee@(25,7)` 與右邊的 `hothead@(37,6)` 連續碰撞，**血量耗盡在半空**（y≈97~100，不是摔死）| **可接受**（w1 仍 3/3 通關且 deaths=2 達標）| 若要更寬鬆：把 `waddledee@(25,7)` 往上挪 1 格或改成不會走到方塊邊緣的 `cappy` |
+| 5 | **w4 r2 風之迴廊・鐵甲滾球前** | x=274~355（17~22, 8~9）| **5** | 雲台段；**hammer 能力台座在 (22,9)，正好在死亡熱點的最右端** ⇒ 機器人常在拿到鐵鎚之前就把 3 條命用完，而後面是上鎖的中魔王房 | **關卡問題** | 見 **R3-P2-05**：台座前移到坑之前（(16,9) 或 (14,9)）|
+| 6 | **w4 r2 鐵甲滾球本體** | x=484~610（30~38）| **5** | `rollarmor@(33,9)` 的滾動衝撞與 `slam` 震波（實測震波在 x=448 與 545 兩處同時存在）| **中魔王偏強**（但有保底武器，設計成立）| 若要放寬，照 balance-levels 的建議拉長 `open` 硬直，不要降 hp |
+| 7 | **w3 r0 海濱沙灘・斜坡底單格尖刺** | x=807~842（50~52, 9）| **4** | balance-levels 已把 3 格尖刺縮成 1 格，但它坐在 `\` 斜坡的正下方，走下斜坡的加速度讓「跳過去」的時機很窄。截圖 `d_w3r0_spike.png` | **關卡（小）** | 把這格尖刺往右移 2 格離開斜坡底，或在尖刺上方補一塊單向平台 |
+| 8 | **w3 r2 第 1 段尖刺床** | x=185~222（11.6~13.9）| **4** | 同 #2（5 格尖刺）。截圖 `d_w3r2_a.png` | 機器人笨為主 | 同 #2 |
+| 9 | **w2 r0 古堡玄關長廊** | x=660~940（41~59, 9）| **4**（只發生在 run1）| 12 格無掩體走廊 ＋ shotzo / cappy；run2 / run3 完全沒死在這 | **樣本變異，暫不建議動** | 若要動，只需在 (48,8) 補一根石柱 |
+| 10 | **w5 r1 守衛長廊（暗房）** | x=819~1408 | **3**（只發生在 run2）| 暗房長廊，可視半徑 40px | 樣本變異 | — |
+| 11 | **w4 r0 / r2 一格寬雲洞** | w4 r0 x=259.6（16.2, y=212＝摔出地圖）、w4 r2 x=610.5（38.2, y=212）| **2** | 洞寬 16px、卡比框寬 14px ⇒ 走過去必掉，**洞底沒有任何東西＝即死**。截圖 `d_w4r0_pit.png` | **關卡問題（balance-levels 自承未處理）** | 見 **R3-P2-06** |
+| 12 | 其他零星 | w3 r1 (20,10) 水道 1、w5 r2 (16~61) 3、w5 r3 (10,6) 1、w4 r1 (11,20) 1、w4 r2 (70,1) 1、w2 r2 (54,9) 2 | 各 1~3 | 分散、不重複 | 機器人笨 | — |
+
+---
+
+## R3-3. 魔王難度曲線複測
+
+```bash
+.venv/bin/python tools/boss_test.py --curve --curve-runs 5              # sword、真實魔王房、不加無敵、3 條命
+.venv/bin/python tools/boss_test.py --curve --curve-mid --curve-runs 5  # 中距離（刀刃）玩家模型
+```
+
+| 世界 | 魔王 | 目標 | **sword 5 樣本** | 平均 | **mid 5 樣本** | 平均 | 達標 | 平均擊殺幀數（sword）| 玩家被打中次數（sword）|
+|---|---|---|---|---|---|---|---|---|---|
+| w1 | 大樹威斯比 | ≥ 80% | 100 / 100 / 100 / 100 / 100 | **100** | 100 / 100 / 100 / 100 / 100 | **100** | ✅ | **822**（701~1026，全勝）| 1 / 4 / 1 / 2 / 3 |
+| w2 | 洛洛洛 & 拉拉拉 | ≥ 70% | 100 / 100 / 100 / 100 / 100 | **100** | 100 / 47 / 100 / 100 / 100 | **89** | ✅ | 1225（821~1582，全勝）| 4 / 4 / 5 / 2 / 2 |
+| w3 | 克拉寇 | ≥ 60% | 80 / 100 / 100 / 100 / 100 | **96** | 100 / 80 / 35 / 65 / 85 | **73** | ✅ | 779（4 勝）＋ 1 次 gameOver | 3 / 4 / 4 / 4（+ 失敗樣本 24）|
+| w4 | 魅塔騎士 | ≥ 50% | 100 / 100 / 100 / 100 / 100 | **100** | 100 / 100 / 100 / 100 / 100 | **100** | ✅ | **838**（746~946，全勝）| **4 / 4 / 2 / 5 / 5** |
+| w5 | 迪迪迪大王 | ≥ 40% | 65 / 100 / 93 / 100 / 92 | **90** | 10 / 100 / 100 / 80 / 100 | **78** | ✅ | 894（2 勝）＋ 3 次 gameOver | 2 / 1（+ 失敗樣本 17~21）|
+
+原始輸出：`shots/agent_qa3/curve_sword.txt`、`curve_mid.txt`（每個樣本都有 `frames / died / gameOver / hits / playerHurt / playerMinHp`）。
+
+### R3-3a. 主觀判斷：**曲線不是遞增的**
+
+- **達標 ✅，但「達標」只是下限**：5 個目標全部通過，因為目標是「至少打掉 n%」；**5 個魔王有 4 個是 100%**，等於這條檢查已經失去鑑別度。
+- **w4 魅塔騎士兩種模型都是 100%，而且平均 838 幀就殺完 —— 比 w2 洛洛洛（1225 幀）還快，只比 w1 威斯比（822 幀）慢 16 幀。**
+  balance-enemies 把 `recover 40→16` 之後他確實會反擊（`playerHurt` 是 5 個魔王裡最高的 2~5），但**打不死玩家**。
+  → **採納 balance-enemies 自己提的方案**：二階段 `slash` dmg 1→**2**，或 `maxHp` 45→**55**（兩者擇一，不要再加硬直 —— 硬直只會讓貼身揮劍的機器人更快贏）。
+- **w1 威斯比反而是「最好打」的那一隻**：10 / 10 樣本 100%，最短 701 幀、`playerHurt` 最低（1~4）。
+  Round 2 的問題（走進樹身被連續扣血）修過頭了：`trunk` 縮到 24px 寬 + `contactCD 45` + 吹風期間不扣血，三個一起加。
+  → 建議把三項擇一放寬（例如吹風期間恢復接觸傷害，但保留 `blowPush`），讓 w1 有「入門魔王」該有的壓力，同時**別動 hp**。
+- **實際上比較有鑑別度的是 `mid`（中距離）模型**：100 / 89 / 73 / 100 / 78 —— w3 最低、w4 突起。
+  建議 balance-enemies 之後就用 `--curve-mid` 當主要指標，`--curve`（sword 貼身）當「會不會卡關」的底線檢查。
+- **樣本變異**：`--curve-runs 3` 完全不夠（w5 sword 的 5 個樣本是 65/100/93/100/92）。本節一律用 5 次，建議之後也維持 5 次以上。
+
+---
+
+## R3-4. 全流程截圖（16 個畫面 / 23 張，逐張 Read）
+
+| # | 畫面 | 截圖 | 結果 |
+|---|---|---|---|
+| 1 | 標題 | `f01_title.png` | OK（logo / PRESS START / 底部兩行提示都可讀）|
+| 2 | 標題選單 | `reg_title_menu.png` | OK（6 項，不壓 logo）|
+| 3 | 能力圖鑑 8 頁 | `gal_p1~p8.png` | **問題**：7/8 頁說明被截成「…」、第 5 頁連招式名都截斷、第 7 頁行首「，」→ **R3-P1-03** |
+| 4 | 設定 | `f04_settings.png` | OK（音樂 / 音效 10 格滑桿、按鍵提示、畫面縮放、F 全螢幕）|
+| 5 | 選關 | `f05_select.png`、`z_select_default.png` | **問題**：W3 的關名標籤壓住 W1 標籤與 W2 節點的 ★x/3 → **R3-P2-04** |
+| 6 | W1 開場橫幅 | `f06_banner.png`、`reg_banner_toast.png` | OK（橫幅 ＋ 下方 toast 兩行都可讀）|
+| 7 | 暫停卡 | `f07_pause.png` | OK（能力卡 2 行風味文字完整、3 招式表、下半選單 6 項、HUD 仍在、互不重疊）|
+| 8 | 中魔王鎖門（w4 r2 rollarmor）| `reg_rollarmor_w4r2.png`、`f08_lockeddoor.png` | OK（滾球在 x≈30、hammer 台座、出口門上鎖圖示清楚）|
+| 9 | 魔王二階段 | `f09_phase2_w5_00~02.png` | OK（迪迪迪變色、toast「迪迪迪大王怒了！」、血條 40%）|
+| 10 | 結算 | `reg_result.png` | OK（關名不被切、★ 像素星、TOTAL＝SCORE+獎勵、BEST 同步）|
+| 11 | 選關 BEST | `f11_select_best.png` | OK（`BEST 0009870`、`收集星 ★★★ 3/3`、`CLEAR` 旗）|
+| 12 | 競技場選能力 | `f12_arena_select.png` | OK（9 格能力縮圖、規則兩行、BEST --:--）。小瑕疵：說明第 2 行把「複製」斷在兩行之間（`吸入敵人，按↓吞下複 / 製能力`）|
+| 13 | 競技場休息室 | `f13_arena_rest_00~01.png` | OK（3 顆番茄在單向平台上、出口門、HUD `ARENA 2/5` ＋ `00:05` ＋ 番茄 ×3）|
+| 14 | 競技場結算 | `reg_arena_result.png` | OK（順序只在「→」換行、NEW RECORD 閃爍）|
+| 15 | GAME OVER | `f15_gameover.png` | OK（`回到地圖` / `回到標題` ＋ 下方說明）|
+| 16 | 結局 | `f16_ending_seq_01~03.png` | OK（`本作為同人致敬作品 / 所有美術與音樂皆為原創 / FINAL SCORE / THE END / PRESS START` 全部完整）。註：`--steps 200` 那張還在逐字打字，看起來像被截斷，要跑到 ≥ 280 幀才會打完 |
+
+另外一起檢查的畫面：暗房（`reg_dark_w4r3/w5r1.png`）、水域（`reg_water_*.png`）、3 間魔王房開場（`reg_boss_*.png`）、競技場登場字幕（`f14_arenaintro_*.png`）。
+**23 張全部：無洋紅缺圖（`missing sprites: []`）、無 console error、無文字溢出畫面邊界。**
+
+---
+
+## R3-5. Round 3 新問題清單
+
+| # | 嚴重度 | 位置 | 現象 | 重現指令 | 截圖 | 建議負責 |
+|---|---|---|---|---|---|---|
+| **R3-P1-01** | P1 | `tools/playthrough.py`（魔王戰 AI）| **兩支測試工具對同一隻魔王的結論相反**：`boss_test --curve` 說迪迪迪被打掉 **90%**、洛洛洛 **100%**；但 `playthrough.py` 的機器人走到同一間房，**離場時迪迪迪 `hp=59~60/60`（0~2%）、洛洛洛 `hp=21/30`（30%）**。w5 的 9 次死亡與 w2 的 8 次死亡全部發生在魔王房，也就是說「w5 deaths=4」其實是**工具打不動魔王**，不是關卡難度。在兩支工具的打法統一（或 playthrough 直接沿用 `boss_test` 的 `[sword]` 模型）之前，**「不加 --godmode 時 deaths ≤ 2」對 w2 / w5 量不到東西**。 | `.venv/bin/python tools/playthrough.py --level w5 --ability sword --maxframes 30000`（→ `rooms=[0..5] deaths=4 boss hp 60/60`）對照 `.venv/bin/python tools/boss_test.py --curve --curve-runs 5` | `d_w5r5_boss.png` | **levels**（playthrough.py 擁有者）＋ **enemies**（boss_test.py 擁有者）|
+| **R3-P1-02** | P1 | `src/bosses.js` 魅塔騎士 / 威斯比 | **魔王曲線仍不遞增**。sword 模型 100 / 100 / 96 / 100 / 90，mid 模型 100 / 89 / 73 / 100 / 78 —— **w4 魅塔騎士兩種模型 10/10 樣本全 100%、平均 838 幀就被殺完**（比 w2 的 1225 幀還快）；**w1 威斯比 10/10 全 100%、最短 701 幀、玩家只掉 1~4 格血**，是全系列最好打的一隻。目標值（≥80/70/60/50/40）因為是下限，已經沒有鑑別度。 | `.venv/bin/python tools/boss_test.py --curve --curve-runs 5`；`... --curve-mid --curve-runs 5` | `curve_sword.txt`、`curve_mid.txt` | **enemies** |
+| **R3-P1-03** | P1 | `src/ui.js` 能力圖鑑（`GalleryScene`）| **R2-P2-09 未修且惡化：8 頁有 7 頁的說明被截成「…」**（只有第 1 頁火焰完整）。最嚴重是第 5 頁「電擊」：說明被截，**3 個招式名也全被截**（「放電（44px…」「放電中…」「按住 45…」「電擊波（96…」）；第 3 / 4 / 6 / 8 頁也各有 1 個招式名被截。第 7 頁「冰凍」第 2 行仍以「，」開頭（**R2-P2-10 未修**）。圖鑑是唯一能讀完整說明的地方，截斷等於沒寫。 | `.venv/bin/python shots/agent_qa3/qshot.py --scene title --script "step 60; tap start 2; step 6; tap down 2; step 6; tap down 2; step 6; tap down 2; step 6; tap jump 2; step 30; shot p1; tap right 2; step 8; shot p2; …" --out shots/agent_qa3/gal.png` | `gal_p1~p8.png`（尤其 `gal_p5.png`、`gal_p7.png`）| **ui**（版面：說明改 3 行 / 招式欄加寬）＋ abilities 文案 |
+| **R3-P2-04** | P2 | `src/ui.js` `StageSelectScene` 關名標籤 | **選關地圖上的關名標籤互相重疊**：W3「漂浮群島」的標籤條壓住 ① W1「翠綠草原」標籤的最後一個字、② **W2 節點下方的 ★x/3 收集標記**（完全看不到 W2 收集了幾顆）。另外 W5「迪迪迪城」標籤右緣到 x≈251，已經頂到地圖外框。有無存檔都一樣。 | `.venv/bin/python shots/agent_qa3/qshot.py --scene select --steps 60 --out shots/agent_qa3/z_select_default.png` | `f05_select.png`、**`z_select_labels.png`（放大圖）**、`z_select_default.png` | **ui** |
+| **R3-P2-05** | P2 | `src/levels.js` w4 r2 | **上鎖中魔王房的保底武器在死亡熱點的「之後」**：hammer 能力台座在 (22,9)，而 5 次死亡集中在 x=274~355（磁磚 17~22）＝ 台座**正前方**的雲台段。機器人常常在拿到鐵鎚前就用完 3 條命，而鐵甲滾球的鐵殼會彈開徒手攻擊 ⇒ 一旦空手進場就是死循環。 | `.venv/bin/python tools/playthrough.py --level w4 --ability sword --maxframes 30000`（死亡點 x=274.8 / 335.6 / 355.6）| `d_w4r2_a.png` | **levels** |
+| **R3-P2-06** | P2 | `src/levels.js` w4 r0 / r2 / r3 | **一格寬雲洞仍是「必掉且即死」**（balance-levels 自承未處理）：洞寬 16px、卡比框寬 14px，走過去一定掉下去，洞底沒有踏腳雲也沒有地板。實測 w4 fire run1 在 r0 x=259.6（磁磚 16.2）直接 `y=212` 摔出地圖；w4 sword run2 在 r2 x=610.5 同樣死法。已知位置：r0 x=14/16、r2 x=10/38、r3 x=20。 | `.venv/bin/python tools/playthrough.py --level w4 --ability fire --maxframes 30000` | `d_w4r0_pit.png` | **levels** |
+| **R3-P2-07** | P2 | `src/levels.js` w3 r2 | **兩段 5 格尖刺床是全專案最大的死亡熱點**（w3 的 16 次死亡有 11 次在這裡）。第 2 段上方雖然有單向平台 (34,8)(35,8)，但只有 2 格，跳上去的落點很窄；第 1 段上方是 row8 的既有落腳點但同樣只有 1~2 格。 | `.venv/bin/python shots/agent_qa3/qshot.py --level w3 --room 2 --x 9 --y 9 --ability sword --steps 40 --out shots/agent_qa3/d_w3r2_a.png` | `d_w3r2_a.png`、`d_w3r2_b.png` | **levels** |
+| **R3-P2-08** | P2 | `src/levels.js` w3 r0 | **斜坡底的單格尖刺**（磁磚 52,9）造成 4 次死亡。尖刺本身只有 1 格（Round 3 已縮短），但它坐在 `\` 斜坡的正下方，走下斜坡時的水平速度讓起跳時機很窄。 | `.venv/bin/python shots/agent_qa3/qshot.py --level w3 --room 0 --x 48 --y 9 --ability sword --steps 40 --out shots/agent_qa3/d_w3r0_spike.png` | `d_w3r0_spike.png` | **levels** |
+
+### R3-5a. 觀察（不列入問題，給下一輪參考）
+- **競技場結算第 1 行已經到 230 / 240px**：`arena.js orderLines` 的 `PER_LINE = 3` 沒有餘裕了，魔王中文名再加長就會爆行。
+- **競技場選能力頁**「無能力」說明把「複製」斷在兩行之間（`吸入敵人，按↓吞下複 / 製能力`），不影響閱讀但可以靠 `UI.wrapLines` 的詞界規則改善。
+- **能力圖鑑面板下緣**（y≈193）之下會露出標題畫面底部那兩行變暗的提示字，視覺上有點雜；面板加高 8px 或把底層那兩行在圖鑑開啟時隱藏即可。
+- **截圖時看到「卡比不見了」不一定是 bug**：無敵閃爍（`player.invuln > 0`）會有整幀不畫玩家。本輪在 w3 r0 與 w5 r5 各誤判過一次，都是用 `--seq` 連拍 + 逐像素掃描（`getImageData` 找粉紅）排除的。建議之後的 QA 一律連拍 3 張再下結論。
+
+---
+
+## R3-6. 健康度回歸（22:20）
+
+| 檢查 | 結果 |
+|---|---|
+| `for f in src/*.js src/art/*.js; do node --check "$f"; done` | **全部通過** |
+| `node tools/level_check.js` | **0 error / 1 warning**（既有的拉拉拉出生點提示）|
+| `.venv/bin/python tools/engine_test.py` | **118 / 118 PASS** |
+| `.venv/bin/python tools/boss_test.py --curve --curve-runs 5` | **CURVE PASS**（5 / 5 達標，但見 R3-P1-02）|
+| 60 餘次截圖 + 20 次 playthrough | **`missing sprites: []`、0 console error、0 pageerror** |
+
+## R3-7. 重現指令總表
+
+```bash
+cd "/home/ken150ken150/桌面/我的專案/遊戲開發/卡比之星"; PY=.venv/bin/python; Q=shots/agent_qa3/qshot.py
+
+# 非無敵難度量測（20 次；5 個世界可以並行跑）
+for w in w1 w2 w3 w4 w5; do
+  for i in 1 2 3; do $PY tools/playthrough.py --level $w --ability sword --maxframes 30000; done
+  $PY tools/playthrough.py --level $w --ability fire --maxframes 30000
+done
+
+# 魔王曲線（兩種玩家模型）
+$PY tools/boss_test.py --curve --curve-runs 5
+$PY tools/boss_test.py --curve --curve-mid --curve-runs 5
+
+# Round 2 問題回歸
+$PY $Q --level w3 --room 0 --x 63 --y 9 --script "press right,down 40" --seq "3:25" --state --out shots/agent_qa3/reg_water_w3r0b.png   # R2-P1-14
+$PY $Q --level w4 --room 2 --x 28 --y 9 --steps 90  --out shots/agent_qa3/reg_rollarmor_w4r2.png                                      # R2-P1-15
+for s in "w3 4" "w4 4" "w5 5"; do set -- $s; $PY $Q --level $1 --room $2 --steps 200 --out shots/agent_qa3/reg_boss_$1r$2.png; done    # R2-P1-04
+$PY $Q --level w1 --room 0 --js "const p=KB.player;p.ability='fire';KB.game.abilityFlash=60;KB.game.toast('取得能力：火焰');" --steps 20 --out shots/agent_qa3/reg_banner_toast.png  # R2-P2-13
+$PY $Q --scene title --script "step 60; tap start 2; step 10" --out shots/agent_qa3/reg_title_menu.png                                 # R2-P2-16
+$PY $Q --level w4 --room 3 --x 14 --y 9 --steps 40 --out shots/agent_qa3/reg_dark_w4r3.png                                             # R2-P2-17
+$PY $Q --level w1 --room 0 --js "KB.game.score=12340;KB.game.kills=17;KB.game.timeAlive=3600;__kb.goto('result')" --steps 400 --out shots/agent_qa3/reg_result.png  # R2-P2-18
+$PY $Q --level w5 --room 0 --steps 30 --out shots/agent_qa3/reg_gold_w5r0.png                                                          # P2-11
+ARENA="{order:['whispywoods','lololo','kracko','metaknight','dedede'],idx:4,phase:'boss',tomatoes:1,base:12345,beaten:5,ability:'sword',abilityCur:'sword',hp:4,score:9000}"
+$PY $Q --scene title --js "KB.setScene(new KB.ArenaResultScene($ARENA,true))" --steps 40 --out shots/agent_qa3/reg_arena_result.png    # 競技場結算斷行
+$PY $Q --scene arena --script "step 20; tap right 2; step 10; tap jump 2; step 96" \
+       --js2 "console.log('bossIntroMax='+KB.game.bossIntroMax)" --console --out shots/agent_qa3/f14_arena_bossintro.png               # 競技場 60 幀登場
+
+# 全流程（其餘見 shots/agent_qa3/f01~f16_*.png 的檔名）
+$PY $Q --scene select --steps 60 --out shots/agent_qa3/z_select_default.png
+$PY $Q --level w1 --ability sword --script "step 30; tap start 2; step 10" --out shots/agent_qa3/f07_pause.png
+$PY $Q --level w5 --room 5 --ability sword --js "const g=KB.game;g.bossIntroT=0;g.boss.introducing=false;g.boss.hp=Math.round(g.boss.maxHp*0.4);g.boss.maybePhase2();" --seq "3:40" --out shots/agent_qa3/f09_phase2_w5.png
+$PY $Q --scene arena --script "step 20; tap right 2; step 10; tap jump 2; step 260" --js2 "KB.arenaExit(KB.game)" --seq "2:45" --out shots/agent_qa3/f13_arena_rest.png
+$PY $Q --scene gameover --steps 90 --out shots/agent_qa3/f15_gameover.png
+$PY $Q --scene ending --steps 60 --seq "5:220" --out shots/agent_qa3/f16_ending_seq.png
+
+# 放大切圖（確認 1~2px 的重疊）：zoom.py <in> <out> <遊戲座標cx> <cy> <半寬> <半高> <放大倍率>
+$PY shots/agent_qa3/zoom.py shots/agent_qa3/f05_select.png shots/agent_qa3/z_select_labels.png 100 115 60 30 4
+```

@@ -932,3 +932,19 @@ git 已初始化，基線 commit `c382e2a`。Playwright venv：`.venv/bin/python
   我已經把兩段尖刺縮短、補平台、補 3 顆番茄；再往下調就會失去這一房的主題，建議交給 qa3 用人類操作確認一次。
 - **w2 的難度集中在中魔王 / 魔王**（Bonkers、洛洛洛&拉拉拉），不是路程；等 balance-enemies 的魔王曲線調完再重測。
 - `tools/build.py` 已跑（779 KB），但其他 agent 可能還在改檔，總控收尾時請再 build 一次。未 commit。
+
+## qa3
+> 檔案：`docs/QA_REPORT.md`（Round 3 章節）、`shots/agent_qa3/`（含自製工具 `qshot.py` ＝ shot.py 的 --script/--seq/--state ＋ jshot.py 的 --prejs/--js/--js2、`zoom.py` 放大切圖）。src/ 唯讀。
+
+- [Round 3 21:35] 完成：**Round 2 問題逐項回歸截圖 + Read 判定**（12 項）。截圖 `shots/agent_qa3/reg_*.png`。
+- [Round 3 21:50] 完成：**魔王難度曲線複測**。`tools/boss_test.py --curve --curve-runs 5`（sword）與 `--curve-mid --curve-runs 5`，原始輸出見 QA_REPORT R3-3。
+- [Round 3 22:05] 完成：**全流程 16 張截圖**（標題→結局，含競技場 3 張）`shots/agent_qa3/f01~f16_*.png`，逐張 Read。
+- [Round 3 22:10] 完成：**非無敵 playthrough 20 次**（5 世界 × sword 3 + fire 1，`--maxframes 30000`），死亡點彙整見 QA_REPORT R3-2。
+- [Round 3 22:20] 完成：**docs/QA_REPORT.md 追加「Round 3（qa3 agent）」章節**（R3-0 摘要 / R3-1 回歸 12 項 / R3-2 死亡表 / R3-3 魔王曲線 / R3-4 全流程 16 畫面 / R3-5 新問題 8 筆 / R3-6 健康度 / R3-7 重現指令）。
+  原始 log 一併存進 `shots/agent_qa3/`：`curve_sword.txt`、`curve_mid.txt`、`play_w1~w5.txt`。
+  健康度：`node --check src/*.js src/art/*.js` 全過、`node tools/level_check.js` 0 error / 1 warning、`tools/engine_test.py` 118/118 PASS。
+- [Round 3 22:20] **結論**：Round 3 的 12 項修復**全部有效**；主線從 Round 2 的「15/15 全滅」變成 w1 3/3 通關（deaths=2）、w2 1/3 通關、w5 能走到魔王房。
+  **仍待處理（依序）**：① R3-P1-01 `playthrough.py` 與 `boss_test.py` 的魔王戰打法不一致（w2/w5 的 deaths 其實量不到關卡難度）；
+  ② R3-P1-02 魔王曲線不遞增（w4 魅塔騎士 10/10 樣本 100%、w1 威斯比修過頭變成最好打）；
+  ③ R3-P1-03 能力圖鑑 7/8 頁說明被截斷（R2-P2-09 未修、且惡化）；④ R3-P2-04 選關關名標籤重疊；⑤ R3-P2-05/06 w4 的保底武器位置與一格寬雲洞。
+  **我沒有動過 src/**（唯讀），也沒有跑 `tools/build.py`（dist 由總控收尾時再 build）。
