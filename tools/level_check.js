@@ -24,15 +24,17 @@ const isSolid = ch => !!SOLID[ch];
 const isStand = ch => !!SOLID[ch] || !!SLOPE[ch] || ch === '=';
 
 // 實體分類（與 src/enemies.js 行為一致）
-const GROUND = new Set(['waddledee', 'waddledoo', 'hothead', 'sirkibble', 'sparky', 'rocky', 'chilly', 'bladeknight', 'bonkers', 'mrfrosty', 'poppybros', 'cappy', 'twizzy', 'kabu', 'glunk', 'spikeball', 'snowly']);
+const GROUND = new Set(['waddledee', 'waddledoo', 'hothead', 'sirkibble', 'sparky', 'rocky', 'chilly', 'bladeknight', 'bonkers', 'mrfrosty', 'poppybros', 'cappy', 'twizzy', 'kabu', 'glunk', 'spikeball', 'snowly', 'rollarmor']);
+// 中魔王（可以解開 gatekeeper 的門鎖）
+const MINIBOSS = new Set(['bonkers', 'mrfrosty', 'rollarmor']);
 const WATER = new Set(['squishy', 'glunk']);
 const FLY = new Set(['brontoburt', 'scarfy', 'gordo', 'shotzo', 'dartwing']);
 const ITEMS = new Set(['tomato', 'food', 'oneup', 'candy', 'pointstar', 'bigstar']);
 // 機關類實體（不需要地面、也不算敵人密度）：大星星收集品 / 開關方塊 / 中魔王門鎖
 const GADGET = new Set(['bigstar', 'switchblock', 'gatekeeper', 'essence', 'warpstar']);
 const UNLOCKER = new Set(['switchblock', 'gatekeeper']);   // 可以解開 locked 門的實體
-const TALL = { bonkers: 2, mrfrosty: 2, bladeknight: 2, snowly: 2 };   // 佔用的高度（格）
-const WIDE = { bonkers: 2, mrfrosty: 2 };
+const TALL = { bonkers: 2, mrfrosty: 2, bladeknight: 2, snowly: 2, rollarmor: 2 };   // 佔用的高度（格）
+const WIDE = { bonkers: 2, mrfrosty: 2, rollarmor: 2 };
 const BOSS = { whispywoods: { w: 3, h: 4, ground: true }, lololo: { w: 2, h: 2, ground: true }, kracko: { w: 4, h: 3, ground: false }, metaknight: { w: 2, h: 2, ground: true }, dedede: { w: 3, h: 4, ground: true } };
 const DECO = { green: 'tbfsgmrw', castle: 'pwrkacb', island: 'purghsb', cloud: 'csrbdm', dedede: 'pkwtscb' };
 
@@ -159,8 +161,8 @@ for (const lv of KB.LEVELS) {
     const nUnlocker = (room.entities || []).filter(e => UNLOCKER.has(e.t)).length;
     if (nLocked && !nUnlocker) err(`${tag}: 有 ${nLocked} 扇 locked 門，但房內沒有解鎖實體（${[...UNLOCKER].join(' / ')}）`);
     if (!nLocked && nUnlocker) warn(`${tag}: 有解鎖實體但沒有 locked 門`);
-    if ((room.entities || []).some(e => e.t === 'gatekeeper') && !(room.entities || []).some(e => e.t === 'bonkers' || e.t === 'mrfrosty'))
-      err(`${tag}: 有 gatekeeper 但房內沒有中魔王（bonkers / mrfrosty），門會永遠打不開`);
+    if ((room.entities || []).some(e => e.t === 'gatekeeper') && !(room.entities || []).some(e => MINIBOSS.has(e.t)))
+      err(`${tag}: 有 gatekeeper 但房內沒有中魔王（${[...MINIBOSS].join(' / ')}），門會永遠打不開`);
     doors.forEach((d, di) => {
       checkPos(`door#${di}`, d.x, d.y, true);
       if (!d.to) { err(`${tag}: door#${di} 沒有 to`); return; }
@@ -195,6 +197,8 @@ for (const lv of KB.LEVELS) {
         for (const [what, ex] of entries) {
           const dpx = Math.abs(ex - room.bossPos[0]) * 16;
           if (dpx > 200) err(`${tag}: ${what} x=${ex} 與 bossPos x=${room.bossPos[0]} 相距 ${dpx}px > 200px，登場結束時無法同框`);
+          // R3（R2-P1-04）：太近時登場動畫一結束玩家就貼在魔王身上，必吃一次接觸傷害
+          else if (dpx < 96) err(`${tag}: ${what} x=${ex} 與 bossPos x=${room.bossPos[0]} 只相距 ${dpx}px < 96px，登場一結束就會碰到魔王`);
         }
         if (lv.boss === 'lololo') {
           const px = room.bossPos[0] - 3, py = room.bossPos[1] - 4;
@@ -277,6 +281,14 @@ for (const lv of KB.LEVELS) {
       // 大星星：不可以放在會被地形擋住 / 撿不到的地方（水中可以）
       if (e.t === 'bigstar' && ch === '^') err(`${tag}: ${what} (${e.x},${e.y}) 大星星放在尖刺上`);
     });
+    // ---- R3 主線補給：每個非魔王房至少要有 1 個「站得到的」番茄 / 食物（不算水底與空中）----
+    if (!room.bossRoom) {
+      const sup = (room.entities || []).filter(e => e.t === 'tomato' || e.t === 'food' || e.t === 'candy');
+      const tagOf = e => (get(e.x, e.y) === '~' ? '水底' : (!isStand(get(e.x, e.y + 1)) ? '空中' : 'ok'));
+      const reach = sup.filter(e => tagOf(e) === 'ok');
+      console.log(`  (info) ${tag}: 補給 ${sup.length} 個 [${sup.map(e => `${e.t}(${e.x},${e.y})${tagOf(e) === 'ok' ? '' : ':' + tagOf(e)}`).join(' ')}]`);
+      if (!reach.length) warn(`${tag}: 沒有任何「站得到」的番茄 / 食物（全在水底或空中），主線補給不足`);
+    }
     // 敵人密度
     const nEnemy = (room.entities || []).filter(e => !ITEMS.has(e.t) && !GADGET.has(e.t)).length;
     const area = w * Math.max(1, h / 12);

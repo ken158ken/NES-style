@@ -279,7 +279,9 @@
   KB.ITEMS.abilitystar = class extends Item {
     constructor(x, y, ability, dir) {
       super(x, y); this.spr = 'item_abilitystar'; this.name = 'abilitystar'; this.ability = ability; this.w = 14; this.h = 14; this.bob = false;
-      this.grav = 0.18; this.solid = true; this.maxFall = 3; this.vx = (dir || 1) * 1.6; this.vy = -3.5; this.score = 0;
+      // R3：初速 vx 從 1.6 減半到 1.0 —— Round 2 把落地彈跳從 6 次改成 2 次之後，能力星會滑得離屍體太遠，
+      //      boss_test 的 kracko / dedede 樣本因此撿不回劍（enemies-bosses2 的 bisect 結論）。
+      this.grav = 0.18; this.solid = true; this.maxFall = 3; this.vx = (dir || 1) * 1.0; this.vy = -3.5; this.score = 0;
       // 存在時間由 KB.PHYS.abilityStarLife 決定（Extra 模式減半）；最後 120 幀開始閃爍（player2 規格）
       this.maxLife = Math.round(((KB.PHYS && KB.PHYS.abilityStarLife) || 600) * (KB.session && KB.session.extra ? 0.5 : 1));
       this.life = this.maxLife; this.blinkAt = Math.max(30, Math.round(this.maxLife * 0.2));
@@ -289,8 +291,8 @@
       this.baseUpdate(dt);
       if (this.beingInhaled) return;
       this.physics();
-      // 落地彈 2 次（-2.8 → -1.6）後停住
-      if (this.onGround) { this.bounces++; this.vy = this.bounces === 1 ? -2.8 : this.bounces === 2 ? -1.6 : 0; if (this.bounces >= 3) { this.vx *= 0.5; this.vy = 0; } }
+      // 落地彈 2 次（-2.8 → -1.6）後停住；每次落地水平速度再 ×0.5，星星就停在敵人倒下的位置附近
+      if (this.onGround) { this.bounces++; this.vx *= 0.5; this.vy = this.bounces === 1 ? -2.8 : this.bounces === 2 ? -1.6 : 0; if (this.bounces >= 3) { this.vx = 0; this.vy = 0; } }
       if (this.hitWall) { this.vx *= -1; this.dir *= -1; }
       if (this.fellOut) this.dead = true;
       if (this.life > 0) { this.life--; if (this.life <= 0) this.dead = true; }

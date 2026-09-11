@@ -36,6 +36,10 @@ def main():
         pg.evaluate("()=>__kb.step(2)")
 
         def st(): return json.loads(pg.evaluate("()=>__kb.state()"))
+        def falling(pl):
+            # 快速下墜（掉進坑裡）→ 連按跳觸發漂浮。人類玩家一定會這樣自救，
+            # 但原本的機器人「每 45 幀跳一次」常常來不及，w4 的一格寬雲洞因此變成假的必死點。
+            return (not pl['onGround']) and pl['vy'] >= 4 and pl['state'] not in ('ride', 'dead', 'hurt')
         def press(o): pg.evaluate("(o)=>__kb.press(o)", o)
         def step(n): pg.evaluate("(n)=>__kb.step(n)", n)
         def shot(name):
@@ -60,6 +64,12 @@ def main():
         def miniboss_near():
             return pg.evaluate("""()=>{const p=KB.player;const m=KB.game.entities.find(e=>!e.dead&&KB.MiniBoss&&e instanceof KB.MiniBoss&&!e.stunned);
               return m?{dx:m.cx-p.cx,dy:m.cy-p.cy,hp:m.hp,px:p.x,mw:KB.game.map.pw}:null}""")
+        def essence_near():
+            # 能力台座（KB.ITEMS.essence）：碰到就給能力、不會消失。空手時優先去踩一下，
+            # 否則上鎖的中魔王房（鐵殼 / 硬直才有攻擊窗）會變成永遠打不倒的死循環。
+            return pg.evaluate("""()=>{const p=KB.player;const s=KB.game.entities.filter(e=>!e.dead&&e.name==='essence');
+              if(!s.length)return null;s.sort((a,b)=>Math.abs(a.cx-p.cx)-Math.abs(b.cx-p.cx));const d=s[0];
+              return {dx:d.cx-p.cx,dy:d.cy-p.cy}}""")
         def ability_star_near():
             return pg.evaluate("""()=>{const p=KB.player;const s=KB.game.entities.find(e=>!e.dead&&e.name==='abilitystar');
               return s?{dx:s.cx-p.cx,dy:s.cy-p.cy}:null}""")
@@ -70,12 +80,14 @@ def main():
 
         frames = 0; deaths = 0; rooms_seen = []; last_x = None; stuck = 0; dir_ = 1; lastRoom = -1; bossSeen = False; cleared = False; jumpT = 0
         shots_taken = 0; roomFrames = 0; maxX = {}; starChase = 0; starBlock = 0; bsChase = 0; bsBlock = 0
+        essChase = 0; essBlock = 0; mbStuck = 0; mbLastX = None
         while frames < a.maxframes:
             s = st(); g = s['game']; pl = s['player']
             if g is None or pl is None: break
             if s['scene'] != 'GameScene': print(f'scene changed to {s["scene"]} at frame {frames}'); shot('scene_' + s['scene']); break
             if g['room'] != lastRoom:
                 lastRoom = g['room']; rooms_seen.append(g['room']); roomFrames = 0; stuck = 0; last_x = None; dir_ = 1
+                essChase = 0; essBlock = 0; mbStuck = 0; mbLastX = None
                 print(f'[room {g["room"]}] enter at frame {frames}, x={pl["x"]}, y={pl["y"]}, ents={g["ents"]}')
                 shot(f'room{g["room"]}_enter')
             if a.godmode:
@@ -135,8 +147,25 @@ def main():
                 step(10); frames += 10; continue
             # 出口被鎖（中魔王門鎖）：先去把中魔王打倒
             if locked_doors() and not any_door_ahead():
+                # 空手時先去踩能力台座（中魔王要有武器才打得倒）
+                if essBlock > 0: essBlock -= 2
+                if not pl['ability'] and not pl['mouth'] and essBlock <= 0:
+                    es = essence_near()
+                    if es and abs(es['dx']) < 700 and abs(es['dy']) < 200:
+                        essChase += 2
+                        if essChase > 1600: essChase = 0; essBlock = 2000
+                        else:
+                            keys = {'right' if es['dx'] > 0 else 'left': True}
+                            if es['dy'] < -12 or essChase % 120 < 40: keys['jump'] = (frames % 8) < 3
+                            press(keys); step(2); frames += 2; continue
+                    else: essChase = 0
+                else: essChase = 0
                 mb = miniboss_near()
                 if mb:
+                    # 走去中魔王的路上可能要越過坑 / 台階：位置不動就連按跳（漂浮）
+                    if mbLastX is not None and abs(pl['x'] - mbLastX) < 0.8: mbStuck += 2
+                    else: mbStuck = max(0, mbStuck - 4)
+                    mbLastX = pl['x']
                     keys = {}
                     d = mb['dx']; toward = 'right' if d > 0 else 'left'; away = 'left' if d > 0 else 'right'
                     # 被逼到牆角就改成往中魔王那側鑽（邊漂浮越過他），否則會卡在牆邊被連續打
@@ -161,6 +190,8 @@ def main():
                         elif (frames % 40) < 3: keys[toward] = True
                         else: keys['attack'] = (frames % 70) < 46
                         if frames % 150 < 8: keys['jump'] = True
+                    if mbStuck > 30: keys['jump'] = (frames % 8) < 3
+                    if falling(pl): keys['jump'] = (frames % 4) < 2
                     press(keys); step(2); frames += 2; continue
             # 順路撿大星星（有追星上限：藏在可破壞方塊後 / 水底的星星機器人不一定拿得到，追太久就放棄繼續主線）
             if a.collect:
@@ -215,6 +246,7 @@ def main():
             if frames % 45 == 0 and not pl['mouth']: keys['jump'] = True
             if pl['mouth']: keys['attack'] = (frames % 8) < 2
             elif pl['ability'] and frames % 30 < 2: keys['attack'] = True
+            if falling(pl): keys['jump'] = (frames % 4) < 2
             press(keys); step(2); frames += 2; roomFrames += 2
             if roomFrames % 600 == 0: shot(f'room{g["room"]}_f{roomFrames}')
         press({})
