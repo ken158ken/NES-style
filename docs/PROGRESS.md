@@ -1148,7 +1148,18 @@ git 已初始化，基線 commit `c382e2a`。Playwright venv：`.venv/bin/python
 （agent 在此追加）
 
 ## magic
-（agent 在此追加）
+- [09-12] 完成：**mage 元素法師**（X 火球拋物線爆炸 / ↑+X 三格冰牆 240 幀可站上去、火焰可融、到時自動還原磁磚 / ↓+X 魔法陣 30 幀後天雷三連 / 空中 X 風刃三連穿透 / 按住 60 幀「必殺：元素風暴」letterbox + 大魔法陣 + 火冰雷三波全畫面）；驗證：`tools/test_magic.py --only mage` 15/15、`shots/agent_magic/mage_x_*.png mage_wall_*.png mage_bolt_*.png mage_wind_*.png mage_storm_*.png`；下一步：time
+- [09-12] 完成：**time 時間**（X 時停 180 幀＋CD 600 幀、worldTint 灰藍 + 時鐘魔法陣 + textPop「時間停止」；時停中 X 改近身拳，傷害記在 `e._pendDmg`，時間恢復瞬間一次結算＋連鎖 burst / ↓+X 慢動作 slowMoT 240 / ↑+X 加速 120 幀（每幀補位移，因 player.js 會把 vx 夾回 walk）/ 空中 X 回溯到 60 幀前位置＋殘影逆放）；驗證：`--only time` 17/17、`shots/agent_magic/time_*.png`、時停截圖 `shots/agent_magic/enemy_magic_timestop.png`（敵人定格 + 色調）；下一步：gravity
+- [09-12] 完成：**gravity 重力**（X 黑洞 90 幀吸敵人 / 敵彈 + 卡比輕微被吸，結束爆炸 ring+burst / ↓+X 反重力讓範圍內敵人浮起失控 90 幀 / 空中 X 隕石三連 + 落地 shockwave / ↑+X 浮空 240 幀可自由上下飛 / 按住 60 幀「必殺：奇點」全畫面吸引 + zoom + 內爆）；驗證：`--only gravity` 21/21、`shots/agent_magic/grav_*.png`；下一步：clone
+- [09-12] 完成：**clone 分身**（onGet 生成 2 個 Mini Kirby，type `ally`、跟隨後方 20/40px、自動朝 96px 內最近敵人吐小星 dmg 1、受傷閃爍、onLose 消失 / X 全員吐星三道 / ↓+X 與分身交換位置 / 空中 X 分身墊腳再跳一次 / 按住 60 幀「必殺：百裂分身」letterbox + 8 道殘影衝鋒 + slash 連發）；驗證：`--only clone` 16/16、`shots/agent_magic/clone_*.png`；下一步：敵人 + 全套測試
+- [09-12] 完成：4 魔法系敵人 `wizzle`（mage，瞬移+火球）/ `tiktok`（time，時間場讓卡比變慢）/ `gravitron`（gravity，浮球拉近卡比）/ `mimi`（clone，模仿卡比移動+撲擊），各含 walk(2)/attack(2) 精靈與 `onInhaled` 能力；驗證：`tools/test_magic.py` **102/102 PASS**、`tools/engine_test.py` 118/118、`tools/enemy_test.py` 393/393、`node --check` 三檔通過；截圖 `shots/agent_magic/enemy_magic_enemy_*.png`、精靈總表 `sheet_mage.png sheet_time.png sheet_gravity.png sheet_clone.png`
+- 新增 key：`KB.ABILITY_KEYS` += mage / time / gravity / clone（名稱 元素法師・時間・重力・分身；HUD MAGE・TIME・GRAVITY・CLONE），`ui_ability_<key>` 與 `_mini` 圖示皆在 `src/art/kirby_magic.js` 自行註冊（items_ui.js 的迴圈在本檔載入前就跑完了）。
+- 跨檔需求（總控整合用，本輪未動他人檔案）：
+  1. **能力每幀鉤子**：目前只有攻擊中才會呼叫 `def.update`，持續型效果改用自製 `KB.MagicTicker`（type `fx`、owner `player` 的實體）。切換房間時 `GameScene.loadRoom` 會清空 entities → 分身 / 加速 / 浮空會在過門後消失（所有效果都寫成「每幀重新施加」，不會留下壞掉的重力或速度）。若 player.js 願意加 `if (d.tickAbility) d.tickAbility(this)`（每幀、不分狀態）即可改成正規作法。
+  2. **onGet 未被 GameScene.enter 呼叫**：`game.js` 的 `enter()` 直接 `player.ability = o.ability`，不走 `giveAbility` → `onGet` 不執行。分身因此在 `--ability clone` 開場時要等第一次攻擊才生成（正常遊戲流程吸入敵人取得能力沒問題）。建議 enter() 改呼叫 `giveAbility`。
+  3. **重力翻轉走天花板**：`KB.physics.step` 只在 `vy >= 0` 時判定落地，負重力無法「站在天花板」，依指示改成保底版「浮空 240 幀可自由上下飛」（↑/↓ 控制、上緣自動止住）。若 player-feel agent 之後支援 `p.flipG`，可再換成真正的天花板行走。
+  4. 音效：已呼叫 audio5 約定的 `fireball / icewall / thunder / magic_circle / magic_big / timestop / timeresume / slowmo / rewind / blackhole / meteor / gravity_lift / clone_summon / clone_swap / clone_rush`，未註冊時自動退回既有音效（`KB.audio.SFX_NAMES` 檢查），不會噴錯。
+- 已知問題：`hat_time` 的懷錶在 16×16 帽子上偏小；`kirby_attack_mage_storm` 的元素環大半被身體擋住（實際演出靠 KB.VFX.circle，影響不大）。
 
 ## forms
 （agent 在此追加）
