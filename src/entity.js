@@ -56,6 +56,19 @@
   }
   KB.Entity = Entity;
 
+  // ---------- Extra（超難）難度鉤子 ----------
+  // 開關：KB.session.extra === true（由選單 / 存檔設定，本檔只讀）。
+  // 所有倍率集中在這裡，敵人 / 魔王端一律透過 KB.exK() 取值，不要在各自的檔案裡再寫死 1.2 / 1.25。
+  //   spd     敵人移動速度（Enemy.walk / Baddie.chase）
+  //   proj    敵方投射物初速（Projectile 建構）
+  //   bossHp  魔王 maxHp（Boss.ensureExtra）
+  //   miniHp  中魔王 maxHp（Baddie.applyExtra）
+  //   phase2  魔王二階段門檻（佔 maxHp 的比例；一般難度 0.5）
+  KB.EXTRA = { spd: 1.2, proj: 1.2, bossHp: 1.25, miniHp: 1.25, phase2: 0.6 };
+  KB.extraOn = () => !!(KB.session && KB.session.extra);
+  KB.exK = k => (KB.extraOn() ? KB.EXTRA[k] : 1);
+  KB.exPhase2 = () => (KB.extraOn() ? KB.EXTRA.phase2 : 0.5);
+
   // ---------- 敵人基底 ----------
   class Enemy extends Entity {
     constructor(x, y) {
@@ -67,7 +80,10 @@
       this.beingInhaled = false; this.inhaleSrc = null;
       this.freezeT = 0;  // 被冰凍幀數
       this.z = 1; this.walkAnim = true;
-      this.dropItem = null; // 死亡掉落道具 key
+      this.dropItem = null; // 死亡掉落道具 key（spawnDef 的 drop，優先於 dropTable）
+      // 掉落表：{道具 key: 機率}，由 die() 統一 roll（見 rollDrop）。
+      this.dropTable = { pointstar: 0.25, food: 0.05 };
+      this.exK = 1;         // Extra 難度的移動速度倍率（Baddie.applyExtra 設定）
       this.startX = x; this.startY = y; this.stepH = 8;
       this.active = false;   // 進入畫面後才啟動
     }
@@ -83,7 +99,7 @@
         if (this.turnAtWall && KB.physics.wallAhead(KB.game.map, this)) this.dir *= -1;
         else if (this.turnAtEdge && KB.physics.edgeAhead(KB.game.map, this)) this.dir *= -1;
       }
-      this.vx = speed * this.dir;
+      this.vx = speed * this.dir * (this.exK || 1);
     }
     // 被吸入中（player 呼叫）：往嘴巴移動
     pullTo(px, py, strength) {
@@ -128,7 +144,28 @@
       }
       if (KB.audio) KB.audio.sfx('enemydie');
       if (KB.game) KB.game.addScore(this.score, this.cx, this.y);
-      if (this.dropItem && KB.ITEMS && KB.ITEMS[this.dropItem]) KB.spawn(new KB.ITEMS[this.dropItem](this.x, this.y));
+      this.rollDrop(src);
+    }
+    // 掉落：只有「被攻擊打死」才會走到這裡 ——
+    //   被吸入吞下 → onInhaled 直接 dead=true（不經 die）；掉出地圖 → update 裡 dead=true（不經 die）。
+    // 規則：spawnDef 的 drop 指定優先（機率 100%）；魔王房不掉（免得魔王戰變成補品大放送）；
+    //       dropTable 依序 roll，命中第一個就停（一次最多掉一個，機率 0 / 1 時為確定性行為）。
+    rollDrop(src) {
+      if (!KB.game || !KB.ITEMS) return null;
+      if (this.dropItem) {
+        if (!KB.ITEMS[this.dropItem]) return null;
+        return KB.spawn(new KB.ITEMS[this.dropItem](this.x, this.y));
+      }
+      if (KB.game.isBossRoom) return null;
+      const tbl = this.dropTable; if (!tbl) return null;
+      for (const k in tbl) {
+        const pr = tbl[k];
+        if (!(pr > 0) || !KB.ITEMS[k]) continue;
+        if (Math.random() >= pr) continue;
+        const It = KB.ITEMS[k];
+        return KB.spawn(k === 'pointstar' ? new It(this.cx - 4, this.cy - 4, { pop: true }) : new It(this.cx - 6, this.cy - 6));
+      }
+      return null;
     }
     onInhaled(player) {
       this.dead = true;
@@ -225,6 +262,8 @@
     constructor(o) {
       super(o.x, o.y);
       this.type = 'proj'; this.spr = o.spr || 'proj_star'; this.vx = o.vx || 0; this.vy = o.vy || 0;
+      // Extra 難度：敵方投射物初速 ×1.2（在子類讀 vx 之前先乘，例如 Boomerang 的 maxV）
+      if ((o.owner || 'enemy') === 'enemy' && KB.extraOn()) { const k = KB.EXTRA.proj; this.vx *= k; this.vy *= k; }
       this.w = o.w || 8; this.h = o.h || 8; this.x = o.x - this.w / 2; this.y = o.y - this.h / 2;
       this.dmg = o.dmg !== undefined ? o.dmg : 1; this.owner = o.owner || 'enemy';
       this.life = o.life || 120; this.grav = o.grav || 0; this.bounce = o.bounce || 0; this.pierce = !!o.pierce;

@@ -480,12 +480,16 @@ git 已初始化，基線 commit `c382e2a`。Playwright venv：`.venv/bin/python
   需求：**至少 10 格連續平地**，兩端有牆或落差；牠碰撞框 30×30、精靈最寬 44px，房間淨高請留 ≥ 3 格。
 - **mechanics / player2（平衡回報，非我的檔案）**：`src/items.js` 這一輪對 `abilitystar` 的改動（落地彈跳 6 次 → 3 次、
   `life` 420 → `KB.PHYS.abilityStarLife`）**讓 `boss_test` 的 kracko / dedede fight 樣本從 3/3 掉到 2/3**。
-  Bisect 證據：把 **只有** `src/items.js` 還原成 HEAD（我這輪的所有改動都留著）→ `tools/boss_test.py --runs 3` **ALL PASS**；
-  只還原 `abilities.js` 或 `tilemap.js` 則仍然 FAIL。原因是掉落的能力星彈跳次數改了 → 落點改了 → 機器人撿不回劍。
+  Bisect 證據（在 Round 2 mechanics commit 07cfc12 之前做的）：把 **只有** `src/items.js` 還原成 Round 1 版本
+  （我這輪的所有改動都留著）→ `tools/boss_test.py --runs 3` **ALL PASS**；只還原 `abilities.js` 或 `tilemap.js` 則仍然 FAIL。
+  原因是掉落的能力星彈跳次數改了 → 落點改了 → 機器人撿不回劍。
+  （bisect 期間我短暫地把 `src/items.js` / `abilities.js` / `tilemap.js` checkout 成舊版再複製回來，
+  若 mechanics 發現自己有哪一筆編輯不見了請重做 —— 對不起，之後我不會再動別人的檔案。）
   建議：能力星落地彈跳改回 6 次（或把第 2 次彈跳的水平摩擦調回原值），再跑 `tools/boss_test.py --runs 3` 確認。
 - **ui-flow / menu**：Extra 難度的開關請寫 `KB.session.extra = true`（布林），敵人 / 魔王端已經全部接好；
   倍率要調整請改 `src/entity.js` 的 `KB.EXTRA`（`spd / proj / bossHp / miniHp / phase2`），不要在各處寫死。
-  注意 `__kb.goto('game', …)` 與 `main.js` 開新遊戲時會重建 `KB.session`，**設定 extra 要在進入 GameScene 之後（或改成從存檔帶入）**。
+  已確認與 ui-flow / player2 對得上：`main.js` 的 `__kb.goto('game', {extra:true})` 會把旗標帶進新的 `KB.session`，
+  `menu.js` 的 Extra 選項與 `player.js` 的 `extraMaxHp` 讀的也是同一個旗標。
 - **audio2**：登場動畫用到的 sfx 都是既有的（`door` / `land` / `hammer` / `block` / `slide` / `cutter` / `unlock` / `enemyhit`）。
   若之後要做專屬的登場音效，建議加 `boss_intro`（一次性號角）與 `cape`（布料展開），我再接上去。
 

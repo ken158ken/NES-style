@@ -65,10 +65,10 @@
 - [todo] level_check 支援新字元；playthrough 5 世界仍通關
 
 ## enemies-bosses2（src/enemies.js, src/bosses.js, src/art/enemies.js, src/art/bosses.js, src/entity.js）
-- [doing] 新原創中魔王 1 種（例如「巨型飛羽鳥」或「鐵甲滾球」，2 招 + 受傷硬直，給 cutter 或 hammer），像素圖 40~48px
-- [todo] 敵人掉落表：每敵人 dropTable（點數星機率、食物機率），由 Enemy.die 統一處理
-- [todo] Extra 難度鉤子：讀 KB.session.extra 時敵人速度 ×1.2、投射物速度 ×1.2、魔王 HP ×1.25、二階段門檻 60%
-- [todo] 魔王登場動畫（各 1 個：威斯比搖晃落葉、克拉寇雲聚集、魅塔騎士披風展開、迪迪迪從門走出、洛洛洛從兩側推箱進場）
+- [done] 新原創中魔王 1 種（例如「巨型飛羽鳥」或「鐵甲滾球」，2 招 + 受傷硬直，給 cutter 或 hammer），像素圖 40~48px
+- [done] 敵人掉落表：每敵人 dropTable（點數星機率、食物機率），由 Enemy.die 統一處理
+- [done] Extra 難度鉤子：讀 KB.session.extra 時敵人速度 ×1.2、投射物速度 ×1.2、魔王 HP ×1.25、二階段門檻 60%
+- [done] 魔王登場動畫（各 1 個：威斯比搖晃落葉、克拉寇雲聚集、魅塔騎士披風展開、迪迪迪從門走出、洛洛洛從兩側推箱進場）
 - [todo] 敵人配置需求寫給 mechanics（哪一房放新中魔王）
 
 ## player2（src/player.js, src/const.js, src/input.js, src/art/kirby.js, tools/engine_test.py）

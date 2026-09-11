@@ -118,14 +118,14 @@ HOOK_JS = r"""() => {
 # ---------------------------------------------------------------------------
 ORDER = ['waddledee', 'waddledoo', 'brontoburt', 'hothead', 'sirkibble', 'sparky', 'rocky', 'chilly', 'bladeknight', 'bonkers', 'mrfrosty',
          'poppybros', 'scarfy', 'gordo', 'cappy', 'cappy_bare', 'twizzy', 'shotzo', 'squishy', 'glunk', 'kabu',
-         'spikeball', 'dartwing', 'snowly']
+         'spikeball', 'dartwing', 'snowly', 'rollarmor']
 ABILITY = {'waddledee': None, 'waddledoo': 'beam', 'brontoburt': None, 'hothead': 'fire', 'sirkibble': 'cutter', 'sparky': 'spark', 'rocky': 'stone',
            'chilly': 'ice', 'bladeknight': 'sword', 'poppybros': None, 'cappy': None, 'cappy_bare': None, 'twizzy': None, 'squishy': None, 'glunk': None, 'kabu': None,
-           'spikeball': None, 'dartwing': None, 'snowly': 'ice'}
-NOT_INHALABLE = {'scarfy', 'gordo', 'shotzo', 'bonkers', 'mrfrosty'}
+           'spikeball': None, 'dartwing': None, 'snowly': 'ice', 'rollarmor': 'hammer'}
+NOT_INHALABLE = {'scarfy', 'gordo', 'shotzo', 'bonkers', 'mrfrosty', 'rollarmor'}
 FLY = {'brontoburt', 'scarfy', 'gordo', 'shotzo', 'dartwing'}
 INVINCIBLE = {'gordo', 'shotzo'}
-MINIBOSS = {'bonkers': 'hammer', 'mrfrosty': 'ice'}
+MINIBOSS = {'bonkers': 'hammer', 'mrfrosty': 'ice', 'rollarmor': 'hammer'}
 HOPPERS = {'sparky', 'poppybros'}
 
 def overlaps(a, b):
@@ -140,12 +140,13 @@ def hitbox_touches_player(S, kind):
     return None
 HP = {'waddledee': 2, 'waddledoo': 2, 'brontoburt': 2, 'hothead': 2, 'sirkibble': 2, 'sparky': 2, 'rocky': 3, 'chilly': 2, 'bladeknight': 4, 'bonkers': 14,
       'mrfrosty': 12, 'poppybros': 2, 'scarfy': 2, 'gordo': 999, 'cappy': 2, 'cappy_bare': 2, 'twizzy': 2, 'shotzo': 999, 'squishy': 2, 'glunk': 2, 'kabu': 3,
-      'spikeball': 3, 'dartwing': 2, 'snowly': 3}
+      'spikeball': 3, 'dartwing': 2, 'snowly': 3, 'rollarmor': 12}
 # 各敵人在「玩家 x=3」時的預設生成格（吸入 / 攻擊 / 接觸階段會另外指定）
 SPAWN = {k: dict(ex=8, ey=9) for k in ORDER}
 SPAWN.update({'brontoburt': dict(ex=9, ey=6), 'scarfy': dict(ex=9, ey=7), 'gordo': dict(ex=9, ey=9, a='v', b=2), 'shotzo': dict(ex=10, ey=8),
               'squishy': dict(px=40, ex=47, ey=9), 'twizzy': dict(ex=12, ey=9), 'kabu': dict(ex=10, ey=9),
-              'dartwing': dict(ex=9, ey=6), 'spikeball': dict(ex=9, ey=9), 'snowly': dict(ex=9, ey=9)})
+              'dartwing': dict(ex=9, ey=6), 'spikeball': dict(ex=9, ey=9), 'snowly': dict(ex=9, ey=9),
+              'rollarmor': dict(ex=9, ey=9)})
 
 results = []
 VERBOSE = False
@@ -189,6 +190,8 @@ class Harness:
     def ability_moves(self, key): return self.ev("(k)=>{const d=KB.ABILITIES[k];return {moves:d.moves||null, desc:d.desc||null};}", key)
     def stone_form(self): return self.ev("()=>KB.player.abilityData && KB.player.abilityData.form")
     def score(self): return self.ev("()=>KB.game.score")
+    def extra(self, v): self.ev("(v)=>{KB.session = KB.session || {}; KB.session.extra = !!v;}", bool(v))
+    def items(self): return self.ev("()=>KB.game.entities.filter(e=>!e.dead && e.type==='item').map(e=>e.name)")
     def save_shot(self, name, data=None):
         if not self.shots: return
         if data is None: data = self.ev("()=>__t.shot()")
@@ -494,6 +497,48 @@ def phase_feature(h, key):
         check(n + 'mist reaches player', hitbox_touches_player(S, 'ice') is not None, dict(hurts=hu))
         check(n + 'keeps its distance (never walks into the player)', all(abs(x['e']['cx'] - x['p']['cx']) > 18 for x in S), '')
         h.save_shot1(key)
+    elif key == 'rollarmor':
+        # ① 鐵殼滾動：距離遠 → 縮進殼裡高速滾過來
+        h.goto(3); h.spawn(key, 14, 9, d=-1)
+        S = h.run(240, 4); roll = [x for x in S if x['e']['state'] == 'roll']
+        check(n + 'curls into its shell and rolls at the player (rollarmor_roll, |vx| >= 2.5)',
+              bool(roll) and any(x['e']['spr'] == 'rollarmor_roll' and abs(x['e']['vx']) >= 2.5 for x in roll),
+              dict(rollSamples=len(roll), maxVx=max((abs(x['e']['vx']) for x in roll), default=0)))
+        h.save_shot(key)
+        # 撞牆反彈：玩家站在牆（col 34）的另一側 → 滾過去撞牆，方向會翻轉且永遠越不過牆
+        # （生成點要避開 col 20~23 的坑，否則會直接掉下去）
+        h.goto(40); h.spawn(key, 28, 9, d=1)
+        S = h.run(320, 3); roll = [x for x in S if x['e']['state'] == 'roll']
+        dirs = sorted(set(x['e']['dir'] for x in roll))
+        maxr = max(x['e']['x'] + x['e']['w'] for x in S)
+        check(n + 'bounces off walls while rolling (dir flips, never passes the wall)',
+              len(roll) >= 2 and len(dirs) == 2 and maxr <= WALL_X * 16 + 0.5, dict(dirs=dirs, maxRight=maxr))
+        # ② 站起來砸地：近距離 → slam（dmg 2 判定框 + 左右兩道震波）
+        h.goto(3); h.spawn(key, 5, 9, d=-1)
+        S = h.run(240, 2, shot_when='hitbox'); sp = h.spawned(); hu = h.hurts()
+        hm = spawned_of(sp, type='hitbox', kind='hammer')
+        sk = [x for x in sp if x['type'] == 'hitbox' and x['kind'] == 'shock']
+        check(n + 'stands up and slams the ground (dmg 2 hammer hitbox)',
+              len(hm) >= 1 and hm[0]['dmg'] == 2 and any(x['e']['spr'] == 'rollarmor_attack' for x in S), dict(hammer=len(hm)))
+        check(n + 'slam sends one shockwave to each side', len(sk) >= 2, dict(shock=len(sk)))
+        check(n + 'slam reaches the player',
+              hitbox_touches_player(S, 'hammer') is not None or any(x['kind'] in ('hammer', 'shock') for x in hu), dict(hurts=hu))
+        h.save_shot1(key + '_slam')
+        # ③ 鐵殼關著（滾動 / 砸地預備）打不穿；殼張開（open）才扣血
+        h.goto(3, 9, ability='sword', immune=True); h.spawn(key, 6, 9, d=-1)
+        r = h.ev("""()=>{
+          const e = __te, o = {};
+          e.setState('roll'); e.stateT = 30; e.invuln = 0;
+          o.hp0 = e.hp; o.rollRet = e.hurt(3, {cx: e.cx, cy: e.cy}); o.hpRoll = e.hp;
+          e.setState('slam'); e.stateT = 2; e.invuln = 0;
+          o.slamRet = e.hurt(3, {cx: e.cx, cy: e.cy}); o.hpSlam = e.hp;
+          e.setState('open'); e.openT = 400; e.invuln = 0;
+          o.openRet = e.hurt(3, {cx: e.cx, cy: e.cy}); o.hpOpen = e.hp;
+          return o;
+        }""")
+        check(n + 'armored shell (roll / slam windup) blocks all damage',
+              r['hpRoll'] == r['hp0'] and r['hpSlam'] == r['hp0'] and r['rollRet'] is True and r['slamRet'] is True, r)
+        check(n + 'open shell takes damage', r['hpOpen'] == r['hp0'] - 3, r)
     elif key == 'kabu':
         h.goto(3); h.spawn(key, 10, 9)
         S = h.run(200, 5); p = S[0]['p']
@@ -605,6 +650,10 @@ def phase_attack(h, key):
     if hits_needed > 2:
         h.taps('attack', hits_needed + 2, 14); e1 = h.ent()
     if key in MINIBOSS:
+        # 有無敵狀態的中魔王（鐵甲滾球的鐵殼）可能擋掉好幾下 → 補打到暈倒為止
+        for _ in range(16):
+            if e1['stunned'] or e1['dead']: break
+            h.taps('attack', 3, 14); e1 = h.ent()
         check(n + 'hp 0 -> stunned (inhalable, harmless, not dead)', e1['stunned'] and e1['hp'] == 0 and e1['inhalable'] and not e1['hurtsPlayer'] and not e1['dead'], dict(hp=e1['hp'], stunned=e1['stunned'], inh=e1['inhalable'], hurts=e1['hurtsPlayer']))
         check(n + 'stun awards 3000', h.score() - sc0 >= 3000, h.score() - sc0)
         h.save_shot(key + '_stun')
@@ -740,6 +789,145 @@ def phase_abilities(h):
         check(f'{k}: has desc + >=3 moves for the pause card', ok, d)
 
 
+# ---------------------------------------------------------------------------
+# 階段 7：敵人掉落表（entity.js 的 Enemy.dropTable / rollDrop）
+#   機率設成 0 / 1 就是確定性行為，測試不靠隨機。
+# ---------------------------------------------------------------------------
+DROP_NAMES = ('pointstar', 'food', 'tomato', 'oneup', 'candy')
+
+def dropped(h):
+    """本次 goto 之後由 KB.spawn 生出來的掉落道具（用 spawn 紀錄而不是場上實體：
+    道具可能一落地就被站在旁邊的卡比撿走）"""
+    return [x['name'] for x in h.spawned() if x['type'] == 'item' and x['name'] in DROP_NAMES]
+
+
+def kill_with_table(h, enemy, table, boss_room=False, drop=None, taps=6):
+    """生一隻敵人、覆寫牠的掉落表，用劍打死，回傳掉出來的道具名稱"""
+    h.goto(3, 9, ability='sword', immune=True)
+    h.spawn(enemy, 5, 9, d=-1)
+    if drop is not None:
+        h.ev("(d)=>{__te.dropItem = d;}", drop)
+    h.ev("([t, b])=>{ __te.dropTable = t; KB.game.isBossRoom = b; }", [table, bool(boss_room)])
+    h.taps('attack', taps, 14)
+    for _ in range(16):
+        e = h.ent()
+        if e['dead'] or e['stunned']: break
+        h.taps('attack', 3, 14)
+    h.run(10, 10)
+    return dropped(h)
+
+
+def phase_drops(h):
+    n = 'drops: '
+    tbl = h.ev("()=>({enemy: new KB.ENEMIES.waddledee(0,0).dropTable, mini: new KB.ENEMIES.bonkers(0,0).dropTable})")
+    check(n + 'default tables (Enemy 0.25/0.05, MiniBoss 0.5/0.1)',
+          tbl['enemy'] == {'pointstar': 0.25, 'food': 0.05} and tbl['mini'] == {'tomato': 0.5, 'oneup': 0.1}, tbl)
+    it = kill_with_table(h, 'waddledee', {'pointstar': 1})
+    check(n + 'probability 1 always drops', it.count('pointstar') == 1 and len(it) == 1, it)
+    it = kill_with_table(h, 'waddledee', {'pointstar': 0, 'food': 0})
+    check(n + 'probability 0 never drops', it == [], it)
+    it = kill_with_table(h, 'waddledee', {'tomato': 1, 'oneup': 1})
+    check(n + 'at most one item per kill (first hit in the table wins)', it == ['tomato'], it)
+    it = kill_with_table(h, 'waddledee', {'pointstar': 1}, boss_room=True)
+    check(n + 'no drops in a boss room', it == [], it)
+    it = kill_with_table(h, 'waddledee', {'pointstar': 1}, drop='oneup')
+    check(n + "spawnDef 'drop' overrides the table", it == ['oneup'], it)
+    # 被吸入吞下不掉落（onInhaled 不經過 die）
+    h.goto(3, 9)
+    h.spawn('waddledee', 6, 9, d=-1)
+    h.ev("()=>{__te.dropTable = {pointstar: 1};}")
+    S, took = inhale_until(h, 90)
+    check(n + 'inhaled (swallowed) enemies drop nothing', took is not None and dropped(h) == [], dict(took=took, items=dropped(h)))
+    # 掉出地圖不掉落
+    h.goto(3, 9)
+    h.spawn('waddledee', 6, 9, d=-1)
+    h.ev("()=>{__te.dropTable = {pointstar: 1}; __te.y = KB.game.map.ph + 200;}")
+    h.run(20, 10)
+    check(n + 'enemies that fall out of the map drop nothing', h.ent()['dead'] and dropped(h) == [], dropped(h))
+    # 中魔王：被打倒（暈倒）的那一刻掉，吸入時不重複掉
+    h.goto(3, 9, ability='sword', immune=True)
+    h.spawn('bonkers', 5, 9, d=-1)
+    h.ev("()=>{__te.dropTable = {tomato: 1};}")
+    for _ in range(20):
+        e = h.ent()
+        if e['stunned'] or e['dead']: break
+        h.taps('attack', 3, 14)
+    at_stun = dropped(h)
+    check(n + 'mini-boss drops when it is knocked down (stun)', at_stun == ['tomato'], dict(stunned=h.ent()['stunned'], items=at_stun))
+    h.ev("()=>__t.dropAbility()")
+    e1 = h.ent(); pl = h.player()
+    if abs(e1['cx'] - pl['cx']) > 44: h.teleport(e1['cx'] - 40, pl['y'])
+    S, took = inhale_until(h, 120)
+    check(n + 'inhaling the stunned mini-boss does not drop again', took is not None and dropped(h) == at_stun,
+          dict(took=took, before=at_stun, after=dropped(h)))
+
+
+# ---------------------------------------------------------------------------
+# 階段 8：Extra（超難）難度鉤子（KB.session.extra）
+# ---------------------------------------------------------------------------
+def phase_extra(h):
+    n = 'extra: '
+    h.goto(3)
+    ex = h.ev("()=>({on: KB.extraOn(), tbl: KB.EXTRA, spd: KB.exK('spd'), proj: KB.exK('proj'), ph: KB.exPhase2()})")
+    check(n + 'KB.EXTRA table exists and is OFF by default',
+          ex['on'] is False and ex['spd'] == 1 and ex['proj'] == 1 and ex['ph'] == 0.5
+          and ex['tbl'] == {'spd': 1.2, 'proj': 1.2, 'bossHp': 1.25, 'miniHp': 1.25, 'phase2': 0.6}, ex)
+
+    def walk_speed(v):
+        h.goto(3); h.extra(v)
+        h.spawn('waddledee', 8, 9, d=1)
+        S = h.run(60, 10)
+        return max(abs(x['e']['vx']) for x in S)
+    v0, v1 = walk_speed(False), walk_speed(True)
+    check(n + 'enemy movement speed x1.2', abs(v1 - v0 * 1.2) < 0.02, dict(normal=v0, extra=v1))
+
+    # 敵方投射物初速 ×1.2（玩家的不受影響）
+    pr = h.ev("""()=>{
+      const mk = o => { const p = new KB.Projectile(Object.assign({spr:'proj_star', x:100, y:100, vx:2, vy:-3}, o)); p.dead = true; return {vx:+p.vx.toFixed(3), vy:+p.vy.toFixed(3)}; };
+      KB.session.extra = false; const a = mk({owner:'enemy'});
+      KB.session.extra = true;  const b = mk({owner:'enemy'}), c = mk({owner:'player'});
+      KB.session.extra = false;
+      return {normal:a, extra:b, player:c};
+    }""")
+    check(n + 'enemy projectile speed x1.2 (player projectiles unchanged)',
+          abs(pr['extra']['vx'] - 2.4) < 1e-6 and abs(pr['extra']['vy'] + 3.6) < 1e-6
+          and pr['normal'] == {'vx': 2, 'vy': -3} and pr['player'] == {'vx': 2, 'vy': -3}, pr)
+    # 實戰：shotzo 的砲彈也要快 1.2 倍
+    def cannon_vx(v):
+        h.goto(3); h.extra(v)
+        h.spawn('shotzo', 10, 8)
+        S = h.run(200, 4)
+        vs = [abs(o['vx']) for x in S for o in x['o'] if o['kind'] == 'cannon']
+        return max(vs) if vs else 0
+    c0, c1 = cannon_vx(False), cannon_vx(True)
+    check(n + 'in game: shotzo cannonball x1.2', c0 > 0 and abs(c1 - c0 * 1.2) < 0.03, dict(normal=c0, extra=c1))
+
+    # 中魔王 HP ×1.25
+    def mini_hp(v):
+        h.goto(3); h.extra(v)
+        h.spawn('rollarmor', 9, 9, d=-1)
+        h.run(3, 3)
+        e = h.ent(); return (e['hp'], h.ev("()=>__te.maxHp"))
+    m0, m1 = mini_hp(False), mini_hp(True)
+    check(n + 'mini-boss HP x1.25 (12 -> 15)', m0 == (12, 12) and m1 == (15, 15), dict(normal=m0, extra=m1))
+    b0 = mini_hp(False)
+    check(n + 'mini-boss HP back to normal when extra is off', b0 == (12, 12), b0)
+
+    # 魔王 maxHp ×1.25、二階段門檻 50% → 60%
+    bs = h.ev("""()=>{
+      const mk = () => { const b = new KB.BOSSES.whispywoods(200, 144); b.ensureExtra(); return {maxHp:b.maxHp, hp:b.hp, half:b.half}; };
+      KB.session.extra = false; const a = mk();
+      KB.session.extra = true;  const b = mk();
+      KB.session.extra = false;
+      return {normal:a, extra:b};
+    }""")
+    check(n + 'boss maxHp x1.25 (40 -> 50) and hp starts full',
+          bs['normal']['maxHp'] == 40 and bs['extra']['maxHp'] == 50 and bs['extra']['hp'] == 50, bs)
+    check(n + 'phase 2 threshold 50% -> 60%',
+          abs(bs['normal']['half'] - 20) < 1e-6 and abs(bs['extra']['half'] - 30) < 1e-6, bs)
+    h.extra(False)
+
+
 def main():
     global VERBOSE
     ap = argparse.ArgumentParser()
@@ -748,7 +936,10 @@ def main():
     a = ap.parse_args(); VERBOSE = a.v
     keys = [k for k in a.only.split(',') if k] or ORDER
     run_abilities = (not a.only) or ('abilities' in keys)
-    keys = [k for k in keys if k != 'abilities']
+    run_extras = (not a.only) or ('drops' in keys) or ('extra' in keys)
+    only_drops = 'drops' in keys
+    only_extra = 'extra' in keys
+    keys = [k for k in keys if k not in ('abilities', 'drops', 'extra')]
     logs = []
     with sync_playwright() as p:
         b = p.chromium.launch()
@@ -776,6 +967,17 @@ def main():
             phase_abilities(h)
             errs = [l for l in logs[n0:] if 'pageerror' in l or 'console.error' in l]
             check('abilities: no page errors', not errs, errs[:3])
+        if run_extras:
+            for label, fn, want in (('drops', phase_drops, only_drops), ('extra', phase_extra, only_extra)):
+                if a.only and not want: continue
+                print('-' * 8, label)
+                n0 = len(logs)
+                try:
+                    fn(h)
+                except Exception as ex:
+                    check(f'{label}: raised', False, repr(ex))
+                errs = [l for l in logs[n0:] if 'pageerror' in l or 'console.error' in l]
+                check(f'{label}: no page errors', not errs, errs[:3])
         missing = pg.evaluate("()=>__kb.missing()")
         b.close()
     print('---')

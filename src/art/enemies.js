@@ -1979,4 +1979,160 @@
   const SN_ATK0 = pasteR(SN_BODY, ['.kiik.', 'kiiiik', '.kiik.'], 9, 4).concat(['..krrk....krrk..']);
   const SN_ATK1 = pasteR(SN_BODY, ['.kiiik', 'kiiiii', 'kiiiii', '.kiiik'], 9, 4).concat(['...krrk..krrk...']);
   S('snowly_attack', [SN_ATK0, SN_ATK1], { fps: 8 }, { e: '#f4f8ff', C: '#2090c0', i: '#c8f4ff' });
+
+  // ======================================================================
+  // 新中魔王：鐵甲滾球 Rollarmor —— 背著整片可開闔鐵殼的圓滾生物
+  //   walk 40×36（2 幀）/ roll 36×36 圓球（2 幀、anchor center、程式端會旋轉）
+  //   attack 44×40（2 幀：舉臂 / 砸下，鐵殼張開露出軟肉）/ hurt 1 幀 / stun 1 幀
+  //   本段用程序式畫布（rgrid/rdisc/…）而不是手排字串：40px 以上的圖手排易出錯。
+  // ======================================================================
+  const RA_PAL = {
+    s: '#9aa4b4', S: '#5c6676', d: '#333b48', L: '#dce4f0',
+    r: '#e87050', R: '#a03c20', y: '#ffd040', Y: '#b07c00',
+    n: '#ffe0b0', k: '#161a20', w: '#ffffff',
+  };
+  const rgrid = (w, h) => Array.from({ length: h }, () => Array(w).fill('.'));
+  const rrows = g => g.map(r => r.join(''));
+  const rin = (g, x, y) => y >= 0 && y < g.length && x >= 0 && x < g[0].length;
+  const rpx = (g, x, y, c) => { if (rin(g, x, y)) g[y][x] = c; };
+  const ronly = (g, x, y, c) => { if (rin(g, x, y) && g[y][x] !== '.') g[y][x] = c; };   // 只覆蓋已有像素
+  const rfill = (g, x, y, w, h, c) => { for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) rpx(g, x + i, y + j, c); };
+  const rdisc = (g, cx, cy, r, c) => { for (let y = -r; y <= r; y++) for (let x = -r; x <= r; x++) if (x * x + y * y <= r * r + r * 0.6) rpx(g, cx + x, cy + y, c); };
+  const rell = (g, cx, cy, rx, ry, c) => { for (let y = -ry; y <= ry; y++) for (let x = -rx; x <= rx; x++) if ((x * x) / (rx * rx + 0.5) + (y * y) / (ry * ry + 0.5) <= 1) rpx(g, cx + x, cy + y, c); };
+  const rlineC = (g, x0, y0, x1, y1, c, maskOnly) => {
+    const dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1; let err = dx + dy;
+    for (; ;) { (maskOnly ? ronly : rpx)(g, x0, y0, c); if (x0 === x1 && y0 === y1) break; const e2 = 2 * err; if (e2 >= dy) { err += dy; x0 += sx; } if (e2 <= dx) { err += dx; y0 += sy; } }
+  };
+  const routline = (g, c) => {
+    const h = g.length, w = g[0].length, src = g.map(r => r.slice());
+    const tr = (x, y) => x < 0 || y < 0 || x >= w || y >= h || src[y][x] === '.';
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      if (src[y][x] === '.' || src[y][x] === c) continue;
+      if (tr(x - 1, y) || tr(x + 1, y) || tr(x, y - 1) || tr(x, y + 1)) g[y][x] = c;
+    }
+  };
+  // 金屬打光：以 (cx,cy) 為中心，左上亮（L）右下暗（S）
+  const rmetal = (g, cx, cy, hi, lo, base) => {
+    for (let y = 0; y < g.length; y++) for (let x = 0; x < g[0].length; x++) {
+      if (g[y][x] !== base) continue;
+      const u = (x - cx) + (y - cy);
+      if (u > lo) g[y][x] = 'S'; else if (u < hi) g[y][x] = 'L';
+    }
+  };
+  const rrivet = (g, x, y) => { ronly(g, x, y, 'y'); ronly(g, x + 1, y, 'Y'); ronly(g, x, y + 1, 'Y'); };
+  // 鐵殼（背甲）：中心 (cx,cy)、半徑 (rx,ry)，含接縫與鉚釘
+  function raShell(g, cx, cy, rx, ry) {
+    rell(g, cx, cy, rx, ry, 's');
+    rmetal(g, cx, cy, -rx - 2, rx - 5, 's');
+    for (let i = -rx; i <= rx; i++) { ronly(g, cx + i, cy + 1, 'd'); ronly(g, cx + i, cy + 2, 'd'); }   // 開闔接縫
+    rrivet(g, cx - 9, cy - 8); rrivet(g, cx, cy - 11); rrivet(g, cx + 9, cy - 7);
+    rrivet(g, cx - 10, cy + 5); rrivet(g, cx, cy + 8); rrivet(g, cx + 9, cy + 6);
+  }
+  // 頭（鐵盔 + 一條發光面罩）：中心 (cx,cy)
+  function raHead(g, cx, cy, eye) {
+    rdisc(g, cx, cy, 6, 'S');
+    rmetal(g, cx, cy, -8, 3, 'S');
+    rell(g, cx, cy - 4, 6, 3, 'd');                 // 盔頂
+    rfill(g, cx - 6, cy - 1, 12, 4, 'k');           // 面罩開口
+    for (let i = 0; i < 6; i++) { rpx(g, cx + i, cy, eye || 'y'); rpx(g, cx + i, cy + 1, eye ? 'w' : 'Y'); }
+    rpx(g, cx - 3, cy - 5, 'L'); rpx(g, cx - 2, cy - 6, 'L');
+  }
+  function raFoot(g, x, y) { rfill(g, x, y, 9, 6, 'S'); rfill(g, x, y + 4, 9, 2, 'd'); rpx(g, x + 1, y + 5, 'n'); rpx(g, x + 4, y + 5, 'n'); rpx(g, x + 7, y + 5, 'n'); }
+  function raClaw(g, x, y) { rfill(g, x, y, 7, 5, 'S'); rpx(g, x + 5, y + 4, 'n'); rpx(g, x + 3, y + 5, 'n'); rpx(g, x + 6, y + 2, 'n'); }
+  // --- 走路（2 幀）---
+  function raWalk(f) {
+    const g = rgrid(40, 36);
+    raFoot(g, f ? 4 : 9, 30); raFoot(g, f ? 18 : 21, f ? 30 : 29);
+    raShell(g, 14, 17, 14, 14);
+    raHead(g, 32, 25);
+    raClaw(g, 24, f ? 27 : 29);
+    routline(g, 'k');
+    return rrows(g);
+  }
+  S('rollarmor_walk', [raWalk(0), raWalk(1)], { fps: 5 }, RA_PAL);
+  // --- 鐵球（2 幀、置中；程式端旋轉）---
+  function raBall(f) {
+    const g = rgrid(36, 36);
+    rdisc(g, 17, 17, 16, 's');
+    rmetal(g, 17, 17, -18, 11, 's');
+    // 赤道帶（旋轉時看得出來）
+    const a0 = f ? 0.45 : 0;
+    const dx = Math.cos(a0), dy = Math.sin(a0);
+    for (let t = -17; t <= 17; t++) for (let o = -1; o <= 1; o++) ronly(g, Math.round(17 + dx * t - dy * o), Math.round(17 + dy * t + dx * o), 'd');
+    // 外緣四根短脊（讓旋轉看得出來）
+    for (let i = 0; i < 4; i++) {
+      const a = a0 + i * Math.PI / 2 + Math.PI / 4;
+      rdisc(g, Math.round(17 + Math.cos(a) * 15), Math.round(17 + Math.sin(a) * 15), 2, 'd');
+      rrivet(g, Math.round(17 + Math.cos(a) * 9), Math.round(17 + Math.sin(a) * 9));
+    }
+    // 面罩從殼縫露出來
+    rfill(g, 24, 16, 9, 3, 'k');
+    for (let i = 0; i < 5; i++) rpx(g, 26 + i, 17, 'y');
+    routline(g, 'k');
+    return rrows(g);
+  }
+  S('rollarmor_roll', [raBall(0), raBall(1)], { fps: 8, anchor: 'center' }, RA_PAL);
+  // --- 站起來砸地（2 幀：舉臂 / 砸下）---
+  function raSlam(f) {
+    const g = rgrid(44, 40);
+    raFoot(g, 12, 34); raFoot(g, 24, 34);
+    // 張開的兩片鐵殼（像翅膀往左右上方掀開）
+    rell(g, 10, 14, 9, 6, 's'); rell(g, 34, 14, 9, 6, 's');
+    rmetal(g, 22, 14, -14, 8, 's');
+    for (const cx of [10, 34]) { rrivet(g, cx - 4, 12); rrivet(g, cx + 3, 15); }
+    // 露出的軟肉
+    rell(g, 22, 24, 11, 12, 'r');
+    rmetal(g, 22, 24, -99, 6, 'r');
+    for (let y = 0; y < 40; y++) for (let x = 0; x < 44; x++) if (g[y][x] === 'S' && y > 18 && x > 12 && x < 33) g[y][x] = 'R';
+    for (let i = -8; i <= 8; i++) ronly(g, 22 + i, 24, 'R');
+    raHead(g, 30, 30, 'r');
+    if (f === 0) {   // 舉臂
+      rfill(g, 10, 6, 7, 16, 's'); rfill(g, 28, 6, 7, 16, 's');
+      rfill(g, 8, 3, 10, 5, 's'); rfill(g, 27, 3, 10, 5, 's');
+      rmetal(g, 22, 10, -14, 10, 's');
+      for (const x of [9, 12, 15, 28, 31, 34]) rpx(g, x, 3, 'n');
+      rpx(g, 21, 8, 'w'); rpx(g, 22, 7, 'w'); rpx(g, 23, 8, 'w');
+    } else {          // 砸下
+      rfill(g, 12, 26, 7, 12, 's'); rfill(g, 26, 26, 7, 12, 's');
+      rfill(g, 9, 34, 11, 5, 's'); rfill(g, 25, 34, 11, 5, 's');
+      rmetal(g, 22, 30, -16, 8, 's');
+      for (const x of [10, 13, 16, 26, 29, 32]) rpx(g, x, 38, 'n');
+      for (let i = 0; i < 6; i++) { rpx(g, 4 + i, 36 - i, 'L'); rpx(g, 39 - i, 36 - i, 'L'); }
+    }
+    routline(g, 'k');
+    return rrows(g);
+  }
+  S('rollarmor_attack', [raSlam(0), raSlam(1)], { fps: 6, loop: false }, RA_PAL);
+  // --- 受傷（1 幀）：鐵殼裂開、眼睛變「×」---
+  function raHurt() {
+    const g = rgrid(40, 36);
+    raFoot(g, 7, 31); raFoot(g, 20, 31);
+    raShell(g, 16, 18, 15, 13);
+    rlineC(g, 6, 8, 13, 20, 'k', true); rlineC(g, 13, 20, 9, 28, 'k', true);   // 裂痕
+    rlineC(g, 22, 7, 26, 18, 'k', true);
+    raHead(g, 31, 25, 'w');
+    rfill(g, 31, 23, 5, 5, 'k'); rlineC(g, 32, 24, 35, 27, 'w'); rlineC(g, 35, 24, 32, 27, 'w');  // ×
+    raClaw(g, 25, 30);
+    routline(g, 'k');
+    return rrows(g);
+  }
+  S('rollarmor_hurt', [raHurt()], { fps: 1 }, RA_PAL);
+  // --- 暈眩（1 幀）：癱坐、鐵殼掀開、頭上冒星星 ---
+  function raStun() {
+    const g = rgrid(40, 30);
+    rell(g, 6, 18, 8, 6, 's'); rell(g, 33, 18, 8, 6, 's');        // 掀開的兩片殼
+    rmetal(g, 20, 18, -16, 8, 's');
+    rell(g, 20, 21, 12, 8, 'r'); rmetal(g, 20, 21, -99, 4, 'r');
+    for (let y = 0; y < 30; y++) for (let x = 0; x < 40; x++) if (g[y][x] === 'S' && y > 16 && x > 9 && x < 31) g[y][x] = 'R';
+    rdisc(g, 24, 22, 6, 'd'); rell(g, 24, 18, 6, 3, 'S');
+    rfill(g, 19, 21, 11, 3, 'k');
+    rlineC(g, 25, 21, 28, 24, 'w'); rlineC(g, 28, 21, 25, 24, 'w');   // 眼睛 ×
+    for (const [sx, sy] of [[10, 3], [20, 0], [30, 4]]) {              // 星星
+      rpx(g, sx + 1, sy, 'y'); rfill(g, sx, sy + 1, 3, 1, 'y'); rpx(g, sx + 1, sy + 2, 'y');
+      rpx(g, sx, sy + 3, 'Y'); rpx(g, sx + 2, sy + 3, 'Y');
+    }
+    routline(g, 'k');
+    return rrows(g);
+  }
+  S('rollarmor_stun', [raStun()], { fps: 1 }, RA_PAL);
 })();

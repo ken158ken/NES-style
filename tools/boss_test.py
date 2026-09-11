@@ -258,6 +258,31 @@ window.__bt = (function () {
       const p = b.partner;
       return { hp: b.hp, maxHp: b.maxHp, phase: b.phase, rage: !!b.rage, partnerPhase: p ? p.phase : null, partnerRage: p ? !!p.rage : null, state: b.state };
     },
+    // 登場動畫探針：登場期間反覆嘗試打魔王（直接 hurt + 生玩家判定框），記錄 hp 有沒有掉、
+    // 以及 introducing 什麼時候變成 false；順便在幾個時間點擷取截圖。
+    introProbe(n, scale) {
+      const g = KB.game, b = g.boss;
+      const out = { hp0: b.hp, maxHp: b.maxHp, introT0: g.bossIntroT, introducing0: !!b.introducing,
+        hurtRet: [], tries: 0, introEnd: -1, minHp: b.hp, shots: {} };
+      const marks = { early: 6, mid: Math.floor(KB.BOSS_INTRO * 0.5), late: KB.BOSS_INTRO - 12 };
+      for (let i = 0; i < n; i++) {
+        // bossIntroT > 10：判定框 life 3 幀，太靠近登場結束會「跨過」結束那一刻打中（那是正常的）
+        if (g.bossIntroT > 10 && i % 18 === 0) {
+          out.tries++;
+          out.hurtRet.push(b.hurt(4, { cx: b.cx, cy: b.cy }));
+          KB.hitbox({ x: b.x - 6, y: b.y - 6, w: b.w + 12, h: b.h + 12, dmg: 4, owner: 'player', type: 'sword', life: 3, pierce: true, breakBlocks: false });
+          if (b.partner && !b.partner.dead) b.partner.hurt(4, { cx: b.partner.cx, cy: b.partner.cy });
+        }
+        __kb.step(1);
+        if (b.introducing) out.minHp = Math.min(out.minHp, b.hp);   // 只看登場期間
+        if (out.introEnd < 0 && !b.introducing) { out.introEnd = i; out.hpAtIntroEnd = b.hp; }
+        for (const k of Object.keys(marks)) if (marks[k] === i) out.shots[k] = scaleShot(scale || 3);
+      }
+      out.hp = b.hp; out.introducing = !!b.introducing; out.bossIntroT = g.bossIntroT; out.dead = !!b.dead;
+      out.partnerIntroducing = b.partner ? !!b.partner.introducing : null;
+      out.started = !!b.started;
+      return out;
+    },
     shot(s) { __kb.render(); return scaleShot(s || 3); },
   };
 })();
@@ -324,6 +349,7 @@ class Session:
         return self.ev("()=>__bt.summary()")
 
 
+KB_INTRO_MAX = 160   # bossIntroT 起始 150；probe 允許一點餘裕
 REAL_ROOMS = {'whispywoods': ('w1', 3), 'lololo': ('w2', 4), 'kracko': ('w3', 4), 'metaknight': ('w4', 4), 'dedede': ('w5', 5)}
 
 
@@ -353,6 +379,26 @@ def run_boss(sess, key, a):
     res['idle'] = idle_ok
     print(f"[{key}] IDLE   {'PASS' if idle_ok else 'FAIL'}  (intro_ok={bool(intro_ok)} attacks={log['attacksSpawned']} moved={log['bossMoved']:.0f} minHp={log['minHp']} errors={len(errs)})")
     for e in errs: print('   ', e)
+
+    # ---------- [intro] 登場動畫：期間打不到魔王、150 幀後 introducing=false ----------
+    if not a.no_intro:
+        sess.start(key, ability='sword', use_w1=use_w1, use_real=use_real, hitbox=a.hitbox, intro_frames=0)
+        probe = sess.ev("([n,s])=>__bt.introProbe(n,s)", [a.intro_frames, a.scale])
+        for k, v in probe.pop('shots').items():
+            save_png(out.parent / f'{out.name}_introanim_{k}.png', v)
+        errs = sess.take_errors()
+        print('intro:', fmt(probe))
+        intro_anim_ok = (probe['introducing0'] and probe['introT0'] >= 140 and probe['tries'] >= 5
+                         and probe.get('hpAtIntroEnd') == probe['hp0'] and probe['minHp'] == probe['hp0']
+                         and not any(probe['hurtRet']) and not probe['dead']
+                         and 0 <= probe['introEnd'] <= KB_INTRO_MAX and not probe['introducing']
+                         and probe['bossIntroT'] == 0 and probe['started']
+                         and probe['partnerIntroducing'] in (None, False) and not errs)
+        res['intro'] = intro_anim_ok
+        print(f"[{key}] INTRO  {'PASS' if intro_anim_ok else 'FAIL'}  "
+              f"(invulnerable={probe.get('hpAtIntroEnd') == probe['hp0']} tries={probe['tries']} introEnd={probe['introEnd']} "
+              f"introducing={probe['introducing']} errors={len(errs)})")
+        for e in errs: print('   ', e)
 
     # ---------- [fight]（跑 a.runs 個樣本：出生點與揮劍節拍不同）----------
     wins = 0
@@ -459,6 +505,8 @@ def main():
     ap.add_argument('--mid-frames', type=int, default=0, help='中距離測試的最大幀數（0 = frames×2；中距離打法本來就比較慢）')
     ap.add_argument('--no-phase2', action='store_true')
     ap.add_argument('--no-mid', action='store_true')
+    ap.add_argument('--no-intro', action='store_true')
+    ap.add_argument('--intro-frames', type=int, default=200, help='登場動畫探針的幀數（>150 才會看到 introducing 變 false）')
     a = ap.parse_args()
     keys = ORDER if a.boss == 'all' else [k.strip() for k in a.boss.split(',')]
     results = {}

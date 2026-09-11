@@ -18,6 +18,7 @@
 (function () {
   KB.BOSSES = KB.BOSSES || {};
   const T = KB.TILE;
+  KB.BOSS_INTRO = 150;   // game.js 的 bossIntroT 起始值（登場演出總幀數）
   const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
   const NO_PULL = { dead: 1, door: 1, stone: 1, dance: 1, hurt: 1 };
 
@@ -153,7 +154,18 @@
     setState(s) { this.state = s; this.stateT = 0; }
     // 招式間隔：二階段縮短 30%
     iv(n) { return this.phase === 2 ? Math.max(1, Math.round(n * 0.7)) : n; }
-    get half() { return this.maxHp * 0.5; }
+    // Extra（超難）難度：魔王 maxHp ×1.25、二階段門檻改成 60%（倍率集中在 entity.js 的 KB.EXTRA）。
+    // 子類建構式在 super() 之後才設定 hp / maxHp，所以只能延後套用；ensureExtra() 在
+    // update / introUpdate / hurt / drawBody 開頭各呼叫一次（子類可能覆寫其中任何一個，但一定會經過 drawBody）。
+    ensureExtra() {
+      if (this.extraApplied) return; this.extraApplied = true;
+      if (!KB.extraOn()) return;
+      const k = KB.EXTRA.bossHp;
+      this.maxHp = Math.max(1, Math.round(this.maxHp * k));
+      this.hp = Math.min(this.maxHp, Math.max(1, Math.round(this.hp * k)));
+      if (this.maxSelfHp !== undefined) { this.maxSelfHp = Math.max(1, Math.round(this.maxSelfHp * k)); this.selfHp = this.maxSelfHp; }
+    }
+    get half() { return this.maxHp * KB.exPhase2(); }
     maybePhase2() { if (this.phase === 1 && this.hp > 0 && this.hp < this.half) this.enterPhase2(); }
     enterPhase2() {
       if (this.phase >= 2) return;
@@ -168,9 +180,12 @@
     }
     onPhase2() { }
     get floorY() { return groundY(this.cx, this.bottom); }
-    // 登場期間（game 只呼叫這個）：動畫計時、有物理的魔王落到地面
-    introUpdate(dt) { this.t += dt; if (this.solid) { this.vx = 0; this.physics(); } }
+    // 登場期間（game 只呼叫這個，共 150 幀）：動畫計時、有物理的魔王落到地面。
+    // this.introT 是「已經過的登場幀數」，各魔王的登場演出都依它排時序。
+    introUpdate(dt) { this.ensureExtra(); this.t += dt; this.introT = (this.introT || 0) + 1; if (this.solid) { this.vx = 0; this.physics(); } }
+    get introP() { return Math.min(1, (this.introT || 0) / KB.BOSS_INTRO); }   // 登場進度 0~1
     update(dt) {
+      this.ensureExtra();
       this.baseUpdate(dt);
       this.stateT++; if (this.hurtT > 0) this.hurtT--;
       if (this.introducing) { this.introUpdate(dt); return; }
@@ -182,6 +197,7 @@
     onIntroEnd() { }
     ai(dt) { }
     hurt(amount, src) {
+      this.ensureExtra();
       if (this.dead || this.invuln > 0 || this.introducing || this.untouchable) return false;
       this.hp -= amount; this.flash = 10; this.invuln = 12; this.hurtT = 20;
       KB.audio.sfx('boss_hurt');
@@ -204,14 +220,16 @@
     onDeath(src) { }
     // 繪製：找不到精靈時額外畫出碰撞框（QA 用），受傷閃白由 sprOpts 處理
     drawBody(g, spr, opts) {
+      this.ensureExtra();
       if (this.hidden) return;
       opts = this.sprOpts(opts || {});
-      if (!KB.has(spr)) g.rect(this.x, this.y, this.w, this.h, (this.flash > 0 && (this.flash & 2)) ? '#ffffff' : this.color);
-      g.spr(spr, this.cx, this.bottom, opts);
+      const ox = opts.ox || 0, oy = opts.oy || 0;
+      if (!KB.has(spr)) g.rect(this.x + ox, this.y + oy, this.w, this.h, (this.flash > 0 && (this.flash & 2)) ? '#ffffff' : this.color);
+      g.spr(spr, this.cx + ox, this.bottom + oy, opts);
       // 二階段變色：同一張精靈疊一層會呼吸的色調（不是整片剪影，看得出原本的圖）
       if (this.phase === 2 && !opts.tint) {
         const a = 0.32 + 0.12 * Math.sin(this.t * 7);
-        g.spr(spr, this.cx, this.bottom, Object.assign({}, opts, { tint: this.rageColor, alpha: a }));
+        g.spr(spr, this.cx + ox, this.bottom + oy, Object.assign({}, opts, { tint: this.rageColor, alpha: a }));
         if ((Math.floor(this.t * 60) % 7) === 0) KB.particles(this.cx + (Math.random() - 0.5) * this.w, this.y + this.h * 0.3, this.rageColor, 1, { spread: 0.4, grav: -0.02, life: 16, up: 0.4 });
       }
       if (KB.DEBUG && KB.showHitbox) g.rect(this.x, this.y, this.w, this.h, 'rgba(255,128,0,0.3)');
@@ -235,8 +253,19 @@
       this.setState('idle');
     }
     snap() { this.bottom = groundY(this.cx, this.bottom - 1); }
-    introUpdate(dt) { this.t += dt; this.snap(); }
-    onIntroEnd() { this.snap(); }
+    // 【登場】整棵樹左右搖晃，樹冠不斷飄下葉子（搖晃幅度隨時間收斂）
+    introUpdate(dt) {
+      super.introUpdate(dt); this.snap();
+      const k = this.introT;
+      this.introSway = Math.sin(k * 0.30) * (1 - this.introP) * 5;
+      if (k % 3 === 0) {
+        const lx = this.cx + (this.rng() - 0.5) * 40, ly = this.y + 6 + this.rng() * 34;
+        KB.particles(lx, ly, ['#90e858', '#48c048', '#207820'], 1, { spread: 0.4, grav: 0.03, life: 110, up: -0.15, vx: -0.5 - this.rng() * 0.7, size: 2 });
+      }
+      if (k === 1) KB.audio.sfx('block');
+      if (k % 46 === 24) { KB.audio.sfx('enemyhit'); if (KB.game) KB.game.shake = Math.max(KB.game.shake || 0, 3); }
+    }
+    onIntroEnd() { this.snap(); this.introSway = 0; }
     nextAttack() {
       // 二階段多一招「暴風」：大蘋果三連 + 地面三處竄根
       // 二階段的循環裡「暴風」只放一次：放兩次的話貼著樹砍的玩家會一直掉能力（boss_test 的普通玩家樣本會輸）
@@ -309,7 +338,7 @@
     }
     draw(g) {
       const spr = this.hurtT > 0 ? 'whispy_hurt' : (this.state === 'blow' ? 'whispy_blow' : 'whispy_idle');
-      this.drawBody(g, spr);
+      this.drawBody(g, spr, this.introducing ? { ox: Math.round(this.introSway || 0) } : undefined);
       for (const r of this.roots) {
         if (r.t < r.warn || r.t > r.warn + 30) continue;
         const w = r.big ? 16 : 12, h = r.big ? 30 : 22;
@@ -330,10 +359,44 @@
       this.solid = true; this.grav = KB.GRAV; this.speed = 0.9; this.box = null; this.selfHp = this.maxSelfHp = 15;
       this.hopOnPush = false; this.ko = false; this.koT = 0; this.color = '#4060e0'; this.spr = 'lololo_walk';
       this.rage = false; this.baseSpeed = 0.9; this.shoveT = 0;
+      this.introSide = 1;   // 登場從哪一側推箱進來（+1 右側 / -1 左側）
       this.setSize(18, 22); this.dir = -1; this.setState('idle');
     }
     get leader() { return this; }
     frontX(ent) { return this.dir > 0 ? ent.x + ent.w + 1 : ent.x - 1; }
+    // 【登場】從房間左右兩側「推著箱子」走進自己的定位（登場期間不吃物理，結束時歸位）
+    introUpdate(dt) {
+      this.ensureExtra(); this.t += dt; this.introT = (this.introT || 0) + 1;
+      const N = KB.BOSS_INTRO, k = this.introT;
+      if (k === 1) {
+        this.introFrom = clamp(this.spawnX + this.introSide * 76, 4, Math.max(4, mapW() - this.w - 4));
+        this.dir = this.introSide > 0 ? -1 : 1;
+        this.solid = false; this.grav = 0; this.vx = 0; this.vy = 0;
+      }
+      const u = Math.min(1, k / (N - 26));
+      this.x = this.introFrom + (this.spawnX - this.introFrom) * u;
+      this.bottom = this.spawnY + T;
+      if (u < 1) {
+        if (k % 12 === 0) { KB.audio.sfx('land'); KB.particles(this.cx, this.bottom, ['#d8d8e0', '#a0a0b0'], 2, { spread: 0.7, grav: 0.1, life: 14, up: 0.4, size: 1 }); }
+        const bx = this.dir > 0 ? this.x + this.w + 8 : this.x - 8;
+        if (k % 8 === 0) KB.particles(bx, this.bottom - 1, '#c08040', 1, { spread: 0.5, grav: 0.1, life: 12, up: 0.3, size: 1 });
+      } else if (!this.introDone) {
+        this.introDone = true;
+        KB.fx('fx_poof', this.dir > 0 ? this.x + this.w + 8 : this.x - 8, this.bottom - 8); KB.audio.sfx('block');
+      }
+    }
+    // 注意：這裡不呼叫 setState —— 登場期間 stateT 已經累積到 150，魔王一開打就會出招，
+    // 那是原本的戰鬥節奏（boss_test 的普通玩家樣本對節奏很敏感），重設會讓整場平衡跑掉。
+    onIntroEnd() {
+      this.solid = true; this.grav = KB.GRAV;
+      this.x = this.spawnX; this.bottom = this.spawnY + T; this.vx = 0; this.vy = 0;
+    }
+    // 登場時手上那顆箱子（純繪製，不生實體 —— 免得登場期間就打到卡比）
+    drawIntroBox(g) {
+      if (this.introDone) return;
+      const bx = this.dir > 0 ? this.x + this.w + 8 : this.x - 8;
+      g.spr('proj_box', bx, this.bottom, { t: 0, flip: this.dir < 0 });
+    }
     releaseBox(push) {
       const b = this.box; this.box = null; if (!b || b.dead) return;
       b.pusher = null; b.vx = push ? this.dir * 2.5 : 0; b.friction = push ? 0.96 : 0.9;
@@ -399,7 +462,8 @@
     }
     draw(g) {
       if (this.ko) return;
-      const moving = (this.state === 'push' || this.state === 'walk') && !this.ko;
+      const moving = this.introducing || ((this.state === 'push' || this.state === 'walk') && !this.ko);
+      if (this.introducing) this.drawIntroBox(g);
       this.drawBody(g, this.spr, { t: moving ? this.t : 0, fps: 8 });
     }
   }
@@ -409,6 +473,7 @@
       this.leaderRef = leader; this.displayName = '拉拉拉'; this.subtitle = 'LALALA'; this.name = 'lalala';
       this.hp = this.maxHp = 15; this.score = 0; this.spr = 'lalala_walk'; this.color = '#f070b0';
       this.speed = this.baseSpeed = 1.0; this.hopOnPush = true; this.dir = 1; this.rageColor = '#ff3060';
+      this.introSide = -1;   // 拉拉拉從左側進場（洛洛洛從右側）
     }
     get leader() { return this.leaderRef; }
     hurt(amount, src) { return this.leader ? this.leader.damageFrom(this, amount, src) : false; }
@@ -488,7 +553,23 @@
       this.hoverY = clamp(Math.max(this.baseY, fl - this.h - 58), 4, Math.max(4, fl - this.h - 24));
       this.lowY = Math.max(4, fl - this.h - 30);
     }
-    introUpdate(dt) { this.t += dt; this.calcHover(); this.y += (this.hoverY - this.y) * 0.1; }
+    // 【登場】四面八方的小雲往中心聚集，本體由淡到實（alpha 漸顯），成形時閃一下
+    introUpdate(dt) {
+      this.ensureExtra(); this.t += dt; this.introT = (this.introT || 0) + 1;
+      this.calcHover(); this.y += (this.hoverY - this.y) * 0.1;
+      const N = KB.BOSS_INTRO, k = this.introT, form = N - 18;
+      if (k < form && k % 2 === 0) {
+        const a = this.rng() * Math.PI * 2, R = 72 + this.rng() * 54, life = 26;
+        const px = this.cx + Math.cos(a) * R, py = this.cy + Math.sin(a) * R * 0.55;
+        KB.particles(px, py, ['#ffffff', '#d0d4e6', '#aeb4cc'], 1, { spread: 0, grav: 0, life, up: 0, vx: (this.cx - px) / life, vy: (this.cy - py) / life, size: 2 });
+      }
+      if (k === form) {
+        KB.fx('fx_sparkle', this.cx, this.cy); KB.audio.sfx('unlock');
+        if (KB.game) KB.game.shake = Math.max(KB.game.shake || 0, 5);
+        KB.particles(this.cx, this.cy, ['#ffffff', '#ffff80'], 18, { spread: 3.2, grav: 0, life: 30 });
+      }
+      this.introAlpha = clamp(Math.pow(k / (N - 24), 2), 0.06, 1);
+    }
     hoverTo(tx, ty, k) {
       tx = clamp(tx, 4, mapW() - this.w - 4); ty = clamp(ty, 4, Math.max(4, this.floor - this.h - 8));
       this.x += (tx - this.x) * k; this.y += (ty - this.y) * k;
@@ -592,7 +673,7 @@
       }
       const spr = this.hurtT > 0 ? 'kracko_hurt' : ((this.state === 'idle' || this.state === 'low') ? 'kracko_idle' : 'kracko_attack');
       if (this.state === 'storm' && (Math.floor(this.t * 60) % 6) === 0) KB.particles(this.cx + (this.rng() - 0.5) * 50, this.bottom - 4, '#8090ff', 1, { spread: 0.5, grav: 0, life: 12, up: 0 });
-      this.drawBody(g, spr, { flip: false });
+      this.drawBody(g, spr, this.introducing ? { flip: false, alpha: this.introAlpha } : { flip: false });
     }
   }
   KB.BOSSES.kracko = Kracko;
@@ -600,6 +681,7 @@
   // =====================================================================
   // W4 魅塔騎士：登場先丟一把劍給卡比（沒有能力時）。走向玩家、揮劍、衝刺斬、跳躍、劍氣、披風消失後出現在另一側。
   // =====================================================================
+  const CAPE_OPEN = 40, CAPE_SHUT = 104;   // 魅塔騎士登場：披風展開 / 收攏的幀
   class MetaKnight extends Boss {
     constructor(x, y) {
       super(x, y);
@@ -612,6 +694,26 @@
       this.evadeLock = 0;     // 受傷後 30 幀內不能迴避
       this.rageColor = '#8040ff'; this.phase2Msg = '魅塔騎士拔出了真劍！';
       this.setState('idle');
+    }
+    // 【登場】披風整件裹著站定 → 猛然展開成雙翼（風壓粒子）→ 再收攏 → 換回一般站姿
+    introUpdate(dt) {
+      super.introUpdate(dt);
+      const k = this.introT;
+      if (k === 1) { this.facePlayer(); KB.audio.sfx('slide'); }
+      if (k === CAPE_OPEN) {
+        KB.audio.sfx('cutter');
+        if (KB.game) KB.game.shake = Math.max(KB.game.shake || 0, 4);
+        KB.particles(this.cx, this.cy, ['#8040ff', '#c0b0ff', '#ffffff'], 14, { spread: 3, grav: -0.01, life: 26 });
+      }
+      if (k > CAPE_OPEN && k < CAPE_SHUT && k % 3 === 0)
+        KB.particles(this.cx + (this.rng() - 0.5) * 34, this.cy - 6 + this.rng() * 16, ['#8040ff', '#4050b0', '#ffffff'], 1,
+          { spread: 0.4, grav: -0.012, life: 24, up: 0.3, vx: (this.rng() - 0.5) * 1.6, size: 1 });
+      if (k === CAPE_SHUT) { KB.audio.sfx('slide'); KB.fx('fx_poof', this.cx, this.cy + 6); }
+    }
+    drawIntro(g) {
+      const k = this.introT || 0;
+      if (k >= CAPE_SHUT + 14) { this.drawBody(g, 'metaknight_idle'); return; }
+      this.drawBody(g, 'metaknight_cape', { frame: (k >= CAPE_OPEN && k < CAPE_SHUT) ? 1 : 0 });
     }
     onIntroEnd() {
       const p = this.player;
@@ -767,6 +869,7 @@
     }
     draw(g) {
       if (this.hidden) return;
+      if (this.introducing) { this.drawIntro(g); return; }
       let spr = 'metaknight_idle', o = {};
       if (this.hurtT > 0 || this.state === 'hurt') spr = 'metaknight_hurt';
       else if (this.state === 'slash' || this.state === 'tricutter') { spr = 'metaknight_attack'; o.frame = this.stateT < 8 ? 0 : this.stateT < 16 ? 1 : 2; }
@@ -792,6 +895,53 @@
       this.setState('idle');
     }
     get enraged() { return this.phase === 2; }
+    // 【登場】王座後的大門打開 → 大搖大擺走出來 → 舉鎚敲兩下示威
+    introUpdate(dt) {
+      this.ensureExtra(); this.t += dt; this.introT = (this.introT || 0) + 1;
+      const N = KB.BOSS_INTRO, k = this.introT, walkEnd = N - 56;
+      if (k === 1) {
+        this.introDoorX = clamp(this.spawnX + 36, 4, Math.max(4, mapW() - this.w - 4));
+        this.dir = -1; this.solid = false; this.grav = 0; this.vx = 0; this.vy = 0;
+        KB.audio.sfx('door');
+      }
+      this.bottom = this.spawnY + T;
+      if (k <= walkEnd) {
+        this.x = this.introDoorX + (this.spawnX - this.introDoorX) * (k / walkEnd);
+        if (k % 14 === 0) { KB.audio.sfx('land'); KB.particles(this.cx + 10, this.bottom, '#c0a060', 2, { spread: 0.8, grav: 0.12, life: 14, up: 0.4 }); }
+      } else {
+        this.x = this.spawnX;
+        const j = k - walkEnd;
+        if (j === 14 || j === 38) {   // 掄鎚敲地示威（純演出，沒有判定框）
+          KB.audio.sfx('hammer');
+          if (KB.game) KB.game.shake = Math.max(KB.game.shake || 0, 5);
+          KB.particles(this.cx - 22, this.bottom, ['#c0a060', '#f0e0c0', '#ffffff'], 9, { spread: 2.2, up: 1.4, life: 24 });
+          KB.fx('fx_hit', this.cx - 26, this.bottom - 6);
+        }
+      }
+    }
+    onIntroEnd() {   // 同上：不重設 state / stateT，保留原本的開場節奏
+      this.solid = true; this.grav = KB.GRAV;
+      this.x = this.spawnX; this.bottom = this.spawnY + T; this.vx = 0; this.vy = 0;
+    }
+    // 王座後的大門（登場前 70 幀慢慢淡出）
+    drawIntroDoor(g) {
+      const k = this.introT || 0, a = Math.max(0, 1 - k / 70);
+      if (a <= 0 || this.introDoorX === undefined) return;
+      const w = this.w + 10, h = this.h + 12, gy = this.spawnY + T, x = this.introDoorX - 5;
+      g.rect(x, gy - h, w, h, 'rgba(16,10,26,' + (0.92 * a).toFixed(2) + ')');
+      g.rect(x - 3, gy - h - 4, w + 6, 4, 'rgba(208,164,64,' + a.toFixed(2) + ')');
+      g.rect(x - 3, gy - h, 3, h, 'rgba(208,164,64,' + a.toFixed(2) + ')');
+      g.rect(x + w, gy - h, 3, h, 'rgba(208,164,64,' + a.toFixed(2) + ')');
+      g.rect(x + 2, gy - h + 3, w - 4, 2, 'rgba(120,88,32,' + a.toFixed(2) + ')');
+    }
+    drawIntro(g) {
+      const N = KB.BOSS_INTRO, k = this.introT || 0, walkEnd = N - 56;
+      this.drawIntroDoor(g);
+      if (k <= walkEnd) { this.drawBody(g, 'dedede_walk', { fps: 6 }); return; }
+      const j = k - walkEnd;
+      const fr = j < 14 ? 0 : j < 26 ? 2 : j < 38 ? 0 : j < 48 ? 2 : 1;
+      this.drawBody(g, 'dedede_hammer', { frame: fr });
+    }
     onPhase2() { this.stopInhaleFx(); this.setState('inhale'); }
     moveSpeed() { return this.enraged ? 1.3 : 0.85; }
     stopInhaleFx() { if (this.inhaleFx) { this.inhaleFx.dead = true; this.inhaleFx = null; } }
@@ -924,6 +1074,7 @@
     onDeath() { this.stopInhaleFx(); for (const e of KB.game.entities) if (e.kind === 'impactstar') e.dead = true; }
     onHurtPhaseGuard() { }
     draw(g) {
+      if (this.introducing) { this.drawIntro(g); return; }
       let spr = 'dedede_idle', o = {};
       switch (this.state) {
         case 'walk': spr = 'dedede_walk'; o.fps = this.enraged ? 10 : 7; break;

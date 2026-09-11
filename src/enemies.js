@@ -28,8 +28,19 @@
       this.vx = 0; this.vy = 0; this.freezeT = 0; this.beingInhaled = false; this.inhaleSrc = null;
       this.alert = false; this.alertT = 0;
     }
+    // Extra（超難）難度：所有敵人的調整集中在這裡（倍率見 entity.js 的 KB.EXTRA）。
+    // 子類建構式會在 super() 之後才設定 speed / hp，所以不能在建構式裡做 —— 改在「第一次 update」套用一次。
+    applyExtra() {
+      if (this.extraApplied) return; this.extraApplied = true;
+      if (!KB.extraOn()) return;
+      this.exK = KB.EXTRA.spd;                       // 走路 / 追擊速度 ×1.2（Enemy.walk 與 chase 共用）
+      if (this.isMiniBoss) {                          // 中魔王血量 ×1.25
+        this.maxHp = Math.max(1, Math.round(this.maxHp * KB.EXTRA.miniHp));
+        this.hp = this.maxHp;
+      }
+    }
     update(dt) {
-      if (this.state0 === undefined) { this.state0 = this.state; this.spr0 = this.spr; this.cool0 = this.cool; }
+      if (this.state0 === undefined) { this.state0 = this.state; this.spr0 = this.spr; this.cool0 = this.cool; this.applyExtra(); }
       if (KB.game) {
         const f = KB.game.frame;
         if (this.lastF !== undefined && f - this.lastF > 1 && this.x === this.startX) this.onReset();
@@ -48,7 +59,7 @@
     chase(speed) {
       this.facePlayer();
       if (this.onGround && ((this.turnAtWall && KB.physics.wallAhead(KB.game.map, this)) || (this.turnAtEdge && KB.physics.edgeAhead(KB.game.map, this)))) { this.vx = 0; return false; }
-      this.vx = speed * this.dir; return true;
+      this.vx = speed * this.dir * (this.exK || 1); return true;
     }
     canSee(dx, dy) { return playerAlive() && this.playerDist() <= dx && Math.abs(this.playerDy()) <= (dy !== undefined ? dy : 32); }
     inFront() { return this.playerDx() * this.dir > 0; }
@@ -385,6 +396,8 @@
     constructor(x, y) {
       super(x, y); this.inhalable = false; this.score = 3000; this.stunned = false; this.stunT = 0; this.stunH = 16;
       this.turnAtEdge = true; this.persistent = true; this.walkSpr = 'waddledee_walk';
+      this.isMiniBoss = true;                            // applyExtra / 掉落表用
+      this.dropTable = { tomato: 0.5, oneup: 0.1 };      // 中魔王的掉落（在 stun 的那一刻 roll）
     }
     hurt(amount, src) {
       if (this.dead || this.stunned || this.invuln > 0) return false;
@@ -392,7 +405,7 @@
       if (this.hp <= 0) { this.hp = 0; this.stun(src); return true; }
       sfx('boss_hurt'); return true;
     }
-    stun() {
+    stun(src) {
       this.stunned = true; this.stunT = 300; this.inhalable = true; this.hurtsPlayer = false; this.vx = 0; this.killHitbox();
       this.setState('stunned'); this.setSpr(this.walkSpr);
       const b = this.bottom; this.bodyH = this.h; this.h = this.stunH; this.bottom = b;
@@ -400,6 +413,8 @@
       shake(6); sfx('boss_die');
       if (KB.game) KB.game.addScore(this.score, this.cx, this.y);
       this.score = 0;   // 吸入 / 消失時不重複給分
+      // 中魔王「被打倒」＝ stun 的那一刻就掉道具（之後暈倒的身體還可以被吸入拿能力，不會重複掉）
+      this.rollDrop(src);
     }
     ai(dt) {
       this.stateT++; this.animT++; if (this.cool > 0) this.cool--;
@@ -506,6 +521,139 @@
         else if ((this.frostCombo = (this.frostCombo || 0) + 1) % 3 === 0) { this.setState('breath'); this.setSpr('mrfrosty_throw'); }
         else { this.setState('charge'); this.setSpr('mrfrosty_walk'); }
       }
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // 鐵甲滾球 Rollarmor（原創中魔王）
+  //   造型：穿著鐵甲的圓滾生物，背上一整片可開闔的鐵殼。
+  //   兩招：
+  //     ① 鐵殼滾動（roll）—— 縮進殼裡高速滾過來，撞牆反彈，滾 2 次牆之後散開。
+  //     ② 站起來砸地（slam）—— 立起身子高舉雙臂砸下，正面 dmg 2 判定 + 左右各一道沿地面跑的震波。
+  //   弱點：**殼是關的時候（滾動 / 砸地預備）打不穿**（會「鏘」一聲彈開、不扣血）；
+  //         滾完 / 砸完的 open 硬直期間鐵殼會張開露出軟肉，那才是玩家的攻擊窗。
+  //   打倒後與其他中魔王一樣會暈倒 → 可吸入取得 hammer。
+  // ---------------------------------------------------------------------
+  const ROLL_CURL = 20;   // 縮進殼裡的預備幀數
+  const SLAM_HIT = 24;    // 舉起雙臂到砸下的幀數（鐵殼關著＝無敵期）
+  class Rollarmor extends MiniBoss {
+    constructor(x, y) {
+      super(x, y);
+      this.name = 'rollarmor'; this.displayName = '鐵甲滾球';
+      this.spr = this.walkSpr = 'rollarmor_walk';
+      this.w = 30; this.h = 30; this.hp = 12; this.maxHp = 12; this.ability = 'hammer';
+      this.speed = 0.55; this.cool = 50; this.score = 3500; this.stunH = 18;
+      this.rot = 0; this.bounces = 0; this.hurtT = 0; this.clang = 0; this.combo = 0;
+      this.state = 'walk';
+    }
+    onReset() {
+      super.onReset();
+      this.rot = 0; this.bounces = 0; this.hurtT = 0; this.clang = 0; this.combo = 0;
+      this.turnAtEdge = true; this.setSpr('rollarmor_walk');
+    }
+    // 鐵殼關著 → 無敵（滾動中、砸地的預備動作）
+    get armored() { return this.state === 'roll' || (this.state === 'slam' && this.stateT < SLAM_HIT); }
+    hurt(amount, src) {
+      if (this.dead || this.stunned) return false;
+      if (this.armored) {
+        if (this.invuln <= 0) {
+          this.invuln = 10; this.clang = 10;
+          const hx = src && src.cx !== undefined ? clamp(src.cx, this.x, this.x + this.w) : this.cx;
+          const hy = src && src.cy !== undefined ? clamp(src.cy, this.y, this.bottom) : this.cy;
+          KB.fx('fx_hit', hx, hy);
+          KB.particles(hx, hy, ['#ffffff', '#d8e0ec'], 6, { spread: 1.8, grav: 0.06, life: 14, up: 0.4, size: 1 });
+          sfx('block');
+        }
+        return true;   // 判定框被鐵殼彈開：算「打到了」（不會每幀重複判定），但不扣血
+      }
+      const ok = super.hurt(amount, src);
+      if (ok && !this.stunned) this.hurtT = 14;
+      return ok;
+    }
+    // 砸地：正面 dmg 2 判定 + 左右兩道沿地面前進的震波
+    slamGround() {
+      const gy = this.bottom;
+      this.killHitbox();
+      this.hitbox = KB.hitbox({ x: 0, y: 0, w: 30, h: 26, dmg: 2, owner: 'enemy', type: 'hammer', follow: this, ox: 0, oy: 4, life: 10, breakBlocks: false });
+      for (const s of [-1, 1]) {
+        if (KB.Shockwave) KB.spawn(new KB.Shockwave(s > 0 ? this.x + this.w : this.x, gy, s, { speed: 2.4, life: 80, dmg: 1, color: '#d8e0ec' }));
+        else KB.hitbox({ x: this.cx + (s > 0 ? 10 : -50), y: gy - 14, w: 40, h: 16, dmg: 1, owner: 'enemy', type: 'shock', life: 12, pierce: true, breakBlocks: false });
+        KB.particles(this.cx + s * 16, gy, ['#c8d0e0', '#ffffff'], 7, { spread: 2, vx: s * 1.5, up: 1.4, life: 22 });
+      }
+      shake(6); sfx('hammer');
+    }
+    think() {
+      if (this.hurtT > 0) this.hurtT--;
+      if (this.clang > 0) this.clang--;
+      // ① 鐵殼滾動：縮殼 → 高速滾動（撞牆反彈）→ 撞兩次牆或時間到就散開
+      if (this.state === 'roll') {
+        if (this.stateT < ROLL_CURL) { this.vx *= 0.7; if (this.stateT === 1) sfx('stone'); return; }
+        this.vx = this.dir * 2.8 * (this.exK || 1);
+        if (this.stateT % 3 === 0) KB.particles(this.cx - this.dir * 12, this.bottom - 2, ['#c8d0e0', '#ffffff'], 1, { spread: 0.8, up: 0.5, life: 12, size: 1 });
+        if (this.hitWall) {
+          this.dir *= -1; this.bounces++; shake(4); sfx('block');
+          KB.particles(this.cx + this.dir * -14, this.cy, ['#ffffff', '#d8e0ec'], 8, { spread: 2.2, life: 16 });
+        }
+        const edge = this.onGround && KB.physics.edgeAhead(KB.game.map, this);
+        if (this.bounces >= 2 || edge || this.stateT > 150) { this.vx = 0; this.openShell(60); }
+        return;
+      }
+      // ② 站起來砸地：SLAM_HIT 幀的預備（鐵殼關著）→ 砸下 → 硬直
+      if (this.state === 'slam') {
+        this.vx *= 0.8;
+        if (this.stateT === 1) { this.facePlayer(); sfx('boss_hurt'); }
+        if (this.stateT < SLAM_HIT && this.stateT % 5 === 0) KB.particles(this.cx, this.y - 2, ['#ffe040', '#ffffff'], 1, { spread: 0.5, grav: 0.02, life: 14, up: 0.6, size: 1 });
+        if (this.stateT === SLAM_HIT) this.slamGround();
+        if (this.stateT > SLAM_HIT + 16) { this.killHitbox(); this.openShell(46); }
+        return;
+      }
+      // 硬直（鐵殼張開）：玩家的攻擊窗，只會慢慢後退喘氣
+      if (this.state === 'open') {
+        this.vx *= 0.85;
+        if (this.stateT % 8 === 0) KB.particles(this.cx + (Math.random() - 0.5) * 18, this.y + 6, '#ffffff', 1, { spread: 0.4, grav: -0.02, life: 16, up: 0.4, size: 1 });
+        if (this.stateT >= this.openT) { this.setState('walk'); this.setSpr('rollarmor_walk'); this.turnAtEdge = true; this.cool = 50; }
+        return;
+      }
+      this.setSpr('rollarmor_walk');
+      const see = this.notice(140, 60);
+      if (playerAlive()) this.chase(this.speed * (see ? 1.5 : 1)); else this.walk();
+      if (this.cool <= 0 && this.onGround && playerAlive() && Math.abs(this.playerDy()) < 44) {
+        this.facePlayer(); this.vx = 0; this.bounces = 0; this.combo++;
+        if (this.playerDist() > 70 || this.combo % 3 === 0) { this.setState('roll'); this.setSpr('rollarmor_roll'); this.turnAtEdge = false; }
+        else { this.setState('slam'); this.setSpr('rollarmor_attack'); }
+      }
+    }
+    openShell(frames) {
+      this.openT = frames; this.setState('open'); this.setSpr('rollarmor_attack'); this.turnAtEdge = true; this.bounces = 0;
+      KB.particles(this.cx, this.cy, ['#ffffff', '#e06040'], 6, { spread: 1.6, life: 18 });
+      sfx('block');
+    }
+    pickFrame() {
+      if (this.state === 'slam') return this.stateT < SLAM_HIT ? 0 : 1;
+      if (this.state === 'open') return 1;
+      return undefined;
+    }
+    draw(g) {
+      if (this.freezeT > 0) { this.drawFrozen(g); return; }
+      if (this.stunned) {
+        const blink = this.stunT < 90 ? (this.stunT & 2) : ((this.stunT >> 3) & 1);
+        if (blink) return;
+        g.spr('rollarmor_stun', this.cx, this.bottom, { frame: 0, flip: this.dir < 0 });
+        return;
+      }
+      if (this.state === 'roll') {
+        this.rot += (this.stateT < ROLL_CURL ? 0.06 : this.vx * 0.09);
+        const wx = KB.inhaleWobble(this);
+        g.spr('rollarmor_roll', this.cx + wx, this.cy + (this.wobY || 0), this.sprOpts({ t: this.animT / 60, rot: this.rot, flip: false }));
+        return;
+      }
+      if (this.hurtT > 0 && this.state !== 'slam') {
+        const wx = KB.inhaleWobble(this);
+        g.spr('rollarmor_hurt', this.cx + wx, this.bottom + (this.wobY || 0), this.sprOpts({ t: 0 }));
+        return;
+      }
+      super.draw(g);
+      if (this.clang > 0 && (this.clang & 1)) g.spr(this.spr, this.cx, this.bottom, { frame: this.pickFrame() || 0, flip: this.dir < 0, tint: '#ffffff', alpha: 0.5 });
     }
   }
 
@@ -851,7 +999,7 @@
   //  註冊
   // =====================================================================
   Object.assign(KB.ENEMIES, {
-    spikeball: SpikeRoller, dartwing: DartWing, snowly: Snowly,
+    spikeball: SpikeRoller, dartwing: DartWing, snowly: Snowly, rollarmor: Rollarmor,
     waddledee: WaddleDee, waddledoo: WaddleDoo, brontoburt: BrontoBurt, hothead: HotHead, sirkibble: SirKibble,
     sparky: Sparky, rocky: Rocky, chilly: Chilly, bladeknight: BladeKnight, bonkers: Bonkers, mrfrosty: MrFrosty,
     poppybros: PoppyBros, scarfy: Scarfy, gordo: Gordo, cappy: Cappy, cappy_bare: CappyBare, twizzy: Twizzy,

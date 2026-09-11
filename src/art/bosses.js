@@ -442,6 +442,33 @@
     }
     return g;
   }
+  // 登場用：披風「展開 / 收攏」2 幀（frame 0 = 整件裹住只露眼睛、frame 1 = 張成雙翼）
+  function mkCape(f) {
+    const wide = 44, h = 30;   // 兩幀必須同尺寸（KB.sprite 以第 0 幀決定大小）
+    const g = grid(wide, h), cx = wide >> 1, bottom = h - 1, cy = bottom - 11;
+    if (!f) {
+      mkFeet(g, cx, bottom, 0);
+      // 整件披風裹住身體：上窄下寬的斗篷
+      cape(g, [[cx - 5, cy - 10], [cx + 5, cy - 10], [cx + 9, cy - 2], [cx + 11, cy + 9], [cx - 11, cy + 9], [cx - 9, cy - 2]],
+        [[cx - 4, cy - 6, cx - 6, cy + 8], [cx + 3, cy - 6, cx + 5, cy + 8], [cx, cy - 8, cx, cy + 8]]);
+      // 只露出兩顆發光的眼
+      for (const dx of [-4, -3, 3, 4]) { px(g, cx + dx, cy - 4, 'y'); px(g, cx + dx, cy - 3, 'Y'); }
+      px(g, cx - 5, cy - 4, 'k'); px(g, cx + 5, cy - 4, 'k');
+    } else {
+      // 左右各一片張開的翼形披風
+      const wing = (sx) => cape(g,
+        [[cx + sx * 4, cy - 8], [cx + sx * 10, cy - 15], [cx + sx * 19, cy - 12], [cx + sx * 21, cy - 3],
+         [cx + sx * 18, cy + 7], [cx + sx * 14, cy + 2], [cx + sx * 10, cy + 9], [cx + sx * 5, cy + 4]],
+        [[cx + sx * 8, cy - 6, cx + sx * 17, cy - 9], [cx + sx * 8, cy - 1, cx + sx * 16, cy - 1], [cx + sx * 8, cy + 4, cx + sx * 14, cy + 3]]);
+      wing(-1); wing(1);
+      mkFeet(g, cx, bottom, 1);
+      mkBody(g, cx, cy, MK_MASK, 0);
+      sword(g, cx + 9, cy + 1, 0.3, -1, 12);
+      mkGlove(g, cx + 7, cy + 2); mkGlove(g, cx - 10, cy + 3);
+    }
+    return g;
+  }
+  S('metaknight_cape', [mkCape(0), mkCape(1)], { fps: 4, loop: false });
   S('metaknight_idle', [metaknight('idle', 0), metaknight('idle', 1)], { fps: 4 });
   S('metaknight_attack', [metaknight('attack', 0), metaknight('attack', 1), metaknight('attack', 2)], { fps: 10, loop: false });
   S('metaknight_dash', [metaknight('dash', 0)], { fps: 1 });
