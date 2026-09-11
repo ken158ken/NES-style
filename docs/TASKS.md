@@ -72,17 +72,22 @@
 - [todo] 敵人配置需求寫給 mechanics（哪一房放新中魔王）
 
 ## player2（src/player.js, src/const.js, src/input.js, src/art/kirby.js, tools/engine_test.py）
-- [doing] 游泳打磨：入水 / 出水水花粒子與 sfx('splash')、水中氣泡、水中可吸入（吸力減半）、水中受傷
-- [todo] player.rideStar(path, onArrive)：state 'ride'，沿點陣列飛行、拖尾粒子、無敵、到達時下星 + fx
-- [todo] 梯子打磨：爬梯頂 / 底的過渡幀、在梯子上可攻擊（吐星）
-- [todo] Extra 模式：KB.session.extra 時 maxHp 3、能力星回收時間減半
-- [todo] 能力星彈跳手感：落地彈 2 次、8 秒後閃爍、10 秒消失（items.js 由 mechanics 擁有 → 寫需求）
-- [todo] engine_test 新增測試，全 PASS
+- [done] 游泳打磨：入水 6 顆 / 出水 3 顆水花 + sfx('splash')、每 20 幀嘴邊氣泡、水中吸入（範圍 26px）與吐星、水中擊退 ×0.5、新精靈 kirby_swim_inhale
+- [done] player.rideStar(path, onArrive)：state 'ride'，4px/frame 沿折線（轉角 lerp）、黃白拖尾、無敵不可操作、新精靈 kirby_ride + item_warpstar 星星、到達呼叫 onArrive 否則落地 + fx_sparkle
+- [done] 梯子打磨：爬頂 / 底過渡幀 kirby_climb_top（6 幀）、梯子上按攻擊吐 proj_airpuff 不離開梯子
+- [done] Extra 模式：建構時讀 KB.session.extra → maxHp 3；能力星回收時間常數 KB.PHYS.abilityStarLife = 600（減半在 items.js → 跨檔需求）
+- [done] 能力星彈跳手感需求已寫給 mechanics（PROGRESS「player2 跨檔需求」1）
+- [done] engine_test 新增第 33~38 組（+29 項），118/118 PASS；enemy_test 332/332；playthrough w1 / w3 --godmode 通關
 
-## audio2（src/audio.js, tools/audio_check.js, tools/render_music.py）
-- [doing] 環境音：'splash' 'bubble' 'wind' 'torch' 'fuse'（導火線燃燒循環）'melt' 'hardblock'（打不破的硬磚叮）
-- [todo] 音樂：'result'（結算 8 小節不循環）、'arena'（競技場 loop）、'arena_rest'（休息房短循環）、'w_intro' 開場短句、每世界第二首曲（'green2' 'castle2' 'island2' 'cloud2' 'dedede2'，供後半房間）
-- [todo] 結算計數 sfx 'count' 與 'count_end'
+## audio2（src/audio.js, tools/audio_check.js, tools/audio_test.html, tools/render_music.py）
+- [done] 新 sfx：'splash' 'bubble' 'wind' 'torch' 'fuse' 'melt' 'hardblock' 'ride'（+'warp' 別名）'essence'
+- [done] 結算計數 sfx 'count'（每 4 幀，節流放寬到 25ms）與 'count_end'
+- [done] 每音效節流表 KB.audio.SFX_THROTTLE（原本全域 80ms 會吃掉 count / fuse）
+- [done] 音樂：'result'（8 小節不循環，停在主和弦）、'arena'（BPM160 16 小節 loop）、'arena_rest'（ABAB 柔和 loop）、'w_intro'（2 小節 3 秒）、各世界第二首 'green2' 'castle2' 'island2' 'cloud2' 'dedede2'
+- [done] 環境音層 KB.audio.ambient(key|null)：'water' 'wind' 'cave' 'castle'（獨立 ambBus 掛在 sfxBus 下，與 music 互不影響）
+- [done] audio_check（+ambient/節流檢查）、render_music（+ambient 渲染與即時 API 檢查）、audio_test.html（+ambient 按鈕）；playwright 實機 0 console error
+- [todo] 等 mechanics / ui-flow / player2 接線後，實機驗證切房 ambient 銜接與結算計數節奏（跨檔需求已寫入 PROGRESS.md）
+- [todo] docs/SPEC.md 第 9 節名單需補新 sfx / music / ambient（總控處理，audio2 無權編輯 SPEC）
 
 ## qa2（docs/QA_REPORT.md 追加 Round 2 章節, shots/agent_qa2/）
 - [doing] 非無敵難度調校：每世界 × 3 能力（sword/fire/none）playthrough 不加 --godmode，記錄死亡點與原因 → 提出調整建議（敵人位置 / 尖刺 / 魔王傷害）

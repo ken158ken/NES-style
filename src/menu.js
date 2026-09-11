@@ -153,7 +153,8 @@
       this.frame++;
       const inp = KB.input;
       if (this.page === 'help') {
-        if (inp.pressed('jump') || inp.pressed('attack') || inp.pressed('select') || inp.pressed('start')) { this.page = 'main'; sfx('menu_back'); }
+        if (inp.pressed('jump') || inp.pressed('attack') || inp.pressed('select') || inp.pressed('start')) { this.page = 'main'; sfx('menu_back'); return; }
+        UI.helpUpdate();
         return;
       }
       if (inp.pressed('start') || inp.pressed('select')) { this.resume(game); return; }
@@ -174,14 +175,14 @@
       }
       sfx('select');
       if (it.id === 'resume') { this.resume(game); return; }
-      if (it.id === 'help') { this.page = 'help'; return; }
+      if (it.id === 'help') { this.page = 'help'; UI.openHelp(); return; }
       if (it.id === 'map') {
         unduck(); KB.session.lives = game.lives; KB.session.score = game.score;
         KB.setScene(KB.StageSelectScene ? new KB.StageSelectScene(Math.max(0, KB.LEVELS.indexOf(game.level))) : new KB.GameScene(game.levelId));
         return;
       }
       if (it.id === 'title') {
-        unduck(); KB.session = { lives: KB.START_LIVES, score: 0 };
+        unduck(); UI.newSession(KB.START_LIVES, 0);
         if (KB.TitleScene) KB.setScene(new KB.TitleScene());
         return;
       }
@@ -271,6 +272,7 @@
     { id: 'music', label: '音樂音量', vol: 'music' },
     { id: 'sfx', label: '音效音量', vol: 'sfx' },
     { id: 'hints', label: '按鍵提示' },
+    { id: 'scale', label: '畫面縮放', cycle: [0, 2, 3, 4], names: ['自動', '2x', '3x', '4x'] },
   ];
   function slider(ctx, x, y, level) {
     for (let i = 0; i < 10; i++) {
@@ -290,6 +292,15 @@
       if (it.vol) {
         if (d) { UI.volStep(it.vol, d); sfx('menu'); }
         if (inp.pressed('jump') || inp.pressed('attack')) { UI.toggleVol(it.vol); sfx('menu'); }
+      } else if (it.cycle) {
+        const step = d || (inp.pressed('jump') || inp.pressed('attack') ? 1 : 0);
+        if (step) {
+          const st = UI.settings(), n = it.cycle.length;
+          let i = it.cycle.indexOf(st[it.id] | 0); if (i < 0) i = 0;
+          st[it.id] = it.cycle[(i + step + n) % n];
+          UI.saveSettings(); sfx('menu');
+          if (KB.resizeCanvas) KB.resizeCanvas();
+        }
       } else if (d || inp.pressed('jump') || inp.pressed('attack')) {
         const st = UI.settings(); st[it.id] = !st[it.id]; UI.saveSettings(); sfx('menu');
       }
@@ -299,18 +310,23 @@
     draw(ctx) {
       const ms = MS();
       KB.rect(ctx, 0, 0, W, H, 'rgba(0,0,0,0.7)');
-      panel(ctx, 24, 44, 208, 126);
-      T(ctx, '設定', 128, 48, { color: C.yellow, align: 'center', size: 16 });
-      KB.rect(ctx, 34, 72, 188, 1, '#405070');
+      panel(ctx, 24, 36, 208, 158);
+      T(ctx, '設定', 128, 40, { color: C.yellow, align: 'center', size: 16 });
+      KB.rect(ctx, 34, 64, 188, 1, '#405070');
       const st = UI.settings();
       for (let i = 0; i < SET_ITEMS.length; i++) {
-        const it = SET_ITEMS[i], y = 80 + i * 22, sel = this.sel === i;
+        const it = SET_ITEMS[i], y = 72 + i * 22, sel = this.sel === i;
         if (sel) cursor(ctx, 34, y + 3, this.frame);
         fit(ctx, it.label, 48, y, 66, { color: sel ? C.yellow : '#fff', size: ms });
         if (it.vol) { slider(ctx, 122, y + 2, UI.volLevel(it.vol)); KB.text(ctx, String(UI.volLevel(it.vol)), 222, y + 3, { color: '#c8d8f0', align: 'right' }); }
-        else T(ctx, onOff(st[it.id]), 222, y, { color: st[it.id] ? '#80e0a0' : C.grey, align: 'right', size: ms });
+        else if (it.cycle) {
+          let k = it.cycle.indexOf(st[it.id] | 0); if (k < 0) k = 0;
+          T(ctx, it.names[k], 222, y, { color: k === 0 ? '#c8d8f0' : '#80e0a0', align: 'right', size: ms });
+        } else T(ctx, onOff(st[it.id]), 222, y, { color: st[it.id] ? '#80e0a0' : C.grey, align: 'right', size: ms });
       }
-      fit(ctx, '←→ 調整　SELECT 返回', 128, 148, 196, { color: C.grey, align: 'center', size: ms });
+      KB.rect(ctx, 34, 158, 188, 1, '#405070');
+      fit(ctx, '←→ 調整　SELECT 返回', 128, 162, 196, { color: C.grey, align: 'center', size: ms });
+      fit(ctx, 'F：全螢幕切換', 128, 177, 196, { color: C.grey, align: 'center', size: ms });
     }
   }
   KB.SettingsMenu = SettingsMenu;
@@ -324,15 +340,21 @@
     constructor() {
       this.items = [];
       if (anyCleared()) this.items.push({ id: 'continue', label: '繼續遊戲' });
-      this.items.push({ id: 'new', label: '新遊戲' }, { id: 'help', label: '操作說明' },
-        { id: 'gallery', label: '能力圖鑑' }, { id: 'settings', label: '設定' });
+      this.items.push({ id: 'new', label: '新遊戲' });
+      // Extra 模式：通關 W5 後解鎖（KB.session.extra，由 player2 的難度調整讀取）
+      if (KB.DEBUG || (KB.save && KB.save.cleared && KB.save.cleared.w5)) this.items.push({ id: 'extra', label: 'Extra 模式' });
+      this.items.push({ id: 'help', label: '操作說明' }, { id: 'gallery', label: '能力圖鑑' });
+      // 競技場：通關 W5（或 ?debug=1）後解鎖
+      if (KB.ArenaScene && (KB.DEBUG || (KB.save && KB.save.cleared && KB.save.cleared.w5))) this.items.push({ id: 'arena', label: '競技場' });
+      this.items.push({ id: 'settings', label: '設定' });
       this.sel = 0; this.frame = 0; this.page = 'main'; this.sub = null;
     }
     update(scene) {
       this.frame++;
       const inp = KB.input;
       if (this.page === 'help') {
-        if (inp.pressed('jump') || inp.pressed('attack') || inp.pressed('select') || inp.pressed('start')) { this.page = 'main'; sfx('menu_back'); }
+        if (inp.pressed('jump') || inp.pressed('attack') || inp.pressed('select') || inp.pressed('start')) { this.page = 'main'; sfx('menu_back'); return; }
+        UI.helpUpdate();
         return;
       }
       if (this.sub) { if (this.sub.update() === 'back') { this.sub = null; this.page = 'main'; } return; }
@@ -344,19 +366,21 @@
         const it = this.items[this.sel];
         sfx('select');
         if (it.id === 'continue') scene.startGame(true);
-        else if (it.id === 'new') scene.startGame(false);
-        else if (it.id === 'help') this.page = 'help';
+        else if (it.id === 'new') scene.startGame(false, false);
+        else if (it.id === 'extra') scene.startGame(false, true);
+        else if (it.id === 'help') { this.page = 'help'; UI.openHelp(); }
         else if (it.id === 'gallery') this.sub = new AbilityGallery();
+        else if (it.id === 'arena') { UI.leave(scene, () => KB.setScene(new KB.ArenaScene())); }
         else if (it.id === 'settings') this.sub = new SettingsMenu();
       }
     }
     draw(ctx, scene) {
       if (this.page === 'help') { UI.drawHelp(ctx, { hint: 'Z / SELECT：返回選單' }); return; }
       if (this.sub) { this.sub.draw(ctx); return; }
-      const ms = MS(), n = this.items.length, h = 20 + n * 19, y0 = 180 - h;
+      const ms = MS(), n = this.items.length, rowH = n >= 6 ? 17 : 19, h = 18 + n * rowH, y0 = 180 - h;
       panel(ctx, 112, y0, 136, h);
       for (let i = 0; i < n; i++) {
-        const y = y0 + 9 + i * 19, sel = this.sel === i;
+        const y = y0 + 8 + i * rowH, sel = this.sel === i;
         if (sel) cursor(ctx, 124, y + 3, this.frame);
         T(ctx, this.items[i].label, 142, y, { color: sel ? C.yellow : '#fff', size: ms });
       }
@@ -390,7 +414,7 @@
     // 新的 GameScene（＝進入關卡）且在第一房 → 從第 0 幀起算，顯示 3 秒提示
     if (hint.game !== game) {
       hint.game = game; hint.level = game.levelId; hint.lastAbility = p ? p.ability : null;
-      hint.at = (game.roomIdx === 0) ? 0 : -1e9; hint.abAt = -1e9;
+      hint.at = (game.roomIdx === 0 && !game.arena) ? 0 : -1e9; hint.abAt = -1e9;
     }
     // 取得新能力 → 閃 1 秒提醒可以看招式
     const ab = p ? p.ability : null;

@@ -222,6 +222,13 @@
   UI.stepFade = stepFade; UI.leave = leave; UI.drawFade = drawFade;
   UI.mkStars = mkStars; UI.drawStars = drawStars; UI.mkClouds = mkClouds; UI.drawClouds = drawClouds;
   UI.drawMuteToast = drawMuteToast; UI.pad7 = pad7;
+  // 重設 KB.session：預設保留 extra 旗標（player2 的 Extra 模式；傳第 3 參數可明確指定）
+  UI.newSession = function (lives, score, extra) {
+    const old = KB.session || {};
+    const s2 = { lives: lives === undefined ? KB.START_LIVES : lives, score: score || 0 };
+    s2.extra = extra !== undefined ? !!extra : !!old.extra;
+    KB.session = s2; return s2;
+  };
 
   // ---------- 標題畫面 ----------
   function drawTitleBg(ctx, sc) {
@@ -285,13 +292,34 @@
     return maxw;
   };
   // 操作說明（標題畫面 / 暫停子頁共用）；列數由 input.js 的 HELP 決定，自動調整行距並截斷過長說明
+  // 第 2 頁：進階提示（input.js 的 HELP 已滿 8 列，這裡補 player2 要求的進階操作）
+  UI.HELP2 = [
+    ['水中 X', '水中也能吸入（減半）'],
+    ['梯子上 X', '在梯子上吐氣星攻擊'],
+    ['↓ + 跳', '單向平台上＝穿下去'],
+    ['跳（連按）', '漂浮；X 吐氣結束'],
+    ['滑鏟中 跳', '滑鏟可用跳躍取消'],
+    ['受傷時', '能力星噴出，可撿回'],
+    ['能力台座', '碰到即可重複取得能力'],
+    ['傳送星', '碰到後自動飛往另一處'],
+  ];
+  UI.helpPage = 0;
+  UI.HELP_PAGES = 2;
+  // 說明頁的左右翻頁（TitleScene / PauseMenu / TitleMenu 顯示說明時每幀呼叫）
+  UI.helpUpdate = function () {
+    const inp = KB.input;
+    if (inp.pressed('right') || inp.pressed('left')) { UI.helpPage = (UI.helpPage + 1) % UI.HELP_PAGES; sfx('menu'); }
+  };
+  UI.openHelp = function () { UI.helpPage = 0; };
   function drawHelp(ctx, opts) {
     opts = opts || {};
     KB.rect(ctx, 0, 0, W, H, 'rgba(0,0,0,0.62)');
     panel(ctx, 6, 6, 244, 188);
+    const page = opts.page !== undefined ? (opts.page | 0) : (UI.helpPage | 0);
     T(ctx, '操作說明', 128, 10, { color: C.yellow, align: 'center', size: 16, outline: '#402000' });
+    KB.text(ctx, (page + 1) + '/' + UI.HELP_PAGES, 240, 16, { color: C.grey, align: 'right' });
     KB.rect(ctx, 20, 30, 216, 1, '#405070');
-    const rows = (KB.input && KB.input.HELP) || [];
+    const rows = page === 1 ? UI.HELP2 : ((KB.input && KB.input.HELP) || []);
     const top = 35, bottom = 170, n = Math.max(1, rows.length);
     const gap = Math.max(11, Math.min(18, Math.floor((bottom - top) / n)));
     let y = top + Math.max(0, Math.floor((bottom - top - gap * n) / 2));
@@ -306,7 +334,7 @@
       fit(ctx, d, 100, y, DW, { color: '#fff', size: dSize });
       y += gap;
     }
-    fit(ctx, opts.hint || 'M：靜音　　SELECT：返回', 128, 173, 238, { color: C.grey, align: 'center', size: UI.MS });
+    fit(ctx, '←→ 換頁　　' + (opts.hint || 'M：靜音　　SELECT：返回'), 128, 173, 238, { color: C.grey, align: 'center', size: UI.MS });
   }
   UI.drawHelp = drawHelp;
 
@@ -316,12 +344,12 @@
       this.menu = null;
       this.clouds = mkClouds(5, 11, 14, 80); this.stars = mkStars(12, 5, 0, 0, W, 60);
     }
-    enter() { KB.session = { lives: KB.START_LIVES, score: 0 }; music('title'); }
+    enter() { UI.newSession(KB.START_LIVES, 0); music('title'); }
     // 從標題進入遊戲：cont=true → 接續（第一個未通關的世界）；否則從 W1 開始
-    startGame(cont) {
+    startGame(cont, extra) {
       let idx = 0;
       if (cont) { idx = KB.LEVELS.findIndex(l => !clearedOf(l.id)); if (idx < 0) idx = KB.LEVELS.length - 1; }
-      KB.session = { lives: KB.START_LIVES, score: 0 };
+      UI.newSession(KB.START_LIVES, 0, cont ? undefined : !!extra);
       leave(this, () => KB.setScene(new StageSelectScene(Math.max(0, idx))));
     }
     update(dt) {
@@ -330,7 +358,8 @@
       const inp = KB.input;
       // 按 START 後交給標題選單（menu.js 的 KB.TitleMenu）；沒有 menu.js 時維持舊行為
       if (this.menu) { this.menu.update(this); return; }
-      if (inp.pressed('select')) { this.help = !this.help; sfx('menu'); return; }
+      if (inp.pressed('select')) { this.help = !this.help; if (this.help) UI.openHelp(); sfx('menu'); return; }
+      if (this.help) { UI.helpUpdate(); }
       if (inp.pressed('start') || inp.pressed('jump')) {
         if (this.help) { this.help = false; sfx('menu'); return; }
         sfx('select');
@@ -492,8 +521,14 @@
       else if (this.cleared(i)) { sprAt(ctx, 'uifb_flag', 196, 164, 'tl'); KB.text(ctx, 'CLEAR', 240, 167, { color: C.yellow, align: 'right' }); }
       else T(ctx, '出發！', 240, 164, { color: C.cyan, align: 'right', size: UI.MS });
       // 第 2 列：收集星（本關）
-      if (lv) { T(ctx, '收集星', 16, 182, { color: '#c8d8f0', size: UI.MS }); drawStarRow(ctx, 64, 186, lv.id, { plate: false, left: true }); }
-      fit(ctx, '←→ 移動　Z 進入　SELECT 回標題', 128, 198, 234, { color: C.grey, align: 'center', size: UI.MS });
+      if (lv) { T(ctx, '收集星', 16, 180, { color: '#c8d8f0', size: UI.MS }); drawStarRow(ctx, 64, 184, lv.id, { plate: false, left: true }); }
+      // 最佳分數（結算畫面寫入 KB.save.best[levelId]）
+      if (lv) {
+        const best = (KB.save && KB.save.best && KB.save.best[lv.id]) | 0;
+        KB.text(ctx, 'BEST', 130, 181, { color: '#98a8c0' });
+        KB.text(ctx, pad7(best), 240, 181, { color: best > 0 ? C.yellow : '#5c6884', align: 'right' });
+      }
+      fit(ctx, '←→ 移動　Z 進入　SELECT 回標題', 128, 197, 234, { color: C.grey, align: 'center', size: UI.MS });
       drawMuteToast(ctx); drawFade(ctx, this);
     }
   }
@@ -525,7 +560,8 @@
     }
     const flashName = game.abilityFlash > 0 && ((game.abilityFlash >> 2) & 1);
     KB.text(ctx, hud, L.nameX, L.rowA, { color: flashName ? C.yellow : '#fff' });
-    T(ctx, cn, L.nameX, L.rowB, { color: flashName ? '#fff' : '#ffc8dc', size: 12 });
+    // 中文能力名：14px（12px 時「鐵鎚」這種密集字會糊）
+    T(ctx, cn, L.nameX, L.rowB, { color: flashName ? '#fff' : '#ffc8dc', size: UI.MS });
     // 中：血量
     const maxHp = p ? p.maxHp : KB.MAX_HP, hp = p ? Math.max(0, p.hp) : 0;
     const hurting = p && p.state !== 'dead' && p.invuln > KB.PHYS.invulnFrames - 30;
@@ -538,9 +574,18 @@
       sprAt(ctx, full ? pick('ui_hp_full', 'uifb_hp_full') : pick('ui_hp_empty', 'uifb_hp_empty'), L.hpX + i * L.hpGap, L.hpY, 'tl', o);
     }
     // 右：上列分數、下列生命（卡比臉 + xN）
-    KB.text(ctx, 'SCORE ' + pad7(game.score), L.right, L.rowA, { color: '#fff' , align: 'right' });
-    sprAt(ctx, pick('ui_kirby_face', 'uifb_face'), L.faceX, L.faceY, 'tl');
-    KB.text(ctx, 'x' + Math.max(0, game.lives | 0), L.right, L.livesY, { color: '#fff', align: 'right' });
+    if (game.arena) {
+      // 競技場：上列 ARENA n/5、下列計時，右下角換成剩餘番茄數
+      const a = game.arena, n = Math.min(a.order.length, (a.idx | 0) + (a.phase === 'rest' ? 2 : 1));
+      KB.text(ctx, 'ARENA ' + n + '/' + a.order.length, L.right, L.rowA, { color: C.yellow, align: 'right' });
+      KB.text(ctx, mmss((a.base | 0) + (game.timeAlive | 0)), 210, L.rowB, { color: C.cyan, align: 'right' });   // 魔王血條佔 x 66~156，計時靠右放
+      if (!sprAt(ctx, 'item_tomato', L.faceX + 7, L.faceY + 15, 'b')) KB.rect(ctx, L.faceX + 2, L.faceY + 4, 10, 10, '#e83030');
+      KB.text(ctx, 'x' + Math.max(0, a.tomatoes | 0), L.right, L.livesY, { color: '#fff', align: 'right' });
+    } else {
+      KB.text(ctx, 'SCORE ' + pad7(game.score), L.right, L.rowA, { color: '#fff', align: 'right' });
+      sprAt(ctx, pick('ui_kirby_face', 'uifb_face'), L.faceX, L.faceY, 'tl');
+      KB.text(ctx, 'x' + Math.max(0, game.lives | 0), L.right, L.livesY, { color: '#fff', align: 'right' });
+    }
     drawMuteToast(ctx);
   };
 
@@ -585,6 +630,158 @@
     T(ctx, '↑↓ 選擇　Z 確認', 128, 121, { color: C.grey, align: 'center', size: 12 });
   };
 
+  // ---------- 關卡開場橫幅（WORLD n + 關名）----------
+  // 進入關卡第一房時滑入 → 停 90 幀 → 滑出；純繪製，完全不阻擋操作。
+  const BANNER = { slideIn: 20, hold: 90, slideOut: 20, dist: 320 };
+  const bn = { game: null, start: -1e9 };
+  UI.resetLevelBanner = function () { bn.game = null; bn.start = -1e9; };
+  UI.drawLevelBanner = function (ctx, game) {
+    if (bn.game !== game) {
+      bn.game = game;
+      // 以 game.frame 計時（截圖工具只在最後 render 一次，用畫面次數計時會不準）
+      const ok = game.roomIdx === 0 && !game.arena && !(game.room && game.room.secret);
+      bn.start = ok ? 0 : -1e9;
+      // 開場音：audio2 指定用 sfx('select')（music('w_intro') 會蓋掉關卡曲，不使用）
+      if (ok) sfx('select');
+    }
+    if (game.paused || game.clearT >= 0) return;
+    const age = (game.frame || 0) - bn.start, span = BANNER.slideIn + BANNER.hold + BANNER.slideOut;
+    if (age < 0 || age > span) return;
+    let off = 0;
+    if (age < BANNER.slideIn) { const u = age / BANNER.slideIn; off = -BANNER.dist * Math.pow(1 - u, 3); }
+    else if (age > BANNER.slideIn + BANNER.hold) { const u = (age - BANNER.slideIn - BANNER.hold) / BANNER.slideOut; off = BANNER.dist * u * u * u; }
+    const x = Math.round(23 + off);
+    const n = Math.max(0, KB.LEVELS.indexOf(game.level)) + 1, name = (game.level && game.level.name) || '';
+    panel(ctx, x, 32, 210, 48, 'rgba(10,16,34,0.88)');
+    bigText(ctx, 'WORLD ' + n, x + 105, 37, 2, { color: C.yellow, outline: '#603000', shadow: '#a06000', align: 'center', spacing: 1 });
+    KB.rect(ctx, x + 12, 57, 186, 1, '#405070');
+    fit(ctx, name, x + 105, 60, 190, { color: '#fff', align: 'center', size: 16 });
+  };
+
+  // ---------- 過關結算（KB.ResultScene）----------
+  // 過關舞蹈結束（game.clearT === 220）後由 game.js 切換過來；結束時呼叫 game.gotoNext()。
+  const STAR_BONUS = 1000, HP_BONUS = 100;
+  function mmss(frames) {
+    const s = Math.max(0, Math.floor((frames || 0) / 60));
+    return String(Math.floor(s / 60) % 100).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+  }
+  UI.mmss = mmss;
+
+  class ResultScene {
+    constructor(game) {
+      this.game = game || null;
+      const g = this.game;
+      this.levelId = (g && g.levelId) || (KB.LEVELS[0] && KB.LEVELS[0].id) || 'w1';
+      this.levelIdx = g && g.level ? Math.max(0, KB.LEVELS.indexOf(g.level)) : 0;
+      this.levelName = (g && g.level && g.level.name) || '';
+      const score = g ? Math.max(0, g.score | 0) : 0;
+      const hp = g && g.player ? Math.max(0, g.player.hp | 0) : 0;
+      const sc = starCount(this.levelId);
+      this.rows = [
+        { label: 'SCORE', bm: true, val: score, fmt: pad7, color: '#fff' },
+        { label: 'TIME', bm: true, val: g ? Math.max(0, g.timeAlive | 0) : 0, fmt: mmss, color: '#fff' },
+        { label: '擊敗敵人', val: g ? Math.max(0, g.kills | 0) : 0, fmt: n => 'x' + n, color: '#fff' },
+        { label: '大星星 ★' + sc + '/' + UI.STAR_MAX, val: sc * STAR_BONUS, fmt: n => '+' + n, color: C.yellow },
+        { label: 'HP 獎勵 ' + hp + '×' + HP_BONUS, val: hp * HP_BONUS, fmt: n => '+' + n, color: C.yellow },
+      ];
+      this.total = score + sc * STAR_BONUS + hp * HP_BONUS;
+      this.prevBest = (KB.save && KB.save.best && KB.save.best[this.levelId]) | 0;
+      this.newBest = this.total > this.prevBest;
+      this.cur = this.rows.map(() => 0); this.curTotal = 0;
+      this.i = 0; this.hold = 0; this.tick = 0; this.done = false; this.saved = false;
+      this.t = 0; this.frame = 0; this.fade = 1; this.leaving = null;
+      this.stars = mkStars(36, 33, 0, 0, W, H);
+      this.conf = [];
+      for (let i = 0; i < 24; i++) this.conf.push({ x: Math.random() * W, y: Math.random() * H, vy: 0.25 + Math.random() * 0.5, ph: Math.random() * 6.28, c: ['#ffe040', '#ffb0d0', '#80e0ff', '#a0f0a0'][i & 3] });
+    }
+    enter() { music(KB.audio && KB.audio.SONGS && KB.audio.SONGS.result ? 'result' : 'clear'); }
+    finish() {
+      if (this.done) return;
+      this.done = true;
+      if (!this.saved) {
+        this.saved = true;
+        try {
+          if (KB.save) {
+            KB.save.best = KB.save.best || {};
+            KB.save.best[this.levelId] = Math.max(this.prevBest, this.total);
+            KB.saveGame && KB.saveGame();
+          }
+        } catch (e) { }
+        if (this.newBest) sfx('bigstar');
+      }
+    }
+    finishAll() {
+      for (let i = 0; i < this.rows.length; i++) this.cur[i] = this.rows[i].val;
+      this.i = this.rows.length; this.curTotal = this.total;
+      sfx('count_end'); this.finish();
+    }
+    exitScene() {
+      const g = this.game, idx = this.levelIdx;
+      leave(this, () => {
+        if (g && g.gotoNext) g.gotoNext();
+        else KB.setScene(new StageSelectScene(Math.min(KB.LEVELS.length - 1, idx + 1)));
+      });
+    }
+    update(dt) {
+      this.t += dt; this.frame++;
+      for (const q of this.conf) { q.y += q.vy; q.x += Math.sin(this.t * 2 + q.ph) * 0.3; if (q.y > H) { q.y = -4; q.x = Math.random() * W; } }
+      if (stepFade(this)) return;
+      const inp = KB.input;
+      if (inp.pressed('jump') || inp.pressed('start') || inp.pressed('attack')) {
+        if (!this.done) { this.finishAll(); return; }
+        if (this.frame > 8) { sfx('select'); this.exitScene(); return; }
+      }
+      if (this.done || this.frame < 26) return;
+      if (this.hold > 0) { this.hold--; return; }
+      if (this.i < this.rows.length) {
+        const r = this.rows[this.i], tgt = r.val;
+        if (tgt <= 0) { this.i++; this.hold = 6; sfx('count_end'); return; }
+        this.cur[this.i] = Math.min(tgt, this.cur[this.i] + Math.max(1, tgt * 0.03));
+        if ((++this.tick) % 4 === 0) sfx('count');
+        if (this.cur[this.i] >= tgt) { this.cur[this.i] = tgt; this.i++; this.hold = 10; sfx('count_end'); }
+        return;
+      }
+      if (this.curTotal < this.total) {
+        this.curTotal = Math.min(this.total, this.curTotal + Math.max(1, this.total * 0.03));
+        if ((++this.tick) % 4 === 0) sfx('count');
+        if (this.curTotal >= this.total) { this.curTotal = this.total; sfx('count_end'); this.finish(); }
+        return;
+      }
+      this.finish();
+    }
+    draw(ctx) {
+      const f = this.frame, ms = UI.MS;
+      bands(ctx, 0, H, ['#0c1430', '#141c48', '#1a2458', '#202c68']);
+      drawStars(ctx, this.stars, this.t);
+      for (const q of this.conf) KB.rect(ctx, Math.round(q.x), Math.round(q.y), 2, 3, q.c);
+      bigText(ctx, 'STAGE CLEAR', 128, 2, 2, { color: C.yellow, outline: '#603000', shadow: '#a06000', align: 'center', spacing: 1 });
+      KB.text(ctx, 'W' + (this.levelIdx + 1), 10, 29, { color: C.cyan, outline: C.dark });
+      fit(ctx, this.levelName, 32, 24, 214, { color: '#fff', size: 16 });
+      panel(ctx, 8, 40, 240, 150);
+      // 逐項：已開始滾動的才顯示
+      for (let i = 0; i < this.rows.length; i++) {
+        const r = this.rows[i], y = 48 + i * 18;
+        if (i > this.i) continue;
+        if (r.bm) KB.text(ctx, r.label, 18, y + 3, { color: '#c8d8f0' });
+        else fit(ctx, r.label, 18, y, 140, { color: '#c8d8f0', size: ms });
+        KB.text(ctx, r.fmt(Math.floor(this.cur[i])), 238, y + 3, { color: r.color, align: 'right' });
+      }
+      KB.rect(ctx, 16, 138, 224, 1, '#405070');
+      if (this.i >= this.rows.length) {
+        KB.text(ctx, 'TOTAL', 18, 148, { color: C.yellow, outline: '#402000' });
+        bigText(ctx, pad7(Math.floor(this.curTotal)), 238, 142, 2, { color: '#fff', outline: '#203050', align: 'right' });
+      }
+      if (this.done) {
+        KB.text(ctx, 'BEST', 18, 170, { color: '#98a8c0' });
+        KB.text(ctx, pad7(Math.max(this.prevBest, this.total)), 238, 170, { color: this.newBest ? C.pink : '#c8d8f0', align: 'right' });
+        if (this.newBest && ((f >> 3) & 1)) KB.text(ctx, 'NEW!', 60, 170, { color: C.yellow });
+        if ((f % 60) < 42) fit(ctx, 'Z / ENTER：繼續', 128, 196, 240, { color: '#fff', align: 'center', size: ms });
+      } else fit(ctx, 'Z / ENTER：跳過', 128, 196, 240, { color: C.grey, align: 'center', size: ms });
+      drawMuteToast(ctx); drawFade(ctx, this);
+    }
+  }
+  KB.ResultScene = ResultScene;
+
   // ---------- Game Over ----------
   class GameOverScene {
     constructor(game) {
@@ -602,7 +799,7 @@
       if (inp.pressed('up') || inp.pressed('down')) { this.sel ^= 1; sfx('menu'); }
       if (inp.pressed('jump') || inp.pressed('start')) {
         sfx('select');
-        if (this.sel === 0) { const idx = this.levelIdx; leave(this, () => { KB.session = { lives: KB.START_LIVES, score: 0 }; KB.setScene(new StageSelectScene(idx)); }); }
+        if (this.sel === 0) { const idx = this.levelIdx; leave(this, () => { UI.newSession(KB.START_LIVES, 0); KB.setScene(new StageSelectScene(idx)); }); }
         else leave(this, () => KB.setScene(new TitleScene()));
       }
     }

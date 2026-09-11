@@ -10,11 +10,31 @@
   function resize() {
     const ww = window.innerWidth, wh = window.innerHeight;
     let s = Math.max(1, Math.floor(Math.min(ww / KB.W, wh / KB.H)));
+    // 設定頁「畫面縮放」：KB.save.settings.scale（0 / undefined = 自動，2 / 3 / 4 = 固定整數倍）
+    try {
+      const pref = (KB.save && KB.save.settings && KB.save.settings.scale) | 0;
+      if (pref >= 2) s = pref;
+    } catch (e) { }
     if (KB.DEBUG && window.__forceScale) s = window.__forceScale;
     canvas.style.width = (KB.W * s) + 'px'; canvas.style.height = (KB.H * s) + 'px';
     canvas.style.left = Math.floor((ww - KB.W * s) / 2) + 'px'; canvas.style.top = Math.floor((wh - KB.H * s) / 2) + 'px';
+    KB.scale = s;
   }
   window.addEventListener('resize', resize);
+  KB.resizeCanvas = resize;      // 設定頁改縮放後立即套用
+
+  // F 鍵：全螢幕切換（不佔用遊戲按鍵；瀏覽器拒絕時安靜失敗）
+  KB.toggleFullscreen = function () {
+    try {
+      const el = document.documentElement;
+      if (!document.fullscreenElement) { const p = el.requestFullscreen && el.requestFullscreen(); if (p && p.catch) p.catch(() => { }); }
+      else { const p = document.exitFullscreen && document.exitFullscreen(); if (p && p.catch) p.catch(() => { }); }
+    } catch (e) { }
+  };
+  window.addEventListener('keydown', e => {
+    if (e.code === 'KeyF' && !e.ctrlKey && !e.altKey && !e.metaKey) { e.preventDefault(); KB.toggleFullscreen(); }
+  });
+  document.addEventListener('fullscreenchange', () => setTimeout(resize, 60));
 
   KB.setScene = function (s) {
     if (KB.scene && KB.scene.exit) KB.scene.exit();
@@ -85,10 +105,12 @@
       o = o || {};
       if (name === 'title') KB.setScene(KB.TitleScene ? new KB.TitleScene() : new KB.GameScene(KB.LEVELS[0].id));
       else if (name === 'select') KB.setScene(KB.StageSelectScene ? new KB.StageSelectScene(o.index || 0) : new KB.GameScene(KB.LEVELS[0].id));
-      else if (name === 'game') { KB.session = { lives: KB.START_LIVES, score: 0 }; KB.setScene(new KB.GameScene(o.level || KB.LEVELS[0].id, o)); if (o.nofade) { KB.scene.fade = 0; KB.scene.fadeDir = 0; } }
+      else if (name === 'game') { KB.session = Object.assign({ lives: KB.START_LIVES, score: 0 }, { extra: !!(KB.session && KB.session.extra) || !!o.extra }); KB.setScene(new KB.GameScene(o.level || KB.LEVELS[0].id, o)); if (o.nofade) { KB.scene.fade = 0; KB.scene.fadeDir = 0; } }
       else if (name === 'sheet') KB.setScene(new SheetScene(o.filter, o.page));
       else if (name === 'gameover') KB.setScene(KB.GameOverScene ? new KB.GameOverScene(null) : KB.scene);
       else if (name === 'ending') KB.setScene(KB.EndingScene ? new KB.EndingScene(null) : KB.scene);
+      else if (name === 'arena') KB.setScene(KB.ArenaScene ? new KB.ArenaScene() : KB.scene);
+      else if (name === 'result') KB.setScene(KB.ResultScene ? new KB.ResultScene(KB.game) : KB.scene);
       return true;
     },
     step(n) { for (let i = 0; i < (n || 1); i++) step(); render(); return KB.frameCount; },
@@ -112,8 +134,8 @@
   function boot() {
     document.body.appendChild(canvas);
     resize();
-    KB.session = { lives: KB.START_LIVES, score: 0 };
     const q = new URLSearchParams(location.search);
+    KB.session = { lives: KB.START_LIVES, score: 0, extra: q.get('extra') === '1' };
     if (KB.DEBUG && q.get('norun') === '1') { render(); return; }
     if (q.get('level')) { KB.setScene(new KB.GameScene(q.get('level'), { room: +(q.get('room') || 0), ability: q.get('ability') || undefined })); }
     else if (KB.TitleScene) KB.setScene(new KB.TitleScene());
