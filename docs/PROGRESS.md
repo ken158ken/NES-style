@@ -354,10 +354,151 @@ git 已初始化，基線 commit `c382e2a`。Playwright venv：`.venv/bin/python
   - audio2：已接上 `sfx('count')` / `sfx('count_end')` / `music('result')` / `music('arena')` / `music('arena_rest')`；開場橫幅依指示用 `sfx('select')`，未用 `w_intro`。
 
 ## mechanics
-（agent 在此追加）
+
+- [2026-09-11 23:20] 完成：**3 種互動磁磚 + 暗房遮罩**（tilemap.js / game.js / art/world.js / abilities.js）。
+  - `X` 硬磚 `tile_hardblock`（灰底鉚釘）：實心；`KB.TileMap.hardBreakable(a)` 判定 —— 判定框 `kind` 為 `hammer` / `stone`、
+    帶 `breakHard`（火焰衝刺，abilities.js 建立判定框後掛上）或 `dmg ≥ 5` 才打得破；其餘攻擊 `map.clink()` 播 `sfx('hardblock')` + 白色火花（10 幀冷卻）。炸彈連鎖也能炸開 X。
+  - `F` 導火線 `tile_fuse` / `tile_fuse_v`（依左右鄰居自動選橫／直向）：不實心、可通行；被 `kind==='fire'` 判定命中 → `map.igniteFuse()`，
+    `map.burning` 每 6 幀往相鄰 F 延伸（燒過的變 `.`、畫 `tile_fuse_burn` 2 幀火焰、播 `sfx('fuse')`），燒到相鄰 `B`/`*` 就丟進既有的 `pending` 連鎖引爆。
+  - `I` 冰磚 `tile_iceblock`（8 位數色碼半透明藍）：實心；被 `fire` 判定命中 → `map.meltIce()` 20 幀後消失（期間 alpha 遞減 + 閃爍 + 冰屑粒子 + `sfx('melt')`）。重擊（hammer/stone）也砸得破，避免卡死。
+  - 暗房：`room.dark` → `game.js drawDark()` 用離屏 canvas 填 `room.darkColor`（預設 `rgba(4,4,14,0.94)`）後以 `destination-out` 徑向漸層挖洞；
+    卡比半徑 40px，火把 / 星星裝飾（castle `r`、dedede `t`/`c`、cloud `s`）另挖 34px 會閃動的小光圈。
+    `abilities.js` 的 `light(r)` 在放電 / 電擊波設 `lightR=96`、噴火設 `lightR=64`，同時寫 `lightT=180` 與 `lightF=game.frame`；
+    招式結束後 `lightF` 停住 → 半徑依**遊戲幀**（不是繪製次數）在 180 幀內線性縮回 40px。
+  驗證：`shots/agent_mech/w2_dark.png`（40px 光圈 + 火把）、`w2_dark_spark_on.png`（96px）、`w2_dark_spark_fade190.png`（縮回 40px）、
+  `w2_hard_before/hit.png`（鐵鎚砸破）、`w2_hard_clink.png`（劍砍只有火花、硬磚還在）、`w1_fuse_before/after_burn/after.png`、`w1_ice_before/after.png`。
+  下一步：關卡運用。
+
+- [2026-09-11 23:35] 完成：**關卡運用（levels.js 末端新增「Round 2 機關層」MECH 疊加表）**。
+  不動原本的房間字串，改用 `MECH = [{lv, r, tiles, deco, flags, rm, add}]` 疊加補丁，一眼看得出每個世界用了哪些機關。
+  | 關 | 房 | 機關 | 內容 / 獎勵 | 能力來源 |
+  |---|---|---|---|---|
+  | w1 | r0 起點草原 | `F`×4 + `B` | 地面垂下的導火線 → 引爆空中木箱 → 4 點數星 + 食物 | essence(fire) @(58,9)、Hot Head (63,9) |
+  | w1 | r1 星星森林 | `I`×1 | 空中石室入口的冰磚（側牆，正面噴火燒得到）→ 4 點數星 + 食物 | essence(fire) @(50,9)、Hot Head (37,6) |
+  | w2 | r0 古堡玄關 | `X`×2 | 兩端封死的空中石廊（x=42~54）→ 6 點數星 + 食物 + 番茄 | essence(hammer) @(30,9) |
+  | w2 | r1 螺旋塔 | **暗房** | 整座塔只看得見卡比周圍；牆上加 6 支火把 | essence(spark) @(6,25) |
+  | w3 | r1 珊瑚洞窟 | `I`×4 | 右側水道整片結冰，燒開才潛得下去 → 3 點數星 + 食物 | essence(fire) @(60,9) |
+  | w3 | r2 浮島跳躍 | `F`×6 + `B` / **傳送星** | 導火線炸藥庫（4 點數星 + 食物）；傳送星 (60,9) 飛過 x=62~68 尖刺坑落到 (73,9) | essence(fire) @(19,9) |
+  | w4 | r2 風之迴廊 | `X`×2 / **傳送星** | 天花板硬磚密道（6 點數星 + 1UP）；傳送星 (53,9) 飛過 x=56~58 無底洞落到 (68,9) | essence(hammer) @(45,9) |
+  | w4 | r3 魅塔之前 | **暗房** | 雲霧深處（`darkColor` 較淡）；加 4 顆會發光的星星裝飾 | essence(spark) @(14,9) |
+  | w5 | r0 城門 | `F`×6 + `B` | 導火線炸藥庫 → 4 點數星 + 食物 | essence(fire) @(19,9) |
+  | w5 | r1 守衛長廊 | `X`×2 + **暗房** | 暗房走廊（4 支火把）+ 硬磚密道（6 點數星 + 1UP + 番茄） | essence(hammer) @(6,9) |
+  | w5 | r2 地下水牢 | `I`×4 | 中段水牢結冰，燒開才潛得到底 → 2 點數星 + 食物 | essence(fire) @(25,9) |
+  **主路線完全沒有被新磁磚擋住**（所有機關都在天花板 / 支線 / 水面，冰面可以直接走過去），大星星與秘密房位置一格未動。
+  硬磚 / 冰磚前一定補了 1~2 格立足點 —— 卡比「漂浮中按攻擊＝吐氣」，站著才打得出地面招式（掄鎚 / 噴火）。
+  驗證：`node tools/level_check.js` → 0 error；`shots/agent_mech/` 各機關前後對照圖。
+
+- [2026-09-11 23:45] 完成：**能力台座 `KB.ITEMS.essence` 與傳送星 `KB.ITEMS.warpstar`**（items.js + art/world.js）。
+  - `essence`：`{ t:'essence', x, y, a:'<能力 key>' }`。`item_essence_base` 底座 + 上方漂浮的 `ui_ability_<key>_mini`（2 倍放大）+ 光暈 + 能力色火花；
+    碰到即 `player.giveAbility(key)` 並播 `sfx('essence')`，**不會消失**，冷卻 30 幀，已經是同一種能力時不重複觸發。全遊戲 11 個（每世界 1~2 個，都放在對應機關前）。
+  - `warpstar`：`{ t:'warpstar', x, y, a:[[tx,ty],…], b?:{room,x,y} }`。`item_warpstar` 2 幀星星 + 光暈 + 拖尾；
+    碰到 → `dead=true` → `KB.player.rideStar(worldPath, onArrive)`（磁磚座標換算成 `tx*16+8`）；`b` 有值時 `onArrive` 走 `fadeTo → loadRoom`，沒有就原地落地。
+    `rideStar` 不存在時退回「`fadeTo` 直接抵達」。w3 r2 / w4 r2 各 1 次。
+  驗證：`shots/agent_mech/w3_warp_ride2.png`（騎星飛過尖刺坑）、`w3_warp_land.png`、`w4_warp_before.png`（台座 + 傳送星 + 硬磚密道同框）。
+
+- [2026-09-11 23:55] 完成：**工具與最終驗證**。
+  - `tools/level_check.js`：`X F I` 加進 KNOWN（X/I 視為實心）；新增「機關磁磚統計」、「有 X/F/I 就要有對應能力來源（essence 台座或會給該能力的敵人）」、
+    「導火線必須 4 鄰接連得到 B/\*」、「暗房要有發光裝飾與電擊/火焰來源」、`essence` 的 `a` 與底座地面、`warpstar` 路徑點不可在實心格 / 落點要站得住 / `b` 目標房合法。
+  - `tools/playthrough.py`：卡住時的嘗試順序加了 **D「↓+攻擊」**（重擊招式，硬磚 X 只有這類打得破）。
+  - 依 audio2 需求：每房補 `ambient`（water / cave / wind / castle，依房名與水量自動判定）、每世界 r≥2 的非魔王 / 非秘密房改用第二首曲（`green2` … `dedede2`）。
+  - 依 player2 需求：`abilitystar` 改用 `KB.PHYS.abilityStarLife`（Extra ×0.5）、落地彈 2 次（-2.8 / -1.6）、最後 20% 幀數才開始閃爍。
+  驗證：`node tools/level_check.js` → **0 error / 1 warning**（既有的拉拉拉出生點提示）；
+  `.venv/bin/python tools/engine_test.py` → **118/118 PASS**；
+  `tools/playthrough.py --level wN --ability sword --godmode` 五世界 **全部 cleared=True**（最後一輪 w1 4443 / w2 8266 / w3 6021 / w4 9133 / w5 9974 幀，deaths=0，missing sprites 皆空）。
+
+#### 跨檔需求（mechanics → 其他 agent / 總控）
+- **總控（game.js loadRoom）**：房間資料已備妥 `room.ambient`，請在 `loadRoom` 結尾加 `KB.audio.ambient(room.ambient || null)`（audio2 指定）。
+- **ui-flow**：暗房 `room.dark` 的遮罩畫在 `map.drawWater` 之後、HUD 之前（`GameScene.drawDark`），HUD / 橫幅 / 暫停畫面都不會被壓暗；若之後要加「暗房也壓暗 HUD」請改 drawDark 的呼叫位置。
+- **enemies-bosses2**：新中魔王要放哪一房請告訴我（目前 w2 r2 / w3 r2 / w5 r3 已有 gatekeeper 門鎖）。
+  另外 w5 r0 (22,9) 的 Blade Knight 就站在導火線旁邊、w4 r2 (58,8) 的 gordo 靠近傳送星起點，若要調敵人位置我再同步機關座標。
+- **abilities-enemies**：`abilities.js` 只加了兩個 hook —— 火焰衝刺判定框 `d.box.breakHard = true`、火焰 / 電擊 update 開頭呼叫 `light(64/96)`；招式數值一律沒動。
+
+#### 已知問題 / 未完成
+- `tools/build.py` 尚未執行（其他 agent 還在改檔，避免打包到半成品狀態）→ 請總控收尾時統一 build。
+- 冰磚在「站在冰面上用地面噴火」時，判定框只有最下方 1px 壓到腳下那一列 —— 對水面結冰（w3 r1 / w5 r2）是「往前方燒」最順手；
+  若之後 player 的 `h` 改動，建議改用火焰衝刺（↓+X，判定框 oy −3 / h 20）驗證。
+- 暗房目前只有卡比與火把 / 星星裝飾發光；敵人的投射物（火球 / 電擊）沒有光源，之後想加可在 `drawDark` 的 `hole()` 迴圈裡加實體掃描。
 
 ## enemies-bosses2
-（agent 在此追加）
+
+- [2026-09-11 23:10] 完成：**新原創中魔王「鐵甲滾球 Rollarmor」**（`KB.ENEMIES.rollarmor`，繼承 `MiniBoss`）。
+  hp 12 / 碰撞框 30×30 / score 3500 / 打倒後暈倒可吸入得 **hammer**。兩招 + 一個弱點：
+  ① **鐵殼滾動 roll**（距離 >70px 或每第 3 次出招）縮進殼裡以 2.8px/f 滾過來，撞牆反彈，撞 2 次牆 / 遇懸崖 / 150 幀後散開；
+  ② **站起來砸地 slam**（近距離）24 幀舉臂預備後砸下 —— 正面 `dmg 2` 的 hammer 判定框 + 左右各一道沿地面跑的 `KB.Shockwave`；
+  ③ **弱點**：鐵殼關著（roll 全程、slam 的 24 幀預備）時攻擊會「鏘」一聲被彈開**不扣血**（`get armored`），
+  滾完 / 砸完的 `open` 硬直（46~60 幀，鐵殼張開露出橘紅軟肉）才是玩家的攻擊窗。
+  像素圖（`src/art/enemies.js`，程序式繪製，40~44px）：`rollarmor_walk` 2 幀 / `rollarmor_roll` 2 幀（36×36 置中、程式端旋轉）/
+  `rollarmor_attack` 2 幀（舉臂 / 砸下）/ `rollarmor_hurt` 1 幀（殼裂 + ×眼）/ `rollarmor_stun` 1 幀（癱坐冒星星）。
+  驗證：`tools/enemy_test.py --only rollarmor` 16/16 PASS；sheet 截圖 `shots/agent_eb2/sheet_rollarmor.png`、
+  實戰截圖 `shots/agent_eb2/rollarmor_walk.png` / `rollarmor_roll.png` / `rollarmor_slam_windup.png` / `rollarmor_slam_hit.png` / `rollarmor_open.png` / `rollarmor_stun.png`。
+
+- [2026-09-11 23:25] 完成：**敵人掉落表**（`src/entity.js`）。`Enemy` 新增 `dropTable`（預設 `{pointstar:0.25, food:0.05}`），
+  `MiniBoss` 覆寫為 `{tomato:0.5, oneup:0.1}`；`Enemy.die` 統一呼叫新的 `rollDrop(src)`：
+  `spawnDef.drop`（`ent.dropItem`）指定時優先且必掉 → 魔王房（`KB.game.isBossRoom`）不掉 → 否則依表順序 roll，**命中第一個就停（一次最多一個）**，
+  所以機率設 0 / 1 時是確定性行為。`pointstar` 用 `{pop:true}` 彈出。
+  「只在被攻擊殺死時掉」是靠既有結構保證的：被吸入吞下走 `onInhaled`（直接 `dead=true`，不經 `die`）、掉出地圖走 `update` 的 `fellOut`（同樣不經 `die`）。
+  中魔王沒有 `die()`（暈倒 300 幀後才 `dead=true`），所以改在 `MiniBoss.stun(src)`「被打倒的那一刻」roll 一次，之後吸入不會重複掉。
+  驗證：`tools/enemy_test.py --only drops` 11/11 PASS（機率 1 必掉 / 機率 0 不掉 / 一次最多一個 / 魔王房不掉 / spawnDef.drop 優先 / 吸入吞下不掉 / 掉出地圖不掉 / 中魔王暈倒時掉且吸入不重複）。
+
+- [2026-09-11 23:40] 完成：**Extra（超難）難度鉤子**。倍率表集中在 `src/entity.js`：
+  `KB.EXTRA = { spd:1.2, proj:1.2, bossHp:1.25, miniHp:1.25, phase2:0.6 }`，搭配 `KB.extraOn()` / `KB.exK(k)` / `KB.exPhase2()`（開關讀 `KB.session.extra`）。
+  套用點只有三處，不散落：
+  (1) `Baddie.applyExtra()`（`src/enemies.js`，**第一次 update 時**呼叫一次 —— 子類建構式在 `super()` 之後才設 speed/hp，建構式裡做不到）：
+      設 `this.exK = 1.2`（`Enemy.walk` 與 `Baddie.chase` 共用），中魔王（`isMiniBoss`）`maxHp ×1.25`；
+  (2) `KB.Projectile` 建構式：`owner==='enemy'` 時 `vx/vy ×1.2`（在子類讀 `vx` 之前先乘，例如 `Boomerang.maxV`）；
+  (3) `Boss.ensureExtra()`（`src/bosses.js`，於 `update / introUpdate / hurt / drawBody` 開頭各呼叫一次，只會生效一次）：`maxHp ×1.25`（含 `maxSelfHp`），
+      二階段門檻改成 `get half() { return this.maxHp * KB.exPhase2(); }`（一般 50% → Extra 60%，即時計算不需要初始化）。
+  驗證：`tools/enemy_test.py --only extra` 9/9 PASS（倍率表 / 預設關閉 / 敵人走速 ×1.2 / 投射物 ×1.2 且玩家的不受影響 / 實戰 shotzo 砲彈 ×1.2 /
+  中魔王 12→15 且關掉會變回 12 / 魔王 40→50 / 門檻 20→30）；實機 smoke：Extra 開啟後威斯比 50（half 30）、迪迪迪 75（half 45），無 pageerror。
+
+- [2026-09-11 23:55] 完成：**5 個魔王登場動畫**（`bossIntroT` 150 幀期間的 `introUpdate` / `draw`，`KB.BOSS_INTRO = 150`，基底提供 `this.introT` / `introP`）。
+  - 威斯比：整棵樹左右搖晃（幅度隨時間收斂）+ 樹冠不斷飄落綠色葉片粒子，每 46 幀一次沉重的搖動 + 震動。
+  - 洛洛洛 & 拉拉拉：**從房間左右兩側各推一顆箱子走進定位**（洛洛洛右→左、拉拉拉左→右；登場期間 `solid=false` 不吃物理，
+    箱子是純繪製的 `proj_box`，不生實體以免登場期間就打到卡比），走到定位冒 `fx_poof`。
+  - 克拉寇：四面八方的小雲朝中心聚集（粒子帶速度向內）+ 本體 `alpha` 由 0.06 漸顯到 1，第 132 幀成形時閃光 + 震動。
+  - 魅塔騎士：新精靈 **`metaknight_cape`（2 幀：整件披風裹住只露發光雙眼 / 張成雙翼）**，時序為裹住 → 40 幀展開（風壓粒子）→ 104 幀收攏 → 118 幀換回 `metaknight_idle`。
+  - 迪迪迪：王座後畫一道**城堡大門**（70 幀內淡出）→ 從門裡大搖大擺走出來（`dedede_walk` + 腳步塵）→ 最後 56 幀舉鎚敲地示威兩下（`dedede_hammer` + 震動 + 木屑）。
+  **平衡注意**：`onIntroEnd` 只還原 `solid/grav/位置`，**不呼叫 `setState`** —— 登場期間 `stateT` 已累積到 150，魔王一開打就出招是原本的節奏，
+  重設會讓整場戰鬥時序位移（實測會讓 `boss_test` 的 lololo 普通玩家樣本從 3/3 掉到 1/2）。
+  驗證：`tools/boss_test.py` 新增 `[intro]` 全部 PASS；連拍 `shots/agent_eb2/intro_<boss>_00..06.png` 與拼接 `shots/agent_eb2/introseq_{whispy,lololo,kracko,metaknight,dedede}.png`。
+
+- [2026-09-12 00:10] 完成：**測試與收工驗證**。
+  - `tools/enemy_test.py` **368/368 PASS**（新增 rollarmor 16 項、drops 11 項、extra 9 項；`--only rollarmor,drops,extra` 可單跑）。
+    另把「中魔王打到暈倒」改成自適應補刀（鐵甲滾球的鐵殼會擋掉好幾下，固定次數不夠）。
+  - `tools/boss_test.py` 新增 `[intro]` 測試（`__bt.introProbe`）：登場期間每 18 幀直接 `hurt()` + 生一個覆蓋魔王的玩家判定框（共 8 次），
+    魔王 hp 不得下降、`hurt()` 一律回傳 false、150 幀後 `introducing === false` / `bossIntroT === 0` / `started === true`（洛洛洛連 partner 一起檢查），
+    並在第 6 / 75 / 138 幀擷取 `shots/boss_<key>_introanim_{early,mid,late}.png`。新增 `--no-intro` / `--intro-frames`。
+  - `tools/engine_test.py` 118/118 PASS；`node --check` 我改的 5 個檔全通過；
+    `tools/playthrough.py --level w1..w5 --godmode` 五世界皆 `cleared=True`、`deaths=0`、`missing sprites: []`；`tools/build.py` → 759 KB。
+
+### 跨檔需求（enemies-bosses2 → 其他 agent）
+- **mechanics（levels.js）— 新中魔王放置**：`{ t: 'rollarmor', x: 31, y: 9 }`，建議放 **w4 room 3「風之迴廊」**
+  （該房 row 10 的 x=27~37 是 11 格連續平地、兩端是落差，正好讓「滾過來 → 撞牆／到邊緣散開」看得出來；y=9 即腳站 row 10）。
+  理由：w2 r2 有 Bonkers、w3 r2 有 Mr. Frosty、w5 r3 有兩隻，**w4 目前沒有中魔王**；鐵甲滾球給 hammer，對接下來的魅塔騎士戰也很好用。
+  一併建議比照其他中魔王房加上 `{ t:'gatekeeper', x, y }` + 出口門 `locked:true`（`level_check` 會檢查兩者要成對）。
+  備選位置：w4 r3 的 x=85~95 平地（`{t:'rollarmor', x:89, y:9}`）、或 w5 r1「守衛長廊」任一段 ≥10 格平地。
+  需求：**至少 10 格連續平地**，兩端有牆或落差；牠碰撞框 30×30、精靈最寬 44px，房間淨高請留 ≥ 3 格。
+- **mechanics / player2（平衡回報，非我的檔案）**：`src/items.js` 這一輪對 `abilitystar` 的改動（落地彈跳 6 次 → 3 次、
+  `life` 420 → `KB.PHYS.abilityStarLife`）**讓 `boss_test` 的 kracko / dedede fight 樣本從 3/3 掉到 2/3**。
+  Bisect 證據：把 **只有** `src/items.js` 還原成 HEAD（我這輪的所有改動都留著）→ `tools/boss_test.py --runs 3` **ALL PASS**；
+  只還原 `abilities.js` 或 `tilemap.js` 則仍然 FAIL。原因是掉落的能力星彈跳次數改了 → 落點改了 → 機器人撿不回劍。
+  建議：能力星落地彈跳改回 6 次（或把第 2 次彈跳的水平摩擦調回原值），再跑 `tools/boss_test.py --runs 3` 確認。
+- **ui-flow / menu**：Extra 難度的開關請寫 `KB.session.extra = true`（布林），敵人 / 魔王端已經全部接好；
+  倍率要調整請改 `src/entity.js` 的 `KB.EXTRA`（`spd / proj / bossHp / miniHp / phase2`），不要在各處寫死。
+  注意 `__kb.goto('game', …)` 與 `main.js` 開新遊戲時會重建 `KB.session`，**設定 extra 要在進入 GameScene 之後（或改成從存檔帶入）**。
+- **audio2**：登場動畫用到的 sfx 都是既有的（`door` / `land` / `hammer` / `block` / `slide` / `cutter` / `unlock` / `enemyhit`）。
+  若之後要做專屬的登場音效，建議加 `boss_intro`（一次性號角）與 `cape`（布料展開），我再接上去。
+
+### 已知問題 / 未完成（enemies-bosses2）
+- `tools/boss_test.py --runs 3` 目前 SUMMARY 是 `kracko fight=FAIL / dedede fight=FAIL`，**不是我這輪造成的**（見上面的 bisect：還原 items.js 就 ALL PASS）。
+  我這輪新增的 `[intro]`、以及 idle / phase2 / mid / inhale 全部 PASS。
+- 鐵甲滾球目前**沒有被放進任何關卡**（levels.js 不屬於我），所以 `playthrough` 不會遇到牠；實戰驗證是用 playwright 腳本生到 w1 room0 做的。
+- 鐵甲滾球的鐵殼無敵是「彈開不扣血」（`hurt` 回傳 true，判定框算命中所以不會每幀重複觸發）。
+  若 QA 覺得「打不動」太挫折，可把 `open` 硬直從 46/60 幀再拉長，或讓 slam 的預備期改成只擋一半傷害。
+- Extra 難度的「敵人移動速度 ×1.2」只作用在 `Enemy.walk()` / `Baddie.chase()`（一般移動）；
+  各招式裡寫死的衝刺速度（Mr. Frosty 的 charge、Bonkers 的 leap 等）沒有跟著加速，只有鐵甲滾球的滾動有乘 `exK`。
+  要全面加速的話建議之後統一改成 `speed * this.exK`。
+
 
 ## player2
 
@@ -506,3 +647,19 @@ git 已初始化，基線 commit `c382e2a`。Playwright venv：`.venv/bin/python
   - mechanics：R2-P1-04 w3/w4/w5 魔王房 spawn 與 bossPos 只差 16px（建議 ≥96px）、R2-P1-05 無敵 Shotzo 擋在 w5 r0 唯一動線、R2-P1-07 主線番茄不足、R2-P2-11 / R2-P2-12。
   - ui-flow：R2-P2-08 HUD 能力中文名仍 12px、R2-P2-09 能力圖鑑 6/8 頁說明被截斷、R2-P2-10 圖鑑行首標點、R2-P2-13 開場橫幅與右上 toast 重疊。
 
+- [2026-09-11 22:05] 完成：**第三部分 Round 2 新功能驗證（第 1~2 輪）**。已驗 13 項：結算畫面、開場橫幅、競技場（選能力 / 戰鬥 HUD / 休息室）、HUD 14px、設定「畫面縮放」+ F 全螢幕、選關 BEST、標題新選單、互動磁磚 X / F / I、暗房、能力台座 essence、傳送星 warpstar、游泳水花、新中魔王 rollarmor 精靈。
+  **新問題 5 項**（詳見 `docs/QA_REPORT.md` R2-6a）：
+  - **R2-P1-14（mechanics）水中看不見卡比**：`game.js` 先畫實體、之後才 `map.drawWater()` 且 `globalAlpha=0.72`，水中的卡比 / 敵人 / 食物全被壓成同一個青藍色（放大圖 `shots/agent_qa2/r2_swim_zoom.png`）。這直接對應死亡熱點 #4 / #9。建議 alpha 降到 0.3~0.4 或改繪製順序。
+  - **R2-P1-15（enemies-bosses2 + mechanics）新中魔王 rollarmor 沒有放進任何關卡**：`KB.ENEMIES.rollarmor` 已註冊、8 張精靈齊全，但 5 世界 30 房的 entities 沒有任何一筆 `t:'rollarmor'`。
+  - R2-P2-16（ui-flow）標題選單面板壓住 logo 的「STAR」字；R2-P2-17（mechanics）暗房裡敵人幾乎看不見（建議光圈 40→52px）；R2-P2-18（ui-flow）結算畫面關名被面板上框線切到。
+  已修確認：**R2-P2-08（HUD 能力中文名 12px）→ ui-flow 已改 `size: UI.MS`**。
+  截圖：`shots/agent_qa2/r2_*.png`（結算 5 張、競技場 3 張、機關 6 張、游泳 3 張、rollarmor 精靈 1 張、標題 / 設定 2 張，皆已 Read 看圖）。
+  未完成：mechanics 與 enemies-bosses2 尚未在 PROGRESS 回報，Extra 難度的實機量測待他們回報後再做（第 3~4 輪）。
+- [2026-09-11 22:20] 完成：**第三部分第 3~4 輪重讀 + 整體健康度回歸**。
+  `node tools/level_check.js` → **0 error / 1 warning**；`node --check` 掃 `src/*.js` + `src/art/*.js` → **全過**（19:34 的 `waterSplash` 暫時性錯誤已消失）；
+  `playthrough.py --level wN --ability sword --godmode --maxframes 30000` × 5 → **5/5 cleared=True、deaths=0、missing sprites 空**（w1 4686 / w2 7755 / w3 6075 / w4 8449 / w5 9686 幀）。
+  → **路線完整性沒有退步；退步的是「不用無敵能不能走完」（從來沒被驗過）**。建議驗收條件改成兩條：① `--godmode` 必須通關；② 不加 `--godmode` 時 `deaths ≤ 2`（目前 5 個世界都不過）。
+  Extra 模式已驗（HUD 3 格 HP，`shots/agent_qa2/r2_extra_hud.png`），但建議等一般難度調完再開放。
+  另補：`r1_abilityflash.png` 顯示**開場橫幅 2 秒內跳 toast 會整行疊在「WORLD n」上、兩行都不可讀** → R2-P2-13 已升級為 **P1**（ui-flow）。
+  **mechanics 與 enemies-bosses2 到 20:00 為止仍未在 PROGRESS 回報**（程式已進檔，是直接掃 src 驗的），請兩位補寫，否則總控無法分辨「做完」與「寫到一半」。
+  qa2 三部分全部完成；完整報告見 `docs/QA_REPORT.md` 的「# Round 2（qa2 agent）」章節（R2-0 ~ R2-7），截圖 60 張於 `shots/agent_qa2/`。

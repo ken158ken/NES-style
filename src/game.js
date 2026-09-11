@@ -68,6 +68,7 @@
       this.updateCamera(true);
       const mk = room.music || (this.isBossRoom && this.boss ? (this.level.id === 'w5' ? 'finalboss' : 'boss') : this.level.music || this.theme);
       this.playMusic(mk);
+      try { if (KB.audio && KB.audio.ambient) KB.audio.ambient(room.ambient || null); } catch (e) { }
       if (this.map.w * T < KB.W) { /* 小房間置中 */ }
     }
     spawnDef(e) {
@@ -311,10 +312,11 @@
         this._darkCtx = cv.getContext('2d');
       }
       const x = this._darkCtx;
-      if (this.lightT > 0 && this._lightF !== this.frame) { this._lightF = this.frame; this.lightT--; }
-      if (!(this.lightT > 0)) { this.lightT = 0; }
+      // lightT / lightF 由 abilities.js 的 light() 每幀寫入（招式期間 lightF 會一直跟著 frame 走），
+      // 招式結束後 lightF 停住 → 剩餘幀數隨遊戲幀遞減 → 半徑線性縮回 40px（不依賴繪製次數）
+      const lt = Math.max(0, (this.lightT || 0) - Math.max(0, this.frame - (this.lightF || 0)));
       const peak = this.lightR || 40;
-      const r = Math.max(24, 40 + (peak - 40) * Math.min(1, this.lightT / 180));
+      const r = Math.max(24, 40 + (peak - 40) * Math.min(1, lt / 180));
       x.globalCompositeOperation = 'source-over';
       x.clearRect(0, 0, KB.W, KB.VIEW_H);
       x.fillStyle = this.room.darkColor || 'rgba(4,4,14,0.94)';

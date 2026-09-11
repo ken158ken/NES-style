@@ -189,18 +189,108 @@
     return n;
   };
 
+  // ---------- 能力台座：底座 + 上方漂浮的能力圖示；碰到即取得能力，不消失（冷卻 30 幀）----------
+  // 關卡以 { t:'essence', x, y, a:'fire' } 生成（a 為 KB.ABILITIES 的 key）。
+  // 用途：放在需要該能力的機關（硬磚 / 導火線 / 冰磚 / 暗房）前面，讓玩家不必回頭找敵人。
+  KB.ITEMS.essence = class extends Item {
+    constructor(x, y, key) {
+      super(x, y);
+      this.name = 'essence'; this.spr = 'item_essence_base';
+      this.ability = (key && KB.ABILITIES && KB.ABILITIES[key]) ? key : 'fire';
+      this.w = 14; this.h = 16; this.z = 1; this.score = 0; this.bob = false;
+      this.cool = 0; this.inhalable = false; this.hurtsPlayer = false;
+    }
+    update(dt) {
+      this.baseUpdate(dt);
+      if (this.cool > 0) this.cool--;
+      const p = KB.player;
+      if (!p || p.dead || p.state === 'dead' || this.cool > 0) return;
+      if (!this.overlaps(p)) return;
+      this.cool = 30;
+      if (p.ability === this.ability) return;
+      const d = KB.ABILITIES[this.ability], col = (d && d.color) || '#ffe040';
+      KB.audio.sfx('essence');       // audio2 提供的台座啟動音（giveAbility 另有 'ability' jingle）
+      KB.particles(this.cx, this.bottom - 12, ['#ffffff', col], 16, { spread: 2.5, life: 26 });
+      KB.fx('fx_sparkle', this.cx, this.bottom - 12);
+      p.giveAbility(this.ability);
+    }
+    draw(g) {
+      const d = KB.ABILITIES[this.ability], col = (d && d.color) || '#ffe040';
+      const bob = Math.round(Math.sin(this.t * 3) * 2);
+      const iy = this.bottom - 13 + bob;
+      g.circle(this.cx, iy - 6, 9 + Math.sin(this.t * 5) * 1.5, 'rgba(255,255,255,0.14)');
+      g.spr('item_essence_base', this.cx, this.bottom, { t: this.t });
+      const icon = 'ui_ability_' + this.ability + '_mini';
+      if (KB.has(icon)) g.spr(icon, this.cx, iy, { scaleX: 2, scaleY: 2 });
+      else g.rect(this.cx - 4, iy - 8, 8, 8, col);
+      if (this.cool <= 0 && KB.game && KB.game.frame % 9 === 0)
+        KB.particles(this.cx + (Math.random() - 0.5) * 12, this.bottom - 4, col, 1, { spread: 0.4, grav: -0.05, life: 22, up: 0.3, size: 1 });
+    }
+  };
+
+  // ---------- 傳送星：碰到後卡比騎星沿路徑飛行，抵達後換房 / 原地落地 ----------
+  // 關卡以 { t:'warpstar', x, y, a:[[tx,ty], ...], b:{room,x,y} } 生成。
+  //   a = 飛行路徑（磁磚座標，轉成該格中心的世界座標）；b 省略＝同房過場（飛到路徑終點降落）。
+  // player2 的 KB.Player.rideStar(path, onArrive) 尚未存在時，退回「淡出 → 直接抵達」。
+  KB.ITEMS.warpstar = class extends Item {
+    constructor(x, y, path, to) {
+      super(x, y);
+      this.name = 'warpstar'; this.spr = 'item_warpstar'; this.w = 16; this.h = 16; this.z = 3;
+      this.score = 0; this.bob = true; this.inhalable = false;
+      this.path = Array.isArray(path) && path.length ? path : null;
+      this.to = to || null; this.used = false;
+    }
+    worldPath() {
+      const T = KB.TILE, a = [];
+      for (const pt of (this.path || [])) a.push({ x: pt[0] * T + 8, y: pt[1] * T + 8 });
+      if (!a.length) a.push({ x: this.cx, y: this.cy });
+      return a;
+    }
+    update(dt) {
+      this.baseUpdate(dt);
+      if (this.used) return;
+      const p = KB.player, g = KB.game;
+      if (!p || !g || p.state === 'dead' || p.state === 'ride' || !this.overlaps(p)) return;
+      this.used = true; this.dead = true;
+      const path = this.worldPath(), dest = this.to, last = path[path.length - 1];
+      KB.audio.sfx('warp');
+      KB.particles(this.cx, this.cy, ['#ffffff', '#ffe040', '#fff8b0'], 20, { spread: 3, life: 30 });
+      KB.fx('fx_sparkle', this.cx, this.cy);
+      const arrive = () => { if (dest) g.fadeTo(() => g.loadRoom(dest.room, dest.x, dest.y)); };
+      if (p.rideStar) { p.rideStar(path, arrive); return; }
+      // fallback：player2 的 rideStar 尚未提供 → 淡出後直接抵達
+      g.fadeTo(() => {
+        if (dest) { g.loadRoom(dest.room, dest.x, dest.y); return; }
+        p.x = last.x - p.w / 2; p.bottom = last.y + 8; p.vx = 0; p.vy = 0;
+        if (p.setState) p.setState('fall');
+        KB.particles(last.x, last.y, ['#ffffff', '#ffe040'], 14, { spread: 2.5, life: 26 });
+      });
+    }
+    draw(g) {
+      const bob = Math.round(Math.sin(this.t * 4) * 2);
+      g.circle(this.cx, this.cy + bob, 11 + Math.sin(this.t * 6) * 2, 'rgba(255,232,120,0.18)');
+      g.spr(this.spr, this.cx, this.bottom + bob, { t: this.t });
+      if (KB.game && KB.game.frame % 7 === 0)
+        KB.particles(this.cx + (Math.random() - 0.5) * 14, this.cy + 6, ['#ffe040', '#fff8b0'], 1, { spread: 0.5, grav: -0.04, life: 20, up: 0.2, size: 1 });
+    }
+  };
+
   // 能力星：丟棄 / 受傷時掉出；碰到或吸入可取回能力
   KB.ITEMS.abilitystar = class extends Item {
     constructor(x, y, ability, dir) {
       super(x, y); this.spr = 'item_abilitystar'; this.name = 'abilitystar'; this.ability = ability; this.w = 14; this.h = 14; this.bob = false;
-      this.grav = 0.18; this.solid = true; this.maxFall = 3; this.vx = (dir || 1) * 1.6; this.vy = -3.5; this.life = 420; this.score = 0;
+      this.grav = 0.18; this.solid = true; this.maxFall = 3; this.vx = (dir || 1) * 1.6; this.vy = -3.5; this.score = 0;
+      // 存在時間由 KB.PHYS.abilityStarLife 決定（Extra 模式減半）；最後 120 幀開始閃爍（player2 規格）
+      this.maxLife = Math.round(((KB.PHYS && KB.PHYS.abilityStarLife) || 600) * (KB.session && KB.session.extra ? 0.5 : 1));
+      this.life = this.maxLife; this.blinkAt = Math.max(30, Math.round(this.maxLife * 0.2));
       this.inhalable = true; this.graceT = 30; this.bounces = 0;
     }
     update(dt) {
       this.baseUpdate(dt);
       if (this.beingInhaled) return;
       this.physics();
-      if (this.onGround) { this.bounces++; this.vy = this.bounces < 6 ? -2.6 : 0; if (this.bounces >= 6) this.vx *= 0.5; }
+      // 落地彈 2 次（-2.8 → -1.6）後停住
+      if (this.onGround) { this.bounces++; this.vy = this.bounces === 1 ? -2.8 : this.bounces === 2 ? -1.6 : 0; if (this.bounces >= 3) { this.vx *= 0.5; this.vy = 0; } }
       if (this.hitWall) { this.vx *= -1; this.dir *= -1; }
       if (this.fellOut) this.dead = true;
       if (this.life > 0) { this.life--; if (this.life <= 0) this.dead = true; }
@@ -211,7 +301,7 @@
     onInhaled(p) { this.dead = true; p.mouth = { ability: this.ability, name: 'abilitystar', score: 0 }; }
     pullTo(px, py, s) { const dx = px - this.cx, dy = py - this.cy, d = Math.max(1, Math.hypot(dx, dy)); this.x += dx / d * s; this.y += dy / d * s; }
     draw(g) {
-      if (this.life > 0 && this.life < 90 && (Math.floor(this.t * 60) & 2)) return;
+      if (this.life > 0 && this.life < this.blinkAt && (Math.floor(this.t * 60) & 2)) return;
       const d = KB.ABILITIES[this.ability]; const col = d && d.color ? d.color : '#ffe040';
       g.spr(this.spr, this.cx, this.bottom, { t: this.t, fps: 6 });
       const icon = 'ui_ability_' + this.ability + '_mini';

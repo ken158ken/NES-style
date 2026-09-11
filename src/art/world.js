@@ -268,6 +268,121 @@
     check('tile_door_boss', bdoor, 16, 28);
     const bdoor2 = patch(bdoor.map((r, i) => i < 5 ? r.replace(/w/g, 'h') : r), [[3, 1, 'w'], [12, 3, 'w']]);
     KB.sprite('tile_door_boss', PX, [bdoor, bdoor2], { anchor: 'bottom', fps: 2 });
+
+    // ------------------------------------------------------------------
+    // 互動機關磁磚（mechanics agent）
+    //   X tile_hardblock ：灰色鉚釘硬磚，只有 hammer / stone / 火焰衝刺 / dmg≥5 打得破
+    //   F tile_fuse(_v)  ：導火線（可通行），被火焰類判定點燃後沿線燃燒（tile_fuse_burn）
+    //   I tile_iceblock  ：半透明冰磚，被火焰類判定命中 20 幀後融化
+    // ------------------------------------------------------------------
+    tile('tile_hardblock', PX, [
+      'SSSSSSSSSSSSSSSS',
+      'SwwwwwwwwwwwwwwS',
+      'SwsskksssskkssdS',
+      'SwskkkssskkkssdS',
+      'SwsskksssskkssdS',
+      'SwssssssssssssdS',
+      'SwssssssssssssdS',
+      'SwsssssswssssedS',
+      'SwssssssssssssdS',
+      'SwssssssssssssdS',
+      'SwssssssssssssdS',
+      'SwsskksssskkssdS',
+      'SwskkkssskkkssdS',
+      'SwsskksssskkssdS',
+      'SddddddddddddddS',
+      'SSSSSSSSSSSSSSSS',
+    ]);
+
+    const ICE = Object.assign({}, PX, { i: '#a0e0ff9c', I: '#68b8e8c8', j: '#ffffffcc', J: '#4898d0e0' });
+    tile('tile_iceblock', ICE, [
+      'JJJJJJJJJJJJJJJJ',
+      'JjjiiiiiiiiiiiiJ',
+      'JjiiiiijiiiiiiiJ',
+      'JjiiiiijjiiiiiiJ',
+      'JjiiiiiijIiiiiiJ',
+      'JjiiiiiiiIiiiiiJ',
+      'JjiiiiiiiiiiiiiJ',
+      'JjiiiiiiiiiiiiiJ',
+      'JjiiiiIiiiiijjiJ',
+      'JjiiiIiiiiijiiiJ',
+      'JjiiIiiiiiiiiiiJ',
+      'JjiiiiiiiiiiiIiJ',
+      'JjiiiiiiiiiiIiiJ',
+      'JjiiiiiiiiiIiiiJ',
+      'JIIIIIIIIIIIIIIJ',
+      'JJJJJJJJJJJJJJJJ',
+    ]);
+
+    const blank16 = () => Array(16).fill('................');
+    const fuseH = patch(blank16(), []).slice();
+    fuseH[6] = '.....o.....o....';
+    fuseH[7] = 'TTTqTTTTTTqTTTTT';
+    fuseH[8] = 'qqqTqqqqqqTqqqqq';
+    tile('tile_fuse', PX, fuseH);
+
+    const fuseV = blank16().map((r, y) => (y === 3 || y === 11) ? '......TtqT......' : '......Ttq.......');
+    fuseV[6] = '....o.Ttq.......';
+    fuseV[10] = '......Ttq.o.....';
+    tile('tile_fuse_v', PX, fuseV);
+
+    const fuseB0 = [
+      '................',
+      '................',
+      '................',
+      '........o.......',
+      '.......oyo......',
+      '......oyhyo.....',
+      '.....oyhwhyo....',
+      'TTTTqyhwwhyqTTTT',
+      'qqqqoyhwwhyoqqqq',
+      '.....oyhwhyo....',
+      '......oyhyo.....',
+      '.......oyo......',
+      '........o.......',
+      '................',
+      '................',
+      '................',
+    ];
+    const fuseB1 = fuseB0.map(r => r.replace(/y/g, 'o').replace(/h/g, 'y').replace(/w/g, 'h'));
+    tile('tile_fuse_burn', PX, [fuseB0, fuseB1], { fps: 12 });
+
+    // ------------------------------------------------------------------
+    // 能力台座（KB.ITEMS.essence）與傳送星（KB.ITEMS.warpstar）
+    // ------------------------------------------------------------------
+    KB.sprite('item_essence_base', PX, [[
+      '..ssssssssssss..',
+      '.shhhhhhhhhhhhs.',
+      '.sSSSSSSSSSSSSs.',
+      '...ssssssssss...',
+      '...sSSSSSSSSs...',
+      '...sSddddddSs...',
+      '..sSSSSSSSSSSs..',
+      '.sSSSSSSSSSSSSs.',
+      '.shhhhhhhhhhhhs.',
+      'ssSSSSSSSSSSSSss',
+    ]], { anchor: 'bottom' });
+
+    const warp0 = [
+      '.......y........',
+      '......yhy.......',
+      '......yhy.......',
+      '.....yhhhy......',
+      'yyyyyyhhhyyyyyy.',
+      '.YyhhhhhhhhhyY..',
+      '..YyhhhhhhhyY...',
+      '...YyhhhhhyY....',
+      '....Yyhhhyy.....',
+      '....yhYYYhy.....',
+      '...yhY...Yhy....',
+      '..yhY.....Yhy...',
+      '..yY.......Yy...',
+      '................',
+      '................',
+      '................',
+    ];
+    const warp1 = patch(warp0.map(r => r.replace(/h/g, 'w')), [[7, 0, 'w'], [1, 4, 'h'], [14, 4, 'h']]);
+    KB.sprite('item_warpstar', PX, [warp0, warp1], { anchor: 'bottom', fps: 6 });
   })();
 
   // ============================================================================

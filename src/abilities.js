@@ -28,6 +28,8 @@
     if (d.whip) { d.whip.dead = true; d.whip = null; }
   }
   const beat = b => { if (b && !b.dead) b.life = 3; };                 // 心跳續命
+  // 暗房照明（mechanics）：招式期間每幀呼叫，game.js 的 drawDark 讀 lightR / lightT（結束後 180 幀線性縮回 40px）
+  const light = r => { const g = KB.game; if (g) { g.lightR = r; g.lightT = 180; g.lightF = g.frame; } };
   const slowFall = (p, v) => { if (!p.onGround && p.vy > v) p.vy = v; }; // 空中攻擊時緩慢下落
   // 連段：setState 對相同狀態不會重置 stateT，所以先切回 idle 再重新 startAttack（動畫 / 計時 / 判定全部重來）
   function restartAttack(p) { p.setState('idle'); p.startAttack(); }
@@ -72,6 +74,7 @@
       if (d.mode === 'dash') {
         setup(p, { anim: 'kirby_attack_fire_dash', dur: 40, fps: 12, lock: true });
         d.box = KB.hitbox({ x: 0, y: 0, w: 24, h: 20, dmg: 3, owner: 'player', type: 'fire', follow: p, ox: -12, oy: -3, life: 3, rehit: 8, knock: 2, flipWithOwner: false, breakBlocks: true });
+        d.box.breakHard = true;     // 火焰衝刺可撞破硬磚 X（mechanics）
         p.vx = p.dir * 3.4;
       } else if (d.mode === 'spin') {
         setup(p, { anim: 'kirby_attack_fire_spin', dur: 30, fps: 14, lock: false });
@@ -85,6 +88,7 @@
     update(p, dt, held) {
       const d = data(p), b = d.box;
       d.t++;
+      light(64);                    // 火光：暗房照明半徑 64px
       if (d.mode === 'dash') {
         p.vx = p.dir * 3.4;
         if (b && !b.dead) beat(b);
@@ -435,6 +439,7 @@
     update(p, dt, held) {
       const d = data(p), b = d.box;
       d.t++;
+      light(96);                    // 放電 / 電擊波：暗房照明半徑 96px
       if (d.mode === 'burst') {
         p.vx *= 0.6;
         if (b && !b.dead) { beat(b); b.life = Math.max(b.life, 2); }

@@ -296,7 +296,7 @@ P2-07 / P2-09（w3 水域硬邊 + 雙水平線）→ **仍在**（見 R2-P2-11�
 | **R2-P2-10** | P2 | 能力圖鑑第 7 頁（冰凍）| **中文標點出現在行首**：第 2 行以「，」開頭。建議 `UI.wrapLines` 加上「行首不排標點」的規則。 | 同上（翻到 7/8）| `gallery_p7.png` | **ui-flow** |
 | **R2-P2-11** | P2 | w3 r1 珊瑚洞窟 / w5 r2 | **Round 1 的 P2-07 / P2-09 仍在**：水體是一塊硬邊矩形、沒有過渡磚；背景海平線與實際水面磁磚高度不同，畫面同時有兩條水平線。 | `.venv/bin/python tools/shot.py --scene game --level w3 --room 1 --x 13 --y 9 --steps 40 --out shots/agent_qa2/hot_w3r1_water.png` | `hot_w3r1_water.png` | **mechanics** |
 | **R2-P2-12** | P2 | w5 r0 出生點、**w5 r6 秘密房出生點** | **Round 1 的 P2-11 仍在，而且多一處**：卡比出生點與金色柱子裝飾重疊（r6 秘密房同樣問題）。 | `.venv/bin/python tools/shot.py --scene game --level w5 --room 6 --steps 60 --out shots/agent_qa2/secret_w5r6.png` | `secret_w5r6.png` | **mechanics** |
-| **R2-P2-13** | P2 | 關卡開場橫幅（Round 2 新功能）| 「WORLD n ／關名」橫幅與右上角的「ENTER：暫停／說明」toast **重疊**，橫幅右上角被 toast 蓋住。建議橫幅出現時延後 toast，或把橫幅下移 12px。 | `.venv/bin/python tools/shot.py --scene game --level w2 --room 0 --x 22 --y 9 --steps 50 --out shots/agent_qa2/enemy_spikeball_w2r0.png` | `enemy_spikeball_w2r0.png`、`hud_lowhp.png` | **ui-flow** |
+| **R2-P2-13** | **P1**（第三部分補測後升級）| 關卡開場橫幅（Round 2 新功能）| 「WORLD n ／關名」橫幅與右上角的「ENTER：暫停／說明」toast **重疊**（橫幅右上角被蓋住）；更嚴重的是**開場 2 秒內若跳出任何 toast，會直接疊在橫幅第一行正中央**，兩行字互相蓋掉、完全不可讀（實測「取得能力：火焰」toast 壓在「WORLD 1」上 → `r1_abilityflash.png`）。建議橫幅顯示期間把 toast 佇列住（橫幅收掉再播），或把橫幅整塊下移 24px 讓出 toast 帶。 | `.venv/bin/python shots/agent_qa2/jshot.py --scene game --level w1 --room 0 --js "const p=KB.player;p.ability='fire';KB.game.abilityFlash=60;KB.game.toast('取得能力：火焰');" --steps 20 --out shots/agent_qa2/r1_abilityflash.png` | **`r1_abilityflash.png`**、`enemy_spikeball_w2r0.png`、`hud_lowhp.png` | **ui-flow** |
 
 ---
 
@@ -337,3 +337,57 @@ for s in "w1 4" "w2 5" "w3 5" "w4 5" "w5 6"; do set -- $s;
 #   低血量：--js "KB.player.hp=1;"
 #   二階段：--js "const g=KB.game;g.bossIntroT=0;g.boss.introducing=false;g.boss.hp=Math.round(g.boss.maxHp*0.4);g.boss.maybePhase2();" --seq "3:40"
 ```
+
+---
+
+## R2-6. Round 2 新功能驗證（第三部分，分批進行）
+
+> 作法：每隔一段時間重讀 `docs/PROGRESS.md` 的 Round 2 區段，看到新完成項目就驗證；同時也直接掃 `src/` 找已經進檔但還沒寫進 PROGRESS 的功能。
+> **第 1 輪（PROGRESS 只有 audio2 回報）**：掃 `src/` 發現 ui-flow / mechanics / player2 的程式其實都已進檔，直接先驗。
+> **第 2 輪（ui-flow、player2 已回報）**：重驗 ui-flow 後來才做的 HUD 14px / 畫面縮放 / 選關 BEST。
+
+| 功能 | 負責 | 驗證方式 | 結果 | 截圖 |
+|---|---|---|---|---|
+| **過關結算畫面** | ui-flow | `jshot.py --scene game --level w1 --js "KB.game.score=12340;KB.game.kills=17;KB.game.timeAlive=3600;__kb.goto('result')" --steps 400` | **OK**。逐項跳數字正常，SCORE 12340 / TIME 01:00 / 擊敗敵人 ×17 / 大星星 ★0/3 +0 / HP 獎勵 6×100 **+600** / **TOTAL 0012940**（＝12340+600，加總正確）/ BEST 同步寫入。 | `r2_result_00~03.png`、`r2_result_final.png` |
+| **關卡開場橫幅** | ui-flow | 任一 `--room 0` 截圖 | **OK**（「WORLD n ／關名」置中橫幅，不阻擋操作）。**但與右上 toast 重疊** → R2-P2-13。 | `hud_lowhp.png`、`enemy_spikeball_w2r0.png` |
+| **競技場（Boss Rush）** | ui-flow | `shot.py --scene arena`；再 `--script "step 30; tap right 2; step 6; tap jump 2; step 200"` 進第一戰；休息室用 `KB.arenaExit(KB.game)` 觸發 | **OK**。選能力頁（9 頁：普通＋8 能力、生命 1 / 連戰 5 名魔王 / 番茄整場共用 3 顆、BEST --:--）、戰鬥中 HUD 換成 `ARENA 1/5` + 計時 `00:03` + 番茄 ×3、休息室 16×12 一屏 3 顆番茄在單向平台上 + 出口門 + `ARENA 2/5`。 | `r2_arena_select.png`、`r2_arena_fight.png`、`r2_arena_rest.png` |
+| **HUD 中文 14px / 設定「畫面縮放」/ F 全螢幕 / 選關 BEST** | ui-flow | 第 2 輪重跑 | **OK**（`ui.js:564` HUD 能力中文名已改 `size: UI.MS`；設定頁多一列「畫面縮放 自動」與「F：全螢幕切換」；選關面板有 `BEST`）。**R2-P2-08 視為已修**。 | `r2_pause_hammer2.png`、`r2_settings3.png`、`select_stars.png` |
+| **標題選單新項目** | ui-flow | `shot.py --scene title --script "step 60; tap start 2; step 10"` | **OK**（debug 下 6 項：新遊戲 / Extra 模式 / 操作說明 / 能力圖鑑 / 競技場 / 設定）。小問題：選單面板壓在「STAR」標題字上 → R2-P2-16。 | `r2_title_menu2.png` |
+| **互動磁磚 F 導火線 + B 炸彈方塊** | mechanics | `shot.py --scene game --level w1 --room 0 --x 57 --y 9` | **OK**（(61,6)~(61,9) 的導火線與 (61,5) 的炸彈方塊都畫得出來，沒有缺圖）。 | `r2_mech_w1r0_fuse_essence.png` |
+| **互動磁磚 I 冰磚** | mechanics | `shot.py --scene game --level w1 --room 1 --x 51 --y 9` | **OK**（(52~54,2) 三塊冰磚封住天花板凹室，裡面看得到食物）。 | `r2_mech_w1r1_ice.png` |
+| **互動磁磚 X 硬磚** | mechanics | 資料檢查 + `--level w2 --room 0 --x 45 --y 9` | **OK**（w2 r0 (42,3)/(54,3)、w4 r2 (44,1)/(56,1)、w5 r1 (8,2)/(20,2) 都在；`tilemap.js` SOLID 與 `tile_hardblock` 皆已註冊）。截圖時硬磚在畫面上方之外，以資料確認。 | `r2_mech_w2r0_hardblock.png` |
+| **暗房 `room.dark`** | mechanics | `--level w2 --room 1 --x 4 --y 24`、`--level w4 --room 3 --x 14 --y 9` | **OK 但偏暗** → R2-P2-17。卡比周圍光圈、火把 / 星星光暈都正確，HUD 不受遮罩影響。 | `r2_mech_w2r1_dark.png`、`r2_mech_w4r3_dark.png` |
+| **能力台座 essence** | mechanics | 同上兩張 + w1 r1 | **OK**（碰到即取得：w4 r3 進場後 HUD 立刻變成 `SPARK 電擊`；底座像素圖正常）。全專案共 9 個台座（fire×5、hammer×2、spark×2）。 | `r2_mech_w4r3_dark.png`、`r2_mech_w1r1_ice.png` |
+| **傳送星 warpstar** | mechanics + player2 | `--level w3 --room 2 --x 58 --y 9` | **OK**（w3 r2 (60,9)、w4 r2 (53,9) 各 1 個；星星帶閃光，路徑終點在尖刺坑 / 無底洞對岸）。`player.rideStar` 已在 player.js，items.js 也留了 fallback。 | `r2_mech_w3r2_warpstar.png` |
+| **游泳打磨（水花 / 氣泡）** | player2 | `--level w3 --room 0 --x 63 --y 9 --script "press right,down 40; step 20"` | **水花 / 氣泡 OK，但發現 R2-P1-14（水中看不見卡比）**。 | `r2_splash.png`、`r2_swim.png`、`r2_swim_zoom.png` |
+| **新中魔王 `rollarmor`（鐵甲滾球）** | enemies-bosses2 | `shot.py --scene sheet --filter rollarmor` + 掃 `levels.js` | 精靈 **OK**（walk×2 / roll×2 / attack×2 / hurt / stun 共 8 張，無洋紅缺圖，已註冊在 `KB.ENEMIES.rollarmor` 且繼承 `MiniBoss`）。**但 `levels.js` 裡一隻都沒有放** → R2-P1-15。 | `r2_sheet_rollarmor.png` |
+| **Extra 難度鉤子** | enemies-bosses2 / player2 | `enemies.js:37` 中魔王 HP×1.25、標題選單已有「Extra 模式」 | 程式在，**尚未做實機難度量測**（等 mechanics / enemies-bosses2 回報後再測）。 | — |
+
+### R2-6a. 第三部分新增的問題
+
+| # | 嚴重度 | 位置 | 現象 | 重現指令 | 截圖 | 建議負責 agent |
+|---|---|---|---|---|---|---|
+| **R2-P1-14** | P1 | `src/tilemap.js` `drawWater` + `src/game.js:395~400` 繪製順序 | **在水裡看不見卡比**。`game.js` 先畫全部實體，**之後**才 `this.map.drawWater(...)`，而 `drawWater` 用 `globalAlpha = 0.72` 把水磁磚整片蓋上去 ⇒ 水中的卡比、敵人、食物全被壓成同一個青藍色，卡比的粉紅完全消失，和旁邊的 squishy 幾乎分不出來（放大圖 `r2_swim_zoom.png` 只能靠眼睛認出他）。這直接對應死亡熱點 #4（w3 r0，5 次）與 #9（w3 r1，2 次）。建議：`globalAlpha` 降到 0.3~0.4，或把水體改成「畫在實體之前 + 只在實體之上疊一層很淡的色調 / 水面波紋」。 | `.venv/bin/python tools/shot.py --scene game --level w3 --room 0 --x 63 --y 9 --script "press right,down 40; step 20" --state --out shots/agent_qa2/r2_swim.png`（state 顯示 `player.x=1020.5 y=161 state:"swim"`，cam.x=912.7 ⇒ 卡比就在畫面 x≈108, y≈161，但肉眼幾乎看不到）| `r2_swim.png`、**`r2_swim_zoom.png`** | **mechanics**（tilemap.js drawWater 是 mechanics 的檔）／ game.js 繪製順序需總控協調 |
+| **R2-P1-15** | P1 | `src/levels.js` | **新中魔王 `rollarmor` 做好了但沒有出現在任何關卡**（`KB.ENEMIES.rollarmor` 已註冊、精靈齊全，但掃過 5 世界 30 間房的 `entities` 沒有任何一筆 `t:'rollarmor'`）。TASKS 的 enemies-bosses2 也寫了「敵人配置需求寫給 mechanics」，目前還沒接上。建議放在有 `gatekeeper` 門鎖的房間（現有 3 處：w2 r2 / w3 r2 / w5 r3），或新增一處 w4 的中魔王房。 | `node -e "global.KB={};require('./src/levels.js');…"`（見 R2-5）| `r2_sheet_rollarmor.png` | **enemies-bosses2**（提需求）+ **mechanics**（放進 levels.js）|
+| **R2-P2-16** | P2 | 標題選單 | 選單面板（現在 6 項）**壓住標題 logo 的「STAR」字**。建議面板再往下 8~10px，或標題 logo 上移。 | `.venv/bin/python tools/shot.py --scene title --script "step 60; tap start 2; step 10" --out shots/agent_qa2/r2_title_menu2.png` | `r2_title_menu2.png` | **ui-flow** |
+| **R2-P2-17** | P2 | 暗房（w2 r1 / w4 r3 / w5 r1）| **暗房裡的敵人幾乎看不見**：光圈半徑 40px，敵人站在光圈邊緣時只剩一團剪影（`r2_mech_w4r3_dark.png` 左側的 snowly 與上方的飛行敵人幾乎辨認不出）。暗房本身很漂亮，但以「不放無預警傷害」為原則，建議①光圈半徑加到 52~56px，或②讓敵人本體帶一點自體微光（眼睛 / 輪廓高亮），或③暗房裡不要放會主動衝過來的敵人。 | `.venv/bin/python tools/shot.py --scene game --level w4 --room 3 --x 14 --y 9 --steps 40 --out shots/agent_qa2/r2_mech_w4r3_dark.png` | `r2_mech_w4r3_dark.png`、`r2_mech_w2r1_dark.png` | **mechanics** |
+| **R2-P2-18** | P2 | 結算畫面 | 「W1 翠綠草原」關名的字底被下方面板的上框線切到一點。建議關名往上 3px 或面板往下 3px。 | 見上表結算列 | `r2_result_final.png` | **ui-flow** |
+
+### R2-6b. 已在第 2 輪確認修好的 Round 2 問題
+- **R2-P2-08（HUD 能力中文名 12px）→ 已修**（`ui.js:564` 改 `size: UI.MS`＝14）。
+
+### R2-6c. 第 3~4 輪重讀 PROGRESS 的結果（20:00 觀測）
+- ui-flow、player2、audio2 已回報；**mechanics 與 enemies-bosses2 到 20:00 為止仍是「（agent 在此追加）」**，但他們的程式其實都已進檔（`src/tilemap.js` 的 X/F/I/D、`levels.js` 的 `MECH` 機關層、`enemies.js` 的 `Rollarmor`），所以上表是直接掃 `src/` 驗的。請這兩位補寫 PROGRESS，否則總控無法判斷哪些是「做完」哪些是「寫到一半」。
+- **Extra 模式**：`__kb.goto('game',{extra:true})` 後 HUD 正確變成 3 格 HP（`r2_extra_hud.png`），`enemies.js:34` 的 `applyExtra` 與 `const.js` 的 `extraMaxHp: 3` 都在。
+  **但提醒**：一般難度目前機器人 15 / 15 全滅（R2-0），Extra（HP 3、敵人 / 投射物 ×1.2、魔王 HP ×1.25）在一般難度調完之前不建議對外開放。
+
+## R2-7. 整體健康度回歸（20:00）
+
+| 檢查 | 結果 |
+|---|---|
+| `node tools/level_check.js` | **0 error / 1 warning**（既有的拉拉拉出生點提示）|
+| `for f in src/*.js src/art/*.js; do node --check "$f"; done` | **全部通過**（19:34 那次 `waterSplash` 的暫時性錯誤已消失）|
+| `playthrough.py --level wN --ability sword --godmode --maxframes 30000` × 5 | **5 / 5 `cleared=True`、deaths=0、`missing sprites: []`**（w1 4686 / w2 7755 / w3 6075 / w4 8449 / w5 9686 幀）|
+
+也就是說：**「能不能走完」沒有退步，退步的是「不用無敵能不能走完」——後者從來沒有被驗過。**
+建議把 `playthrough.py` 的驗收條件改成兩條：① `--godmode` 必須通關（路線完整性）；② **不加 `--godmode` 時，`deaths` 應該 ≤ 2**（難度合理性）。目前第 ② 條 5 個世界都不過。

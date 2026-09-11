@@ -1,7 +1,8 @@
 // 磁磚地圖 + AABB 物理（含 45° 斜坡、單向平台、水、梯子）
 (function () {
   const T = KB.TILE;
-  const SOLID = { '#': 1, '*': 1, 'B': 1 };
+  // 機關磁磚（mechanics）：X 硬磚（實心、只有重擊打得破）、I 冰磚（實心、火焰可融）、F 導火線（可通行）
+  const SOLID = { '#': 1, '*': 1, 'B': 1, 'X': 1, 'I': 1 };
   const SLOPE = { '/': 1, '\\': 1 };
 
   class TileMap {
@@ -13,6 +14,9 @@
       this.pw = w * T; this.ph = this.h * T;
       this.anim = 0;
       this.pending = []; // 炸彈方塊連鎖
+      this.burning = new Map();  // 燃燒中的導火線 'tx,ty' -> {tx,ty,t}
+      this.melting = new Map();  // 融化中的冰磚     'tx,ty' -> {tx,ty,t}
+      this.clinkT = 0;           // 硬磚「叮」音效冷卻
     }
     get(tx, ty) {
       if (tx < 0 || tx >= this.w) return '#';
@@ -25,6 +29,11 @@
     static isSolid(ch) { return !!SOLID[ch]; }
     static isSlope(ch) { return !!SLOPE[ch]; }
     static isGround(ch) { return !!SOLID[ch] || !!SLOPE[ch]; }
+    // 硬磚 X 的破壞條件：鐵鎚 / 石頭 / 火焰衝刺（判定框自帶 breakHard）/ 傷害 ≥ 5 的重擊
+    static hardBreakable(a) {
+      if (!a) return false;
+      return a.kind === 'hammer' || a.kind === 'stone' || !!a.breakHard || (a.dmg || 0) >= 5;
+    }
     isSolidPx(px, py) {
       const ch = this.at(px, py);
       if (SOLID[ch]) return true;
@@ -45,32 +54,93 @@
     onLadder(px, py) { return this.at(px, py) === 'H'; }
     isSpike(px, py) { return this.at(px, py) === '^'; }
 
-    // 破壞方塊（星星 / 炸彈），回傳是否有破壞
+    // 破壞方塊（星星 / 炸彈 / 硬磚 / 冰磚），回傳是否有破壞
     breakBlock(tx, ty, byBomb) {
       const ch = this.get(tx, ty);
-      if (ch !== '*' && ch !== 'B') return false;
+      if (ch !== '*' && ch !== 'B' && ch !== 'X' && ch !== 'I') return false;
       this.set(tx, ty, '.');
+      const k = tx + ',' + ty;
+      this.burning.delete(k); this.melting.delete(k);
       const cx = tx * T + 8, cy = ty * T + 8;
       if (KB.fx) KB.fx('fx_blockbreak', cx, cy + 8);
-      if (KB.particles) KB.particles(cx, cy, ch === 'B' ? '#f8e040' : '#ffd040', 8, { spread: 2.5 });
-      if (KB.audio) KB.audio.sfx('block');
+      const col = ch === 'B' ? '#f8e040' : ch === 'X' ? ['#d0d0dc', '#a8a8b0', '#585860'] : ch === 'I' ? ['#ffffff', '#c0f0ff', '#78d8f8'] : '#ffd040';
+      if (KB.particles) KB.particles(cx, cy, col, ch === 'X' ? 12 : 8, { spread: 2.5 });
+      if (KB.audio) KB.audio.sfx(ch === 'I' ? 'melt' : 'block');
       if (ch === 'B') {
-        // 連鎖：相鄰炸彈方塊與星星方塊延遲爆破
+        // 連鎖：相鄰炸彈方塊 / 星星方塊 / 硬磚延遲爆破
         for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
           const n = this.get(tx + dx, ty + dy);
-          if (n === 'B' || n === '*') this.pending.push({ tx: tx + dx, ty: ty + dy, t: 6 });
+          if (n === 'B' || n === '*' || n === 'X') this.pending.push({ tx: tx + dx, ty: ty + dy, t: 6 });
         }
         if (KB.game) KB.game.shake = Math.max(KB.game.shake || 0, 6);
       }
       if (KB.game && KB.game.onBlockBroken) KB.game.onBlockBroken(tx, ty, ch);
       return true;
     }
+    // ---------- 機關磁磚 ----------
+    // 導火線 F：被火焰類判定點燃 → 每 6 幀往相鄰 F 延伸；燒到 B / * 就引爆（沿用 breakBlock 連鎖）
+    igniteFuse(tx, ty) {
+      if (this.get(tx, ty) !== 'F') return false;
+      const k = tx + ',' + ty;
+      if (this.burning.has(k)) return false;
+      this.burning.set(k, { tx, ty, t: 6 });
+      if (KB.audio) KB.audio.sfx('fuse');
+      if (KB.particles) KB.particles(tx * T + 8, ty * T + 8, ['#ffe040', '#ff9020'], 4, { spread: 1, grav: -0.04, life: 14, up: 0.3, size: 1 });
+      return true;
+    }
+    // 冰磚 I：被火焰類判定命中 → 20 幀後融化消失
+    meltIce(tx, ty) {
+      if (this.get(tx, ty) !== 'I') return false;
+      const k = tx + ',' + ty;
+      if (this.melting.has(k)) return false;
+      this.melting.set(k, { tx, ty, t: 20 });
+      if (KB.audio) KB.audio.sfx('melt');
+      return true;
+    }
+    // 硬磚 X：打不破時的「叮」＋火花（10 幀冷卻，避免每幀重複）
+    clink(tx, ty) {
+      if (this.clinkT > 0) return false;
+      this.clinkT = 10;
+      const cx = tx * T + 8, cy = ty * T + 8;
+      if (KB.audio) KB.audio.sfx('hardblock');
+      if (KB.fx) KB.fx('fx_hit', cx, cy);
+      if (KB.particles) KB.particles(cx, cy, ['#ffffff', '#fff8a0', '#d0d0dc'], 7, { spread: 2.2, life: 16, size: 1 });
+      return true;
+    }
     update() {
       this.anim++;
+      if (this.clinkT > 0) this.clinkT--;
       if (this.pending.length) {
         const left = [];
         for (const p of this.pending) { p.t--; if (p.t <= 0) this.breakBlock(p.tx, p.ty, true); else left.push(p); }
         this.pending = left;
+      }
+      if (this.burning.size) {
+        for (const [k, b] of Array.from(this.burning)) {
+          b.t--;
+          if (KB.particles && (b.t & 1) === 0) KB.particles(b.tx * T + 8, b.ty * T + 8, ['#ffe040', '#ff9020', '#ff4010'], 1, { spread: 0.7, grav: -0.05, life: 12, up: 0.3, size: 1 });
+          if (b.t > 0) continue;
+          this.burning.delete(k);
+          if (this.get(b.tx, b.ty) === 'F') this.set(b.tx, b.ty, '.');
+          for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+            const n = this.get(b.tx + dx, b.ty + dy);
+            if (n === 'F') this.igniteFuse(b.tx + dx, b.ty + dy);
+            else if (n === 'B' || n === '*') this.pending.push({ tx: b.tx + dx, ty: b.ty + dy, t: 3 });
+          }
+        }
+      }
+      if (this.melting.size) {
+        for (const [k, m] of Array.from(this.melting)) {
+          m.t--;
+          if (KB.particles && m.t % 4 === 0) KB.particles(m.tx * T + 8, m.ty * T + 8, ['#ffffff', '#c0f0ff', '#78d8f8'], 2, { spread: 1.2, life: 18, up: 0.2, size: 1 });
+          if (m.t > 0) continue;
+          this.melting.delete(k);
+          if (this.get(m.tx, m.ty) !== 'I') continue;
+          this.set(m.tx, m.ty, '.');
+          if (KB.particles) KB.particles(m.tx * T + 8, m.ty * T + 8, ['#ffffff', '#c0f0ff', '#78d8f8'], 12, { spread: 2.2, life: 26 });
+          if (KB.fx) KB.fx('fx_poof', m.tx * T + 8, m.ty * T + 8);
+          if (KB.audio) KB.audio.sfx('melt');
+        }
       }
     }
 
@@ -93,6 +163,14 @@
         case '\\': return pick('slopeR');
         case '*': return 'tile_star';
         case 'B': return 'tile_bomb';
+        case 'X': return 'tile_hardblock';
+        case 'I': return 'tile_iceblock';
+        case 'F': {
+          if (this.burning.has(tx + ',' + ty)) return 'tile_fuse_burn';
+          const lf = this.get(tx - 1, ty), rt = this.get(tx + 1, ty);
+          const horiz = lf === 'F' || rt === 'F' || lf === 'B' || rt === 'B' || lf === '*' || rt === '*';
+          return horiz ? 'tile_fuse' : 'tile_fuse_v';
+        }
         case '^': return 'tile_spike';
         case '~': return this.get(tx, ty - 1) === '~' ? 'tile_water' : 'tile_water_top';
         case 'H': return 'tile_ladder';
@@ -120,7 +198,14 @@
           continue;
         }
         const nm = this.tileSprite(tx, ty, theme);
-        if (nm) KB.drawSpr(ctx, nm, tx * T - cam.x, ty * T - cam.y, { anchor: 'topleft', t, frame: KB.SPR[nm] && KB.SPR[nm].n > 1 ? Math.floor(t * 4) % KB.SPR[nm].n : undefined, _tl: true });
+        if (!nm) continue;
+        const o = { anchor: 'topleft', t, frame: KB.SPR[nm] && KB.SPR[nm].n > 1 ? Math.floor(t * (nm === 'tile_fuse_burn' ? 12 : 4)) % KB.SPR[nm].n : undefined, _tl: true };
+        // 融化中的冰磚：逐漸透明 + 抖動閃爍
+        if (this.melting.size && ch === 'I') {
+          const m = this.melting.get(tx + ',' + ty);
+          if (m) o.alpha = Math.max(0.15, Math.min(1, 0.3 + 0.7 * (m.t / 20) + ((m.t & 3) < 2 ? 0.12 : 0)));
+        }
+        KB.drawSpr(ctx, nm, tx * T - cam.x, ty * T - cam.y, o);
       }
     }
     drawWater(ctx, cam, t) {

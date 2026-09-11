@@ -7,9 +7,19 @@ const path = require('path');
 global.window = {}; global.KB = { LEVELS: [] };
 require(path.join(__dirname, '..', 'src', 'levels.js'));
 
-const SOLID = { '#': 1, '*': 1, 'B': 1 };
+// 機關磁磚（mechanics）：X 硬磚 / I 冰磚 皆為實心；F 導火線可通行
+const SOLID = { '#': 1, '*': 1, 'B': 1, 'X': 1, 'I': 1 };
 const SLOPE = { '/': 1, '\\': 1 };
-const KNOWN = new Set(['#', '=', '*', 'B', '^', '~', 'H', '/', '\\', '.', ' ']);
+const KNOWN = new Set(['#', '=', '*', 'B', 'X', 'I', 'F', '^', '~', 'H', '/', '\\', '.', ' ']);
+// 機關磁磚需要的能力，以及可提供該能力的敵人（讓「有機關但拿不到能力」在靜態檢查就抓得到）
+const MECH_NEED = { X: ['hammer', 'stone'], F: ['fire'], I: ['fire'] };
+const ABILITY_FROM = {
+  fire: ['hothead'], ice: ['chilly', 'mrfrosty', 'snowly'], spark: ['sparky'], beam: ['waddledoo'],
+  cutter: ['sirkibble'], sword: ['bladeknight'], hammer: ['bonkers'], stone: ['rocky'],
+};
+const ABILITY_KEYS = new Set(Object.keys(ABILITY_FROM));
+// 暗房的發光裝飾（game.js drawDark）
+const DARK_LIGHTS = { castle: 'r', dedede: 'tc', cloud: 's' };
 const isSolid = ch => !!SOLID[ch];
 const isStand = ch => !!SOLID[ch] || !!SLOPE[ch] || ch === '=';
 
@@ -19,7 +29,7 @@ const WATER = new Set(['squishy', 'glunk']);
 const FLY = new Set(['brontoburt', 'scarfy', 'gordo', 'shotzo', 'dartwing']);
 const ITEMS = new Set(['tomato', 'food', 'oneup', 'candy', 'pointstar', 'bigstar']);
 // 機關類實體（不需要地面、也不算敵人密度）：大星星收集品 / 開關方塊 / 中魔王門鎖
-const GADGET = new Set(['bigstar', 'switchblock', 'gatekeeper']);
+const GADGET = new Set(['bigstar', 'switchblock', 'gatekeeper', 'essence', 'warpstar']);
 const UNLOCKER = new Set(['switchblock', 'gatekeeper']);   // 可以解開 locked 門的實體
 const TALL = { bonkers: 2, mrfrosty: 2, bladeknight: 2, snowly: 2 };   // 佔用的高度（格）
 const WIDE = { bonkers: 2, mrfrosty: 2 };
@@ -64,6 +74,52 @@ for (const lv of KB.LEVELS) {
     const bad = new Set();
     rows.forEach(r => { for (const ch of r) if (!KNOWN.has(ch)) bad.add(ch); });
     if (bad.size) err(`${tag}: 未知磁磚字元 ${[...bad].join(' ')}`);
+    // ---- 機關磁磚（X 硬磚 / F 導火線 / I 冰磚）----
+    const mech = { X: 0, F: 0, I: 0, B: 0 };
+    rows.forEach(r => { for (const ch of r) if (mech[ch] !== undefined) mech[ch]++; });
+    if (mech.X || mech.F || mech.I) {
+      console.log(`  (info) ${tag}: 機關磁磚 X=${mech.X} F=${mech.F} I=${mech.I}（炸彈方塊 B=${mech.B}）`);
+      // 房內要有對應能力的來源（能力台座 essence 或會給該能力的敵人）
+      const ents = room.entities || [];
+      const have = new Set();
+      for (const e of ents) {
+        if (e.t === 'essence' && e.a) have.add(e.a);
+        for (const k of Object.keys(ABILITY_FROM)) if (ABILITY_FROM[k].includes(e.t)) have.add(k);
+      }
+      for (const ch of ['X', 'F', 'I']) {
+        if (!mech[ch]) continue;
+        if (!MECH_NEED[ch].some(k => have.has(k)))
+          warn(`${tag}: 有 '${ch}' 磁磚但房內沒有 ${MECH_NEED[ch].join(' / ')} 的來源（essence 台座或對應敵人）`);
+      }
+      // 導火線必須連得到炸彈方塊（4 鄰接連通）
+      if (mech.F) {
+        const seen = new Set(); let reachB = false;
+        const walk = (x, y) => {
+          const st = [[x, y]];
+          while (st.length) {
+            const [cx, cy] = st.pop(); const k = cx + ',' + cy;
+            if (seen.has(k)) continue; seen.add(k);
+            for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+              const c = get(cx + dx, cy + dy);
+              if (c === 'F') st.push([cx + dx, cy + dy]);
+              else if (c === 'B' || c === '*') reachB = true;
+            }
+          }
+        };
+        for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (get(x, y) === 'F' && !seen.has(x + ',' + y)) { reachB = false; walk(x, y); if (!reachB) warn(`${tag}: (${x},${y}) 起的導火線沒有連到炸彈 / 星星方塊`); }
+      }
+    }
+    // ---- 暗房 ----
+    if (room.dark) {
+      const lights = DARK_LIGHTS[room.theme || lv.theme] || '';
+      let n = 0;
+      if (room.deco && lights) room.deco.forEach(r => { for (const ch of r) if (lights.includes(ch)) n++; });
+      console.log(`  (info) ${tag}: 暗房（發光裝飾 ${n} 個）`);
+      if (lights && !n) warn(`${tag}: 暗房但沒有任何發光裝飾（主題 ${room.theme || lv.theme} 可用 '${lights}'）`);
+      if (!(room.entities || []).some(e => e.t === 'essence' && (e.a === 'spark' || e.a === 'fire')) &&
+        !(room.entities || []).some(e => ABILITY_FROM.spark.includes(e.t) || ABILITY_FROM.fire.includes(e.t)))
+        warn(`${tag}: 暗房但房內沒有電擊 / 火焰來源（光圈無法擴大）`);
+    }
     // 底部：最底列若非實心，其上不得有可站立磁磚（避免懸空地板），也不得是尖刺/水/梯子（需要下方實心）
     let pits = 0;
     for (let x = 0; x < w; x++) {
@@ -187,6 +243,36 @@ for (const lv of KB.LEVELS) {
         else if (isSolid(get(tx, ty))) warn(`${tag}: ${what} gordo 移動終點 (${tx},${ty}) 為實心 '${get(tx, ty)}'`);
       }
       if (e.drop && !ITEMS.has(e.drop)) err(`${tag}: ${what} drop '${e.drop}' 不是道具`);
+      // 能力台座：a 必須是能力 key，且下方要站得住（是個底座）
+      if (e.t === 'essence') {
+        if (!ABILITY_KEYS.has(e.a)) err(`${tag}: ${what} essence 的 a='${e.a}' 不是能力 key（${[...ABILITY_KEYS].join(' ')}）`);
+        if (!isStand(get(e.x, e.y + 1))) err(`${tag}: ${what} essence (${e.x},${e.y}) 下方 '${get(e.x, e.y + 1)}' 不可站立`);
+      }
+      // 傳送星：a 為磁磚座標路徑，路徑點不可在實心格（rideStar 期間不做碰撞）；b 為目標房
+      if (e.t === 'warpstar') {
+        const path = e.a;
+        if (!Array.isArray(path) || path.length < 2) err(`${tag}: ${what} warpstar 需要 a=[[x,y],...]（至少 2 點）`);
+        else path.forEach((pt, pi) => {
+          if (!Array.isArray(pt) || pt.length !== 2) { err(`${tag}: ${what} warpstar 路徑點 #${pi} 格式錯誤`); return; }
+          if (!inMap(pt[0], pt[1])) err(`${tag}: ${what} warpstar 路徑點 #${pi} (${pt[0]},${pt[1]}) 超出地圖`);
+          else if (isSolid(get(pt[0], pt[1])) || SLOPE[get(pt[0], pt[1])]) err(`${tag}: ${what} warpstar 路徑點 #${pi} (${pt[0]},${pt[1]}) 在實心格 '${get(pt[0], pt[1])}' 內`);
+        });
+        if (!e.b && Array.isArray(path) && path.length) {
+          const last = path[path.length - 1];
+          if (inMap(last[0], last[1]) && !isStand(get(last[0], last[1] + 1)))
+            err(`${tag}: ${what} warpstar 終點 (${last[0]},${last[1]}) 下方 '${get(last[0], last[1] + 1)}' 不可站立`);
+        }
+        if (e.b) {
+          const tr2 = lv.rooms[e.b.room];
+          if (!tr2) err(`${tag}: ${what} warpstar 指向不存在的房 ${e.b.room}`);
+          else {
+            const t2 = tr2.map, tw2 = t2[0].length, th2 = t2.length;
+            const g2 = (x, y) => (x < 0 || x >= tw2) ? '#' : (y < 0 || y >= th2) ? '.' : t2[y][x];
+            if (e.b.x < 0 || e.b.x >= tw2 || e.b.y < 0 || e.b.y >= th2) err(`${tag}: ${what} warpstar 落點 (${e.b.x},${e.b.y}) 超出房 ${e.b.room}`);
+            else if (!isStand(g2(e.b.x, e.b.y + 1))) err(`${tag}: ${what} warpstar 落點 (${e.b.x},${e.b.y}) 下方不可站立`);
+          }
+        }
+      }
       if (!ITEMS.has(e.t) && !GADGET.has(e.t) && e.t !== 'gordo' && Math.abs(e.x - sp[0]) <= 6 && Math.abs(e.y - sp[1]) <= 3) warn(`${tag}: ${what} (${e.x},${e.y}) 離 spawn (${sp[0]},${sp[1]}) 太近`);
       // 大星星：不可以放在會被地形擋住 / 撿不到的地方（水中可以）
       if (e.t === 'bigstar' && ch === '^') err(`${tag}: ${what} (${e.x},${e.y}) 大星星放在尖刺上`);

@@ -204,9 +204,12 @@ def main():
                 elif ph < 200:                                          # B：攻擊（能力可打碎方塊）
                     keys['attack'] = (frames % 16) < 2 if pl['ability'] else (frames % 60) < 40
                     if not pl['ability'] and pl['mouth']: keys['attack'] = True
-                elif ph < 300:                                          # C：吸入星星方塊再吐出
+                elif ph < 280:                                          # C：吸入星星方塊再吐出
                     keys['attack'] = (frames % 60) < 40
                     if pl['mouth']: keys['attack'] = (frames % 60) >= 40
+                elif ph < 330:                                          # D：↓+攻擊（重擊招式，硬磚 X 只有這類打得破）
+                    keys['down'] = True
+                    keys['attack'] = (frames % 20) < 3
                 else: dir_ *= -1; stuck = 0
             # 隨機跳過坑 / 打敵人
             if frames % 45 == 0 and not pl['mouth']: keys['jump'] = True
