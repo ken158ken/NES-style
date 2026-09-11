@@ -20,6 +20,14 @@
   const data = p => p.abilityData || (p.abilityData = {});
   const down = k => KB.input.down(k);
   const sfx = n => { try { if (KB.audio && KB.audio.sfx) KB.audio.sfx(n); } catch (e) { } };
+  // 特效呼叫（src/vfx.js 的 KB.VFX）；KB.VFX 不存在或丟例外時整組 no-op，不影響判定
+  const vx = function (name) {
+    const V = KB.VFX;
+    if (!V || typeof V[name] !== 'function') return null;
+    try { return V[name].apply(V, Array.prototype.slice.call(arguments, 1)); } catch (e) { return null; }
+  };
+  // 蓄力完成的共用演出（flash + ring + MAX!）
+  const chargeFx = (p, color) => { sfx('charge_ready'); vx('chargeReady', p.cx, p.cy - 14, color); };
   // 清除本能力產生、且必須隨攻擊結束的實體（判定框 / 光鞭）
   function killBox(p) {
     const d = data(p);
@@ -76,9 +84,18 @@
         d.box = KB.hitbox({ x: 0, y: 0, w: 24, h: 20, dmg: 3, owner: 'player', type: 'fire', follow: p, ox: -12, oy: -3, life: 3, rehit: 8, knock: 2, flipWithOwner: false, breakBlocks: true });
         d.box.breakHard = true;     // 火焰衝刺可撞破硬磚 X（mechanics）
         p.vx = p.dir * 3.4;
+        // 特效：橘色殘影 + 火星拖尾 + 起步爆燃
+        vx('afterimage', p, { frames: 42, color: '#ff8030', every: 2, alpha: 0.55 });
+        vx('sparkTrail', p, { color: ['#ffe040', '#ff9020', '#ff4010'], every: 2, life: 15, frames: 42 });
+        vx('burst', p.cx - p.dir * 8, p.cy + 2, { n: 14, colors: ['#ffe040', '#ff9020', '#ff4010'], speed: 2.4, life: 22, grav: -0.03, size: 2, dir: p.dir > 0 ? Math.PI : 0, spread: 0.9 });
+        vx('ring', p.cx, p.cy, { r0: 3, r1: 26, frames: 14, color: '#ffb040', width: 2 });
+        vx('shake', 3);
       } else if (d.mode === 'spin') {
         setup(p, { anim: 'kirby_attack_fire_spin', dur: 30, fps: 14, lock: false });
         d.box = KB.hitbox({ x: 0, y: 0, w: 30, h: 28, dmg: 2, owner: 'player', type: 'fire', follow: p, ox: -15, oy: -14, life: 3, rehit: 8, knock: 1.2, flipWithOwner: false });
+        vx('aura', p, { color: '#ff8030', r: 17, frames: 32, pulse: 0.35 });
+        vx('afterimage', p, { frames: 30, color: '#ff8030', every: 3, alpha: 0.4 });
+        vx('ring', p.cx, p.cy, { r0: 6, r1: 30, frames: 16, color: '#ffe040', width: 2 });
       } else {
         setup(p, { anim: null, dur: 12, fps: 10, lock: true, maxHold: 90 });
         d.box = KB.hitbox({ x: 0, y: 0, w: 12, h: 16, dmg: 1, owner: 'player', type: 'fire', follow: p, ox: 6, oy: 0, life: 3, rehit: 8 });
@@ -95,7 +112,11 @@
         if (d.t % 2 === 1) KB.fx('fx_fire', p.cx - p.dir * 8, p.cy + 4, { vx: -p.dir * 1.2, vy: rnd(-0.4, 0.2), life: 12, flip: p.dir > 0, fps: 12 });
         KB.particles(p.cx + rnd(-9, 9), p.cy + rnd(-8, 8), ['#ffe040', '#ff9020', '#ff4010'], 2, { spread: 0.8, grav: -0.04, life: 14, up: 0.2, vx: -p.dir * 1.2, size: 1 });
         if (d.t % 14 === 0) KB.audio.sfx('fire');
-        if (p.hitWall) { p.attackTimer = Math.min(p.attackTimer, 4); KB.game.shake = 3; }
+        if (p.hitWall) {
+          p.attackTimer = Math.min(p.attackTimer, 4); KB.game.shake = 3;
+          vx('burst', p.cx + p.dir * 8, p.cy, { n: 18, colors: ['#ffe040', '#ff9020', '#ff4010'], speed: 3, life: 24, grav: 0.06, size: 2 });
+          vx('ring', p.cx + p.dir * 8, p.cy, { r0: 2, r1: 30, frames: 14, color: '#ff8030', width: 2 });
+        }
         return;
       }
       if (d.mode === 'spin') {
@@ -112,6 +133,9 @@
       if (!b || b.dead) return;
       if (!on) { b.dead = true; d.box = null; return; }
       b.w = Math.min(40, 12 + d.t * 5); beat(b);
+      // 特效：噴口火星爆散（每 6 幀）
+      if (d.t === 1) vx('burst', p.cx + p.dir * 12, p.cy + 4, { n: 10, colors: ['#ffe040', '#ff9020'], speed: 1.8, life: 18, grav: -0.04, size: 2, dir: p.dir > 0 ? 0 : Math.PI, spread: 0.7 });
+      else if (d.t % 6 === 0) vx('burst', p.cx + p.dir * (10 + b.w * 0.7), p.cy + 5, { n: 6, colors: ['#ffe040', '#ff9020', '#ff4010'], speed: 1.4, life: 16, grav: -0.05, size: 2, dir: p.dir > 0 ? 0 : Math.PI, spread: 1 });
       // 火焰段連續飛出（fx_fire 3 幀），加上向上飄的火星粒子
       if (d.t % 2 === 1) KB.fx('fx_fire', p.cx + p.dir * 10, p.cy + 6, { vx: p.dir * 2.4, vy: rnd(-0.3, 0.1), life: 13, flip: p.dir < 0, fps: 12 });
       KB.particles(p.cx + p.dir * rnd(10, 36), p.cy + rnd(-4, 6), ['#ffe040', '#ff9020', '#ff4010'], 1, { spread: 0.5, grav: -0.05, life: 12, up: 0.2, vx: p.dir * 1.4, size: 1 });
@@ -140,10 +164,17 @@
         setup(p, { anim: 'kirby_attack_sword_spin', dur: 30, fps: 14, lock: false });
         d.box = KB.hitbox({ x: 0, y: 0, w: 32, h: 26, dmg: 2, owner: 'player', type: 'sword', follow: p, ox: -16, oy: -13, life: 3, rehit: 9, knock: 1.2, flipWithOwner: false });
         if (p.vy > -0.5) p.vy = -0.5;
+        // 特效：迴旋斬 → 綠色殘影 + 環形劍光
+        vx('afterimage', p, { frames: 32, color: '#d0ffd0', every: 2, alpha: 0.55 });
+        vx('aura', p, { color: '#40c040', r: 16, frames: 30, pulse: 0.4 });
+        vx('ring', p.cx, p.cy, { r0: 8, r1: 30, frames: 14, color: '#d0ffd0', width: 2 });
       } else if (d.mode === 'up') {
         setup(p, { anim: 'kirby_attack_sword_up', dur: 22, fps: 12, lock: true });
         d.box = KB.hitbox({ x: 0, y: 0, w: 22, h: 30, dmg: 3, owner: 'player', type: 'sword', follow: p, ox: -11, oy: -28, life: 18, rehit: 0, knock: 2.2, flipWithOwner: false });
         if (p.onGround) { p.vy = -2.8; p.onGround = false; }
+        // 特效：上挑斬 → 由下往上的弧
+        vx('slash', p.cx + p.dir * 4, p.cy - 12, 20, -Math.PI / 2, { color: '#d0ffd0', width: 3, frames: 12, arc: Math.PI * 0.9, flip: p.dir < 0 });
+        vx('line', p.cx + p.dir * 4, p.cy - 4, p.cx + p.dir * 8, p.cy - 34, { color: '#ffffff', width: 2, frames: 10 });
       } else {
         setup(p, { anim: null, dur: 18, fps: 10, lock: false });
         d.box = KB.hitbox({ x: 0, y: 0, w: 22, h: 16, dmg: 3, owner: 'player', type: 'sword', follow: p, ox: -8, oy: -18, life: 16, rehit: 0, knock: 1.5 });
@@ -157,6 +188,8 @@
         if (b && !b.dead) beat(b);
         const a = t * 0.42;   // 30 幀約轉 2 圈
         KB.particles(p.cx + Math.cos(a) * 15, p.cy + Math.sin(a) * 14, ['#ffffff', '#d0ffd0'], 1, { spread: 0.2, grav: 0, life: 8, up: 0, size: 1 });
+        // 特效：每半圈補一道大弧劍光
+        if (t === 2 || t === 9 || t === 16 || t === 23) vx('slash', p.cx, p.cy, 19, a, { color: '#d0ffd0', width: 3, frames: 10, arc: Math.PI * 1.3 });
         if (t === 15) KB.audio.sfx('sword');
         return;
       }
@@ -172,12 +205,18 @@
         if (t <= 4) { b.ox = -8; b.oy = -18; b.w = 22; b.h = 16; }   // 舉劍過頭（可打到頭上的敵人）
         else { b.ox = 4; b.oy = -8; b.w = 24; b.h = 26; }              // 劈向前方
       }
+      // 特效：揮下瞬間的大斬擊弧（由上往前掃）
+      if (t === 5) vx('slash', p.cx + p.dir * 5, p.cy - 6, 21, p.dir > 0 ? -0.8 : Math.PI + 0.8, { color: '#d0ffd0', width: 3, frames: 11, arc: Math.PI * 1.05, flip: p.dir < 0 });
       // 滿血劍氣：體力全滿時揮到底射出短程斬擊波
       if (t === 6 && p.hp >= p.maxHp && !d.wave) {
         d.wave = true;
         KB.shoot({ spr: 'proj_swordwave', x: p.cx + p.dir * 14, y: p.cy - 2, vx: p.dir * 4, vy: 0, dmg: 2, owner: 'player', life: 22, w: 12, h: 16,
           grav: 0, solid: true, pierce: false, type: 'sword', dir: p.dir, fxHit: 'fx_hit', trail: '#d0ffd0', knock: 1.5, fps: 12 });
         KB.audio.sfx('cutter');
+        // 特效：劍氣 → 一道向前射出的白綠光線 + 出鞘環
+        vx('line', p.cx + p.dir * 12, p.cy - 2, p.cx + p.dir * 92, p.cy - 2, { color: '#d0ffd0', width: 3, frames: 12 });
+        vx('line', p.cx + p.dir * 12, p.cy - 2, p.cx + p.dir * 70, p.cy - 8, { color: '#ffffff', width: 1, frames: 10 });
+        vx('ring', p.cx + p.dir * 12, p.cy - 2, { r0: 2, r1: 18, frames: 10, color: '#ffffff', width: 1 });
       }
       // 劍光弧線（白色粒子沿弧線掃過）
       if (t >= 2 && t <= 12) {
@@ -249,8 +288,16 @@
         KB.shoot({ spr: 'proj_beamwave', x: p.cx + p.dir * 14, y: p.cy - 2, vx: p.dir * 2.6, vy: 0, dmg: 4, owner: 'player', life: 110, w: 18, h: 18,
           grav: 0, solid: false, pierce: true, type: 'beam', dir: p.dir, fxHit: 'fx_sparkle', trail: '#ffe040', knock: 2, fps: 10, breakBlocks: true });
         KB.game.shake = 3; KB.audio.sfx('beam');
+        // 特效：星潮光束 → 巨大光柱 + 沿途分支電光 + 後座爆散
+        vx('beam', p.cx + p.dir * 10, p.cy - 2, p.dir, 110, { width: 20, color: '#ffe040', frames: 20, taper: 0.55 });
+        vx('lightning', p.cx + p.dir * 14, p.cy - 2, p.cx + p.dir * 104, p.cy - 2, { color: '#fff0a0', frames: 16, jitter: 7, branches: 3 });
+        vx('ring', p.cx + p.dir * 8, p.cy - 2, { r0: 4, r1: 40, frames: 16, color: '#ffffff', width: 2 });
+        vx('burst', p.cx + p.dir * 8, p.cy - 2, { n: 16, colors: ['#ffe040', '#ffffff'], speed: 2.6, life: 24, grav: 0, size: 2 });
+        vx('flash', '#fff8c0', 6, 0.4);
+        vx('zoom', 1.1, 10);
       } else if (d.mode === 'capture') {
         setup(p, { anim: 'kirby_attack_beam_capture', dur: 20, fps: 10, lock: true });
+        vx('circle', p.cx + p.dir * 14, p.cy, { r: 22, frames: 22, color: '#ffe040', spin: 0.14, glyphs: 8 });
         d.box = KB.hitbox({ x: 0, y: 0, w: 22, h: 18, dmg: 0, owner: 'player', type: 'beam', follow: p, ox: 4, oy: -2, life: 12, rehit: 0, pierce: true,
           breakBlocks: false, onHit: b => captureHit(p, b) });
         KB.audio.sfx('beam');
@@ -258,6 +305,7 @@
         setup(p, { anim: null, dur: 20, fps: 10, lock: true, maxHold: 200 });
         d.whip = KB.spawn(new BeamWhip(p)); d.box = d.whip.box;
         KB.audio.sfx('beam');
+        vx('slash', p.cx + p.dir * 5, p.y + 6, 30, p.dir > 0 ? -1.0 : Math.PI + 1.0, { color: '#ffe040', width: 2, frames: 14, arc: Math.PI * 0.62, flip: p.dir < 0 });
       }
     },
     update(p, dt, held) {
@@ -275,7 +323,7 @@
         if (d.whip) { d.whip.dead = true; d.whip = null; d.box = null; }
         if (held) {
           if (t >= 45) {
-            if (!d.charged) sfx('charge_ready');
+            if (!d.charged) chargeFx(p, '#ffe040');
             d.charged = true;
             if (t % 3 === 0) KB.particles(p.cx + p.dir * 10, p.cy - 2, ['#ffffff', '#ffe040'], 2, { spread: 1.6, grav: 0, life: 12, up: 0, size: 1 });
           } else {
@@ -301,6 +349,7 @@
         pierce: true, solid: false, rotSpeed: 0.45 * p.dir, type: 'cutter', dir: p.dir, destructible: false, knock: 1.2, fps: 12 });
       this.thrower = p; this.phase = 'out'; this.range = 46; this.startX = this.cx; this.name = 'cutter';
       this.grav = 0; this.hurtsPlayer = false; this.inhalable = false;
+      vx('sparkTrail', this, { color: ['#ffffff', '#e0e0e0'], every: 2, life: 12, frames: 140 });   // 特效：白色刃光拖尾
     }
     update(dt) {
       this.baseUpdate(dt);
@@ -383,6 +432,8 @@
         d.hit2 = false;
         d.box = KB.hitbox({ x: 0, y: 0, w: 18, h: 14, dmg: 2, owner: 'player', type: 'cutter', follow: p, ox: 2, oy: -16, life: 7, rehit: 0, knock: 1.2 });
         KB.audio.sfx('cutter');
+        // 特效：下劈上段的白色刃弧
+        vx('slash', p.cx + p.dir * 6, p.cy - 10, 17, p.dir > 0 ? -1.4 : Math.PI + 1.4, { color: '#ffffff', width: 2, frames: 9, arc: Math.PI * 0.7, flip: p.dir < 0 });
         return;
       }
       if (d.blades.length >= 2) { setup(p, { anim: null, dur: 14, fps: 10, lock: false }); return; }   // 最多兩片在外，仍播放動作
@@ -404,6 +455,9 @@
           d.box = KB.hitbox({ x: 0, y: 0, w: 20, h: 22, dmg: 3, owner: 'player', type: 'cutter', follow: p, ox: 2, oy: -4, life: 10, rehit: 0, knock: 2 });
           KB.audio.sfx('cutter');
           KB.particles(p.cx + p.dir * 12, p.cy + 6, ['#ffffff', '#e0e0e0'], 4, { spread: 1.2, grav: 0.05, life: 12, up: 0.3, size: 1 });
+          // 特效：下段劈的大刃弧 + 火花
+          vx('slash', p.cx + p.dir * 6, p.cy - 2, 20, p.dir > 0 ? -0.5 : Math.PI + 0.5, { color: '#ffffff', width: 3, frames: 11, arc: Math.PI * 1.0, flip: p.dir < 0 });
+          vx('burst', p.cx + p.dir * 14, p.cy + 6, { n: 8, colors: ['#ffffff', '#e0e0e0'], speed: 2, life: 18, grav: 0.12, size: 2 });
         }
         slowFall(p, 1.6);
         return;
@@ -430,6 +484,16 @@
         d.box = KB.hitbox({ x: 0, y: 0, w: 96, h: 80, dmg: 3, owner: 'player', type: 'spark', follow: p, ox: -48, oy: -32, life: 20, rehit: 7, flipWithOwner: false, pierce: true });
         KB.game.shake = 5; KB.audio.sfx('spark');
         KB.particles(p.cx, p.cy, ['#ffffff', '#80d0ff', '#c0f0ff'], 24, { spread: 4, grav: 0, life: 20, up: 0 });
+        // 特效：隨機 6 道閃電 + 電藍魔法陣 + 一瞬藍染世界
+        for (let i = 0; i < 6; i++) {
+          const a = rnd(0, Math.PI * 2), r = rnd(34, 52);
+          vx('lightning', p.cx, p.cy, p.cx + Math.cos(a) * r, p.cy + Math.sin(a) * r * 0.8, { color: '#c0f0ff', frames: 14, jitter: 6, branches: 2 });
+        }
+        vx('circle', p.cx, p.cy + 6, { r: 44, frames: 26, color: '#80d0ff', spin: 0.16, glyphs: 12 });
+        vx('worldTint', '#80d0ff', 0.4, 8);
+        vx('flash', '#ffffff', 5, 0.45);
+        vx('ring', p.cx, p.cy, { r0: 6, r1: 54, frames: 18, color: '#ffffff', width: 2 });
+        vx('zoom', 1.12, 10);
       } else {
         setup(p, { anim: null, dur: 10, fps: 12, lock: false, maxHold: 150 });
         d.box = KB.hitbox({ x: 0, y: 0, w: 44, h: 40, dmg: 1, owner: 'player', type: 'spark', follow: p, ox: -22, oy: -12, life: 3, rehit: 6, flipWithOwner: false });
@@ -457,12 +521,20 @@
       if (!b || b.dead) return;
       if (!on) { b.dead = true; d.box = null; if (d.charged) startMove(p, 'burst'); return; }
       beat(b);
+      // 特效：電場中不斷跳動的閃電（每 5 幀 2 道）
+      if (d.t === 1) vx('circle', p.cx, p.cy + 6, { r: 22, frames: 20, color: '#80d0ff', spin: 0.18, glyphs: 8 });
+      if (d.t % 5 === 2) {
+        for (let i = 0; i < 2; i++) {
+          const a = rnd(0, Math.PI * 2), r = rnd(14, 22);
+          vx('lightning', p.cx, p.cy, p.cx + Math.cos(a) * r, p.cy + Math.sin(a) * r, { color: '#c0f0ff', frames: 7, jitter: 4, branches: 1 });
+        }
+      }
       // 電場隨機閃爍 + 藍白粒子
       if (d.t % 2 === 0) KB.fx('fx_spark_field', p.cx + rnd(-20, 20), p.cy + rnd(-14, 18) + 8, { life: 4, flip: Math.random() < 0.5, fps: 15 });
       KB.particles(p.cx + rnd(-22, 22), p.cy + rnd(-18, 18), ['#ffffff', '#80d0ff', '#c0f0ff'], 1, { spread: 1.2, grav: 0, life: 8, up: 0, size: 1 });
       if (d.t % 10 === 0) KB.audio.sfx('spark');
       if (p.stateT >= 45) {
-        if (!d.charged) sfx('charge_ready');
+        if (!d.charged) chargeFx(p, '#60c0ff');
         d.charged = true;
         if (d.t % 4 === 0) KB.particles(p.cx, p.y - 6, ['#ffffff', '#ffe040'], 2, { spread: 1, grav: 0, life: 12, up: 0.4, size: 1 });
       } else if (p.stateT >= 12 && p.stateT % 8 === 0) sfx('charge');
@@ -493,6 +565,16 @@
       if (KB.SPR[d.form]) KB.SPR.kirby_stone = KB.SPR[d.form];
       d.roll = 0;
       KB.particles(p.cx, p.cy, STONE_DUST[d.form] || '#a0a0a8', 8, { spread: 2, life: 20 });
+      // 特效：變石瞬間 → 震動 + 碎石噴發 + 白閃 + zoom punch
+      // 註：這裡「不」放 hitstop —— 變石的停格會吃掉「再按 X 解除」的按鍵邊緣，
+      //     playthrough 機器人會卡在石頭狀態過不了關（實測 hitstop 2 / 4 都會卡）。
+      //     石頭的停格感改由落地衝擊（rollUpdate 內的重落地）負責。
+      const dust = STONE_DUST[d.form] || '#a0a0a8';
+      vx('shake', 6);
+      vx('flash', '#ffffff', 4, 0.3);
+      vx('burst', p.cx, p.bottom - 4, { n: 18, colors: [dust, '#ffffff', '#807870'], speed: 2.6, life: 26, grav: 0.2, size: 3 });
+      vx('ring', p.cx, p.cy, { r0: 4, r1: 30, frames: 14, color: dust, width: 3 });
+      vx('zoom', 1.14, 10);
       box.onUpdate = hb => KB.ABILITIES.stone.rollUpdate(p, hb);
     },
     // 斜坡滾動：累積滾速並反推 player.js updateStone 的 vx*0.6 + 斜坡 0.5，讓石頭真的滾起來
@@ -502,6 +584,15 @@
       if (!map) return;
       const ch = map.get(Math.floor(p.cx / 16), Math.floor(p.bottom / 16));
       const sdir = p.onSlope ? (ch === '/' ? -1 : 1) : 0;
+      // 特效：重落地衝擊（左右各一道地面衝擊波 + 塵爆 + 震動；不放 hitstop，見 onStoneStart 註解）
+      if (p.onGround && !d.wasGround && (d.fallV || 0) > 4) {
+        const dust2 = STONE_DUST[d.form] || '#a0a0a8';
+        vx('shake', 6);
+        vx('burst', p.cx, p.bottom - 2, { n: 14, colors: [dust2, '#ffffff'], speed: 2.4, life: 22, grav: 0.25, size: 3 });
+        for (const s of [-1, 1]) vx('shockwave', p.cx + s * 6, p.bottom, { dir: s, speed: 3, frames: 18, w: 12, h: 13, color: dust2 });
+        vx('ring', p.cx, p.bottom - 4, { r0: 4, r1: 34, frames: 14, color: dust2, width: 2 });
+      }
+      d.wasGround = p.onGround; d.fallV = p.vy;
       let r = d.roll || 0;
       if (sdir) r = Math.max(-4.6, Math.min(4.6, r + sdir * 0.34));
       else if (p.onGround) r *= 0.94;
@@ -550,10 +641,16 @@
         }
         slowFall(p, 0.4);
         KB.audio.sfx('ice');
+        // 特效：冰晶散射 → 冰藍雙環 + 晶體粒子爆散
+        vx('ring', p.cx, p.cy, { r0: 4, r1: 40, frames: 18, color: '#a0e8ff', width: 3 });
+        vx('ring', p.cx, p.cy, { r0: 2, r1: 26, frames: 14, color: '#ffffff', width: 1 });
+        vx('burst', p.cx, p.cy, { n: 20, colors: ['#ffffff', '#c0f0ff', '#80d0ff'], speed: 2.4, life: 28, grav: 0.05, size: 3 });
+        vx('circle', p.cx, p.cy, { r: 26, frames: 22, color: '#a0e8ff', spin: -0.1, glyphs: 6 });
       } else {
         setup(p, { anim: null, dur: 12, fps: 10, lock: true, maxHold: 90 });
         d.box = KB.hitbox({ x: 0, y: 0, w: 12, h: 16, dmg: 1, owner: 'player', type: 'ice', follow: p, ox: 6, oy: 0, life: 3, rehit: 10, freeze: true });
         KB.audio.sfx('ice');
+        vx('ring', p.cx + p.dir * 10, p.cy + 4, { r0: 2, r1: 18, frames: 12, color: '#c0f0ff', width: 2 });
       }
     },
     update(p, dt, held) {
@@ -577,6 +674,9 @@
             if (KB.game) KB.game.addScore(best.score, best.cx, best.y);
             KB.particles(best.cx, best.cy, ['#ffffff', '#c0f0ff'], 8, { spread: 2, life: 16 });
             KB.game.shake = 3;
+            vx('ring', best.cx, best.cy, { r0: 4, r1: 30, frames: 14, color: '#a0e8ff', width: 3 });
+            vx('burst', best.cx, best.cy, { n: 14, colors: ['#ffffff', '#c0f0ff', '#80d0ff'], speed: 2.4, life: 24, grav: 0.08, size: 3 });
+            vx('textPop', best.cx, best.cy - 16, 'ICE KICK!', { color: '#a0e8ff', frames: 34 });
           } else {
             KB.shoot({ spr: 'proj_ice', x: p.cx + p.dir * 10, y: p.cy - 1, vx: p.dir * 3.4, vy: 0, dmg: 2, owner: 'player', life: 24, w: 10, h: 10,
               grav: 0, solid: true, pierce: false, freeze: true, type: 'ice', dir: p.dir, fxHit: 'fx_ice', trail: '#c0f0ff', breakBlocks: true });
@@ -596,6 +696,11 @@
       if (!b || b.dead) return;
       if (!on) { b.dead = true; d.box = null; return; }
       b.w = Math.min(32, 12 + d.t * 4); beat(b);
+      // 特效：噴冰前端的冰藍環 + 晶體碎屑
+      if (d.t % 8 === 3) {
+        vx('ring', p.cx + p.dir * (8 + b.w * 0.8), p.cy + 5, { r0: 2, r1: 14, frames: 12, color: '#a0e8ff', width: 1 });
+        vx('burst', p.cx + p.dir * (8 + b.w * 0.7), p.cy + 5, { n: 5, colors: ['#ffffff', '#c0f0ff'], speed: 1.2, life: 18, grav: 0.05, size: 2, dir: p.dir > 0 ? 0 : Math.PI, spread: 1 });
+      }
       if (d.t % 2 === 1) KB.fx('fx_ice', p.cx + p.dir * 10, p.cy + 6, { vx: p.dir * 1.9, vy: rnd(-0.2, 0.2), life: 13, flip: p.dir < 0, fps: 12 });
       KB.particles(p.cx + p.dir * rnd(10, 30), p.cy + rnd(-5, 5), ['#ffffff', '#c0f0ff', '#80d0ff'], 1, { spread: 0.6, grav: 0.02, life: 14, up: 0.1, vx: p.dir * 1.0, size: 1 });
       if (d.t % 24 === 0) KB.audio.sfx('ice');
@@ -652,7 +757,12 @@
               KB.hitbox({ x: p.cx + (s > 0 ? 4 : -40), y: p.bottom - 14, w: 36, h: 16, dmg: 6, owner: 'player', type: 'hammer', life: 10, rehit: 0, pierce: true, knock: 3 });
               KB.fx('fx_hit', p.cx + s * 20, p.bottom - 4);
               KB.particles(p.cx + s * 14, p.bottom, ['#d8b890', '#f0e0c0', '#ffffff'], 9, { spread: 2.2, vx: s * 1.6, up: 1.2, life: 24 });
+              // 特效：左右兩道地面衝擊波
+              vx('shockwave', p.cx + s * 8, p.bottom, { dir: s, speed: 3.6, frames: 22, w: 14, h: 16, color: '#f0e0c0' });
             }
+            vx('ring', p.cx, p.bottom - 4, { r0: 6, r1: 56, frames: 18, color: '#f0e0c0', width: 3 });
+            vx('hitstop', 4); vx('shake', 8); vx('zoom', 1.12, 10);
+            vx('textPop', p.cx, p.bottom - 26, 'SMASH!', { color: '#ffe040', frames: 36 });
             p.attackTimer = Math.min(p.attackTimer, 14);
           }
         }
@@ -669,6 +779,10 @@
           d.box = KB.hitbox({ x: 0, y: 0, w: 40, h: 32, dmg: 6, owner: 'player', type: 'hammer', follow: p, ox: -20, oy: -16, life: 14, rehit: 0, knock: 3, pierce: true, flipWithOwner: false });
           KB.audio.sfx('hammer'); KB.game.shake = 3;
           KB.particles(p.cx, p.cy, ['#d8b890', '#f0e0c0'], 6, { spread: 2, up: 0.5, life: 16 });
+          // 特效：大迴旋每段補一圈環 + 大弧 + 殘影
+          vx('ring', p.cx, p.cy, { r0: 8, r1: 42, frames: 16, color: '#f0e0c0', width: 3 });
+          vx('slash', p.cx, p.cy, 22, d.hits * 2.1, { color: '#f0e0c0', width: 4, frames: 12, arc: Math.PI * 1.6 });
+          if (d.hits === 1) vx('afterimage', p, { frames: 54, color: '#f0e0c0', every: 3, alpha: 0.45 });
         }
         if (t % 4 === 0) KB.particles(p.cx + rnd(-18, 18), p.cy + rnd(-14, 14), '#f0e0c0', 1, { spread: 0.4, grav: 0, life: 8, up: 0, size: 1 });
         return;
@@ -691,6 +805,15 @@
         KB.game.shake = smash ? 5 : 3; KB.audio.sfx('stone');
         KB.particles(p.cx + p.dir * (smash ? 14 : 16), p.bottom, ['#d8b890', '#f0e0c0', '#ffffff'], smash ? 14 : 7, { spread: smash ? 2.4 : 1.6, up: 1.4, life: 22 });
         if (smash) KB.fx('fx_hit', p.cx + p.dir * 16, p.bottom - 2);
+        // 特效：地面衝擊波 + 落點環（巨鎚敲擊再加停格 / zoom / SMASH! 字）
+        const hx = p.cx + p.dir * (smash ? 14 : 16);
+        vx('shockwave', hx, p.bottom, { dir: p.dir, speed: smash ? 3.8 : 3, frames: smash ? 22 : 18, w: smash ? 14 : 11, h: smash ? 16 : 12, color: '#f0e0c0' });
+        vx('ring', hx, p.bottom - 3, { r0: 4, r1: smash ? 46 : 32, frames: 16, color: '#f0e0c0', width: smash ? 3 : 2 });
+        if (smash) {
+          vx('hitstop', 5); vx('shake', 7); vx('zoom', 1.14, 10);
+          vx('burst', hx, p.bottom - 2, { n: 16, colors: ['#d8b890', '#f0e0c0', '#ffffff'], speed: 2.8, life: 26, grav: 0.24, size: 3 });
+          vx('textPop', p.cx, p.bottom - 26, 'SMASH!', { color: '#ffe040', frames: 36 });
+        }
       }
       // 掄鎚動作結束後仍按住 → 進入蓄力；放開時累計 ≥40 幀就放出大迴旋
       if (!smash && t >= 24) {
@@ -698,7 +821,7 @@
         if (held) {
           d.charge++;
           if (d.charge >= 40) {
-            if (!d.ready) { d.ready = true; sfx('charge_ready'); }
+            if (!d.ready) { d.ready = true; chargeFx(p, '#e08040'); }
             if (d.charge % 3 === 0) KB.particles(p.cx + rnd(-10, 10), p.y - 4, ['#ffffff', '#ffe040'], 2, { spread: 1, grav: 0, life: 12, up: 0.5, size: 1 });
           } else {
             if (d.charge % 8 === 1) sfx('charge');

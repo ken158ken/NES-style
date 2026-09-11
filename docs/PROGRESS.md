@@ -1081,7 +1081,68 @@ git 已初始化，基線 commit `c382e2a`。Playwright venv：`.venv/bin/python
 分工見 docs/TASKS.md Round 5。總控已預留：game.js 的 KB.VFX.preWorld/postWorld/update 鉤子、KB.game.timeStopT / slowMoT（非玩家方實體凍結 / 隔幀更新）、index.html 已加入 10 個新檔的 script 標籤（vfx.js、abilities_*.js、art/kirby_*.js、enemies_*.js）。
 
 ## vfx
-（agent 在此追加）
+
+### KB.VFX API 一覽（其他 agent 照這個介面呼叫；`src/vfx.js`）
+> 全部函式在 `KB.game` 不存在時安全 no-op（回傳 `null`）；世界層座標一律用**世界座標**（postWorld 以 cam 轉換）。
+> 所有效果放同一個陣列 `KB.VFX.list`，上限 **400**（超過丟最舊），每個元素是 `{t, life, layer, draw(ctx,cam), up?()}`。
+
+**螢幕層**
+| 呼叫 | 說明 |
+|---|---|
+| `flash(color='#fff', frames=6, alpha=0.8)` | 全畫面（256×224）白閃，alpha 線性衰減 |
+| `tint(color, frames=20, alpha=0.35)` | 全畫面染色，淡入 3 幀 / 後 30% 淡出 |
+| `worldTint(color, alpha=0.35, frames=12)` | **只染世界層**（256×192，HUD 不受影響）；時停 / 電擊用 |
+| `letterbox(frames=20)` | 上下 22px 黑邊，滑入 / 滑出各 8 幀（必殺、變身） |
+| `zoom(scale=1.15, frames=8)` | 以卡比為中心的 zoom punch（preWorld 套變換、世界區塊結尾的 `ctx.restore()` 還原）；low 畫質關閉 |
+| `shake(n)` | → `KB.game.shake`（取 max，不會蓋掉更大的震動） |
+| `hitstop(n)` | → `KB.game.freezeT`（取 max） |
+
+**世界層**（世界座標）
+| 呼叫 | 說明 |
+|---|---|
+| `slash(x,y,r,angle,{color,width,frames,arc,flip})` | 斬擊弧；`angle` 中心角（弧度，0=右、負=上），`flip` 反向掃 |
+| `line(x1,y1,x2,y2,{color,width,frames})` | 3 幀內伸長的直線（劍氣） |
+| `lightning(x1,y1,x2,y2,{color,frames,jitter,branches})` | 折線閃電＋分支，預先算 3 組折線每 2 幀換一組（不每幀重算） |
+| `ring(x,y,{r0,r1,frames,color,width})` | 擴散圓環 |
+| `burst(x,y,{n,colors,speed,life,size,grav,dir,spread})` | 粒子爆發（自帶粒子陣列，不佔 `game.parts`）；`dir`+`spread` 可做扇形 |
+| `circle(x,y,{r,frames,color,spin,glyphs})` | 魔法陣：雙圓 + 旋轉符文刻度 + 內部三角 |
+| `beam(x,y,dir,len,{width,color,frames,taper})` | 光柱；`dir` 為 ±1（水平）或弧度角 |
+| `afterimage(entity,{frames,color,every,alpha,ghostLife})` | 每 `every` 幀複製實體目前精靈成殘影；low 畫質回傳 null |
+| `aura(entity,{color,r,frames,pulse})` | 跟隨實體的三層脈動光環 |
+| `textPop(x,y,text,{color,size,frames,rise,outline})` | 放大彈入 → 上升 → 淡出的文字 |
+| `shockwave(x,y,{w,h,dir,speed,frames,color})` | 地面衝擊波（鋸齒塵浪 + 白色波前 + 碎屑），每幀前進 `speed` |
+| `sparkTrail(entity,{color,every,life,frames})` | 跟隨拖尾（`color` 可傳陣列） |
+
+**演出**
+| 呼叫 | 說明 |
+|---|---|
+| `transform(player, key, {name,color})` | 變身演出：hitstop 10 + 12 條放射光線 + 白色剪影閃 3 次 + ring ×3 + burst 24 + 魔法陣 + flash + 名稱橫幅（`def.name` 16px 中文 + `hudName` 點陣，中央放大彈入停 40 幀淡出）+ letterbox + zoom。能力色取自 `KB.ABILITIES[key].color` |
+| `untransform(player, key?)` | 解除演出：灰色煙 burst + ring + 帽子旋轉飛走殘影 |
+| `banner(name, sub, color)` | 單獨叫出名稱橫幅（必殺技名等） |
+| `chargeReady(x, y, color)` | 蓄力完成共用演出：flash + ring + `MAX!` |
+
+**管理**：`update(game)`（每幀推進，換 GameScene 自動 `clear()`）／`preWorld(ctx,cam,game)`／`postWorld(ctx,cam,game)`／`clear()`／`push(effect)`／`pn(n)` 依畫質縮放粒子數／`level`（唯讀 getter，讀 `KB.save.settings.vfx`：`'high'|'mid'|'low'`，預設 high；low → 粒子 ×0.4、關閉 zoom / afterimage；mid → ×0.7）。
+
+> **給其他 agent 的注意事項**
+> 1. `game.js` **完全沒有改動**：`preWorld` 故意不呼叫 `ctx.save()`（zoom 變換靠世界區塊結尾原本的 `ctx.restore()` 還原），`postWorld` 自己重新裁切遊戲區，所以世界層特效不會溢出到 HUD。
+> 2. hitstop 期間 `game.update` 直接 return → `KB.VFX.update` 不會被呼叫，效果會定格。要在停格「之後」才出現的東西，請用效果的 `up()` 排程（見 `transform` 的 `t === 2`）。
+> 3. 變身請呼叫 `KB.VFX.transform(p, key)`；能力色請寫進 `KB.ABILITIES[key].color`，特效會自動取用。
+
+### 進度
+- [09-12 R5-VFX-1] 完成：`src/vfx.js` 全套 KB.VFX（22 個 API + 4 個管理函式），單一效果陣列上限 400、效果 `{t,life,layer,draw,up}`、不每幀 new canvas；畫質等級讀 `KB.save.settings.vfx`。**game.js 一行都沒改**（preWorld 不 save、靠原本的 restore 還原 zoom；postWorld 自己重新裁切遊戲區）。驗證：`node --check src/*.js` 全過、13 個世界層效果逐一截圖 `shots/agent_vfx/fx_*.png` + 總覽 `shots/agent_vfx/sheet_all.png`；下一步：既有 8 能力接特效。
+- [09-12 R5-VFX-2] 完成：變身演出 `transform(player,key)` / 解除 `untransform(player)` / 名稱橫幅 `banner()`。停格 10 幀期間 `game.update` 直接 return（VFX.update 不會跑），所以白閃 / 黑邊 / 橫幅改由 ctrl 效果的 `up()` 在 `t===2` 排程，停格那 10 幀看到的是「12 條放射光線 + 白色剪影 + ring + 24 顆能力色粒子」定格。驗證：`shots/agent_vfx/transform_sword_00..11.png`（--seq 12:6 連拍 12 張逐幀 Read 檢查：f0~f12 定格衝擊、f18 白閃＋橫幅彈入、f24~f54 「劍 / SWORD」橫幅停留、f60~f66 淡出、f72 後全部清空）；下一步：效能與通關驗證。
+- [09-12 R5-VFX-3] 完成：既有 8 能力全部接上特效（只加呼叫，判定 / 數值 / 時間軸完全沒動）——劍 slash 弧＋迴旋斬 afterimage＋劍氣 line；鎚 shockwave＋ring＋shake＋textPop「SMASH!」；火 sparkTrail＋火星 burst＋衝刺橘色 afterimage；冰 冰藍 ring＋晶體 burst＋魔法陣；光束 beam＋lightning 分支；刀刃 白色 sparkTrail＋slash；電擊 隨機 6 道 lightning＋電藍 circle＋worldTint 一瞬；石頭 shake＋碎石 burst＋白閃＋zoom（**變石不放 hitstop**，實測停格會吃掉「再按 X 解除」的按鍵邊緣，playthrough 機器人會卡死在石頭狀態；停格感改放在「重落地衝擊」——左右兩道 shockwave＋塵爆＋shake）。蓄力完成一律 `chargeReady()`＝flash＋ring＋textPop「MAX!」（beam / spark / hammer 三處）。驗證：`shots/agent_vfx/ab_*.png` 22 張（每招一張，逐張 Read 確認不破圖 / 不超出 clip / 字可讀）、每張拍完再跑 300 幀確認 `KB.VFX.list.length === 0`（無殘留）。
+- [09-12 R5-VFX-4] 完成：效能與回歸驗證。效能：頁面內連續 `__kb.step(1)` ×300（每幀 update+render）——無特效 143 ms（0.48 ms/幀）；同時觸發 **200 個 burst（4800 顆粒子）275 ms（0.92 ms/幀）**，遠低於 3 秒門檻；灌 600 個 burst 後 list 正確截在 400。回歸：`engine_test.py 118/118`、`enemy_test.py 393/393`、`node --check src/*.js` 全過、`playthrough.py --level w1 --godmode` 通關（4334 幀）、`--ability hammer --godmode` 通關（12919 幀）。畫質等級實測：high 20 顆 / mid 14 顆 / low 8 顆粒子，low 正確關閉 zoom 與 afterimage。`KB.game` 不存在時 24 個 API 全部安全 no-op（實測無例外）。
+- [09-12 R5-VFX-5] 完成：石頭停格回歸修正（見上）＋橫幅行距微調（黑底 34px、中文 -14 / 點陣 +5，兩行不再互相貼死）。最終全套驗證：`node --check src/*.js` 全過、`engine_test.py 118/118`、`enemy_test.py 393/393`、`playthrough.py --level w1 --godmode` 通關 4334 幀、`--ability hammer` 12919 幀、`--ability stone` 9620 幀，missing sprites 皆為空。截圖：`shots/agent_vfx/sheet_all.png`（18 個效果總覽）、`fx_*.png`、`ab_*.png`（22 招）、`transform_sword_00..11.png`、`ab_stone_land.png`。
+
+### 未完成 / 已知問題（vfx）
+- 變身演出的 letterbox 用 **70 幀**（規格寫 20 幀）：20 幀會在橫幅還在畫面上時就收掉黑邊，看起來斷掉；要改回去只需動 `V.transform` 裡的 `V.letterbox(70)`。
+- 石頭**沒有** hitstop（原因見 R5-VFX-3），改成重落地衝擊；若 player-feel agent 之後讓 `freezeT` 期間仍保留按鍵邊緣，就可以加回來。
+- 特效內部用了 `Math.random()`，會改變全域 RNG 的呼叫序列 → 同樣輸入的 playthrough 幀數會和 Round 4 不同（判定 / 測試不受影響，engine_test 118、enemy_test 393 全過）。
+- `transform()` **不播音效**（audio5 agent 負責）：建議在 `player.giveAbility`（forms agent）或 audio 那邊補變身音 / 必殺 stinger。
+- 沒有跑 `tools/build.py`：Round 5 其他 agent 的檔案還是空殼，等總控收工再打包。
+- 設定選單還沒有「特效強度」這一項（ui5 agent）：介面已備好，讀寫 `KB.save.settings.vfx = 'high'|'mid'|'low'` 即可，`KB.VFX.level` 會即時生效。
+
 
 ## weapons
 （agent 在此追加）
