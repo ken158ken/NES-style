@@ -93,3 +93,31 @@
 - [doing] 非無敵難度調校：每世界 × 3 能力（sword/fire/none）playthrough 不加 --godmode，記錄死亡點與原因 → 提出調整建議（敵人位置 / 尖刺 / 魔王傷害）
 - [todo] Round 1 全功能回歸截圖（暫停卡 8 能力、能力圖鑑 8 頁、設定、選關、5 秘密房、5 二階段）
 - [todo] 記錄 Round 2 新功能問題並轉交
+
+---
+# Round 3：平衡與打磨（依 QA_REPORT Round 2 章節）
+
+## balance-levels（src/levels.js, src/items.js, tools/playthrough.py, tools/level_check.js）
+- [todo] 死亡熱點修正：w1 r0 sirkibble(75,9) 換 waddledee 或移到支線、番茄 (68,9)→(72,9)；w5 r0 shotzo(51,7) 移離主動線 / 斜坡加掩體、(48,9) 補番茄；w2 r0 poppybros 走廊加掩體或移位；w3 r0/r1 水池 glunk 右移 4 格、番茄移岸邊；w4 r2 出口門前 2 格淨空
+- [todo] 主線番茄 / 食物補給：每房主線至少 1 個補給點（非支線高台 / 水底）
+- [todo] 魔王房 spawn 與 bossPos 距離 ≥ 96px 且 ≤ 200px（w3/w4/w5 目前只差 16px）
+- [todo] 新中魔王 rollarmor 放進 w4 r1 或 w5 r3（依 enemies-bosses2 建議）並加 gatekeeper
+- [todo] w3 水域硬邊 / 雙水平線（P2-07 / P2-09）、w5 r0 與 r6 出生點壓金柱（P2-11）
+- [todo] 驗收：--godmode 5 世界 cleared；不加 --godmode 時 sword 每世界 deaths ≤ 2（記錄實測數字）
+
+## balance-enemies（src/enemies.js, src/bosses.js, src/entity.js, tools/boss_test.py, tools/enemy_test.py）
+- [todo] 敵人行為分世界：w1~w2 的 sirkibble 不接刃、poppybros 投擲前 18 幀預警（舉手幀 + 最小距離 48px）、shotzo 射程 170→120 且開火間隔加長；以 KB.game.level id 或 spawnDef.a 參數控制強度
+- [todo] 魔王曲線：魅塔騎士 recover 40→16 幀、vanishCD 180→120（保持 playthrough 可通關）；威斯比 hurtsPlayer 接觸框縮到樹幹 24px 寬且接觸傷害間隔 ≥ 45 幀；w3 克拉寇、w5 迪迪迪一階段給更多可攻擊窗口（落地硬直 +20 幀）
+- [todo] 目標曲線（sword 不用無敵、機器人）：w1 打掉 ≥ 80%、w2 ≥ 70%、w3 ≥ 60%、w4 ≥ 50%、w5 ≥ 40%；用 boss_test --real 量測並記錄
+- [todo] 暗房中敵人可見度：敵人自帶 8px 微光或眼睛發光（entity draw 時 KB.game.room.dark 判斷）
+
+## polish-ui（src/ui.js, src/menu.js, src/arena.js, src/game.js 僅 draw 順序, src/tilemap.js 僅 drawWater alpha）
+- [todo] 水中卡比可見：drawWater alpha 0.72→0.4，或水層後再畫一次玩家（半透明）
+- [todo] 開場橫幅期間 toast 改排在橫幅下方（y+48）
+- [todo] 標題選單面板不壓 logo（下移或縮小）
+- [todo] 結算關名被面板切到、競技場結算魔王順序斷行（改兩行固定排版、名稱之間用「→」且不在字中斷）
+- [todo] 結算「★」改用像素圖示 uifb_star
+- [todo] 競技場登場字幕縮短為 60 幀（game.js loadRoom 讀 opts.arena 時 bossIntroT=60）
+
+## qa3（docs/QA_REPORT.md Round 3, shots/agent_qa3/）
+- [todo] Round 2 問題回歸 + 非無敵 deaths 量測（5 世界 × sword/fire）+ 魔王曲線量測 + 全流程截圖
