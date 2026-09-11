@@ -681,3 +681,124 @@ git 已初始化，基線 commit `c382e2a`。Playwright venv：`.venv/bin/python
 - [Round 3] 完成：**HUD 三狀態重疊檢查**。暫停 `shots/agent_polishui/hud_pause.png`（能力卡 + 選單 + HUD 不重疊）、魔王血條 `hud_boss.png`（血條 x 66~156 與左側「普通」x≤60、右側分數不衝突）、競技場 `arena_hud.png`（左能力 / 中 HP + 血條 / 右 ARENA 1/5 + 時間 + 番茄，皆無重疊）。
 - [Round 3] 驗證：`.venv/bin/python tools/engine_test.py` → **118/118 PASS**；`node --check` ui.js / menu.js / arena.js / game.js / tilemap.js 全通過；`tools/playthrough.py --level w1 --godmode` → `cleared=True deaths=0 frames=4443`；`tools/build.py` → `dist/卡比之星.html 763 KB`。未 commit。
 - [Round 3] 未完成 / 已知問題：標題選單 7 項時行高只有 15px（14px 中文行間僅 1px，略擠）——若之後再加選單項目需改成分頁；競技場結算第 1 行順序字串寬約 230px，已接近 240px 上限，若魔王中文名再加長需降到每行 2 個名字。
+
+## balance-enemies
+> 檔案：`src/enemies.js`、`src/bosses.js`、`src/entity.js`、`tools/boss_test.py`、`tools/enemy_test.py`（其他檔案一律沒動）
+
+- [Round 3] 完成：**世界強度分級基礎設施**（`src/entity.js` 的 `KB.Enemy`）。新增 `get tier()` / `get tough()` / `get alertK()`：
+  `tier` 取 `KB.game.level.id` 裡的數字（`w1`~`w5` → 1~5），**關卡定義的 `spawnDef.a` 是 1~5 的數字時覆寫**
+  （例如 `{ t:'sirkibble', x:75, y:9, a:4 }` 可在 w1 放一隻「w4 強度」的 Sir Kibble；Gordo 的 `a` 是 `'v'/'h'` 字串所以不受影響），
+  認不出世界的關卡（競技場 / `boss_test` 注入的測試房）取 **3 ＝ 完整行為**。`tough = tier >= 3`。
+  敵人一律讀 `this.tier` / `this.tough`，不各自去讀 `KB.game.level`。
+  驗證：`tools/enemy_test.py --only world` 的前 4 項（w1→1、w5→5、`a=4` 覆寫、未知 id→3）。
+
+- [Round 3] 完成：**敵人行為分世界（前後數值）**（`src/enemies.js`）
+  | 敵人 | 項目 | 之前 | 之後 |
+  |---|---|---|---|
+  | Sir Kibble | 接回迴旋刃（接刃）| 全世界都會，接到後冷卻縮到 24 幀 | **w1~w2 不接刃**（刀刃直接消失）；w3 起才接刃 |
+  | Sir Kibble | 丟刀冷卻 `throwCD` | 90（接刃後 24）| **w1~w2 = 90**、**w3~w5 = 60**（接刃後仍 24）|
+  | Poppy Bros | 投擲前預警 | 無（跳起來第 6 幀就丟）| **站定 18 幀舉手預警**（`poppybros_hop` 幀 0 停格 + 頭上舉著 `proj_bomb`、最後 6 幀閃白 + 黃色火花）|
+  | Poppy Bros | 最小投擲距離 | 無 | **< 48px 不丟，改往反方向跳開**（`hopAway()`）|
+  | Poppy Bros | 投擲間隔 `throwCD` | 80 | **w1~w2 = 120（×1.5）**、w3~w5 = 80 |
+  | Shotzo | 射程 | 170px | **120px** |
+  | Shotzo | 開火間隔 `fireCD` | 100 | **w1~w2 = 160（×1.6）**、**w3~w5 = 130（×1.3）**；砲彈速度維持 2.5px/f |
+  | Waddle Doo | 扇形掃射道數 | 6 道（-95°→+25°）| **w1~w2 = 3 道**、w3 起 = 6 道（角度公式不變，端點一樣）|
+  | Hot Head | 噴火持續 | 30 幀（收招 44 幀）| **w1 = 21 幀（-30%，收招 35 幀）**、w2 以後維持 30 |
+  | 全體 | 察覺（notice）後的加速倍率 | 各自寫死 1.4~1.8（WaddleDee 1.8 / WaddleDoo 1.4 / HotHead 1.7 / Rocky 1.8 / Chilly 1.6 / BladeKnight 1.5 / Bonkers 1.4 / MrFrosty 1.4 / Snowly 1.5）| 統一成 `alertK`：**w1~w2 = 1.1、w3 起 = 1.25** |
+  驗證：`tools/enemy_test.py --only world` 全 PASS（25 項）；截圖 `shots/agent_be/sirkibble_w1r0.png`、`shots/agent_be/poppy_windup.png`（w2 的 Poppy Bros 高舉炸彈的 18 幀預警，實測 `tier=2, throwCD=120`）。
+
+- [Round 3] 完成：**Extra 難度的寫死衝刺速度補乘 `KB.exK('spd')`**（enemies-bosses2 留下的未完成項）。
+  改成 `× this.exK`（`this.exK` 就是 `KB.exK('spd')`，由 `Baddie.applyExtra()` 於第一次 update 設定）：
+  Blade Knight 突刺 2.4、Mr. Frosty 衝撞 2.0、Spike Roller 衝撞 2.3、Bonkers 大跳撲擊（clamp 後）、Rocky 撲擊（clamp 後）、
+  Poppy Bros 跳躍前進 1.0 與跳開 1.3。（鐵甲滾球的滾動本來就有乘。）
+  驗證：`tools/enemy_test.py --only extra` 9/9 PASS，全檔 393/393 PASS。
+
+- [Round 3] 完成：**魔王曲線調整（前後數值）**（`src/bosses.js`）
+  | 魔王 | 項目 | 之前 | 之後 |
+  |---|---|---|---|
+  | 威斯比 | 接觸傷害框 | 整個 40×96 本體 | **只算樹幹：寬 24px、離地 0~48px**（`get trunk`）|
+  | 威斯比 | 接觸傷害冷卻 | 只有玩家自己的 invuln | **再加 boss 自己的 `contactCD = 45` 幀** |
+  | 威斯比 | 吹風（blow）期間 | 照樣有接觸傷害 | **不扣血，改用 `blowPush()` 把玩家以 1px/f 推離樹幹**（走路 1.3px/f，想靠近還是靠得過去）|
+  | 魅塔騎士 | `recover` 硬直 | 40 幀 | **16 幀** |
+  | 魅塔騎士 | `vanishCD` | 180 幀 | **120 幀** |
+  | 魅塔騎士 | `evadeLock` | 30 幀 | **20 幀** |
+  | 克拉寇 | 俯衝後 | 直接升回巡航高度 | **新增 `sub===2` 低空停留 24 幀**（不上升、**沒有接觸傷害** ＝ 可被攻擊的窗口）|
+  | 克拉寇 | 二階段 storm 的雨與閃電 | 兩道雷在 stateT 32 / 70，收招 96 | **雷往後挪 20 幀 → 52 / 90，收招 116** |
+  | 克拉寇 | 灑雨（rain）之後 | 直接接下一招 | **`restT = 20`：多喘 20 幀才出下一招** |
+  | 克拉寇 | 一階段閃電 | 1 道（未明確保證）| **加 `bolted` 旗標明確鎖定只有 1 道**（兩道雷只在二階段的 storm）|
+  | 迪迪迪 | 跳躍 / 超級跳 / 三連跳落地 | 直接回 idle | **新增 `land` 狀態：20 幀硬直**（`DEDEDE_LAND_STUN`，不動、無接觸傷害）|
+  | 迪迪迪 | 吸入預警 | 16 幀（收招 64）| **28 幀（+12，收招 76）**（`DEDEDE_INHALE_WARN`；`rampage` 同步 16→28、收招 40→52）|
+  | 迪迪迪 | 二階段震波三連間隔 | 24 幀 | **32 幀（+8）**（`DEDEDE_TRIPLE_GAP`）|
+  | 迪迪迪 | 出招選擇 | 可以連續張嘴吸 | **`lastAction` 判斷：`inhale` / `rampage` 不可連續出**（沒有武器的玩家會被「吸→碰觸傷害→再吸」鎖死，`boss_test` 的無劍樣本因此卡到時間用完）|
+  | 洛洛洛 | 推箱速度 / 箱子傷害 | `speed 0.9`、箱子 `dmg 1` | **維持不變**（已符合需求，只確認未被其他改動波及）|
+
+- [Round 3] 完成：**魔王難度曲線量測工具**（`tools/boss_test.py`）。
+  驅動端新增 `bossMaxHp` / `bossMinHp` / `gameOver` 統計與 `stopOnGameOver`（3 條命用完切到 `GameOverScene` 就停）；
+  新增 `--curve`（只跑曲線量測，預設 `--real` 真實魔王房、sword、**不加無敵**、3 條命）、`--curve-runs` / `--curve-frames` / `--curve-fake` /
+  **`--curve-mid`**（改用 `[mid]` 的「中距離玩家」模型：刀刃 + 保持距離 + 前後游走）/ `--curve-ability`。
+  指令：`.venv/bin/python tools/boss_test.py --curve --curve-runs 3` 與 `... --curve --curve-mid --curve-runs 3`。
+
+- [Round 3] 魔王曲線量測結果（每個魔王 3 個樣本取平均；數字 ＝ 魔王被打掉的血量 %）：
+  | 世界 | 魔王 | 目標 | QA R2-2 基準（playthrough）| **改前** sword | **改後** sword | **改前** mid | **改後** mid |
+  |---|---|---|---|---|---|---|---|
+  | w1 | 大樹威斯比 | ≥ 80% | 27% | 89%（100/68/100）| **100%**（100/100/100）| 87%（100/100/60）| **100%**（100/100/100）|
+  | w2 | 洛洛洛 & 拉拉拉 | ≥ 70% | 63% | 100%（100/100/100）| **100%**（100/100/100）| 67%（100/47/53）| **82%**（100/47/100）|
+  | w3 | 克拉寇 | ≥ 60% | 2% | 79%（58/80/100）| **93%**（80/100/100）| 56%（72/65/30）| **72%**（100/80/35）|
+  | w4 | 魅塔騎士 | ≥ 50% | 100%（零傷）| 100%（100/100/100）| **100%**（100/100/100）| 100%（100/100/100）| **100%**（100/100/100）|
+  | w5 | 迪迪迪大王 | ≥ 40% | 3% | 100%（100/100/100）| **86%**（65/100/93）| 68%（40/65/100）| **70%**（10/100/100）|
+  **10 個數字全部達標**（sword 與 mid 兩種玩家模型都是）。
+  補充：魅塔騎士雖然兩種模型都還是 100%，但已經**不是 QA R2-2 說的「零傷通關」** —— 現在每場都會打中玩家
+  （sword 模型 `playerHurt = 4 / 4 / 2`、`playerMinHp = 4 / 2 / 5`；mid 模型 `3 / 2 / 5`），`recover` 從 40 縮到 16 幀之後他會確實反擊。
+  原始輸出：`shots/agent_be/curve_sword.txt` / `shots/agent_be/curve_mid.txt`，每個樣本都有 `frames / died / gameOver / hits / playerHurt / playerMinHp`。
+
+- [Round 3] 完成：**暗房敵人可見度**（`src/entity.js`）。`KB.Enemy` 新增 `drawGlow(g)`，在 `Enemy.draw` / `Baddie.draw` / `SpikeRoller.draw` 開頭呼叫：
+  `KB.game.room.dark` 時設 **`this.glow = 10`**（給 `game.js drawDark` 讀的挖洞半徑），並先畫一圈半徑 10px 的暗黃色徑向光暈（`globalAlpha 0.25`）＋ 眼睛兩顆 1px 白色亮點；離開暗房時 `glow = 0`。
+  **實測結論：光暈畫在遮罩之前，確實幾乎全被蓋掉** —— A/B 對照（`shots/agent_be/dark_glow_w5r1.png` vs `dark_noglow.png`）逐像素相減，
+  最大通道差只有 **13/255**（黑幕 `rgba(4,4,14,0.94)` 只透出約 6%），所以**必須由 `game.js drawDark` 對有 `glow` 的實體也挖洞**（見下方跨檔需求）。
+  示意圖 `shots/agent_be/dark_glow_mock.png`（runtime 包一層 `drawDark` 模擬挖洞後的樣子：兩隻敵人在黑暗中明顯可見），對照 `dark_glow_w5r1.png`。
+
+- [Round 3] 完成：**測試**。
+  - `tools/enemy_test.py` **368/368 → 393/393 PASS**（新增 `world` 群組 25 項，可用 `--only world` 單跑）：
+    新增 `etw1`~`etw5` 五個測試關卡（id 帶數字 → `tier` 1~5）、`Harness.goto(level=...)`、`__t.ent()` 多回傳 `tier/tough/alertK/canCatch/throwCD/fireCD/range/windT/cool`。
+    另修掉一個因為 w3 冷卻縮短而變得不穩的舊斷言（`sirkibble: boomerang flies out then returns and vanishes` 改成只看第一把刀的軌跡）。
+  - `tools/boss_test.py --runs 3` **ALL PASS**（含 idle / intro / fight / inhale / phase2 / mid）。
+    注意：**`kracko fight` 與 `dedede fight` 在 Round 2 收工時是 FAIL**（enemies-bosses2 記錄的 items.js 能力星問題），這一輪兩個都回到 3/3。
+    `dedede fight` 我有做 A/B 確認：把我改的三個常數還原（`LAND_STUN 0 / INHALE_WARN 16 / TRIPLE_GAP 24`）也一樣是 2/3（只是換一個樣本掛掉），
+    ⇒ 原因確實是「掉了劍撿不回來」的既有問題，最後是靠「張嘴吸不可以連續出」修好的。
+  - `tools/engine_test.py` **118/118 PASS**（維持）。
+  - `tools/playthrough.py --level w1..w5 --ability sword --godmode` → **5 個世界全部 `cleared=True`、`deaths=0`、`missing sprites: []`**
+    （w1 4658 / w2 13493 / w3 6027 / **w4 7393** / w5 15109 幀 —— w4 魅塔騎士改強之後仍可通關）。
+  - `node --check src/{enemies,bosses,entity}.js` 全通過。
+
+### 跨檔需求（balance-enemies → 其他 agent）
+- **polish-ui（`src/game.js` 的 `drawDark`）— 暗房敵人挖洞**：敵人在暗房時已經會設 `ent.glow = 10`（`src/entity.js` `Enemy.drawGlow`）。
+  請在 `drawDark()` 既有的火把迴圈旁邊再加一段（`hole()` 就是現成的 destination-out 挖洞函式）：
+  ```js
+  // 暗房裡的敵人自帶微光（ent.glow = 半徑 px，由 entity.js 設定）
+  for (const e of this.entities) {
+    if (e.dead || !e.glow) continue;
+    hole(Math.round(e.cx - cam.x), Math.round(e.cy - cam.y), e.glow * 1.8, 0.45);
+  }
+  ```
+  （`e.glow * 1.8` ≈ 18px 的洞，`core 0.45` 讓中心夠亮、邊緣柔和。）
+  **理由**：我在實體層畫的光暈會被 `rgba(4,4,14,0.94)` 的黑幕蓋掉，逐像素量測最大只差 13/255（≈6%），玩家實際上看不見。
+  預期效果見 `shots/agent_be/dark_glow_mock.png`（我用 runtime 包一層 `drawDark` 模擬的示意圖；請用 `hole()` 挖洞而不是加色疊上去，
+  這樣露出來的是敵人本體而不是一團黃光）。對照組：`dark_glow_w5r1.png`（目前）、`dark_noglow.png`（完全沒光暈）。
+- **balance-levels（`src/levels.js`）— 可用 `spawnDef.a` 微調單隻敵人的強度**：`{ t:'sirkibble', x:75, y:9, a:4 }` 代表「w4 強度」，
+  `a:1` 則是「最弱版」。想在後段世界放一隻溫和的敵人（或在前段放一隻硬的）不必動 `enemies.js`，直接給 `a` 就好（1~5）。
+  注意 `a` 已經被 `gordo`（`'v'/'h'`）與 `bigstar`（0/1/2 編號）用掉了 —— `bigstar` 是 item 不吃 tier，`gordo` 的是字串不會被誤判，但這兩種請不要拿 `a` 當強度用。
+- **mechanics / balance-levels（`src/items.js`）— 能力星仍是 `boss_test` 的不穩定來源**：enemies-bosses2 bisect 出來的問題還在
+  （機器人掉了劍之後撿不回能力星 → 陷入無武器死亡迴圈）。我這一輪是靠削弱迪迪迪繞過去的，根因沒解。
+  建議照 enemies-bosses2 的建議把 `abilitystar` 的落地彈跳改回 6 次（或調回第 2 次彈跳的水平摩擦），再跑 `tools/boss_test.py --runs 3` 確認。
+
+### 已知問題 / 未完成（balance-enemies）
+- **魅塔騎士兩種玩家模型都還是 100%**：目標 ≥50% 有達標，但他仍是「機器人一定打得死」的魔王。
+  `recover 40→16` 之後他反擊變多（玩家每場會掉 2~5 格血，不再是 QA 說的零傷沙包），但 `vanishCD 180→120` 讓他更常消失／再出現在玩家旁邊，
+  反而讓貼身揮劍的機器人更快接觸到他（sword 樣本從改前 1331/1151/2791 幀降到 784/834/746 幀）。
+  若 QA 要求「w4 必須比 w1~w3 難」，下一步建議是**提高他的傷害或血量**（例如 `slash` 二階段 dmg 2、或 maxHp 45→55），而不是再加硬直。
+- `boss_test --curve` 的樣本變異很大（同一個魔王 3 個樣本可能是 10% / 100% / 100%），因為一次死亡就會把魔王血量重置回滿。
+  想要穩定的數字建議跑 `--curve-runs 5` 以上；本節表格照任務要求用 3 次平均。
+- 威斯比的 `contactDamage` 是**有副作用的 getter**（回傳 true 的同時把 `contactCD` 設成 45）。
+  只有 `game.js` 的碰觸傷害判定會讀它（而且是在「玩家確實重疊、且非無敵」時才讀），但若之後有 debug 工具去讀 `boss.contactDamage`，會白白吃掉一次冷卻。
+- Poppy Bros 的舉手預警是用 `proj_bomb` 畫在頭頂（`src/art/enemies.js` 不屬於我，沒有專屬的 `poppybros_attack` 精靈）。
+  若 abilities-enemies 之後補了舉手幀，把 `PoppyBros.draw` 的那行換掉即可。

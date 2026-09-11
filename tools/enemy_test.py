@@ -46,10 +46,15 @@ for _sx, _sy in ((64, 7), (65, 8), (66, 9)):
     grid[_sy][_sx] = '\\'
     fill(_sx, _sy + 1, _sx, 11, '#')
 MAP = [''.join(r) for r in grid]
-TEST_LEVEL = "KB.LEVELS.push(" + json.dumps({
-    'id': 'etest', 'name': 'ENEMY TEST', 'theme': 'green', 'music': None, 'boss': None,
-    'rooms': [{'map': MAP, 'spawn': [3, 9], 'entities': [], 'noBoss': True}],
-}, ensure_ascii=False) + ");"
+def _test_level(lid):
+    return "KB.LEVELS.push(" + json.dumps({
+        'id': lid, 'name': 'ENEMY TEST ' + lid, 'theme': 'green', 'music': None, 'boss': None,
+        'rooms': [{'map': MAP, 'spawn': [3, 9], 'entities': [], 'noBoss': True}],
+    }, ensure_ascii=False) + ");"
+
+
+# 'etest' 的 id 沒有數字 → tier 取預設值 3（完整行為）；'etw1'~'etw5' 用來測「敵人行為分世界」。
+TEST_LEVEL = ''.join([_test_level('etest')] + [_test_level('etw%d' % i) for i in range(1, 6)])
 
 GROUND_TOP = 160          # row 10 上緣
 PLAYER_H = 15
@@ -82,7 +87,11 @@ HOOK_JS = r"""() => {
       return { x: +e.x.toFixed(1), y: +e.y.toFixed(1), cx: +e.cx.toFixed(1), cy: +e.cy.toFixed(1), w: e.w, h: e.h, vx: +e.vx.toFixed(2), vy: +e.vy.toFixed(2), dir: e.dir,
         state: e.state, spr: e.spr, hp: e.hp, dead: e.dead, onGround: e.onGround, active: e.active, hidden: !!e.hidden, angry: !!e.angry, stunned: !!e.stunned,
         inhalable: e.inhalable, hurtsPlayer: e.hurtsPlayer, contactDamage: e.contactDamage !== false, beingInhaled: !!e.beingInhaled, freezeT: e.freezeT | 0, solid: e.solid,
-        inSolid: KB.game.map.isSolidPx(e.cx, e.cy), inWater: KB.game.map.inWater(e.cx, e.cy), fellOut: !!e.fellOut, score: e.score };
+        inSolid: KB.game.map.isSolidPx(e.cx, e.cy), inWater: KB.game.map.inWater(e.cx, e.cy), fellOut: !!e.fellOut, score: e.score,
+        // Round 3 分世界強度（entity.js 的 KB.Enemy）
+        tier: e.tier, tough: !!e.tough, alertK: e.alertK, canCatch: !!e.canCatch,
+        throwCD: e.throwCD === undefined ? null : e.throwCD, fireCD: e.fireCD === undefined ? null : e.fireCD,
+        range: e.range === undefined ? null : e.range, windT: e.windT | 0, cool: e.cool | 0 };
     },
     others() {
       return KB.game.entities.filter(e => !e.dead && (e.type === 'proj' || e.type === 'hitbox' || (e.type === 'enemy' && e !== __te)))
@@ -164,8 +173,9 @@ class Harness:
         self.pg = pg; self.shots = shots; self.hitbox = hitbox
     def ev(self, js, arg=None):
         return self.pg.evaluate(js, arg) if arg is not None else self.pg.evaluate(js)
-    def goto(self, x=3, y=9, ability=None, immune=False):
+    def goto(self, x=3, y=9, ability=None, immune=False, level=None):
         o = {'x': x, 'y': y}
+        if level: o['level'] = level          # 'etw1'~'etw5'：切換世界強度（KB.Enemy.tier）
         if ability: o['ability'] = ability
         self.ev("(o)=>__t.goto(o)", o)
         if self.hitbox: self.ev("()=>__kb.hitbox(true)")
@@ -312,10 +322,12 @@ def phase_feature(h, key):
         h.goto(3); h.spawn(key, 7, 9, d=-1)
         S = h.run(240, 3, shot_when='proj'); sp = h.spawned()
         cut = spawned_of(sp, cls='Boomerang')
-        xs = [o['x'] for s in S for o in s['o'] if o['cls'] == 'Boomerang']
+        # 只看「第一把」刀刃的軌跡：w3 起冷卻只有 60 幀，取樣尾端常常是第二把剛飛出去的位置
+        f_end = cut[1]['f'] if len(cut) > 1 else 9e9
+        xs = [o['x'] for s in S for o in s['o'] if o['cls'] == 'Boomerang' and s['f'] <= f_end]
         gone = any(not any(o['cls'] == 'Boomerang' for o in s['o']) for s in S if s['f'] > (cut[0]['f'] + 30 if cut else 9e9))
         check(n + 'throws cutter boomerang', len(cut) >= 1 and any(s['e']['spr'] == 'sirkibble_throw' for s in S), dict(thrown=len(cut)))
-        check(n + 'boomerang flies out then returns and vanishes', cut and min(xs) < cut[0]['x'] - 25 and xs[-1] > min(xs) + 10 and gone, dict(minX=min(xs) if xs else None, start=cut[0]['x'] if cut else None))
+        check(n + 'boomerang flies out then returns and vanishes', cut and min(xs) < cut[0]['x'] - 25 and xs[-1] > min(xs) + 10 and gone, dict(minX=min(xs) if xs else None, start=cut[0]['x'] if cut else None, n=len(cut)))
         check(n + 'only one cutter out at a time', all(sum(1 for o in s['o'] if o['cls'] == 'Boomerang') <= 1 for s in S), '')
         h.save_shot1(key)
     elif key == 'sparky':
@@ -928,6 +940,113 @@ def phase_extra(h):
     h.extra(False)
 
 
+# ---------------------------------------------------------------------------
+# 階段 6（Round 3 balance-enemies）：敵人行為分世界
+#   強度來源 = KB.game.level.id 裡的數字（測試關卡 'etw1'~'etw5'），spawnDef.a 為 1~5 的數字時覆寫。
+#   w1~w2 = 基礎行為，w3 起 = 強化行為（接刃 / 6 道掃射 / 短冷卻）。
+# ---------------------------------------------------------------------------
+def _bomb_frames(sp):
+    return [b['f'] for b in spawned_of(sp, cls='Bomb')]
+
+
+def phase_world(h):
+    n = 'world: '
+    # ---- tier 的來源與覆寫 ----
+    h.goto(3, 9, level='etw1', immune=True); e = h.spawn('waddledee', 8, 9, d=-1)
+    check(n + 'level id w1 -> tier 1 (basic behaviour)', e['tier'] == 1 and not e['tough'] and abs(e['alertK'] - 1.1) < 1e-6, dict(tier=e['tier'], tough=e['tough'], alertK=e['alertK']))
+    h.goto(3, 9, level='etw5', immune=True); e = h.spawn('waddledee', 8, 9, d=-1)
+    check(n + 'level id w5 -> tier 5 (tough behaviour)', e['tier'] == 5 and e['tough'] and abs(e['alertK'] - 1.25) < 1e-6, dict(tier=e['tier'], alertK=e['alertK']))
+    h.goto(3, 9, level='etw1', immune=True); e = h.spawn('waddledee', 8, 9, d=-1, a=4)
+    check(n + 'spawnDef.a overrides tier (a=4 inside w1)', e['tier'] == 4 and e['tough'], dict(tier=e['tier']))
+    h.goto(3, 9, immune=True); e = h.spawn('waddledee', 8, 9, d=-1)
+    check(n + "unknown level id -> tier 3 (full behaviour)", e['tier'] == 3 and e['tough'], dict(tier=e['tier']))
+
+    # ---- Sir Kibble：w1~w2 不接刃、間隔 >= 90；w3 起接刃、間隔 60 ----
+    gaps = {}
+    for lid, tier in (('etw1', 1), ('etw3', 3)):
+        h.goto(3, 9, level=lid, immune=True)
+        e = h.spawn('sirkibble', 7, 9, d=-1)
+        h.run(420, 6)
+        fs = [b['f'] for b in spawned_of(h.spawned(), cls='Boomerang')]
+        gaps[lid] = min((fs[i + 1] - fs[i] for i in range(len(fs) - 1)), default=None)
+        check(n + f'sirkibble {lid}: canCatch={tier >= 3}', e['canCatch'] == (tier >= 3), dict(tier=e['tier'], canCatch=e['canCatch'], throwCD=e['throwCD']))
+        check(n + f'sirkibble {lid}: throwCD {"60" if tier >= 3 else ">=90"}', e['throwCD'] == (60 if tier >= 3 else 90), dict(throwCD=e['throwCD']))
+    check(n + 'sirkibble: w1 throws less often than w3', gaps['etw1'] is not None and gaps['etw3'] is not None and gaps['etw1'] >= 90 and gaps['etw1'] > gaps['etw3'], gaps)
+
+    # ---- Waddle Doo：w1~w2 只掃 3 道，w3 起 6 道 ----
+    for lid, want in (('etw1', 3), ('etw4', 6)):
+        h.goto(3, 9, level=lid, immune=True)
+        h.spawn('waddledoo', 6, 9, d=-1)
+        h.run(200, 5)
+        beams = spawned_of(h.spawned(), type='proj', kind='beam')
+        burst = [b for b in beams if beams and b['f'] <= beams[0]['f'] + 24]
+        check(n + f'waddledoo {lid}: fan = {want} beams', len(burst) == want, dict(burst=len(burst), total=len(beams)))
+
+    # ---- Hot Head：w1 噴火持續縮短 30%（30 → 21 幀）----
+    flame = {}
+    for lid in ('etw1', 'etw3'):
+        h.goto(3, 9, level=lid, immune=True)
+        h.spawn('hothead', 5, 9, d=-1)
+        S = h.run(240, 1)
+        runs, cur = [], 0
+        for s in S:
+            if any(o['type'] == 'hitbox' and o['kind'] == 'fire' for o in s['o']): cur += 1
+            elif cur: runs.append(cur); cur = 0
+        if cur: runs.append(cur)
+        flame[lid] = max(runs) if runs else 0
+        flame[lid + '_runs'] = runs
+    check(n + 'hothead: w1 flame ~30% shorter than w3 (30 -> 21 frames)',
+          flame['etw1'] and flame['etw3'] and flame['etw1'] <= flame['etw3'] * 0.78, flame)
+
+    # ---- Shotzo：射程 120、開火間隔 w1~w2 ×1.6 / w3~w5 ×1.3 ----
+    h.goto(3, 9, level='etw1', immune=True); e = h.spawn('shotzo', 10, 8)
+    check(n + 'shotzo: range 170 -> 120', e['range'] == 120, dict(range=e['range']))
+    check(n + 'shotzo: w1 fire interval 100 x1.6 = 160', e['fireCD'] == 160, dict(fireCD=e['fireCD']))
+    h.goto(3, 9, level='etw4', immune=True); e = h.spawn('shotzo', 10, 8)
+    check(n + 'shotzo: w4 fire interval 100 x1.3 = 130', e['fireCD'] == 130, dict(fireCD=e['fireCD']))
+    # 射程外（玩家 x=3 → cx=10；砲台放在 x=12 格 → cx=200，相距 190 > 120）不開火
+    h.goto(3, 9, level='etw3', immune=True); h.spawn('shotzo', 12, 8)
+    h.run(240, 8)
+    far = spawned_of(h.spawned(), type='proj', kind='cannon')
+    h.goto(3, 9, level='etw3', immune=True); h.spawn('shotzo', 8, 8)
+    S = h.run(240, 4)
+    near = spawned_of(h.spawned(), type='proj', kind='cannon')
+    check(n + 'shotzo: no fire beyond 120px, fires inside it', len(far) == 0 and len(near) >= 1, dict(far=len(far), near=len(near)))
+    # 砲彈速度不變（2.5 px/f，Extra 關閉時）
+    spd = [round((o['vx'] ** 2 + o['vy'] ** 2) ** 0.5, 2) for s2 in S for o in s2['o'] if o['kind'] == 'cannon']
+    check(n + 'shotzo: cannonball speed unchanged (2.5 px/f)', bool(spd) and all(abs(v - 2.5) < 0.06 for v in spd), dict(speeds=spd[:4]))
+
+    # ---- Poppy Bros：18 幀舉手預警、距離 < 48px 不丟改跳開、w1~w2 間隔 ×1.5 ----
+    h.goto(3, 9, level='etw1', immune=True); e = h.spawn('poppybros', 9, 9, d=-1)
+    check(n + 'poppybros: w1 throw interval 80 x1.5 = 120', e['throwCD'] == 120, dict(throwCD=e['throwCD']))
+    S = h.run(300, 1); sp = h.spawned()
+    wind = [s['f'] for s in S if s['e']['windT'] > 0]
+    bombs = _bomb_frames(sp)
+    # 舉手預警：第一顆炸彈之前必須有連續 18 幀的 windT
+    lead = len([f for f in wind if bombs and f < bombs[0]])
+    check(n + 'poppybros: 18-frame wind-up before the first bomb', len(bombs) >= 1 and lead >= 16, dict(bombs=len(bombs), windFrames=lead))
+    check(n + 'poppybros: frozen (hop frame 0) while winding up', all(abs(s['e']['vx']) < 0.01 for s in S if s['e']['windT'] > 0), '')
+    h.goto(3, 9, level='etw4', immune=True); e = h.spawn('poppybros', 9, 9, d=-1)
+    check(n + 'poppybros: w4 throw interval stays 80', e['throwCD'] == 80, dict(throwCD=e['throwCD']))
+    # 貼臉（< 48px）：不丟炸彈，改跳開
+    h.goto(3, 9, level='etw3', immune=True)
+    h.spawn('poppybros', 5, 9, d=-1)
+    h.teleport(64, 144)                      # 卡比 cx≈71、poppy cx≈87 → 相距約 16px
+    S = h.run(150, 1); sp = h.spawned()
+    bombs_close = spawned_of(sp, cls='Bomb')
+    # 只看「一直維持貼臉」的那段：距離從頭到尾都 < 48px 就不該有炸彈
+    stayed_close = all(abs(s['e']['cx'] - s['p']['cx']) < 60 for s in S[:60])
+    hopped = any(abs(s['e']['vx']) > 0.5 and not s['e']['onGround'] for s in S[:90])
+    check(n + 'poppybros: point-blank (< 48px) -> hops away instead of bombing',
+          stayed_close and hopped and len(bombs_close) == 0,
+          dict(bombs=len(bombs_close), hopped=hopped, stayedClose=stayed_close))
+
+    # ---- 察覺加速倍率 ----
+    for lid, k in (('etw2', 1.1), ('etw3', 1.25)):
+        h.goto(3, 9, level=lid, immune=True); e = h.spawn('waddledee', 8, 9, d=-1)
+        check(n + f'notice speed multiplier {lid} = {k}', abs(e['alertK'] - k) < 1e-6, dict(alertK=e['alertK']))
+
+
 def main():
     global VERBOSE
     ap = argparse.ArgumentParser()
@@ -936,10 +1055,11 @@ def main():
     a = ap.parse_args(); VERBOSE = a.v
     keys = [k for k in a.only.split(',') if k] or ORDER
     run_abilities = (not a.only) or ('abilities' in keys)
-    run_extras = (not a.only) or ('drops' in keys) or ('extra' in keys)
+    run_extras = (not a.only) or ('drops' in keys) or ('extra' in keys) or ('world' in keys)
     only_drops = 'drops' in keys
     only_extra = 'extra' in keys
-    keys = [k for k in keys if k not in ('abilities', 'drops', 'extra')]
+    only_world = 'world' in keys
+    keys = [k for k in keys if k not in ('abilities', 'drops', 'extra', 'world')]
     logs = []
     with sync_playwright() as p:
         b = p.chromium.launch()
@@ -968,7 +1088,7 @@ def main():
             errs = [l for l in logs[n0:] if 'pageerror' in l or 'console.error' in l]
             check('abilities: no page errors', not errs, errs[:3])
         if run_extras:
-            for label, fn, want in (('drops', phase_drops, only_drops), ('extra', phase_extra, only_extra)):
+            for label, fn, want in (('drops', phase_drops, only_drops), ('extra', phase_extra, only_extra), ('world', phase_world, only_world)):
                 if a.only and not want: continue
                 print('-' * 8, label)
                 n0 = len(logs)

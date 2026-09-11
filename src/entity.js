@@ -88,6 +88,29 @@
       this.active = false;   // 進入畫面後才啟動
     }
     get player() { return KB.player; }
+    // ---- 世界強度分級（Round 3 balance-enemies）----------------------------
+    // tier 1~5 對應 w1~w5（取 KB.game.level.id 裡的數字）；關卡定義的 spawnDef.a 若是 1~5 的數字就覆寫，
+    // 例如 `{ t:'sirkibble', x:75, y:9, a:4 }` 可以在 w1 就放一隻「w4 強度」的 Sir Kibble。
+    // 認不出世界的關卡（競技場 / boss_test 注入的測試房）用 3＝完整行為，避免測試被削弱。
+    // 敵人一律讀 this.tier / this.tough，不要各自去讀 KB.game.level。
+    get tier() {
+      if (this._tier === undefined) {
+        let t = 0;
+        const a = this.spawnDef ? this.spawnDef.a : undefined;
+        if (typeof a === 'number' && a >= 1 && a <= 5) t = Math.round(a);
+        else {
+          const id = KB.game && KB.game.level ? String(KB.game.level.id || '') : '';
+          const m = /(\d+)/.exec(id);
+          if (m) t = Math.max(1, Math.min(5, parseInt(m[1], 10)));
+        }
+        this._tier = t || 3;
+      }
+      return this._tier;
+    }
+    get tough() { return this.tier >= 3; }          // w3 起才開啟強化行為（接刃 / 6 道掃射 / 短冷卻）
+    // 察覺玩家（notice）後的移動加速倍率。Round 1 各敵人各自寫死 1.4~1.8，w1 第一房就被追著跑（QA R2-1）；
+    // Round 3 統一成 w1~w2 ×1.1、w3 起 ×1.25。
+    get alertK() { return this.tough ? 1.25 : 1.1; }
     facePlayer() { if (KB.player) this.dir = KB.player.cx < this.cx ? -1 : 1; }
     playerDist() { return KB.player ? Math.abs(KB.player.cx - this.cx) : 9999; }
     playerDx() { return KB.player ? KB.player.cx - this.cx : 0; }
@@ -115,9 +138,31 @@
       if (this.fellOut) this.dead = true;
     }
     ai(dt) { this.walk(); }
+    // 暗房（room.dark）裡的敵人可見度（Round 3 balance-enemies）：
+    //   ① this.glow = 10 —— 給 game.js 的 drawDark 讀的「要挖洞的半徑」（見 PROGRESS 跨檔需求，polish-ui 負責）；
+    //   ② 先畫一圈半徑 10px 的暗黃色徑向光暈（alpha 0.25）＋ 眼睛兩顆 1px 亮點。
+    // 注意：drawDark 的黑幕是畫在所有實體之後（destination-out 只挖玩家 / 火把），
+    //       所以在 drawDark 補上 glow 挖洞之前，這裡畫的東西在黑幕最暗處只會透出約 6%。
+    //       眼睛亮點用純白、畫在光暈上面，是在「玩家光圈邊緣」最先看得見的部分。
+    drawGlow(g) {
+      const room = KB.game && KB.game.room;
+      if (!room || !room.dark) { if (this.glow) this.glow = 0; return; }
+      this.glow = 10;
+      const c = g.ctx, x = Math.round(this.cx - g.cam.x), y = Math.round(this.cy - g.cam.y);
+      c.save();
+      c.globalAlpha = 0.25;
+      const gr = c.createRadialGradient(x, y, 0, x, y, 10);
+      gr.addColorStop(0, '#ffe080'); gr.addColorStop(0.5, 'rgba(200,160,48,0.55)'); gr.addColorStop(1, 'rgba(120,96,16,0)');
+      c.fillStyle = gr; c.beginPath(); c.arc(x, y, 10, 0, Math.PI * 2); c.fill();
+      c.restore();
+      // 眼睛：兩顆 1px 亮點（朝著面向的方向偏 1px）
+      const ex = x + (this.dir < 0 ? -1 : 1), ey = Math.round(this.y - g.cam.y + this.h * 0.35);
+      c.save(); c.fillStyle = '#fffff0'; c.fillRect(ex - 2, ey, 1, 1); c.fillRect(ex + 2, ey, 1, 1); c.restore();
+    }
     draw(g) {
       if (this.freezeT > 0) { this.drawFrozen(g); return; }
       const wx = KB.inhaleWobble(this);
+      this.drawGlow(g);
       g.spr(this.spr, this.cx + wx, this.bottom + (this.wobY || 0), this.sprOpts({ t: this.beingInhaled ? 0 : this.t }));
     }
     drawFrozen(g) {

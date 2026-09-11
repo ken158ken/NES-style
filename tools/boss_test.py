@@ -112,7 +112,9 @@ window.__bt = (function () {
     run(n, mode, o) {
       o = o || {}; const scale = o.scale || 3;
       const log = { frames: 0, attacksSpawned: 0, maxAttacks: 0, attackKinds: {}, bossStates: {}, bossMoved: 0, minHp: 99, hurtCount: 0,
-        bossHp: [], bossHits: 0, deadAt: -1, doorAt: -1, clearAt: -1, mouthAt: -1, spitAt: -1, spitHitAt: -1, playerDied: 0, shots: {}, pos: [], events: [] };
+        bossHp: [], bossHits: 0, deadAt: -1, doorAt: -1, clearAt: -1, mouthAt: -1, spitAt: -1, spitHitAt: -1, playerDied: 0, shots: {}, pos: [], events: [],
+        // 難度曲線量測：整場（含死亡重來）魔王掉到最低的血量 / 最大血量 / 有沒有被三振出局
+        bossMaxHp: KB.game.boss ? KB.game.boss.maxHp : 0, bossMinHp: KB.game.boss ? KB.game.boss.hp : 0, gameOver: false };
       const seen = new Set(); let lastHp = KB.player.hp, lastBossHp = KB.game.boss ? KB.game.boss.hp : 0;
       const b0 = KB.game.boss; let bx0 = b0 ? b0.x : 0, by0 = b0 ? b0.y : 0;
       const pending = {}; // name -> frames left before snapshot
@@ -223,6 +225,7 @@ window.__bt = (function () {
         if (p.hp < lastHp) { log.hurtCount++; snap('hurt', 2); ev('hurt', { by: window.__lastHurtBy, hp: p.hp }); } lastHp = p.hp; log.minHp = Math.min(log.minHp, p.hp);
         if (g.lives < lastLives) { log.playerDied++; lastLives = g.lives; ev('died'); }
         if (b && b.hp < lastBossHp) { log.bossHits++; snap('bosshit', 1); ev('hit', { bhp: b.hp }); if (spitT >= 0 && log.spitHitAt < 0) log.spitHitAt = i; } if (b) lastBossHp = b.hp;
+        if (b && !b.introducing) { log.bossMaxHp = Math.max(log.bossMaxHp, b.maxHp); log.bossMinHp = Math.min(log.bossMinHp, b.hp); }
         if (b && i % 60 === 0) log.bossHp.push(b.hp);
         if (i % 120 === 0) log.pos.push([Math.round(p.x), Math.round(p.y), b ? Math.round(b.x) : 0, b ? Math.round(b.y) : 0]);
         if (b && b.dead && log.deadAt < 0) { log.deadAt = i; snap('dead', 30); }
@@ -230,6 +233,8 @@ window.__bt = (function () {
         if (i === Math.floor(n / 2)) snap('mid', 0);
         for (const k of Object.keys(pending)) { if (pending[k]-- <= 0) { log.shots[k] = scaleShot(scale); delete pending[k]; } }
         if (o.stopOnClear && g.clearT >= 30) break;
+        // 難度曲線量測：3 條命用完會切到 GameOverScene（KB.game 變成留在原地的舊物件），到此為止
+        if (o.stopOnGameOver && KB.scene && KB.scene.constructor.name !== 'GameScene') { log.gameOver = true; break; }
         if (o.stopOnMouth && log.spitHitAt >= 0 && i > log.spitHitAt + 30) break;
       }
       KB.input.clearVirtual();
@@ -484,6 +489,55 @@ def run_boss(sess, key, a):
     return res
 
 
+# ---------- [curve] 難度曲線量測（Round 3 balance-enemies）----------
+# 「sword 不用無敵」的普通玩家機器人在真實魔王房（levels.js）裡，3 條命打完為止，
+# 魔王最多被打掉幾 % 的血。目標曲線 w1 → w5 遞減（越後面的魔王越難）。
+CURVE_TARGET = {'whispywoods': 80, 'lololo': 70, 'kracko': 60, 'metaknight': 50, 'dedede': 40}
+
+
+def run_curve(sess, key, a):
+    """跑 a.curve_runs 個樣本，回傳 (平均打掉 %, 每個樣本的 %)。"""
+    pcts = []
+    # --curve-mid：改用 [mid] 的「中距離玩家」模型（刀刃、保持距離、前後游走）——
+    # 貼身揮劍的普通玩家模型對 5 個魔王幾乎都能打到 100%，分不出曲線，中距離模型才有鑑別度。
+    mid = a.curve_mid
+    ability = a.curve_ability or ('cutter' if mid else 'sword')
+    for r in range(a.curve_runs):
+        sess.start(key, ability=ability, use_real=not a.curve_fake, hitbox=False,
+                   intro_frames=160 + r * 11, dx=r % 3)
+        opts = {'scale': a.scale, 'stopOnClear': True, 'stopOnGameOver': True, 'phase': r}
+        if mid:
+            opts.update({'stopGap': MID_GAP.get(key, MID_GAP_DEFAULT), 'attackEvery': 12, 'strafe': a.mid_strafe, 'phase': r + 5})
+        log = sess.ev("([n,m,o])=>__bt.run(n,m,o)", [a.curve_frames, 'fight', opts])
+        log.pop('shots', None)
+        mx = log['bossMaxHp'] or 1
+        pct = 100.0 * (mx - log['bossMinHp']) / mx
+        pcts.append(pct)
+        print(f"curve#{r} {key}: {mx}→{log['bossMinHp']} = {pct:.0f}%  "
+              f"(frames={log['frames']} died={log['playerDied']} gameOver={log['gameOver']} "
+              f"bossDead={log['final']['bossDead']} hits={log['bossHits']} "
+              f"playerHurt={log['hurtCount']} playerMinHp={log['minHp']})")
+    avg = sum(pcts) / len(pcts)
+    return avg, pcts
+
+
+def run_curves(sess, keys, a):
+    rows = []
+    for k in keys:
+        print(f'\n---------- curve {k} ----------')
+        avg, pcts = run_curve(sess, k, a)
+        tgt = CURVE_TARGET.get(k, 0)
+        rows.append((k, avg, pcts, tgt, avg >= tgt))
+    print('\n================ BOSS CURVE ================')
+    print(f"{'boss':12s} {'avg%':>6s} {'target':>7s}  {'samples':<24s} result")
+    ok_all = True
+    for k, avg, pcts, tgt, ok in rows:
+        ok_all &= ok
+        print(f"{k:12s} {avg:6.0f} {tgt:6d}%  {str([round(x) for x in pcts]):<24s} {'OK' if ok else 'UNDER'}")
+    print('CURVE', 'PASS' if ok_all else 'FAIL')
+    return ok_all
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--boss', default='all', help='whispywoods / lololo / kracko / metaknight / dedede / all')
@@ -507,12 +561,24 @@ def main():
     ap.add_argument('--no-mid', action='store_true')
     ap.add_argument('--no-intro', action='store_true')
     ap.add_argument('--intro-frames', type=int, default=200, help='登場動畫探針的幀數（>150 才會看到 introducing 變 false）')
+    ap.add_argument('--curve', action='store_true', help='只跑難度曲線量測（sword 不無敵、真實魔王房，量魔王被打掉幾 %% 血）')
+    ap.add_argument('--curve-runs', type=int, default=3, help='曲線量測樣本數（取平均）')
+    ap.add_argument('--curve-frames', type=int, default=9000, help='曲線量測每個樣本的最大幀數')
+    ap.add_argument('--curve-fake', action='store_true', help='曲線量測改用注入的測試房（預設用 levels.js 的真實魔王房）')
+    ap.add_argument('--curve-mid', action='store_true', help='曲線量測改用中距離玩家模型（刀刃 + 保持距離；對曲線比較有鑑別度）')
+    ap.add_argument('--curve-ability', default='', help='曲線量測用的能力（預設 sword，--curve-mid 時預設 cutter）')
     a = ap.parse_args()
     keys = ORDER if a.boss == 'all' else [k.strip() for k in a.boss.split(',')]
     results = {}
     t0 = time.time()
     with sync_playwright() as pw:
         sess = Session(pw, a.console)
+        if a.curve:
+            keys = [k for k in keys if k in ROOMS]
+            ok = run_curves(sess, keys, a)
+            sess.close()
+            print(f'({time.time() - t0:.0f}s)')
+            sys.exit(0 if ok else 1)
         for k in keys:
             if k not in ROOMS:
                 print('unknown boss', k); continue

@@ -83,6 +83,7 @@
       const o = { t: this.beingInhaled ? 0 : this.animT / 60 };
       const fr = this.pickFrame(); if (fr !== undefined) o.frame = fr;
       const wx = KB.inhaleWobble(this);
+      this.drawGlow(g);                       // 暗房微光 + 眼睛亮點（entity.js）
       g.spr(this.spr, this.cx + wx, this.bottom + this.bob + (this.wobY || 0), this.sprOpts(o));
     }
   }
@@ -109,8 +110,11 @@
         if (this.vx * this.d0 < -this.maxV) this.vx = -this.d0 * this.maxV;
         this.flip = this.vx < 0;
         if (this.home && !this.home.dead && this.overlaps(this.home)) {
-          // 回收：主人接住刀刃 → 冷卻縮短、冒出白色火花
-          this.dead = true; this.home.caught = true;
+          // 回收：主人接住刀刃 → 冷卻縮短、冒出白色火花。
+          // w1~w2（tier ≤ 2）不接刃：刀刃直接消失，不觸發 caught 的短冷卻連發（QA R2-P1-06）
+          this.dead = true;
+          if (!this.home.canCatch) return;
+          this.home.caught = true;
           KB.fx('fx_sparkle', this.home.cx, this.home.cy - 2);
           KB.particles(this.home.cx, this.home.cy, ['#ffffff', '#e0e0e0'], 5, { spread: 1.2, grav: 0, life: 12, up: 0, size: 1 });
           sfx('cutter');
@@ -181,7 +185,7 @@
       if (see && this.alertT === 1 && this.onGround) { this.vy = -1.6; this.onGround = false; }   // 受驚小跳
       // 玩家貼得很近又在背後 → 回頭看
       if (see && this.playerDist() < 30 && !this.inFront() && this.onGround) this.facePlayer();
-      this.walk(see ? this.speed * 1.8 : this.speed);
+      this.walk(see ? this.speed * this.alertK : this.speed);
     }
   }
 
@@ -191,7 +195,7 @@
     think() {
       if (this.state === 'attack') {
         this.vx = 0;
-        const k = this.stateT - 8, N = 6;
+        const k = this.stateT - 8, N = this.tough ? 6 : 3;   // w1~w2 只掃 3 道，w3 起 6 道
         if (k >= 0 && k < N * 3 && k % 3 === 0) {
           const i = k / 3, a = (-95 + i * (120 / (N - 1))) * Math.PI / 180;   // -95° → +25°：頭頂掃到前方地面（蹲下也躲不掉）
           const ox = this.cx + this.dir * 5, oy = this.cy - 2;
@@ -205,7 +209,7 @@
       this.setSpr('waddledoo_walk');
       const see = this.notice(96, 40);
       if (see && this.onGround && this.cool <= 20) this.facePlayer();   // 察覺 → 轉頭盯著玩家
-      this.walk(see ? this.speed * 1.4 : this.speed);
+      this.walk(see ? this.speed * this.alertK : this.speed);
       if (this.cool <= 0 && this.onGround && this.canSee(80, 24) && this.inFront()) { this.vx = 0; this.setState('attack'); this.setSpr('waddledoo_attack'); }
     }
   }
@@ -240,9 +244,10 @@
     think() {
       if (this.state === 'flame') {
         this.vx = 0;
-        if (this.stateT === 6) { this.hitbox = KB.hitbox({ x: 0, y: 0, w: 30, h: 14, dmg: 1, owner: 'enemy', type: 'fire', follow: this, ox: 5, oy: 0, life: 30, rehit: 10, breakBlocks: false }); sfx('fire'); }
-        if (this.stateT >= 6 && this.stateT < 36 && this.stateT % 4 === 2) KB.fx('fx_fire', this.cx + this.dir * (12 + (this.stateT % 12)), this.cy + 4, { flip: this.dir < 0 });
-        if (this.stateT >= 44) { this.setState('walk'); this.setSpr('hothead_walk'); this.cool = 120; }
+        const fl = this.tier <= 1 ? 21 : 30;   // w1 的噴火持續縮短 30%（30 → 21 幀）
+        if (this.stateT === 6) { this.hitbox = KB.hitbox({ x: 0, y: 0, w: 30, h: 14, dmg: 1, owner: 'enemy', type: 'fire', follow: this, ox: 5, oy: 0, life: fl, rehit: 10, breakBlocks: false }); sfx('fire'); }
+        if (this.stateT >= 6 && this.stateT < 6 + fl && this.stateT % 4 === 2) KB.fx('fx_fire', this.cx + this.dir * (12 + (this.stateT % 12)), this.cy + 4, { flip: this.dir < 0 });
+        if (this.stateT >= 14 + fl) { this.setState('walk'); this.setSpr('hothead_walk'); this.cool = 120; }
         return;
       }
       if (this.state === 'shoot') {
@@ -258,7 +263,7 @@
       // 察覺玩家：加速逼近到噴火距離就停住（遠程型不主動貼身）
       const see = this.notice(96, 48);
       if (see && this.onGround) {
-        if (this.playerDist() > 40) this.chase(this.speed * 1.7); else { this.facePlayer(); this.vx = 0; }
+        if (this.playerDist() > 40) this.chase(this.speed * this.alertK); else { this.facePlayer(); this.vx = 0; }
       } else this.walk();
       if (this.cool <= 0 && this.onGround && this.canSee(96, 48)) {
         this.facePlayer(); this.vx = 0; this.setSpr('hothead_attack');
@@ -270,11 +275,14 @@
   // Sir Kibble：玩家接近時丟出回旋刃（一次只有一把在外）
   class SirKibble extends Baddie {
     constructor(x, y) { super(x, y); this.name = 'sirkibble'; this.spr = 'sirkibble_walk'; this.w = 14; this.h = 16; this.speed = 0.5; this.ability = 'cutter'; this.score = 300; this.cutter = null; this.cool = 40; }
+    // w1~w2：不接刃，丟刀間隔 90 幀；w3 起：接刃（接回後 24 幀就能再丟），一般間隔 60 幀
+    get canCatch() { return this.tough; }
+    get throwCD() { return this.tough ? 60 : 90; }
     think() {
       if (this.state === 'throw') {
         this.vx = 0;
         if (this.stateT === 10) { this.cutter = KB.spawn(new Boomerang({ x: this.cx + this.dir * 8, y: this.cy - 2, vx: this.dir * 2.6, vy: 0, dir: this.dir, ownerEnt: this })); sfx('cutter'); }
-        if (this.stateT >= 28) { this.setState('walk'); this.setSpr('sirkibble_walk'); this.cool = 90; }
+        if (this.stateT >= 28) { this.setState('walk'); this.setSpr('sirkibble_walk'); this.cool = this.throwCD; }
         return;
       }
       if (this.caught) { this.caught = false; this.cool = Math.min(this.cool, 24); this.setSpr('sirkibble_throw'); }   // 接回刀刃 → 很快再丟
@@ -319,7 +327,7 @@
     pullTo(px, py, s) { super.pullTo(px, py, s * 0.55); }
     think() {
       if (this.state === 'jump') {
-        if (this.stateT === 1) { this.vy = -4.2; this.vx = clamp(this.playerDx() * 0.03, -1.2, 1.2); this.onGround = false; }
+        if (this.stateT === 1) { this.vy = -4.2; this.vx = clamp(this.playerDx() * 0.03, -1.2, 1.2) * this.exK; this.onGround = false; }   // Extra：撲擊速度也 ×KB.exK('spd')
         if (this.vy > 0) { this.grav = 0.5; this.maxFall = 6; }
         if (this.stateT > 2 && this.onGround) {
           this.grav = KB.GRAV; this.maxFall = KB.MAXFALL; this.vx = 0;
@@ -331,7 +339,7 @@
       }
       this.setSpr('rocky_walk');
       // 察覺玩家：慢慢輾過去
-      if (this.notice(96, 40) && this.onGround) this.chase(this.speed * 1.8); else this.walk();
+      if (this.notice(96, 40) && this.onGround) this.chase(this.speed * this.alertK); else this.walk();
       if (this.cool <= 0 && this.onGround && playerAlive() && this.playerDist() < 36 && this.playerDy() > -24) { this.facePlayer(); this.setState('jump'); this.setSpr('rocky_drop'); }
     }
   }
@@ -350,7 +358,7 @@
       this.setSpr('chilly_walk');
       // 察覺玩家：滑步逼近到噴冰距離就停住（遠程型不主動貼身）
       if (this.notice(96, 40) && this.onGround) {
-        if (this.playerDist() > 32) this.chase(this.speed * 1.6); else { this.facePlayer(); this.vx = 0; }
+        if (this.playerDist() > 32) this.chase(this.speed * this.alertK); else { this.facePlayer(); this.vx = 0; }
       } else this.walk();
       if (this.cool <= 0 && this.onGround && this.canSee(80, 24)) { this.facePlayer(); this.vx = 0; this.setState('attack'); this.setSpr('chilly_attack'); }
     }
@@ -371,7 +379,7 @@
         if (this.stateT < 8) { this.vx = 0; }
         else {
           if (this.stateT === 8) { this.hitbox = KB.hitbox({ x: 0, y: 0, w: 22, h: 18, dmg: 1, owner: 'enemy', type: 'sword', follow: this, ox: 3, oy: -2, life: 20, rehit: 0, breakBlocks: false }); sfx('sword'); }
-          this.vx = this.dir * 2.4;
+          this.vx = this.dir * 2.4 * this.exK;   // Extra：突刺衝鋒速度 ×KB.exK('spd')
           if (this.stateT % 4 === 0) KB.particles(this.cx - this.dir * 8, this.bottom - 2, '#e0e0e8', 2, { spread: 0.8, up: 0.4, life: 12, size: 1 });
           if (this.hitWall || (this.onGround && KB.physics.edgeAhead(KB.game.map, this)) || this.stateT >= 26) {
             this.killHitbox(); this.vx = 0; this.setState('walk'); this.setSpr('bladeknight_walk'); this.cool = 70;
@@ -381,7 +389,7 @@
       }
       this.setSpr('bladeknight_walk');
       const see = this.notice(96, 32);
-      if (see || this.canSee(90, 28)) this.chase(this.speed * (see ? 1.5 : 1)); else this.walk();
+      if (see || this.canSee(90, 28)) this.chase(this.speed * (see ? this.alertK : 1)); else this.walk();
       if (this.cool <= 0 && this.onGround && this.canSee(30, 24)) { this.facePlayer(); this.vx = 0; this.setState('attack'); this.setSpr('bladeknight_attack'); }
       else if (this.cool <= 0 && this.onGround && see && this.playerDist() > 40 && this.playerDist() < 90 && Math.abs(this.playerDy()) < 20) {
         this.facePlayer(); this.vx = 0; this.setState('lunge'); this.setSpr('bladeknight_attack');
@@ -456,7 +464,7 @@
       }
       // 第二招：大跳撲擊 —— 躍向玩家，落地產生左右兩道地面衝擊波
       if (this.state === 'leap') {
-        if (this.stateT === 1) { this.vy = -5.0; this.vx = clamp(this.playerDx() * 0.035, -2.2, 2.2); this.onGround = false; }
+        if (this.stateT === 1) { this.vy = -5.0; this.vx = clamp(this.playerDx() * 0.035, -2.2, 2.2) * this.exK; this.onGround = false; }   // Extra：撲擊速度 ×KB.exK('spd')
         if (this.vy > 0) { this.grav = 0.45; this.maxFall = 7; }
         if (this.stateT > 3 && this.onGround) {
           this.grav = KB.GRAV; this.maxFall = KB.MAXFALL; this.vx = 0;
@@ -472,7 +480,7 @@
       }
       this.setSpr('bonkers_walk');
       const see = this.notice(120, 56);
-      if (playerAlive()) this.chase(this.speed * (see ? 1.4 : 1)); else this.walk();
+      if (playerAlive()) this.chase(this.speed * (see ? this.alertK : 1)); else this.walk();
       if (this.cool <= 0 && this.onGround && playerAlive() && Math.abs(this.playerDy()) < 40) {
         const d = this.playerDist();
         if (d < 40) { this.facePlayer(); this.vx = 0; this.setState('hammer'); this.setSpr('bonkers_attack'); }
@@ -493,7 +501,7 @@
         return;
       }
       if (this.state === 'charge') {
-        this.vx = this.dir * 2.0;
+        this.vx = this.dir * 2.0 * this.exK;   // Extra：衝撞速度 ×KB.exK('spd')
         if (this.stateT % 6 === 0) KB.particles(this.cx - this.dir * 10, this.bottom, '#e0f8ff', 2, { spread: 1, up: 0.5, life: 15 });
         if (this.hitWall || this.stateT >= 45 || (this.onGround && KB.physics.edgeAhead(KB.game.map, this))) {
           if (this.hitWall) { shake(4); sfx('block'); }
@@ -514,7 +522,7 @@
       }
       this.setSpr('mrfrosty_walk');
       const see = this.notice(120, 56);
-      if (playerAlive()) this.chase(this.speed * (see ? 1.4 : 1)); else this.walk();
+      if (playerAlive()) this.chase(this.speed * (see ? this.alertK : 1)); else this.walk();
       if (this.cool <= 0 && this.onGround && playerAlive() && Math.abs(this.playerDy()) < 40) {
         this.facePlayer(); this.vx = 0;
         if (this.playerDist() > 56) { this.setState('throw'); this.setSpr('mrfrosty_throw'); }
@@ -657,34 +665,68 @@
     }
   }
 
-  // Poppy Bros. Jr.：跳躍前進，看到玩家時在空中丟炸彈
+  // Poppy Bros. Jr.：跳躍前進，看到玩家時丟拋物線瞄準炸彈。
+  //   QA R2-1 #3：Round 1 的「落點直接算在玩家身上」在無掩體的直走廊幾乎沒有反應時間，
+  //   所以 Round 3 加了 18 幀的「舉手預警」（停在 hop 幀 0 + 高舉炸彈 + 黃色火花），
+  //   而且距離 < 48px 時不丟改跳開（貼臉炸彈躲不掉）。w1~w2 的投擲間隔再 ×1.5。
+  const POPPY_WIND = 18;      // 舉手預警幀
+  const POPPY_MINDIST = 48;   // 最小投擲距離（更近就跳開）
   class PoppyBros extends Baddie {
-    constructor(x, y) { super(x, y); this.name = 'poppybros'; this.spr = 'poppybros_hop'; this.w = 14; this.h = 16; this.score = 300; this.hopT = 20; this.cool = 50; this.throwT = 0; this.ability = null; this.state = 'hop'; }
+    constructor(x, y) { super(x, y); this.name = 'poppybros'; this.spr = 'poppybros_hop'; this.w = 14; this.h = 16; this.score = 300; this.hopT = 20; this.cool = 50; this.windT = 0; this.ability = null; this.state = 'hop'; }
+    onReset() { super.onReset(); this.windT = 0; }
+    get throwCD() { return this.tough ? 80 : 120; }   // w1~w2：80 × 1.5 = 120 幀
+    throwBomb() {
+      // 拋物線瞄準玩家：固定上拋初速，飛行時間回推水平初速（重力 0.16）
+      const dx = this.playerDx(), dy = this.playerDy();
+      const vy0 = dy < -24 ? -4.2 : -3.4;
+      const T = -2 * vy0 / 0.16;
+      const vx = clamp(dx / T, -2.8, 2.8);
+      this.dir = sign(dx || this.dir);
+      KB.spawn(new Bomb({ x: this.cx + this.dir * 6, y: this.y + 4, vx, vy: vy0, dir: this.dir, ownerEnt: this }));
+      KB.particles(this.cx + this.dir * 6, this.y + 4, '#ffe040', 3, { spread: 0.8, grav: 0.03, life: 12, size: 1 });
+      sfx('spit');
+    }
+    // 太近就往反方向跳開，不丟炸彈
+    hopAway() {
+      this.dir = -sign(this.playerDx() || this.dir);
+      const map = KB.game.map;
+      if (KB.physics.wallAhead(map, this) || KB.physics.edgeAhead(map, this)) this.dir *= -1;
+      this.vy = -3.2; this.vx = this.dir * 1.3 * this.exK; this.onGround = false;
+      this.hopT = 30; this.cool = Math.max(this.cool, 40);
+      KB.particles(this.cx, this.bottom, ['#ffffff', '#d0d0e0'], 3, { spread: 1.0, grav: 0.1, life: 12, size: 1 });
+    }
     think() {
+      // 舉手預警：站定 18 幀（停格在 hop 幀 0，頭上舉著炸彈）後才丟
+      if (this.windT > 0) {
+        this.vx = 0;
+        if (this.windT % 6 === 0) KB.particles(this.cx, this.y - 6, ['#ffe040', '#ffffff'], 1, { spread: 0.5, grav: 0.02, life: 14, up: 0.6, size: 1 });
+        if (--this.windT === 0) this.throwBomb();
+        return;
+      }
       if (this.onGround) {
         this.vx = 0;
         if (--this.hopT <= 0) {
+          if (this.cool <= 0 && this.canSee(120, 64)) {
+            if (this.playerDist() < POPPY_MINDIST) { this.hopAway(); return; }
+            this.facePlayer(); this.windT = POPPY_WIND; this.cool = this.throwCD; this.hopT = 30; sfx('jump');
+            return;
+          }
           this.hopT = 30;
           const map = KB.game.map;
           if (playerAlive() && this.playerDist() < 130) this.facePlayer();
           if (KB.physics.wallAhead(map, this) || KB.physics.edgeAhead(map, this)) this.dir *= -1;
-          this.vy = -2.8; this.vx = this.dir * 1.0; this.onGround = false;
-          if (this.cool <= 0 && this.canSee(120, 64)) { this.throwT = 6; this.cool = 80; }
+          this.vy = -2.8; this.vx = this.dir * 1.0 * this.exK; this.onGround = false;   // Extra：跳躍前進速度 ×KB.exK('spd')
         }
-      } else this.vx = this.dir * 1.0;
-      if (this.throwT > 0 && --this.throwT === 0) {
-        // 拋物線瞄準玩家：固定上拋初速，飛行時間回推水平初速（重力 0.16）
-        const dx = this.playerDx(), dy = this.playerDy();
-        const vy0 = dy < -24 ? -4.2 : -3.4;
-        const T = -2 * vy0 / 0.16;
-        const vx = clamp(dx / T, -2.8, 2.8);
-        this.dir = sign(dx || this.dir);
-        KB.spawn(new Bomb({ x: this.cx + this.dir * 6, y: this.y + 4, vx, vy: vy0, dir: this.dir, ownerEnt: this }));
-        KB.particles(this.cx + this.dir * 6, this.y + 4, '#ffe040', 3, { spread: 0.8, grav: 0.03, life: 12, size: 1 });
-        sfx('spit');
-      }
+      } else this.vx = this.dir * 1.0 * this.exK;
     }
-    pickFrame() { return this.onGround ? 0 : 1; }
+    pickFrame() { return (this.windT > 0 || this.onGround) ? 0 : 1; }
+    draw(g) {
+      super.draw(g);
+      if (this.windT <= 0) return;
+      // 舉手預警的「舉著的炸彈」（沒有專屬的 attack 精靈，改用 proj_bomb 畫在頭頂，最後 6 幀閃白）
+      const bob = Math.round(Math.sin(this.windT * 0.5));
+      g.spr('proj_bomb', this.cx + this.dir * 2, this.y - 4 + bob, { t: 0, flip: this.dir < 0, tint: (this.windT <= 6 && (this.windT & 1)) ? '#ffffff' : undefined });
+    }
   }
 
   // Scarfy：浮空緩慢跟隨；被嘗試吸入即變臉狂追，碰到玩家或 2 秒後爆炸。不可吸入
@@ -801,16 +843,19 @@
   class Shotzo extends Baddie {
     constructor(x, y) { super(x, y); this.name = 'shotzo'; this.spr = 'shotzo'; this.w = 16; this.h = 16; this.hp = 999; this.maxHp = 999; this.inhalable = false; this.solid = false; this.grav = 0; this.score = 0; this.cool = 60; this.ability = null; }
     hurt() { return false; }
+    // 射程 170 → 120px（QA R2-1 #2：w5 城門的斜坡上爬時無處可躲）；開火間隔 w1~w2 ×1.6、w3~w5 ×1.3（砲彈速度不變）
+    get range() { return 120; }
+    get fireCD() { return Math.round(100 * (this.tough ? 1.3 : 1.6)); }
     think() {
       this.vx = 0; this.vy = 0;
       if (!playerAlive()) return;
       this.facePlayer();
-      if (this.cool <= 0 && this.playerDist() < 170 && this.onScreen(16)) {
+      if (this.cool <= 0 && this.playerDist() < this.range && this.onScreen(16)) {
         const p = KB.player, dx = p.cx - this.cx, dy = p.cy - (this.cy - 2), d = Math.max(1, Math.hypot(dx, dy));
         const mx = this.cx + dx / d * 10, my = this.cy - 2 + dy / d * 10;
         KB.shoot({ spr: 'proj_cannonball', x: mx, y: my, vx: dx / d * 2.5, vy: dy / d * 2.5, dmg: 1, owner: 'enemy', life: 160, w: 8, h: 8, grav: 0, solid: true, fxHit: 'fx_poof', type: 'cannon', breakBlocks: false, dir: this.dir, ownerEnt: this });
         KB.particles(mx, my, ['#ffffff', '#a0a0a8'], 5, { spread: 1.2, grav: -0.02, life: 18, up: 0 });
-        sfx('hammer'); this.cool = 100;
+        sfx('hammer'); this.cool = this.fireCD;
       }
     }
   }
@@ -904,7 +949,7 @@
     onReset() { super.onReset(); this.rot = 0; this.setSpr('spikeball_roll'); }
     think() {
       if (this.state === 'dash') {
-        this.vx = this.dir * 2.3;
+        this.vx = this.dir * 2.3 * this.exK;   // Extra：衝撞速度 ×KB.exK('spd')
         if (this.stateT % 3 === 0) KB.particles(this.cx - this.dir * 7, this.bottom - 2, ['#c8b0f8', '#ffffff'], 1, { spread: 0.7, up: 0.4, life: 12, size: 1 });
         if (this.hitWall) { this.dir *= -1; shake(2); sfx('block'); KB.particles(this.cx, this.cy, '#c8b0f8', 6, { spread: 2, life: 14 }); }
         if (this.stateT >= 80 || !this.canSee(150, 60)) { this.setState('roll'); this.setSpr('spikeball_roll'); this.cool = 70; }
@@ -919,6 +964,7 @@
     draw(g) {
       if (this.freezeT > 0) { this.drawFrozen(g); return; }
       this.rot += this.vx * 0.1;
+      this.drawGlow(g);
       const wx = KB.inhaleWobble(this);
       g.spr(this.spr, this.cx + wx, this.cy + (this.wobY || 0), this.sprOpts({ t: this.animT / 60, rot: this.rot, flip: false }));
     }
@@ -989,7 +1035,7 @@
       this.setSpr('snowly_walk');
       const see = this.notice(96, 40);
       if (see && this.onGround) {
-        if (this.playerDist() > 40) this.chase(this.speed * 1.5); else { this.facePlayer(); this.vx = 0; }
+        if (this.playerDist() > 40) this.chase(this.speed * this.alertK); else { this.facePlayer(); this.vx = 0; }
       } else this.walk();
       if (this.cool <= 0 && this.onGround && this.canSee(72, 28)) { this.facePlayer(); this.vx = 0; this.setState('attack'); this.setSpr('snowly_attack'); }
     }
