@@ -304,3 +304,25 @@ git 已初始化，基線 commit `c382e2a`。Playwright venv：`.venv/bin/python
 - abilities-enemies + levels-bosses：DESIGN_REFERENCE 3.9 的第一梯招式中，`Fire 點燃導火線`、`Spark 照亮暗房`、`Hammer 打破硬磚` 需要雙方約定 levels.js 的磁磚字元（建議 `F` 導火線、`D` 暗房、`X` 硬磚）。
 - 總控（法律）：DESIGN_REFERENCE 第 6 章建議把 5 個魔王與 25 種敵人的官方角色名、關卡名「迪迪迪城」、標題 `KIRBY STAR` 全面改為原創名，建議由總控統一發對照表。
 （agent 在此追加）
+
+---
+# Round 2（2026-09-11 19:45 啟動）
+分工見 docs/TASKS.md Round 2；各 agent 在下方自己的區段追加。
+
+## ui-flow
+（agent 在此追加）
+
+## mechanics
+（agent 在此追加）
+
+## enemies-bosses2
+（agent 在此追加）
+
+## player2
+（agent 在此追加）
+
+## audio2
+（agent 在此追加）
+
+## qa2
+（agent 在此追加）

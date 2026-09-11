@@ -46,3 +46,45 @@
 ## research-qa（docs/）
 - [doing] docs/DESIGN_REFERENCE.md：卡比系列（夢之泉 / 超級豪華 / 新星同盟）操作、暫停說明卡、能力招式表、關卡秘密設計、魔王階段的重點整理與對本作的具體建議
 - [todo] docs/QA_REPORT.md：5 世界 playthrough、每房截圖檢視、bug 列表（含重現指令）
+
+---
+# Round 2（2026-09-11 19:45 啟動）— 檔案所有權重新分配
+
+## ui-flow（src/ui.js, src/menu.js, src/main.js, 新 src/arena.js, src/game.js 僅 levelClear/結算/關卡開場 hook, index.html 新增 script）
+- [doing] 過關結算畫面：分數、時間、擊敗數、大星星 x/3、獎勵分（清 HP 加成），逐項跳數字 + 音效；記 KB.save.best[levelId]
+- [todo] 關卡開場橫幅：進入第一房時顯示「WORLD n  關名」2 秒（不阻擋操作）
+- [todo] 競技場（Boss Rush）：標題選單新增「競技場」（通關 w5 或 debug 解鎖）；自選 1 能力 → 5 魔王連戰（隨機順序）→ 每戰之間休息房 3 顆番茄（整場共用）→ 計時 → 最佳時間存 KB.save.arena
+- [todo] HUD 中文能力名改 14px；設定頁「畫面縮放」（自動 / 2x / 3x / 4x）與 F 鍵全螢幕（main.js resize）
+- [todo] 選關面板顯示最佳分數
+
+## mechanics（src/tilemap.js, src/levels.js, src/items.js, src/art/world.js, src/abilities.js 僅互動 hook, src/game.js 僅 draw 的暗房遮罩）
+- [doing] 互動磁磚：`X` 硬磚（僅 hammer / stone / 火焰衝刺可破）、`F` 導火線（火焰類命中後沿線燃燒，燒到炸彈方塊 B 引爆）、`I` 冰磚（火焰類融化，可通行）、`D` 暗房標記（房間 dark:true → 畫面除卡比周圍半徑 40px 外變暗；spark 放電時半徑 96px 並持續 3 秒）
+- [todo] 每世界至少 2 處使用新磁磚並給獎勵（點數星 / 食物 / 通往大星星的捷徑）
+- [todo] 能力台座 KB.ITEMS.essence（顯示能力圖示的底座，碰到即取得能力，可重複），每世界放 1~2 個在需要該能力的機關前
+- [todo] 傳送星 KB.ITEMS.warpstar：碰到後卡比騎星（呼叫 player.rideStar(path)，由 player2 提供）沿路徑飛到另一房 / 位置；w3、w4 各用 1 次
+- [todo] level_check 支援新字元；playthrough 5 世界仍通關
+
+## enemies-bosses2（src/enemies.js, src/bosses.js, src/art/enemies.js, src/art/bosses.js, src/entity.js）
+- [doing] 新原創中魔王 1 種（例如「巨型飛羽鳥」或「鐵甲滾球」，2 招 + 受傷硬直，給 cutter 或 hammer），像素圖 40~48px
+- [todo] 敵人掉落表：每敵人 dropTable（點數星機率、食物機率），由 Enemy.die 統一處理
+- [todo] Extra 難度鉤子：讀 KB.session.extra 時敵人速度 ×1.2、投射物速度 ×1.2、魔王 HP ×1.25、二階段門檻 60%
+- [todo] 魔王登場動畫（各 1 個：威斯比搖晃落葉、克拉寇雲聚集、魅塔騎士披風展開、迪迪迪從門走出、洛洛洛從兩側推箱進場）
+- [todo] 敵人配置需求寫給 mechanics（哪一房放新中魔王）
+
+## player2（src/player.js, src/const.js, src/input.js, src/art/kirby.js, tools/engine_test.py）
+- [doing] 游泳打磨：入水 / 出水水花粒子與 sfx('splash')、水中氣泡、水中可吸入（吸力減半）、水中受傷
+- [todo] player.rideStar(path, onArrive)：state 'ride'，沿點陣列飛行、拖尾粒子、無敵、到達時下星 + fx
+- [todo] 梯子打磨：爬梯頂 / 底的過渡幀、在梯子上可攻擊（吐星）
+- [todo] Extra 模式：KB.session.extra 時 maxHp 3、能力星回收時間減半
+- [todo] 能力星彈跳手感：落地彈 2 次、8 秒後閃爍、10 秒消失（items.js 由 mechanics 擁有 → 寫需求）
+- [todo] engine_test 新增測試，全 PASS
+
+## audio2（src/audio.js, tools/audio_check.js, tools/render_music.py）
+- [doing] 環境音：'splash' 'bubble' 'wind' 'torch' 'fuse'（導火線燃燒循環）'melt' 'hardblock'（打不破的硬磚叮）
+- [todo] 音樂：'result'（結算 8 小節不循環）、'arena'（競技場 loop）、'arena_rest'（休息房短循環）、'w_intro' 開場短句、每世界第二首曲（'green2' 'castle2' 'island2' 'cloud2' 'dedede2'，供後半房間）
+- [todo] 結算計數 sfx 'count' 與 'count_end'
+
+## qa2（docs/QA_REPORT.md 追加 Round 2 章節, shots/agent_qa2/）
+- [doing] 非無敵難度調校：每世界 × 3 能力（sword/fire/none）playthrough 不加 --godmode，記錄死亡點與原因 → 提出調整建議（敵人位置 / 尖刺 / 魔王傷害）
+- [todo] Round 1 全功能回歸截圖（暫停卡 8 能力、能力圖鑑 8 頁、設定、選關、5 秘密房、5 二階段）
+- [todo] 記錄 Round 2 新功能問題並轉交
