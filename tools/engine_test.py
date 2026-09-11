@@ -330,18 +330,15 @@ def main():
         pg.evaluate("(o)=>__kb.press(o)", {'attack': True})
         step(6)
         check('吸入粒子（嘴前方）', parts() >= 2, parts())
-        # 等敵人走進吸力範圍，觀察抖動（連續幀位移不是平滑的等差）
-        xs = []
-        being = False
+        # 等敵人走進吸力範圍；抖動為純繪製偏移（KB.inhaleWobble），碰撞框座標不變
+        being = False; wob = []
         for i in range(120):
             step(1)
-            e = pg.evaluate("()=>{const e=KB.game.entities.find(x=>x.type==='enemy');return e?{b:!!e.beingInhaled,x:e.x}:null}")
-            if e and e['b']:
-                being = True; xs.append(e['x'])
-                if len(xs) >= 6: break
-        d = [round(xs[i + 1] - xs[i], 3) for i in range(len(xs) - 1)] if len(xs) > 2 else []
-        check('敵人被吸中會抖動（beingInhaled + 位移抖動）',
-              being and len(d) >= 3 and (max(d) - min(d)) > 0.5, (being, d))
+            e = pg.evaluate("()=>{const e=KB.game.entities.find(x=>x.type==='enemy');if(!e||!e.beingInhaled)return null;const w=[];for(let k=0;k<8;k++)w.push(KB.inhaleWobble(e));return w}")
+            if e:
+                being = True; wob = e; break
+        check('敵人被吸中會抖動（beingInhaled + 繪製偏移非零且會變號）',
+              being and any(v != 0 for v in wob) and (max(wob) > 0 and min(wob) < 0), (being, wob))
         maxfz = 0
         for i in range(80):
             step(1); maxfz = max(maxfz, jsv('KB.game.freezeT'))
