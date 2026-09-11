@@ -144,7 +144,7 @@
     p.rect(0, 30, 256, 2, '.');
   });
   KB.BG.island = function (ctx, camX, camY, t) {
-    const hz = 112 - camY * 0.1;
+    const hz = 142 - camY * 0.1;
     bands(ctx, 0, hz, ['#3888e8', '#4c9cf0', '#64b4f4', '#80c8f8', '#98d8fc', '#b0e4ff']);
     KB.circle(ctx, 44, 30, 15, '#ffe890'); KB.circle(ctx, 44, 30, 12, '#fff8d0'); KB.circle(ctx, 44, 30, 8, '#ffffff');
     tileX(ctx, iClouds, camX * 0.15 + t * 3, 14 - camY * 0.05);
