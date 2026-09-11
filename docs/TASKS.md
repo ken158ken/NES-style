@@ -121,3 +121,17 @@
 
 ## qa3（docs/QA_REPORT.md Round 3, shots/agent_qa3/）
 - [done] Round 2 問題回歸 + 非無敵 deaths 量測（5 世界 × sword/fire）+ 魔王曲線量測 + 全流程截圖
+
+---
+# Round 5：變身大爆發（2026-09-12）— 12 種新能力 + 特效系統
+使用者指示：法律改名跳過；難度維持；重點是「腦洞大開的變身、特效不嫌多、融合動漫式刀槍魔法巨大化」。
+| agent | 擁有檔案 | 內容 |
+|---|---|---|
+| vfx | src/vfx.js、src/abilities.js（既有 8 能力加特效）、src/game.js 僅 VFX 鉤子已預留 | KB.VFX 特效 API + 變身演出 + 既有能力特效強化 |
+| weapons | src/abilities_weapons.js、src/art/kirby_weapons.js、src/enemies_weapons.js、tools/test_weapons.py | gunner 槍手、ninja 忍者、blade 居合、bow 弓 |
+| magic | src/abilities_magic.js、src/art/kirby_magic.js、src/enemies_magic.js、tools/test_magic.py | mage 元素法師、time 時間、gravity 重力、clone 分身 |
+| forms | src/abilities_forms.js、src/art/kirby_forms.js、src/enemies_forms.js、src/player.js（變身鉤子）、tools/test_forms.py | giant 巨大化、dragon 龍化、mech 機甲、ghost 幽靈 |
+| audio5 | src/audio.js、tools/audio_check.js、tools/render_music.py | 12 能力全部招式音效 + 變身音 + 必殺 stinger |
+| ui5 | src/menu.js、src/arena.js、src/ui.js | 圖鑑 / 競技場選能力分頁（20 能力）、暫停卡 5 列招式、HUD 新能力、變身名稱橫幅 |
+| levels5（第二波） | src/levels.js、src/items.js | 12 種新敵人放進 5 世界 + 能力台座 |
+| qa5（第三波） | docs/QA_REPORT.md | 全能力截圖驗收 |

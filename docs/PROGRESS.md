@@ -1075,3 +1075,31 @@ git 已初始化，基線 commit `c382e2a`。Playwright venv：`.venv/bin/python
 2. 魔王曲線 w4 魅塔騎士 sword 模型 97%（目標 ≤85）：與 boss_test ALL PASS 衝突，建議改用 mid 模型或換統計量。
 3. 法律差異化（DESIGN_REFERENCE 第 6 章）：魔王 / 敵人 / 關卡名仍為官方名，待使用者決定。
 4. 未做：Extra 模式的關卡差異（目前只有數值倍率）、小遊戲、100% 獎勵、設定頁按鍵重映射 UI（資料結構已備）。
+
+---
+# Round 5：變身大爆發（2026-09-12 啟動）
+分工見 docs/TASKS.md Round 5。總控已預留：game.js 的 KB.VFX.preWorld/postWorld/update 鉤子、KB.game.timeStopT / slowMoT（非玩家方實體凍結 / 隔幀更新）、index.html 已加入 10 個新檔的 script 標籤（vfx.js、abilities_*.js、art/kirby_*.js、enemies_*.js）。
+
+## vfx
+（agent 在此追加）
+
+## weapons
+（agent 在此追加）
+
+## magic
+（agent 在此追加）
+
+## forms
+（agent 在此追加）
+
+## audio5
+（agent 在此追加）
+
+## ui5
+（agent 在此追加）
+
+## levels5
+（agent 在此追加）
+
+## qa5
+（agent 在此追加）

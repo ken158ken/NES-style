@@ -26,7 +26,7 @@
       this.cam = { x: 0, y: 0 }; this.shake = 0; this.t = 0; this.frame = 0;
       this.fade = 1; this.fadeDir = -1; this.fadeCb = null; this.paused = false; this.pauseSel = 0; this.pauseMenu = null;
       this.boss = null; this.bossIntroT = 0; this.bossName = ''; this.clearT = -1; this.abilityFlash = 0;
-      this.toasts = []; this.roomIdx = 0; this.checkpoint = null; this.freezeT = 0;
+      this.toasts = []; this.roomIdx = 0; this.timeStopT = 0; this.slowMoT = 0; this.checkpoint = null; this.freezeT = 0;
       this.timeAlive = 0; this.musicKey = null;
     }
     enter() {
@@ -193,8 +193,11 @@
         const e = this.entities[i]; if (e.dead) continue;
         if (e.type === 'enemy' && !e.active) { if (e.x + e.w > camL && e.x < camR && e.y + e.h > camT && e.y < camB) e.active = true; else continue; }
         if (e.type === 'enemy' && (e.x + e.w < camL - 200 || e.x > camR + 200 || e.y > camB + 200)) { if (!e.persistent) { e.active = false; e.x = e.startX; e.y = e.startY; if (e.spawnDef) e.bottom = e.spawnDef.y * T + T; e.vx = 0; e.vy = 0; e.beingInhaled = false; e.freezeT = 0; if (e.onReset) e.onReset(); } continue; }
+        // 時間能力：timeStopT 期間非玩家方實體凍結；slowMoT 期間敵方每 2 幀更新一次
+        if ((this.timeStopT > 0 || (this.slowMoT > 0 && (this.frame & 1))) && e !== p && e.owner !== 'player' && e.type !== 'fx' && !(e.type === 'hitbox' && e.owner === 'player')) continue;
         e.update(dt);
       }
+      if (this.timeStopT > 0) this.timeStopT--; if (this.slowMoT > 0) this.slowMoT--;
       this.collisions();
       // 擊敗數（結算用）：每個敵人只計一次
       for (const e of this.entities) if (e.dead && e.type === 'enemy' && !e._killCounted) { e._killCounted = true; this.kills++; }
@@ -205,6 +208,7 @@
       for (const pu of this.popups) { pu.t--; pu.y -= 0.5; } this.popups = this.popups.filter(pu => pu.t > 0);
       for (const tt of this.toasts) tt.t--; this.toasts = this.toasts.filter(tt => tt.t > 0);
       if (this.abilityFlash > 0) this.abilityFlash--;
+      if (KB.VFX && KB.VFX.update) KB.VFX.update(this);
       if (this.shake > 0) this.shake--;
       this.updateCamera();
     }
@@ -398,6 +402,7 @@
       const bgFn = KB.BG && (KB.BG[this.room.bg || this.theme] || KB.BG[this.theme]);
       if (bgFn) bgFn(ctx, cam.x, cam.y, this.t, this.room); else { ctx.fillStyle = '#78c8f8'; ctx.fillRect(0, 0, KB.W, KB.VIEW_H); }
       const g = new KB.G(ctx, cam);
+      if (KB.VFX && KB.VFX.preWorld) KB.VFX.preWorld(ctx, cam, this);
       this.map.draw(ctx, cam, this.theme, this.t);
       // 實體（依 z 排序）
       const list = this.entities.filter(e => !e.dead || e === this.player).sort((a, b) => a.z - b.z);
@@ -429,6 +434,7 @@
       // 關卡開場橫幅（WORLD n + 關名，滑入 → 停 → 滑出，不阻擋操作）
       if (KB.UI && KB.UI.drawLevelBanner) KB.UI.drawLevelBanner(ctx, this);
       // 遊戲內「?」提示（進新關卡 toast / 右上角常駐問號）
+      if (KB.VFX && KB.VFX.postWorld) KB.VFX.postWorld(ctx, cam, this);
       if (KB.UI && KB.UI.drawGameHint) KB.UI.drawGameHint(ctx, this);
       // HUD
       if (KB.drawHUD) KB.drawHUD(ctx, this); else this.drawHUDFallback(ctx);
