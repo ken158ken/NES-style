@@ -672,7 +672,9 @@
         let k = 1, a = 1;
         if (this.t < IN) { const f = this.t / IN; k = 0.25 + 0.85 * f; if (f > 0.8) k = 1.1 - (f - 0.8) * 0.5; a = f; }
         else if (this.t > IN + HOLD) { const f = (this.t - IN - HOLD) / OUT; a = 1 - f; k = 1 + f * 0.15; }
-        const cx = KB.W / 2, cy = 78;
+        // 開場「WORLD n」橫幅（y≈20~80）還在畫面上時，變身橫幅下移避免重疊
+        const bb = (KB.UI && KB.UI.bannerBottom && KB.game) ? KB.UI.bannerBottom(KB.game) : 0;
+        const cx = KB.W / 2, cy = bb > 0 ? 122 : 78;
         ctx.save();
         ctx.globalAlpha = clamp01(a) * 0.62;
         ctx.fillStyle = '#000000';
