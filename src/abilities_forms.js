@@ -114,14 +114,15 @@
       d.timer = GIANT_TIME; d.step = 0; d.warned = false; d.mode = null;
       p.setForm({
         key: 'giant', scale: 2, inhaleAll: true,
-        // 巨大化沿用既有卡比精靈（scale 2），只有攻擊幀需要指定（否則會找不到 kirby_attack_giant）
+        // 巨大化沿用既有卡比精靈（scale 2）；攻擊幀：衝撞＝跑步、屁股墜落＝蹲下、
+        // 踩踏＝專用的 kirby_attack_giant（fix5 新增，art/kirby_forms.js）
         spr(pp, anim, opts) {
           if (pp.state !== 'attack') return null;
           const m = (pp.abilityData || {}).mode;
           opts.t = pp.t;
           if (m === 'charge') { opts.frame = undefined; opts.fps = 12; return 'kirby_run'; }
           if (m === 'butt') { opts.frame = 0; return 'kirby_crouch'; }
-          opts.frame = 0; return 'kirby_jump';
+          opts.frame = undefined; opts.fps = 8; return 'kirby_attack_giant';
         },
       });
       sfx('giant_grow'); sfx('giant_roar');

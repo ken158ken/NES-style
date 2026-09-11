@@ -1535,3 +1535,89 @@ git 已初始化，基線 commit `c382e2a`。Playwright venv：`.venv/bin/python
 
 ## qa5
 （agent 在此追加）
+- [01:35] qa5 起跑：讀完 CLAUDE.md / TASKS Round 5 / PROGRESS（vfx・weapons・magic・forms・ui5・levels5）；
+  自製工具 `shots/agent_qa5/mshot.py`（每招連拍 6 張 + hitbox + 每張 state/VFX list/hitbox 數/missing/magenta 像素計數 + 收招後 240 幀殘留檢查）、
+  `grid.py`（每能力拼成一張 6 幀總表）、`tshot.py`（變身演出連拍）。
+  第一輪 20 能力 × 87 招全部跑完（shots/agent_qa5/mv/*.png、moves.json）。
+  全套測試：engine_test 118/118、enemy_test 393/393、boss_test ALL PASS、test_weapons 94/94、test_magic 102/102、test_forms 139/139、
+  audio_check 全部通過、level_check 0 error / 1 warning（既有拉拉拉出生點）、`node --check` src 全數通過。
+
+## fix5
+
+> Round 5 收尾除錯。擁有檔案：`src/abilities_magic.js`、`src/abilities_forms.js`、`src/art/kirby_forms.js`、
+> `src/art/kirby_magic.js`、`tools/test_magic.py`、`tools/test_forms.py`（**沒有動 player.js / levels.js**）。截圖目錄 `shots/agent_fix5/`。
+
+### 1. clone「空中 X 分身墊腳」無限上升（levels5 跨檔需求 1）
+- **根因**：`onAttack` 的 `pickMode(p,'step',null,'star')` 只看「在不在空中」，沒有任何次數 / 高度上限；
+  每次墊腳都無條件 `p.vy = P.jump * 0.95`，機器人連按 X 就一路疊上去（實測 `y = -8343` → 軟鎖）。
+- **修法**（`abilities_magic.js`）：
+  1. 新增 `cloneAir(p)` —— 一個常駐 `KB.MagicTicker`，每幀在「`onGround` / `climb` / `swim` / `inWater` / `ride` / `door`」時
+     把 `d.stepUsed` 歸零，並在真正踩到地面 / 抓梯子時記下 `d.groundY`。**每次離地只能墊 1 次。**
+  2. 新增 `stepRoom(p)`：這一腳還能往上多少 = `起跳高度(JUMP_H = jump²/2g ≈ 40px) × 2 − 已上升高度`；
+     墊腳的初速用 `min(|P.jump|×0.95, √(2g·room))` 夾住 ⇒ **總高度不超過兩次跳躍**（漂浮上去之後也墊不動）。
+  3. 墊腳不可用時（已用過 / 高度到頂）**不是把招式吃掉**，而是退回地面招「全員吐星」，手感不變、空中照樣能攻擊。
+- **對魔王 0% 傷害的原因**：不是瞄準也不是傷害值 —— `isFoe()` 本來就含 `type==='boss'`，
+  分身自動吐星 dmg 1、X 全員吐星本體 dmg 2 + 分身各 dmg 1，威斯比 `hurt()` 也照吃（invuln 12 幀）。
+  真正原因就是上面的墊腳軟鎖：機器人在魔王房一邊跳一邊按 X，整隻飛到畫面上方再也回不來 ⇒ 全程打不到。
+  墊腳一修好，`--level w1 --ability clone --godmode` 立刻 **cleared，bossDamage=100%**。
+- 另外修掉一個同源問題：`GameScene.loadRoom` 換房是 `entities = []`，被丟掉的 Ticker **不會**被標成 `dead`，
+  舊的 `!t.dead` 判斷會誤以為 ticker 還活著。新增 `tickerAlive(t)`（`!dead && 還在目前 entities 裡`），
+  `cloneAir` 與 `timeHistory` 都改用它；`timeHistory` 重建時順手清空舊房間的座標（否則回溯會把卡比丟回上一個房間的座標）。
+
+### 2. time「↑+X 加速」把卡比推出地圖（levels5 跨檔需求 2）
+- **根因**：舊實作是「每幀補上額外位移」`pp.x += dirIn * P.walk * 0.8`，完全不走 `player.physics()`；
+  牆壁只用 5px 取樣的 `map.isSolidPx` 自己判一次，而**房間邊界外 `map.get()` 回傳空白 ⇒ 一律不是實心**，
+  所以一旦走到最右邊就再也擋不住，一路推到 `x = 6272~6496`（房寬 1024）→ 軟鎖（實測 30000 幀不動）。
+- **修法**：加速的 ticker 改成只做兩件事 —— `pp.running = true`（把 player.js 的輸入速度上限從
+  `P.walk 1.3` 換成 `P.run 2.2`，×1.7）＋ 保險的 `pp.clampToRoom()`。位移、牆壁、斜坡全部交回 `player.physics()`。
+  回溯（空中 X）落點後也補一次 `clampToRoom()`。
+- **順帶的卡關安全閥**：time 原本 `canJump:false` 且**每一招都 `lock:true`**（近身拳 14 幀、時停 34 幀），
+  連打時卡比幾乎走不動 —— 機器人 w1 r0 要 18753 幀（sword 只要 1907），最後超時卡在 r2。
+  改成 `canJump: true` ＋ 近身拳 `lock: false`（拳頭邊走邊打，手感只有變好沒有變弱），
+  `--ability time --godmode` 從「30000 幀 not cleared」變成 **25935 幀 cleared / bossDamage 100%**。
+
+### 3. forms 缺 3 個攻擊精靈（levels5 跨檔需求 3）
+- **根因**：`player.js currentAnim()` 在 `state==='attack'` 時預設要 `kirby_attack_<ability>`；
+  變身系平常靠 `form.spr()` 整體換掉，但只要 form 還沒建立 / 已經解除而能力還在
+  （`--ability` 直接開場的第一幀、巨大化 900 幀到期、受傷解除變身…）就會落回這個名字 ⇒ 洋紅方塊。
+- **修法**（`art/kirby_forms.js`）：補上 4 組各 2 幀 ——
+  `kirby_attack_giant`（新畫的 22×22「巨腳踩踏」：怒眼 + 露牙 + 舉手蓄力 / 雙腳砸地揚塵，比例照 `art/kirby.js` 的 20×20 卡比，
+  `form.scale = 2` 會放大成 44×44）、`kirby_attack_dragon` / `kirby_attack_ghost` / `kirby_attack_mech`
+  （沿用各自的 `*_attack` 幀，風格完全一致）。同時把 giant 的 `form.spr()` 踩踏分支從 `kirby_jump` 改指向新的專用精靈。
+- 驗證：`--scene sheet --filter kirby_attack` 第 4/5 頁無洋紅（`sheet_kirby_attack_p3.png` / `p4.png`），
+  `shot.py --ability giant/dragon/ghost --script "tap attack 1; step 6" --hitbox` 三張 `missing: []`。
+
+### 4. 12 種新能力 `playthrough --level w1 --ability <key> --godmode`（全部 cleared）
+
+| 能力 | 幀數 | cleared | bossDamage | deaths | missing |
+|---|---|---|---|---|---|
+| gunner | 4446 | ✅ | 100% | 0 | [] |
+| ninja | 4239 | ✅ | 100% | 0 | [] |
+| blade | 5037 | ✅ | 100% | 0 | [] |
+| bow | 5380 | ✅ | 100% | 0 | [] |
+| mage | 5176 | ✅ | 100% | 0 | [] |
+| **time** | **25935** | ✅（修前 30000 not cleared） | 100% | 0 | [] |
+| gravity | 5615 | ✅ | 100% | 0 | [] |
+| **clone** | **7006** | ✅（修前軟鎖 y=-8343） | 100% | 0 | [] |
+| giant | 7016 | ✅ | 100% | 0 | [] |
+| dragon | 5358 | ✅ | 100% | 0 | [] |
+| mech | 11960 | ✅ | 100% | 0 | [] |
+| ghost | 6845 | ✅ | 100% | 0 | [] |
+
+### 5. 測試 / 回歸
+- `tools/test_magic.py` **109/109 PASS**（新增 7 條：clone 連按 X 不會無限爬升 / 落地後重新可墊 / 墊完會掉下來、
+  time 加速留在房間內 + 仍會被牆擋下 + 招式後狀態正常）。
+- `tools/test_forms.py` **143/143 PASS**（`SPRITES` 補上 4 個 `kirby_attack_<key>`）。
+- `tools/engine_test.py` **118/118 PASS**；`node --check` 四個檔全過。
+- 截圖（皆已用 Read 開圖確認）：`shots/agent_fix5/` —
+  `sheet_kirby_attack_p3.png`（`kirby_attack_giant` 兩幀）、`sheet_kirby_attack_p4.png`（dragon / ghost / mech）、
+  `sheet_giant_only.png`、`gs_nohb.png`（實戰巨腳踩踏，落地揚塵）、`atk_giant.png` / `atk_dragon.png` / `atk_ghost.png`（`--hitbox`，三張 missing 皆為 []）、
+  `clone_step_1~3.png`（分身墊腳，兩個小分身在場）、`time_haste_run.png`（加速跑）、`giant_idle400.png`。
+
+### 已知問題 / 未完成（fix5）
+- 加速的倍率是 **×1.7**（`P.walk 1.3 → P.run 2.2`）而不是規格寫的 ×1.8：不動 player.js 的前提下，
+  能拿到的最大輸入上限就是 `P.run`。若 player-feel agent 願意加一個 `p.speedMul`（`speed = ... * (p.speedMul||1)`），
+  這裡一行就能換成精確的 ×1.8。
+- 機器人跑 `mech`(11960) / `time`(25935) 還是偏慢（招式演出長、常被打掉能力再去撿），雖然都在 30000 幀內通關，
+  但 time 的餘裕只有約 4000 幀；若之後 w4 / w5 要跑 time，建議 `--maxframes` 開到 45000。
+- **沒有跑 `tools/build.py`**（沿用 levels5 的作法，等總控收尾統一重建 `dist/`）。未 commit。

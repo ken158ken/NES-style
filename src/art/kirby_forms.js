@@ -265,6 +265,56 @@
   S('kirby_ghost_attack', [ghostFrame({ phase: 0, wail: true }), ghostFrame({ phase: 2, wail: true, dy: -2 })], { fps: 10 });
 
   // ======================================================================
+  //  4.5) `kirby_attack_<key>` 預設攻擊幀（fix5）
+  //  player.js 的 currentAnim() 在 state==='attack' 時要的是 `kirby_attack_<ability>`；
+  //  變身系平常靠 form.spr() 整體替換掉，但只要 form 還沒建立 / 已經解除而能力還在
+  //  （--ability 直接開場的第一幀、巨大化時間到、受傷解除變身…），就會落回這個名字 → 洋紅方塊。
+  //  這裡把三個缺的名字補成真正的精靈：dragon / ghost 直接沿用各自的 *_attack 幀，
+  //  giant 另外畫一組「巨腳踩踏」（22×22，風格同 art/kirby.js 的 20×20 卡比，form.scale=2 會放大成 44×44）。
+  // ======================================================================
+  /** 巨大化踩踏：粉紅身體 + 怒眼 + 露牙，frame0 舉手蓄力 / frame1 雙腳砸地（揚塵） */
+  function giantFrame(o) {
+    o = o || {};
+    const g = G(22, 22);
+    const dy = o.dy || 0;
+    // 手臂（舉起 / 往下砸）
+    for (const [ax, ay] of (o.arms || [[2, 12], [19, 12]])) ell(g, ax, ay + dy, 2, 3, 'p');
+    // 身體（比例照 art/kirby.js 的 20×20 卡比：球心略高、腳在最下面兩列）
+    ball(g, 11, 9 + dy, 8);
+    // 臉：怒眼 + 露牙 + 腮紅
+    stamp(g, CHEEK, 5, 11 + dy);
+    stamp(g, CHEEK, 16, 11 + dy);
+    stamp(g, EYE_ANGRY, 8, 6 + dy);
+    stamp(g, EYE_ANGRY, 13, 6 + dy);
+    stamp(g, MOUTH_FANG, 9, 11 + dy);
+    // 腳
+    for (const [fx, fy] of (o.feet || [[4, 17], [12, 17]])) stamp(g, FOOT, fx, fy);
+    // 落地揚塵
+    if (o.dust) {
+      stamp(g, ['o.', '.l'], 0, 18);
+      stamp(g, ['.o', 'l.'], 20, 18);
+      px(g, 9, 21, 'l'); px(g, 12, 21, 'l');
+    }
+    return RS(g);
+  }
+  S('kirby_attack_giant', [
+    giantFrame({ dy: -1, arms: [[3, 4], [18, 4]], feet: [[4, 17], [12, 17]] }),
+    giantFrame({ arms: [[2, 13], [19, 13]], feet: [[1, 17], [15, 17]], dust: true }),
+  ], { fps: 8 });
+  S('kirby_attack_dragon', [
+    dragonFrame({ wing: 2, angry: true, mouth: MOUTH_FANG, feet: [[10, 20], [17, 20]] }),
+    dragonFrame({ wing: 1, angry: true, mouth: MOUTH_FANG, fire: true, dy: -1 }),
+  ], { fps: 10 });
+  S('kirby_attack_ghost', [
+    ghostFrame({ phase: 0, wail: true }),
+    ghostFrame({ phase: 2, wail: true, dy: -2 }),
+  ], { fps: 10 });
+  S('kirby_attack_mech', [
+    mechFrame({ eye: 'y', feet: [[8, 19], [16, 19]] }),
+    mechFrame({ eye: 'y', punch: true, dy: -1, jet: true }),
+  ], { fps: 10 });
+
+  // ======================================================================
   //  5) 投射物
   // ======================================================================
   // 火箭拳 14×12

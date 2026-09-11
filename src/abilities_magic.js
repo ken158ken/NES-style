@@ -118,6 +118,9 @@
     d.tickers.push(t);
     return t;
   }
+  // GameScene.loadRoom 換房時是直接 `entities = []`，被丟掉的 Ticker 不會被標成 dead，
+  // 所以「還活著嗎」一定要連同「還在目前房間的實體表裡嗎」一起判斷（fix5）。
+  function tickerAlive(t) { return !!t && !t.dead && ents().indexOf(t) >= 0; }
   function killTickers(p) {
     const d = data(p);
     for (const t of (d.tickers || [])) t.finish();
@@ -402,8 +405,9 @@
   // 位置歷史（回溯用）：取得能力時開始記錄；以 --ability 直接開場時，第一次攻擊會補開
   function timeHistory(p) {
     const d = data(p);
-    if (d.hist && d.histTicker && !d.histTicker.dead) return d.hist;
+    if (d.hist && tickerAlive(d.histTicker)) return d.hist;
     d.hist = d.hist || [];
+    d.hist.length = 0;                                   // fix5：換房後舊房間的座標不能拿來回溯
     d.histTicker = tick(p, 'hist', {
       life: 1e9, z: 0,
       fn: (pp, t) => {
@@ -436,7 +440,9 @@
 
   def('time', {
     name: '時間', hudName: 'TIME', color: '#60d8f8',
-    duration: 30, hold: false, maxHold: 0, lockMove: true, canJump: false, fps: 8,
+    // fix5：canJump 放開（時停演出中也能起跳），近身拳改成不鎖移動 —— 原本每一招都把腳釘住 14~34 幀，
+    //       連打時卡比幾乎走不動（playthrough 機器人 w1 r0 要 18753 幀，是 sword 的 10 倍，最後超時卡關）。
+    duration: 30, hold: false, maxHold: 0, lockMove: true, canJump: true, fps: 8,
     desc: '懷錶指針一停，世界就跟著停；時停中打出的傷害會在時間恢復的瞬間一起爆開。',
     moves: [['X', '時間停止（180 幀）'], ['時停中 X', '近身連拳（解除時結算）'], ['↓+X', '慢動作'], ['↑+X', '加速'], ['空中 X', '回溯（60 幀前）']],
     hatOffset: { attack: [0, 0] },
@@ -487,7 +493,7 @@
           end: () => { },
         });
       } else if (mode === 'punch') {
-        setup(p, { anim: 'kirby_attack_time_punch', dur: 14, fps: 14, lock: true });
+        setup(p, { anim: 'kirby_attack_time_punch', dur: 14, fps: 14, lock: false });
         const stopped = !!(g && g.timeStopT > 0);
         d.box = KB.hitbox({ x: 0, y: 0, w: 20, h: 16, dmg: stopped ? 0 : 3, owner: 'player', type: 'time', follow: p, ox: 4, oy: -2,
           life: 8, rehit: 0, knock: stopped ? 0 : 1.5,
@@ -520,17 +526,12 @@
         tick(p, 'haste', {
           life: 120,
           fn: (pp, t) => {
-            // player.js 每幀會把 vx 夾回 walk / run，所以改成「每幀補上額外位移」（0.8×walk ≈ 總速 1.8×）
-            const dirIn = (down('right') ? 1 : 0) - (down('left') ? 1 : 0);
-            if (dirIn && Math.sign(pp.vx) === dirIn) {
-              pp.dir = dirIn;
-              const extra = dirIn * P.walk * 0.8;
-              const map = KB.game && KB.game.map;
-              const edge = extra > 0 ? pp.x + pp.w + extra : pp.x + extra;
-              let blocked = false;
-              if (map) for (let yy = pp.y + 2; yy < pp.y + pp.h - 1; yy += 5) if (map.isSolidPx(edge, yy)) { blocked = true; break; }
-              if (!blocked) pp.x += extra;
-            }
+            // fix5：只放大「輸入速度上限」——把 player.js 的 walk(1.3) 上限換成 run(2.2)（×1.7），
+            // 位移與牆壁碰撞完全交給 player.physics()。
+            // 舊版是「每幀補上額外位移」，那條路徑不走物理、房間邊界外 isSolidPx 又一律回 false，
+            // 所以會把卡比推出地圖（w1 r2 實測 x=6496 / 房寬 1024 → 軟鎖）。
+            if (!pp.full) pp.running = true;
+            if (pp.clampToRoom) pp.clampToRoom();   // 保險：任何情況都不讓加速把卡比留在房間外
             if (t.tick % 3 === 0) {
               ghost(pp.cx, pp.bottom, { spr: 'kirby_run', dir: pp.dir, alpha: 0.35, life: 10, tint: '#ffe040' });
               KB.particles(pp.cx, pp.bottom - 3, ['#ffe040', '#ffffff'], 1, { spread: 0.5, grav: 0, life: 10, up: 0, size: 1 });
@@ -549,6 +550,7 @@
         }
         KB.particles(p.cx, p.cy, ['#60d8f8', '#ffffff'], 12, { spread: 2.4, grav: 0, life: 20 });
         p.x = tgt[0]; p.y = tgt[1]; p.vx = 0; p.vy = 0;
+        if (p.clampToRoom) p.clampToRoom();               // fix5 保險：歷史座標若曾在房間外，回溯不把卡比送出地圖
         hist.length = 0;
         KB.particles(p.cx, p.cy, ['#60d8f8', '#ffffff'], 14, { spread: 2.6, grav: 0, life: 22 });
         V('ring', p.cx, p.cy, { r0: 26, r1: 4, frames: 14, color: '#60d8f8', width: 2 });
@@ -560,7 +562,7 @@
     },
     update(p, dt, held) {
       const d = data(p); d.t++;
-      if (d.mode === 'punch') { if (d.box && !d.box.dead && d.t < 8) beat(d.box); p.vx *= 0.8; return; }
+      if (d.mode === 'punch') { if (d.box && !d.box.dead && d.t < 8) beat(d.box); return; }
       if (d.mode === 'stop') {
         p.vx *= 0.7;
         if (d.t % 4 === 0) KB.particles(p.cx + rnd(-16, 16), p.cy + rnd(-16, 16), ['#ffffff', '#60d8f8'], 1, { spread: 0.4, grav: 0, life: 14, up: 0.2, size: 1 });
@@ -899,12 +901,44 @@
   // 取得能力時生成；以 --ability clone 直接開場（不經 onGet）時，第一次攻擊補生成
   function ensureClones(p) {
     if (!KB.game) return [];
+    cloneAir(p);
     const list = clones(p);
     while (list.length < 2) {
       const c = KB.spawn(new CloneKirby(p, list.length));
       list.push(c);
     }
     return list;
+  }
+
+  // ---- 墊腳安全閥（fix5）----------------------------------------------
+  // 舊版「空中 X 分身墊腳」沒有次數上限：連按 X 就能無限往上疊（實測 y = -8343 → 軟鎖）。
+  // 規則改成：① 每次離地只能墊 1 次，落地 / 抓梯子 / 入水才重置；
+  //           ② 墊完的總高度不超過「起跳高度 ×2」（＝這一腳最多再給一次跳躍的份量）。
+  // player.js 沒有「不分狀態的每幀能力鉤子」，所以用 Ticker（換房時被清掉 → 下次攻擊自動重建，
+  // 而換房一定是站在地上，重置本來就該發生）。
+  const JUMP_H = (P.jump * P.jump) / (2 * P.grav);   // 一次跳躍的理論高度 ≈ 40px
+  function cloneAir(p) {
+    const d = data(p);
+    if (tickerAlive(d.airTicker)) return d;
+    d.stepUsed = 0; d.groundY = p.bottom;
+    d.airTicker = tick(p, 'cloneair', {
+      life: 1e9, z: 0,
+      fn: (pp) => {
+        const dd = data(pp);
+        const grounded = pp.onGround || pp.state === 'climb' || pp.state === 'swim' || pp.inWater || pp.state === 'ride' || pp.state === 'door';
+        if (grounded) {
+          dd.stepUsed = 0;
+          if (pp.onGround || pp.state === 'climb') dd.groundY = pp.bottom;
+        }
+      },
+    });
+    return d;
+  }
+  /** 這一次墊腳還能往上多少 px（總高度上限 = 起跳高度 ×2） */
+  function stepRoom(p) {
+    const d = data(p);
+    const gy = d.groundY === undefined ? p.bottom : d.groundY;
+    return Math.max(0, JUMP_H * 2 - Math.max(0, gy - p.bottom));
   }
 
   def('clone', {
@@ -920,6 +954,8 @@
       d.t = 0; d.charged = false; d.rush = 0; d.done = false;
       const list = ensureClones(p);
       d.mode = pickMode(p, 'step', null, 'star');
+      // 墊腳安全閥：這次滯空已經墊過 / 已經飛到上限高度 → 改成地面招（全員吐星），不會卡住手感也不會無限上升
+      if (d.mode === 'step' && (d.stepUsed >= 1 || stepRoom(p) < 6)) d.mode = 'star';
       if (d.mode === 'swap') {
         setup(p, { anim: 'kirby_attack_clone_swap', dur: 20, fps: 12, lock: true });
         const c = list[0];
@@ -941,7 +977,9 @@
       } else if (d.mode === 'step') {
         setup(p, { anim: 'kirby_attack_clone_step', dur: 20, fps: 12, lock: false });
         const c = list[0];
-        p.vy = P.jump * 0.95; p.onGround = false;
+        d.stepUsed = 1;                                   // 每次離地只能墊 1 次
+        const up = Math.min(Math.abs(P.jump) * 0.95, Math.sqrt(2 * P.grav * stepRoom(p)));
+        p.vy = -up; p.onGround = false;
         if (c && !c.dead) {
           c.x = p.cx - c.w / 2; c.y = p.bottom - 2; c.cool = Math.max(c.cool, 20); c.flashT = 10;
           KB.particles(p.cx, p.bottom + 4, ['#ffb0d0', '#ffffff'], 10, { spread: 2, grav: 0.05, life: 16, up: 0.6 });

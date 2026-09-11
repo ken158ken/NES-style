@@ -197,6 +197,18 @@ def phase_time(h):
     check(n + 'haste ticker gone after 120f', all(t != 'magic_haste' for t in magic_ents(h)), magic_ents(h))
     normal_after(h, 'time', n + 'haste')
 
+    # --- fix5：加速只放大速度上限，不能把卡比推出地圖 / 穿牆 ---
+    #     測試地圖 col 34 rows 6~9 是一道牆；從 col 30 一路往右加速應該被牆擋下。
+    h.goto(30, 9, ability='time')
+    press(h, 'up', 3); press(h, 'up,attack', 3); release(h); step(h, 2)
+    press(h, 'right', 200); release(h); step(h, 4)
+    g = gstate(h)
+    pw = h.ev("()=>KB.game.map.pw")
+    check(n + 'haste stays inside the room', 0 <= g['x'] <= pw - 14, dict(x=g['x'], pw=pw))
+    check(n + 'haste still collides with walls', g['x'] < 34 * 16, dict(x=g['x'], wall=34 * 16))
+    step(h, 200)
+    normal_after(h, 'time', n + 'haste wall')
+
     # --- 空中 X 回溯 ---
     h.goto(3, 9, ability='time')
     give(h, 'time')                      # 走 onGet 讓位置歷史從頭記錄
@@ -327,6 +339,28 @@ def phase_clone(h):
     check(n + 'air X gives a second jump (vy goes up)', vy1 < vy0 - 1.5, dict(vy0=vy0, vy1=vy1))
     step(h, 80)
     normal_after(h, 'clone', n + 'clone step')
+
+    # --- fix5：空中連按 X 不能無限墊腳（每次滯空只能 1 次）---
+    h.goto(3, 9); give(h, 'clone')
+    y0 = gstate(h)['y']
+    press(h, 'jump', 14); release(h); step(h, 2)
+    minY = y0
+    for _ in range(16):                       # 機器人式連按：每 8 幀敲一次 X
+        press(h, 'attack', 2); release(h); step(h, 6)
+        minY = min(minY, gstate(h)['y'])
+    check(n + 'air X spam cannot climb forever', minY > y0 - 120, dict(y0=y0, minY=minY))
+    step(h, 180)
+    g = gstate(h)
+    check(n + 'kirby comes back down after the spam', g['y'] >= y0 - 4, g)
+
+    # --- fix5：落地之後可以再墊一次 ---
+    press(h, 'jump', 14); release(h); step(h, 2)
+    vy0 = gstate(h)['vy']
+    press(h, 'attack', 3); release(h); step(h, 2)
+    vy1 = gstate(h)['vy']
+    check(n + 'landing re-arms the clone step', vy1 < vy0 - 1.5, dict(vy0=vy0, vy1=vy1))
+    step(h, 120)
+    normal_after(h, 'clone', n + 'clone step reset')
 
     # --- 蓄力必殺：百裂分身 ---
     h.goto(3, 9); give(h, 'clone'); spawn_dummy(h, 8)

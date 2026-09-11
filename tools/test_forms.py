@@ -527,13 +527,15 @@ def phase_enemies(h):
 # 階段 8：資料與精靈完整性
 # ---------------------------------------------------------------------------
 SPRITES = {
-    'giant': ['hat_giant', 'ui_ability_giant', 'ui_ability_giant_mini'],
+    # `kirby_attack_<key>` 是 player.js currentAnim() 在 state==='attack' 時的預設名字：
+    # form 還沒建立 / 已經解除而能力還在的那幾幀會落回它，沒註冊就會畫洋紅方塊（fix5）。
+    'giant': ['hat_giant', 'kirby_attack_giant', 'ui_ability_giant', 'ui_ability_giant_mini'],
     'dragon': ['kirby_dragon_idle', 'kirby_dragon_walk', 'kirby_dragon_fly', 'kirby_dragon_attack',
-               'proj_dragonball', 'ui_ability_dragon', 'ui_ability_dragon_mini'],
+               'kirby_attack_dragon', 'proj_dragonball', 'ui_ability_dragon', 'ui_ability_dragon_mini'],
     'mech': ['kirby_mech_idle', 'kirby_mech_walk', 'kirby_mech_jump', 'kirby_mech_attack',
-             'proj_rocketfist', 'proj_missile', 'ui_ability_mech', 'ui_ability_mech_mini'],
+             'kirby_attack_mech', 'proj_rocketfist', 'proj_missile', 'ui_ability_mech', 'ui_ability_mech_mini'],
     'ghost': ['kirby_ghost_idle', 'kirby_ghost_walk', 'kirby_ghost_attack',
-              'ui_ability_ghost', 'ui_ability_ghost_mini'],
+              'kirby_attack_ghost', 'ui_ability_ghost', 'ui_ability_ghost_mini'],
 }
 ENEMY_SPRITES = ['bigbloom_walk', 'bigbloom_attack', 'drako_fly', 'drako_attack',
                  'bolt_walk', 'bolt_attack', 'boodee_float', 'boodee_attack', 'proj_drakofire', 'proj_boltbeam']
