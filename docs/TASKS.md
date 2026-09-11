@@ -25,10 +25,11 @@
 - [done] engine_test 新增對應測試，89/89 PASS
 
 ## abilities-enemies（src/abilities.js, enemies.js, entity.js, art/enemies.js, art/kirby.js）
-- [doing] 每能力多招：劍(空中迴旋斬、上挑、蓄力劍氣)、鎚(蓄力大迴旋、空中落地震)、火(火焰衝刺)、冰(冰塊踢)、光束(蓄力波)、刀刃(上拋回收、下劈)、電擊(蓄力放電範圍)、石頭(斜坡滾動、變身多種造型)
-- [todo] 敵人行為：追擊 / 巡邏 / 察覺玩家轉向、被吸入掙扎、群體配置
-- [todo] 新敵人 3 種（含可給新能力或無能力）與對應像素圖，sheet 截圖確認
-- [todo] enemy_test 覆蓋新招式與新敵人
+- [done] 每能力多招（共 26 招）：劍(空中迴旋斬、上挑斬、滿血劍氣)、鎚(蓄力大迴旋、空中落地震、巨鎚敲擊)、火(火焰衝刺、火焰旋轉)、冰(冰塊飛踢、冰晶散射)、光束(蓄力星潮光束、牽星光環)、刀刃(上拋刃、下劈)、電擊(蓄力電擊波、帶電慢走)、石頭(斜坡滾動、3 種隨機造型)；每招都有專屬卡比動畫幀與 moves/desc
+- [done] 敵人行為：`Baddie.notice()` 察覺玩家（11 種敵人套用）、Waddle Doo 扇形掃射、Sir Kibble 回收刀刃、Poppy Bros 拋物線瞄準、Bonkers/Mr Frosty 第二招、Blade Knight 突刺；被吸入掙扎改為 `KB.inhaleWobble` 純繪製偏移
+- [done] 新敵人 3 種：spikeball（滾刺球，無能力）、dartwing（飛羽鳥，無能力）、snowly（雪人，給 ice），含 2 幀走 / 2 幀攻擊像素圖，sheet 截圖已確認
+- [done] enemy_test 覆蓋新招式與新敵人（每招「命中 waddledee 會死」＋新敵人 4 階段；全 PASS）
+- [todo] 等 levels-bosses 把 3 種新敵人放進關卡後，做實戰配置檢視（跨檔需求已寫入 PROGRESS.md）
 
 ## levels-bosses（src/levels.js, bosses.js, items.js, art/bosses.js, art/world.js, backgrounds.js）
 - [doing] 每世界 3 個隱藏收集品（大星星），存 KB.save.stars[levelId] = [bool×3]

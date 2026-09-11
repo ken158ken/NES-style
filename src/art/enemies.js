@@ -1771,4 +1771,212 @@
       '.w.......c..',
     ],
   ], { fps: 14, anchor: 'center' }, { c: '#80d8ff' });
+
+  // ======================================================================
+  // 新增投射物（卡比招式 / 新敵人用）
+  // ======================================================================
+  const pasteR = (base, patch, x, y) => {          // 疊圖（本節專用）
+    const out = base.map(r => r.split(''));
+    patch.forEach((row, j) => {
+      for (let i = 0; i < row.length; i++) {
+        const ch = row[i]; if (ch === '.' || ch === ' ') continue;
+        const yy = y + j, xx = x + i;
+        if (yy < 0 || yy >= out.length || xx < 0 || xx >= out[0].length) continue;
+        out[yy][xx] = ch;
+      }
+    });
+    return out.map(r => r.join(''));
+  };
+
+  // 劍氣（滿血揮砍射出）：新月形綠色斬擊波，anchor center
+  S('proj_swordwave', [
+    [
+      '.......kk...',
+      '.....kkvvk..',
+      '...kkvvuuk..',
+      '..kvvuuuwk..',
+      '..kvuuuwwk..',
+      '.kvuuuwwk...',
+      '.kvuuuwk....',
+      '.kvuuuwk....',
+      '.kvuuuwwk...',
+      '..kvuuuwwk..',
+      '..kvvuuuwk..',
+      '...kkvvuuk..',
+      '.....kkvvk..',
+      '.......kk...',
+    ], [
+      '......kk....',
+      '....kkvvk...',
+      '..kkvvuuuk..',
+      '..kvuuuwwk..',
+      '.kvuuuwwwk..',
+      '.kvuuwwwk...',
+      'kvuuuwwk....',
+      'kvuuuwwk....',
+      '.kvuuwwwk...',
+      '.kvuuuwwwk..',
+      '..kvuuuwwk..',
+      '..kkvvuuuk..',
+      '....kkvvk...',
+      '......kk....',
+    ],
+  ].map(flipH), { fps: 12 });
+
+  // 波動光束（蓄力放開）：巨大黃白能量球，anchor center
+  S('proj_beamwave', [
+    [
+      '......kkkk......',
+      '....kkyyyykk....',
+      '..kkyyYYYYyykk..',
+      '.kyyYYwwwwYYyyk.',
+      '.kyYYwwwwwwYYyk.',
+      'kyYYwwwwwwwwYYyk',
+      'kyYwwwwwwwwwwYyk',
+      'kyYwwwwwwwwwwYyk',
+      'kyYYwwwwwwwwYYyk',
+      '.kyYYwwwwwwYYyk.',
+      '.kyyYYwwwwYYyyk.',
+      '..kkyyYYYYyykk..',
+      '....kkyyyykk....',
+      '......kkkk......',
+    ], [
+      '......kkkk......',
+      '....kkwwwwkk....',
+      '..kkwwyyyywwkk..',
+      '.kwwyyYYYYyywwk.',
+      '.kwyyYYYYYYyywk.',
+      'kwyyYYYYYYYYyywk',
+      'kwyYYYYYYYYYYywk',
+      'kwyYYYYYYYYYYywk',
+      'kwyyYYYYYYYYyywk',
+      '.kwyyYYYYYYyywk.',
+      '.kwwyyYYYYyywwk.',
+      '..kkwwyyyywwkk..',
+      '....kkwwwwkk....',
+      '......kkkk......',
+    ],
+  ], { fps: 10 });
+
+  // 羽刃（Dart Wing 投擲）：白色尖羽，anchor center
+  S('proj_feather', [
+    [
+      '.......kkk..',
+      '..kkkkkeeek.',
+      '.kweeeeeeeek',
+      'kweeeeeeeek.',
+      '.kssssssk...',
+      '..kkkkk.....',
+      '............',
+    ], [
+      '............',
+      '.......kkk..',
+      '..kkkkkeeek.',
+      '.kweeeeeeeek',
+      'kweeeeeeeek.',
+      '.kssssssk...',
+      '..kkkkk.....',
+    ],
+  ], { fps: 10 });
+
+  // ======================================================================
+  // 新敵人 1：Spike Roller（滾刺球）—— 紫色帶刺鐵球，會沿地面滾動
+  // ======================================================================
+  const SPIKE = hi => [
+    '.......ss.......',
+    '..s....ss....s..',
+    '..ss..kkkk..ss..',
+    '....kkmmmmkk....',
+    '...kmmmmmmmmk...',
+    '..kmmmmmmmmmmk..',
+    hi === 0 ? 's.kmmwwmmmmmmk.s' : 's.kmmmmmmwwmmk.s',
+    hi === 0 ? 'sskmmwwwwmmmmkss' : 'sskmmmmwwwwmmkss',
+    hi === 0 ? 'sskmmwwmmmmmMkss' : 'sskmmmmmwwmmMkss',
+    's.kmmmmmmmmMMk.s',
+    '..kmmmmmmmMMMk..',
+    '...kMMMMMMMMk...',
+    '....kkMMMMkk....',
+    '..ss..kkkk..ss..',
+    '..s....ss....s..',
+    '.......ss.......',
+  ];
+  S('spikeball_roll', [SPIKE(0), SPIKE(1)], { fps: 8, anchor: 'center' });
+  // 衝刺：刺變紅、眼睛發光
+  const SPIKE_DASH = hi => SPIKE(hi).map(r => r.replace(/s/g, 'r'));
+  S('spikeball_dash', [
+    pasteR(SPIKE_DASH(0), ['.yy.', 'y..y'], 6, 6),
+    pasteR(SPIKE_DASH(1), ['y..y', '.yy.'], 6, 6),
+  ], { fps: 12, anchor: 'center' });
+
+  // ======================================================================
+  // 新敵人 2：Dart Wing（飛羽鳥）—— 藍身白翼，飛行中投擲羽刃
+  // ======================================================================
+  const DW_UP = [
+    '..kk........kk..',
+    '.kwwk......kwwk.',
+    '.kwwwkkkkkkwwwk.',
+    '..kwwbbbbbbwwk..',
+    '...kbbbbbbbbk...',
+    '...kbbbbbwxbk...',
+    '...kbbbbbwxbkyk.',
+    '...kbbbbbbbbkyyk',
+    '...kbbbbbbbbkyk.',
+    '....kbbbbbbk....',
+    '.....kbbbbk.....',
+    '......kkkk......',
+    '.......rr.......',
+    '................',
+  ];
+  const DW_DOWN = [
+    '................',
+    '.....kkkkkk.....',
+    '...kkbbbbbbkk...',
+    '..kbbbbbbbbbbk..',
+    '..kbbbbbbbbbbk..',
+    '...kbbbbbwxbk...',
+    '...kbbbbbwxbkyk.',
+    '...kbbbbbbbbkyyk',
+    '.kwwkbbbbbbbbkyk',
+    'kwwwkbbbbbbk....',
+    'kwwkkbbbbk......',
+    '.kk...kkkk......',
+    '.......rr.......',
+    '................',
+  ];
+  S('dartwing_fly', [DW_UP, DW_DOWN], { fps: 8 }, { b: '#5088f8', B: '#2848a8' });
+  S('dartwing_throw', [
+    pasteR(DW_UP, ['.kkk', 'keee', 'kss.'], 11, 9),
+    pasteR(DW_DOWN, ['..kkk', '.keee', 'kkss.'], 10, 4),
+  ], { fps: 8, loop: false }, { b: '#5088f8', B: '#2848a8' });
+
+  // ======================================================================
+  // 新敵人 3：Snowly（雪人）—— 會噴冰霧的雪人，吸入給 ice
+  // ======================================================================
+  const SN_BODY = [
+    '......kkkk......',
+    '....kkeeeekk....',
+    '...keeeeeeeek...',
+    '..keexeeeexeek..',
+    '..keeeeeeeeeek..',
+    '..keeeeoooeeek..',
+    '...keeeeeeeek...',
+    '....kkeeeekk....',
+    '...kkeeeeeekk...',
+    '..keeeeeeeeeek..',
+    '.keeeeeeeeeeeek.',
+    '.keeeCCeeCCeeek.',
+    '.keeeeeeeeeeeek.',
+    '.keeeeeeeeeeeek.',
+    '..keeeeeeeeeek..',
+    '...kkeeeeeekk...',
+    '.....kkkkkk.....',
+  ];
+  S('snowly_walk', [
+    SN_BODY.concat(['..krrk....krrk..']),
+    SN_BODY.concat(['...krrk..krrk...']),
+  ], { fps: 5 }, { e: '#f4f8ff', C: '#2090c0' });
+  // 攻擊：嘴巴張開鼓氣（幀 0 吸氣、幀 1 吐冰霧）
+  const SN_ATK0 = pasteR(SN_BODY, ['.kiik.', 'kiiiik', '.kiik.'], 9, 4).concat(['..krrk....krrk..']);
+  const SN_ATK1 = pasteR(SN_BODY, ['.kiiik', 'kiiiii', 'kiiiii', '.kiiik'], 9, 4).concat(['...krrk..krrk...']);
+  S('snowly_attack', [SN_ATK0, SN_ATK1], { fps: 8 }, { e: '#f4f8ff', C: '#2090c0', i: '#c8f4ff' });
 })();

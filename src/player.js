@@ -313,8 +313,6 @@
         if (e.freezeT > 0) continue;
         e.beingInhaled = true; e.inhaleSrc = this;
         e.pullTo ? e.pullTo(mx, my, 2.4) : (e.x += (mx - e.cx) * 0.15, e.y += (my - e.cy) * 0.15);
-        // 被吸的敵人抖動 ±1px（理想作法是在 Entity.draw 加繪製偏移，見 PROGRESS 跨檔需求）
-        e.x += (Math.random() - 0.5) * 2; e.y += (Math.random() - 0.5) * 2;
         if (e.overlapsRect(mouth.x, mouth.y, mouth.w, mouth.h)) {
           e.beingInhaled = false; e.inhaleSrc = null;
           e.onInhaled(this);

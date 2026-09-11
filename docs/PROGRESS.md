@@ -93,7 +93,55 @@ git 已初始化，基線 commit `c382e2a`。Playwright venv：`.venv/bin/python
    建議收工前跑一次 `for f in src/*.js src/art/*.js; do node --check "$f"; done`。
 
 ## abilities-enemies
-（agent 在此追加）
+
+- [2026-09-11 18:20] 完成：**8 能力全部多招化（共 26 招）+ 對應卡比動畫幀 + moves/desc 資料**。
+  招式輸入不需要動 player.js：`onAttack` 內以 `KB.input.down('up')` / `!p.onGround` 判斷，蹲攻走既有 `onCrouchAttack`，
+  蓄力用 `def.hold` + 動態 `def.maxHold`（非按住招式設 0），動畫用 `def.anim` 切換。
+  - 劍：揮砍 / 空中迴旋斬 / ↑上挑斬 / 滿血劍氣（proj_swordwave，僅 HP 全滿）
+  - 鐵鎚：掄鎚 / 蓄力 40 幀大迴旋（3 段判定、邊轉邊前進）/ 空中落地震（震動 5 + 左右衝擊波）/ ↓巨鎚敲擊
+  - 火焰：噴火 / ↓火焰衝刺（火球衝 40 幀、可破方塊）/ 空中火焰旋轉
+  - 冰凍：噴冰 / ↓冰塊飛踢（把凍結敵人變冰塊飛踢出；無凍結敵人則射冰彈）/ 空中冰晶散射（5 道扇形）
+  - 光束：甩光束 / 蓄力 45 幀星潮光束（穿透）/ ↓牽星光環（命中有能力敵人 → 直接取得其能力）
+  - 刀刃：迴旋刃 / ↑上拋刃（上升與落回各一次判定）/ ↓或空中下劈（兩段判定）
+  - 電擊：放電（放電中可慢走 moveSpeed 0.5）/ 蓄力 45 幀電擊波（96×80、20 幀）
+  - 石頭：變石（每次隨機 3 種外觀）/ 斜坡自動加速滾動（dmg 6→8）/ 再按 X 解除
+  新增卡比精靈：`kirby_attack_sword_spin/sword_up/hammer_spin/hammer_drop/fire_dash/fire_spin/ice_kick/ice_burst/beam_charge/beam_capture/cutter_up/cutter_chop/spark_burst`、`kirby_stone_1~3`；
+  新增投射物 `proj_swordwave / proj_beamwave / proj_feather`。蓄力招已接 audio 的 `sfx('charge')` / `sfx('charge_ready')`。
+  驗證：`tools/enemy_test.py --only abilities` 63/63 PASS（每招都有「命中 waddledee 會死」＋「攻擊結束回到正常狀態」）；
+  截圖 `shots/agent_ab/sword_swing_01.png`（劍氣）、`sword_spin_01.png`、`hammer_spin.png`、`hdrop_01.png`（落地震衝擊波）、
+  `fire_dash_01.png`、`beam_wave.png`、`spark_burst.png`、`cutter_chop.png`、`stone_form.png`、`sheet_attack.png`/`sheet_attack2.png`/`sheet_stone.png`。
+  下一步：敵人行為深化與新敵人。
+
+- [2026-09-11 18:30] 完成：**敵人行為深化（11 種）+ 被吸入掙扎 + 原創新敵人 3 種**。
+  - 新增 `Baddie.notice(range,dy)`：距離 <96px 進入警戒（首次冒黃色驚嘆火花），各敵人自行決定反應。
+  - Waddle Dee 受驚小跳 + 加速 1.8×、背後靠太近會回頭；Waddle Doo 光束改 **6 道扇形掃射（-95°→+25°）** 並會轉頭盯人；
+    Hot Head / Chilly / Snowly 逼近到攻擊距離就停（遠程型不貼身）；Rocky 察覺後輾過去；
+    Sir Kibble **接回迴旋刃**（catch → 冷卻縮到 24 幀、白色火花）；Poppy Bros 炸彈改 **拋物線瞄準玩家**（固定上拋初速回推水平速度）；
+    Blade Knight 新增中距離「突刺衝鋒」；Bonkers 新增第二招「大跳撲擊」（落地左右兩道衝擊波）；
+    Mr. Frosty 新增第二招「寒霜吐息」（42×20 凍結判定，近身第 3 次攻擊觸發）。
+  - 被吸入掙扎：`KB.inhaleWobble(e)`（entity.js）每 4 幀左右擺動 ±2px、垂直 ±1px 隨機抖，**純繪製偏移**，Enemy.draw / Baddie.draw 共用。
+  - 新敵人：`spikeball` 滾刺球（無能力，hp3，不怕懸崖、察覺後 2.3 速衝撞、貼圖會旋轉）、
+    `dartwing` 飛羽鳥（無能力，hp2，停在玩家斜上方投擲瞄準的 `proj_feather`）、
+    `snowly` 雪人（給 **ice**，hp3，噴 34×18 凍結寒霧）。三者各有 2 幀走 / 2 幀攻擊像素圖。
+  驗證：`tools/enemy_test.py` **331/332 → 全部 PASS**（新增 spikeball/dartwing/snowly 共 32 項）；
+  截圖 `shots/enemy_spikeball.png`、`shots/enemy_dartwing.png`、`shots/enemy_snowly.png`、`shots/agent_ab/sheet_spikeball.png`/`sheet_dartwing.png`/`sheet_snowly.png`。
+  下一步：等 levels-bosses 把新敵人放進關卡後再看實戰配置。
+
+- [2026-09-11 18:35] 完成：**收工驗證**。`tools/engine_test.py` 89/89 PASS、`tools/enemy_test.py` 全 PASS、
+  `tools/playthrough.py --level w1 --ability hammer --godmode` → `LEVEL CLEAR`（29641 幀、deaths=0、missing sprites: []）。
+  `node --check src/{abilities,enemies,entity}.js src/art/{kirby,enemies}.js` 全部通過。
+
+#### 跨檔需求（abilities-enemies → 其他 agent）
+- **levels-bosses**：請把新敵人放進關卡 —— `spikeball`（建議 w2/w5 有斜坡或長直道的房間，會滾下懸崖）、
+  `dartwing`（建議 w3 浮島 / w4 空中房，會在玩家頭上盤旋丟羽刃）、`snowly`（建議 w2/w4，吸入可拿 ice）。
+  生成格式同其他敵人：`{t:'spikeball', x, y}`。三者都已註冊在 `KB.ENEMIES` 且 `enemy_test` 全 PASS。
+- **player-feel**：被吸入敵人的抖動已改成 `src/entity.js` 的 `KB.inhaleWobble(e)`（純繪製偏移，水平 ±2 每 4 幀、垂直 ±1 隨機），
+  `Enemy.draw` 與 `Baddie.draw` 都已套用 → **player.js `updateInhale` 裡那兩行 `e.x += (Math.random()-0.5)*2; e.y += ...` 可以移除**（那會動到碰撞框）。
+- **ui-menu**：`KB.ABILITIES[key].moves`（`[['X','招名'],…]`，3~4 招）與 `.desc`（一句話風味描述）8 個能力都已補齊，
+  `enemy_test` 有一項專門守住這個資料格式。
+- **levels-bosses（磁磚約定回覆）**：目前 8 能力的招式都不依賴新磁磚字元；火焰衝刺 / 冰彈 / 星潮光束 / 鎚類招式都已設 `breakBlocks`，
+  會打掉 `*`（星星）與 `B`（炸彈）方塊。若之後要做「導火線 F / 暗房 D / 硬磚 X」，判定框的 `kind` 可用 `fire` / `spark` / `hammer` 判斷。
+
 
 ## levels-bosses
 （agent 在此追加）

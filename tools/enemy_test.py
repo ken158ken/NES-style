@@ -37,6 +37,14 @@ WALL_X = 34
 fill(WALL_X, 6, WALL_X, 9, '#')
 WATER_X0, WATER_X1 = 44, 51
 fill(WATER_X0, 8, WATER_X1, 10, '~')
+# 單向平台（row 8，col 56~59）：測試「↑+攻擊」類招式（敵人站在卡比頭上）
+PLAT_X0, PLAT_X1 = 56, 59
+fill(PLAT_X0, 8, PLAT_X1, 8, '=')
+# 石頭滾動用斜坡：col 61~63 高台（頂面 row 7），col 64/65/66 逐級下降的 '\\'，col 67 起回到一般地面
+fill(61, 7, 63, 11, '#')
+for _sx, _sy in ((64, 7), (65, 8), (66, 9)):
+    grid[_sy][_sx] = '\\'
+    fill(_sx, _sy + 1, _sx, 11, '#')
 MAP = [''.join(r) for r in grid]
 TEST_LEVEL = "KB.LEVELS.push(" + json.dumps({
     'id': 'etest', 'name': 'ENEMY TEST', 'theme': 'green', 'music': None, 'boss': None,
@@ -109,11 +117,13 @@ HOOK_JS = r"""() => {
 # 敵人規格
 # ---------------------------------------------------------------------------
 ORDER = ['waddledee', 'waddledoo', 'brontoburt', 'hothead', 'sirkibble', 'sparky', 'rocky', 'chilly', 'bladeknight', 'bonkers', 'mrfrosty',
-         'poppybros', 'scarfy', 'gordo', 'cappy', 'cappy_bare', 'twizzy', 'shotzo', 'squishy', 'glunk', 'kabu']
+         'poppybros', 'scarfy', 'gordo', 'cappy', 'cappy_bare', 'twizzy', 'shotzo', 'squishy', 'glunk', 'kabu',
+         'spikeball', 'dartwing', 'snowly']
 ABILITY = {'waddledee': None, 'waddledoo': 'beam', 'brontoburt': None, 'hothead': 'fire', 'sirkibble': 'cutter', 'sparky': 'spark', 'rocky': 'stone',
-           'chilly': 'ice', 'bladeknight': 'sword', 'poppybros': None, 'cappy': None, 'cappy_bare': None, 'twizzy': None, 'squishy': None, 'glunk': None, 'kabu': None}
+           'chilly': 'ice', 'bladeknight': 'sword', 'poppybros': None, 'cappy': None, 'cappy_bare': None, 'twizzy': None, 'squishy': None, 'glunk': None, 'kabu': None,
+           'spikeball': None, 'dartwing': None, 'snowly': 'ice'}
 NOT_INHALABLE = {'scarfy', 'gordo', 'shotzo', 'bonkers', 'mrfrosty'}
-FLY = {'brontoburt', 'scarfy', 'gordo', 'shotzo'}
+FLY = {'brontoburt', 'scarfy', 'gordo', 'shotzo', 'dartwing'}
 INVINCIBLE = {'gordo', 'shotzo'}
 MINIBOSS = {'bonkers': 'hammer', 'mrfrosty': 'ice'}
 HOPPERS = {'sparky', 'poppybros'}
@@ -129,11 +139,13 @@ def hitbox_touches_player(S, kind):
             if o['type'] == 'hitbox' and o['owner'] == 'enemy' and o['kind'] == kind and overlaps(o, pr): return s['f']
     return None
 HP = {'waddledee': 2, 'waddledoo': 2, 'brontoburt': 2, 'hothead': 2, 'sirkibble': 2, 'sparky': 2, 'rocky': 3, 'chilly': 2, 'bladeknight': 4, 'bonkers': 14,
-      'mrfrosty': 12, 'poppybros': 2, 'scarfy': 2, 'gordo': 999, 'cappy': 2, 'cappy_bare': 2, 'twizzy': 2, 'shotzo': 999, 'squishy': 2, 'glunk': 2, 'kabu': 3}
+      'mrfrosty': 12, 'poppybros': 2, 'scarfy': 2, 'gordo': 999, 'cappy': 2, 'cappy_bare': 2, 'twizzy': 2, 'shotzo': 999, 'squishy': 2, 'glunk': 2, 'kabu': 3,
+      'spikeball': 3, 'dartwing': 2, 'snowly': 3}
 # 各敵人在「玩家 x=3」時的預設生成格（吸入 / 攻擊 / 接觸階段會另外指定）
 SPAWN = {k: dict(ex=8, ey=9) for k in ORDER}
 SPAWN.update({'brontoburt': dict(ex=9, ey=6), 'scarfy': dict(ex=9, ey=7), 'gordo': dict(ex=9, ey=9, a='v', b=2), 'shotzo': dict(ex=10, ey=8),
-              'squishy': dict(px=40, ex=47, ey=9), 'twizzy': dict(ex=12, ey=9), 'kabu': dict(ex=10, ey=9)})
+              'squishy': dict(px=40, ex=47, ey=9), 'twizzy': dict(ex=12, ey=9), 'kabu': dict(ex=10, ey=9),
+              'dartwing': dict(ex=9, ey=6), 'spikeball': dict(ex=9, ey=9), 'snowly': dict(ex=9, ey=9)})
 
 results = []
 VERBOSE = False
@@ -172,6 +184,10 @@ class Harness:
     def spawned(self): return self.ev("()=>__t.spawned()")
     def hurts(self): return self.ev("()=>__t.hurts()")
     def teleport(self, x, y): self.ev("([x,y])=>__t.teleport(x,y)", [x, y])
+    def press(self, keys): self.ev("(o)=>__kb.press(o)", {k: True for k in keys.split(',')})
+    def release(self): self.ev("()=>__kb.release()")
+    def ability_moves(self, key): return self.ev("(k)=>{const d=KB.ABILITIES[k];return {moves:d.moves||null, desc:d.desc||null};}", key)
+    def stone_form(self): return self.ev("()=>KB.player.abilityData && KB.player.abilityData.form")
     def score(self): return self.ev("()=>KB.game.score")
     def save_shot(self, name, data=None):
         if not self.shots: return
@@ -208,8 +224,10 @@ def phase_spawn(h, key):
     ok = not e['dead'] and not e['fellOut'] and not e['inSolid'] and e['active']
     info = dict(x=e['x'], y=e['y'], onGround=e['onGround'], inSolid=e['inSolid'], dead=e['dead'], active=e['active'])
     if key in FLY:
-        ok = ok and abs(e['y'] - e0['y']) < 24 and not e['onGround']
-        check(f'{key}: spawn hovers (no gravity)', ok, info)
+        ok = (ok and not e['onGround']
+              and e['y'] + e['h'] < GROUND_TOP - 6                      # 沒有落到地面
+              and all(abs(s['e']['vy']) <= 1.6 for s in samples))       # 速度不像自由落體（重力會到 4.2）
+        check(f'{key}: spawn hovers (no gravity)', ok, dict(info, maxVy=max(abs(s['e']['vy']) for s in samples)))
     elif key == 'squishy':
         ok = ok and e['inWater'] and all(s['e']['inWater'] for s in samples)
         check(f'{key}: spawn floats in water', ok, info)
@@ -367,13 +385,20 @@ def phase_feature(h, key):
         alive_at = sum(1 for s in S if s['f'] == f0 for o in s['o'] if o['cls'] == 'Bomb')
         thrown_by = sum(1 for b_ in bombs if b_['f'] <= f0) if f0 is not None else 0
         check(n + 'bomb explodes (24x24 enemy hitbox) and disappears', len(boom) >= 1 and boom[0]['w'] == 24 and boom[0]['owner'] == 'enemy' and alive_at == thrown_by - 1, dict(explosions=len(boom), aliveAtBoom=alive_at, thrownByBoom=thrown_by))
-        # 落地 → 爆炸 ≈ 40 幀
+        # 落地 → 爆炸 ≈ 40 幀（若炸彈直接砸中卡比會提早爆，屬正常）
         land = None
         for s in S:
             for o in s['o']:
                 if o['cls'] == 'Bomb' and o['onGround'] and abs(o['vy']) < 0.01 and land is None: land = s['f']
         fuse = (boom[0]['f'] - land) if (boom and land is not None) else None
-        check(n + 'bomb fuse ~40 frames after settling', fuse is not None and 36 <= fuse <= 48, dict(fuse=fuse, land=land, boom=boom[0]['f'] if boom else None))
+        hit_player = any(abs(s['p']['cx'] - (boom[0]['x'] + 12)) < 24 for s in S if s['f'] == boom[0]['f']) if boom else False
+        check(n + 'bomb fuse ~40 frames after settling (or explodes on contact)',
+              (fuse is not None and 36 <= fuse <= 48) or hit_player, dict(fuse=fuse, land=land, boom=boom[0]['f'] if boom else None, onPlayer=hit_player))
+        # 拋物線瞄準：炸彈落點 / 爆點應該落在卡比附近（±48px）
+        bx = boom[0]['x'] + 12 if boom else None
+        pxs = [s['p']['cx'] for s in S if boom and s['f'] == boom[0]['f']]
+        check(n + 'bomb is lobbed toward the player (lands within 48px)',
+              bx is not None and pxs and abs(bx - pxs[0]) <= 48, dict(boomX=bx, playerX=pxs[0] if pxs else None))
         h.save_shot1(key)
     elif key == 'scarfy':
         h.goto(3); h.spawn(key, 9, 7)
@@ -436,6 +461,38 @@ def phase_feature(h, key):
         check(n + 'spits bubbles upward', len(bb) >= 2 and bo and all(o['vy'] < 0 and abs(o['vx']) < 0.01 for o in bo), dict(bubbles=len(bb)))
         check(n + 'bubble rises then vanishes', bo and min(o['y'] for o in bo) < bb[0]['y'] - 40 and not any(o['kind'] == 'bubble' and o['y'] < bb[0]['y'] - 100 for o in bo), '')
         check(n + 'stays put on ground', all(s['e']['vx'] == 0 and s['e']['onGround'] for s in S), '')
+        h.save_shot1(key)
+    elif key == 'spikeball':
+        h.goto(3); h.spawn(key, 6, 9, d=1)
+        S = h.run(160, 4); e = S[-1]['e']
+        dash = [x for x in S if x['e']['state'] == 'dash']
+        check(n + 'notices player and dashes (spikeball_dash, |vx| >= 2)',
+              dash and any(x['e']['spr'] == 'spikeball_dash' and abs(x['e']['vx']) >= 2.0 for x in dash), dict(dashSamples=len(dash)))
+        h.save_shot(key)
+        # 玩家站在坑的另一側（>96px，不觸發察覺），刺球一路滾進坑裡（turnAtEdge 關閉）
+        h.goto(27); h.spawn(key, 16, 9, d=1)
+        S = h.run(260, 5)
+        fell = [x for x in S if x['e']['x'] > PIT_X0 * 16 - 8]
+        check(n + 'rolls over the cliff edge (does not turn back)', bool(fell) or S[-1]['e']['dead'],
+              dict(maxX=max(x['e']['x'] for x in S), dead=S[-1]['e']['dead']))
+    elif key == 'dartwing':
+        h.goto(3); h.spawn(key, 9, 6)
+        S = h.run(240, 5, shot_when='proj'); sp = h.spawned()
+        fe = spawned_of(sp, type='proj', kind='feather')
+        fo = [o for x in S for o in x['o'] if o['kind'] == 'feather']
+        check(n + 'throws aimed feather darts', len(fe) >= 1 and all(f['spr'] == 'proj_feather' for f in fe) and any(x['e']['spr'] == 'dartwing_throw' for x in S), dict(feathers=len(fe)))
+        check(n + 'feather flies toward the player (vx < 0)', bool(fo) and all(o['vx'] < 0 for o in fo), dict(seen=len(fo)))
+        hov = S[-1]['e']
+        check(n + 'hovers above the player, never lands', hov['cy'] < S[-1]['p']['cy'] - 10 and not any(x['e']['onGround'] for x in S), dict(dy=hov['cy'] - S[-1]['p']['cy']))
+        h.save_shot1(key)
+    elif key == 'snowly':
+        h.goto(3); h.spawn(key, 6, 9, d=-1)
+        S = h.run(220, 4, shot_when='hitbox'); sp = h.spawned(); hu = h.hurts()
+        ice = spawned_of(sp, type='hitbox', kind='ice')
+        check(n + 'breathes freezing mist (freeze hitbox + fx_ice)',
+              len(ice) >= 1 and ice[0]['freeze'] and len(spawned_of(sp, type='fx', spr='fx_ice')) >= 3 and any(x['e']['spr'] == 'snowly_attack' for x in S), dict(ice=len(ice)))
+        check(n + 'mist reaches player', hitbox_touches_player(S, 'ice') is not None, dict(hurts=hu))
+        check(n + 'keeps its distance (never walks into the player)', all(abs(x['e']['cx'] - x['p']['cx']) > 18 for x in S), '')
         h.save_shot1(key)
     elif key == 'kabu':
         h.goto(3); h.spawn(key, 10, 9)
@@ -567,6 +624,122 @@ def phase_attack(h, key):
         check(n + 'fx_poof on death', len(spawned_of(sp, type='fx', spr='fx_poof')) >= 1, '')
 
 
+# ---------------------------------------------------------------------------
+# 階段 6：能力招式 —— 每個能力的每一招都要能打死 waddledee（或達成該招的特殊效果）
+#   seq 元素：(按鍵字串 or None, 幀數)；特殊指令：('@air', 上移 px)、('@spawn', 0)、('@tp', 目標 x)
+# ---------------------------------------------------------------------------
+ABILITY_MOVES = [
+    # ability,   label,                 enemy,        ex, ey, seq,                                              wait, px, py
+    ('sword',  'X 揮砍',               'waddledee',   4,  9, [('attack', 3)],                                     40,  3, 9),
+    ('sword',  '滿血 X 劍氣',           'waddledee',   9,  9, [('attack', 3)],                                     50,  3, 9),
+    ('sword',  '空中 X 迴旋斬',         'waddledee',   4,  9, [('@air', 6), ('attack', 3)],                        50,  3, 9),
+    ('sword',  '↑+X 上挑斬',           'waddledee',  57,  7, [('up', 3), ('up,attack', 3)],                       40, 57, 9),
+    ('hammer', 'X 掄鎚',               'waddledee',   4,  9, [('attack', 3)],                                     40,  3, 9),
+    ('hammer', '蓄力 X 大迴旋',         'waddledee',   5,  9, [('attack', 70), ('@spawn', 0), (None, 4)],          70,  3, 9),
+    ('hammer', '空中 X 落地震',         'waddledee',   4,  9, [('@air', 24), ('attack', 3)],                       40,  3, 9),
+    ('hammer', '↓+X 巨鎚敲擊',         'waddledee',   4,  9, [('down', 3), ('down,attack', 3)],                   50,  3, 9),
+    ('fire',   'X 噴火',               'waddledee',   5,  9, [('attack', 32)],                                    30,  3, 9),
+    ('fire',   '↓+X 火焰衝刺',         'waddledee',   9,  9, [('down', 3), ('down,attack', 3), (None, 40)],       20,  3, 9),
+    ('fire',   '空中 X 火焰旋轉',       'waddledee',   4,  9, [('@air', 6), ('attack', 3)],                        50,  3, 9),
+    ('ice',    'X 噴冰',               'waddledee',   5,  9, [('attack', 34)],                                    30,  3, 9),
+    ('ice',    '↓+X 冰塊飛踢（冰彈）',    'waddledee',   5,  9, [('down', 3), ('down,attack', 3)],                   40,  3, 9),
+    ('ice',    '空中 X 冰晶散射',       'waddledee',   4,  9, [('@air', 6), ('attack', 3)],                        50,  3, 9),
+    ('beam',   'X 甩光束',             'waddledee',   5,  9, [('attack', 3)],                                     40,  3, 9),
+    ('beam',   '蓄力 X 星潮光束',       'waddledee',   9,  9, [('attack', 60), ('@spawn', 0), (None, 4)],          70,  3, 9),
+    ('cutter', 'X 迴旋刃',             'waddledee',   5,  9, [('attack', 3)],                                     50,  3, 9),
+    ('cutter', '↑+X 上拋刃',           'waddledee',  57,  7, [('up', 3), ('up,attack', 3)],                       50, 57, 9),
+    ('cutter', '↓+X 下劈',             'waddledee',   4,  9, [('down', 3), ('down,attack', 3)],                   50,  3, 9),
+    ('spark',  'X 放電',               'waddledee',   4,  9, [('attack', 22)],                                    30,  3, 9),
+    ('spark',  '蓄力 X 電擊波',         'waddledee',   6,  9, [('attack', 55), ('@spawn', 0), (None, 4)],          40,  3, 9),
+    ('stone',  'X 變石壓扁',           'waddledee',   4,  9, [('@tp', 56), ('attack', 3)],                        40,  3, 9),
+    ('stone',  '斜坡滾石衝撞',          'waddledee',  70,  9, [('attack', 3)],                                    160, 64, 6, -1),
+]
+
+
+def run_move(h, ability, enemy, ex, ey, seq, wait, px, py, edir=1):
+    """執行一段招式輸入，回傳 (samples, spawned)"""
+    h.goto(px, py, ability=ability, immune=True)
+    pending = any(c[0] == '@spawn' for c in seq)
+    if not pending:
+        h.spawn(enemy, ex, ey, d=edir)
+    for keys, n in seq:
+        if keys == '@spawn':
+            h.spawn(enemy, ex, ey, d=edir); continue
+        if keys == '@air':
+            p = h.player(); h.teleport(p['x'], GROUND_TOP - PLAYER_H - n); h.run(1, 1); continue
+        if keys == '@tp':
+            p = h.player(); h.teleport(n, p['y']); h.run(1, 1); continue
+        h.run(n, n, keys=keys)
+    S = h.run(wait, 5)
+    return S, h.spawned()
+
+
+def phase_abilities(h):
+    for row in ABILITY_MOVES:
+        ability, label, enemy, ex, ey, seq, wait, px, py = row[:9]
+        edir = row[9] if len(row) > 9 else 1
+        nm = f'{ability} [{label}]'
+        try:
+            S, sp = run_move(h, ability, enemy, ex, ey, seq, wait, px, py, edir)
+            e = S[-1]['e']
+            check(nm + ': kills waddledee', e['dead'], dict(hp=e['hp'], x=e['x'], playerState=S[-1]['p']['state']))
+            # 攻擊結束後不可卡在 attack 狀態
+            st = S[-1]['p']['state']
+            check(nm + ': player returns to a normal state', st in ('idle', 'walk', 'run', 'fall', 'jump', 'crouch', 'stone'), st)
+        except Exception as ex_:
+            check(nm + ': raised', False, repr(ex_))
+    # 招式專屬效果
+    S, sp = run_move(h, 'sword', 'waddledee', 9, 9, [('attack', 3)], 40, 3, 9)
+    check('sword 滿血劍氣: spawns proj_swordwave', len(spawned_of(sp, type='proj', spr='proj_swordwave')) >= 1, '')
+    # 非滿血時不射劍氣
+    h.goto(3, 9, ability='sword', immune=False)
+    h.ev("()=>{KB.player.hp = 3;}")
+    h.run(3, 3, keys='attack'); h.run(20, 10)
+    check('sword 劍氣: only at full HP', len(spawned_of(h.spawned(), type='proj', spr='proj_swordwave')) == 0, '')
+    # 冰塊飛踢：把凍住的敵人踢成冰塊投射物
+    h.goto(3, 9, ability='ice', immune=True)
+    h.spawn('bladeknight', 5, 9, d=1)
+    h.run(16, 16, keys='attack'); h.release(); h.run(4, 4)
+    frozen = h.ent()
+    h.run(3, 3, keys='down'); h.run(3, 3, keys='down,attack'); S = h.run(30, 5)
+    ice = [o for x in S for o in x['o'] if o['name'] == 'iceblock']
+    check('ice 冰塊飛踢: frozen enemy becomes a flying ice block',
+          frozen['freezeT'] > 0 and bool(ice) and S[-1]['e']['dead'], dict(freezeT=frozen['freezeT'], blocks=len(ice)))
+    # 牽星光環：命中有能力的敵人 → 直接取得該能力
+    h.goto(3, 9, ability='beam', immune=True)
+    h.spawn('chilly', 5, 9, d=1)
+    h.run(3, 3, keys='down'); h.run(3, 3, keys='down,attack'); S = h.run(30, 5)
+    check('beam 牽星光環: steals the enemy ability (chilly -> ice)',
+          S[-1]['p']['ability'] == 'ice' and S[-1]['e']['dead'], dict(ability=S[-1]['p']['ability'], dead=S[-1]['e']['dead']))
+    # 電擊：放電中仍可緩慢移動
+    h.goto(3, 9, ability='spark', immune=True)
+    x0 = h.player()['x']
+    S = h.run(40, 10, keys='attack,right')
+    check('spark 帶電慢走: can still walk while discharging', S[-1]['p']['x'] > x0 + 8, dict(x0=x0, x1=S[-1]['p']['x']))
+    # 石頭：每次變身隨機外觀（至少出現 2 種）
+    forms = set()
+    for _ in range(12):
+        h.goto(3, 9, ability='stone', immune=True)
+        h.run(2, 2, keys='attack'); h.release(); h.run(2, 2)
+        f = h.stone_form()
+        if f: forms.add(f)
+    check('stone 變身: random appearance (>=2 of kirby_stone_1/2/3)', len(forms) >= 2, sorted(forms))
+    # 石頭：斜坡上會加速滾動且判定提升到 dmg 8
+    h.goto(64, 6, ability='stone', immune=True)
+    h.spawn('waddledee', 70, 9, d=-1)
+    h.run(3, 3, keys='attack'); h.release()
+    S = h.run(150, 3)
+    vmax = max(abs(x['p']['x'] - S[i - 1]['p']['x']) / 3 for i, x in enumerate(S) if i)
+    dmg = h.ev("()=>KB.player.stoneBox ? KB.player.stoneBox.dmg : 0")
+    check('stone 斜坡滾石: accelerates down the slope (>= 2 px/frame)', vmax >= 2.0, dict(maxSpeed=round(vmax, 2)))
+    check('stone 斜坡滾石: smashes the enemy at the bottom', S[-1]['e']['dead'], dict(dead=S[-1]['e']['dead'], px=S[-1]['p']['x']))
+    # moves / desc 資料（ui-menu 說明卡會讀）
+    for k in ['fire', 'sword', 'beam', 'cutter', 'spark', 'stone', 'ice', 'hammer']:
+        d = h.ability_moves(k)
+        ok = bool(d['desc']) and isinstance(d['moves'], list) and len(d['moves']) >= 3 and all(len(m) == 2 and m[0] and m[1] for m in d['moves'])
+        check(f'{k}: has desc + >=3 moves for the pause card', ok, d)
+
+
 def main():
     global VERBOSE
     ap = argparse.ArgumentParser()
@@ -574,6 +747,8 @@ def main():
     ap.add_argument('--hitbox', action='store_true'); ap.add_argument('-v', action='store_true')
     a = ap.parse_args(); VERBOSE = a.v
     keys = [k for k in a.only.split(',') if k] or ORDER
+    run_abilities = (not a.only) or ('abilities' in keys)
+    keys = [k for k in keys if k != 'abilities']
     logs = []
     with sync_playwright() as p:
         b = p.chromium.launch()
@@ -595,6 +770,12 @@ def main():
                     check(f'{key}: {ph.__name__} raised', False, repr(ex))
             errs = [l for l in logs[n0:] if 'pageerror' in l or 'console.error' in l]
             check(f'{key}: no page errors', not errs, errs[:3])
+        if run_abilities:
+            print('-' * 8, 'abilities')
+            n0 = len(logs)
+            phase_abilities(h)
+            errs = [l for l in logs[n0:] if 'pageerror' in l or 'console.error' in l]
+            check('abilities: no page errors', not errs, errs[:3])
         missing = pg.evaluate("()=>__kb.missing()")
         b.close()
     print('---')

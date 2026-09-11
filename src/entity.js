@@ -101,7 +101,8 @@
     ai(dt) { this.walk(); }
     draw(g) {
       if (this.freezeT > 0) { this.drawFrozen(g); return; }
-      g.spr(this.spr, this.cx, this.bottom, this.sprOpts({ t: this.beingInhaled ? 0 : this.t }));
+      const wx = KB.inhaleWobble(this);
+      g.spr(this.spr, this.cx + wx, this.bottom + (this.wobY || 0), this.sprOpts({ t: this.beingInhaled ? 0 : this.t }));
     }
     drawFrozen(g) {
       g.spr(this.spr, this.cx, this.bottom, { frame: 0, flip: this.dir < 0, tint: '#a0e8ff' });
@@ -136,6 +137,15 @@
     }
   }
   KB.Enemy = Enemy;
+  // 被吸入中的掙扎：每 4 幀左右擺動 ±2px（回傳值），並以 e.wobY 做垂直 ±1 隨機抖動。
+  // 這是「只影響繪製」的偏移，不會動到 x / y / 碰撞框 —— player.js 不需要再自行位移敵人；
+  // 其他 agent 若要加吸力表現，請共用這個函式，不要各自再加一份位移。
+  KB.inhaleWobble = function (e) {
+    if (!e || !e.beingInhaled) { if (e) e.wobY = 0; return 0; }
+    e.wobT = (e.wobT || 0) + 1;
+    e.wobY = (e.wobT % 3 === 0) ? (Math.random() < 0.5 ? -1 : 1) : (e.wobY || 0);
+    return (Math.floor(e.wobT / 4) % 2 ? 2 : -2);
+  };
   KB.ENEMIES = KB.ENEMIES || {};
   KB.BOSSES = KB.BOSSES || {};
   KB.ITEMS = KB.ITEMS || {};
@@ -153,7 +163,13 @@
       this.rehit = o.rehit || 0; this.hitSet = new Map(); this.freeze = !!o.freeze; this.knock = o.knock || 0;
       this.breakBlocks = o.breakBlocks !== false; this.z = 5;
       this.onHit = o.onHit || null; this.dir = o.dir || 1;
+      this.onUpdate = o.onUpdate || null;   // 每幀回呼（判定框在擁有者之後更新，可安全改寫擁有者速度）
       this.stone = !!o.stone;
+      // 石頭變身掛勾：player.js 的 startStone 會產生 {stone:true, owner:'player'} 判定框，
+      // 以此通知 abilities.js（隨機外觀 / 斜坡滾動），避免動到 player.js
+      if (this.stone && this.owner === 'player' && KB.ABILITIES && KB.ABILITIES.stone && KB.ABILITIES.stone.onStoneStart) {
+        try { KB.ABILITIES.stone.onStoneStart(this.follow || KB.player, this); } catch (e) { }
+      }
     }
     update(dt) {
       this.baseUpdate(dt);
@@ -163,6 +179,7 @@
         this.dir = d;
         if (f.dead || (f.type === 'enemy' && f.active === false)) this.dead = true;
       }
+      if (this.onUpdate) this.onUpdate(this);
       this.life--; if (this.life <= 0) this.dead = true;
     }
     canHit(e) {
