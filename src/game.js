@@ -62,7 +62,9 @@
         const B = KB.BOSSES[this.level.boss];
         const bx = room.bossPos ? room.bossPos[0] * T : (this.map.pw - 64), by = room.bossPos ? room.bossPos[1] * T : (this.map.ph - 32);
         this.boss = new B(bx, by); this.boss.type = 'boss'; this.boss.z = 2;
-        this.entities.push(this.boss); this.bossIntroT = 150; this.bossName = this.boss.displayName || this.level.bossName || '';
+        // 競技場連戰 5 場，150 幀登場字幕太拖 → 縮成 60 幀（bossIntroMax 供 draw 的淡入淡出用）
+        this.entities.push(this.boss); this.bossIntroMax = this.bossIntroT = ((this.opts && this.opts.arena) || this.arena) ? 60 : 150;
+        this.bossName = this.boss.displayName || this.level.bossName || '';
         this.boss.introducing = true;
       }
       this.updateCamera(true);
@@ -398,8 +400,12 @@
       // 實體（依 z 排序）
       const list = this.entities.filter(e => !e.dead || e === this.player).sort((a, b) => a.z - b.z);
       for (const e of list) e.draw(g);
-      // 粒子
+      // 水層（半透明疊在實體之上）
       this.map.drawWater(ctx, cam, this.t);
+      // R2-P1-14：水層蓋掉水中的卡比 → 水層之後以半透明再畫一次玩家，粉紅色才分得出來
+      const pw = this.player;
+      if (pw && pw.inWater && !pw.dead) { ctx.save(); ctx.globalAlpha = 0.5; pw.draw(g); ctx.restore(); }
+      // 粒子（氣泡 / 水花畫在水層之上才看得到）
       for (const q of this.parts) { ctx.fillStyle = q.color; ctx.fillRect(Math.round(q.x - cam.x), Math.round(q.y - cam.y), q.size, q.size); }
       // 暗房遮罩（room.dark）：卡比周圍以徑向漸層挖亮，火把也會透出小光暈
       if (this.room && this.room.dark) this.drawDark(ctx, cam);
@@ -407,7 +413,7 @@
       for (const pu of this.popups) KB.text(ctx, String(pu.n), pu.x - cam.x, pu.y - cam.y - 8, { color: '#fff', align: 'center', outline: '#203040' });
       // 魔王登場字幕
       if (this.bossIntroT > 0 && this.bossName) {
-        const a = Math.min(1, this.bossIntroT / 20, (150 - this.bossIntroT) / 20);
+        const a = Math.min(1, this.bossIntroT / 20, ((this.bossIntroMax || 150) - this.bossIntroT) / 20);
         ctx.globalAlpha = Math.max(0, a);
         KB.rect(ctx, 0, 70, KB.W, 34, 'rgba(0,0,0,0.55)');
         (KB.UI && KB.UI.text ? KB.UI.text : KB.text)(ctx, this.bossName, KB.W / 2, 74, { color: '#ffe040', align: 'center', size: 12, outline: '#402000' });
@@ -427,8 +433,10 @@
       // 魔王血條
       if (this.boss && !this.boss.dead && this.bossIntroT === 0 && KB.drawBossBar) KB.drawBossBar(ctx, this.boss);
       else if (this.boss && !this.boss.dead && this.bossIntroT === 0) { KB.rect(ctx, 160, 200, 88, 8, '#000'); KB.rect(ctx, 161, 201, Math.round(86 * this.boss.hp / this.boss.maxHp), 6, '#e83030'); }
-      // 提示
-      for (const tt of this.toasts) (KB.UI && KB.UI.text ? KB.UI.text : KB.text)(ctx, tt.msg, KB.W / 2, 40, { color: '#fff', align: 'center', outline: '#000' });
+      // 提示（R2-P2-13：開場橫幅顯示期間 toast 讓到橫幅下方，兩行字才不會互相蓋掉）
+      const bb = (KB.UI && KB.UI.bannerBottom) ? KB.UI.bannerBottom(this) : 0;
+      const toastY = bb ? bb + 4 : 40;
+      for (const tt of this.toasts) (KB.UI && KB.UI.text ? KB.UI.text : KB.text)(ctx, tt.msg, KB.W / 2, toastY, { color: '#fff', align: 'center', outline: '#000' });
       if (this.paused) {
         if (this.pauseMenu) this.pauseMenu.draw(ctx, this);
         else if (KB.drawPause) KB.drawPause(ctx, this);

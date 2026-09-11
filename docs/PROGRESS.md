@@ -667,3 +667,17 @@ git 已初始化，基線 commit `c382e2a`。Playwright venv：`.venv/bin/python
   另補：`r1_abilityflash.png` 顯示**開場橫幅 2 秒內跳 toast 會整行疊在「WORLD n」上、兩行都不可讀** → R2-P2-13 已升級為 **P1**（ui-flow）。
   **mechanics 與 enemies-bosses2 到 20:00 為止仍未在 PROGRESS 回報**（程式已進檔，是直接掃 src 驗的），請兩位補寫，否則總控無法分辨「做完」與「寫到一半」。
   qa2 三部分全部完成；完整報告見 `docs/QA_REPORT.md` 的「# Round 2（qa2 agent）」章節（R2-0 ~ R2-7），截圖 60 張於 `shots/agent_qa2/`。
+
+---
+# Round 3（2026-09-11）
+
+## polish-ui
+- [Round 3] 完成：**R2-P1-14 水中看不見卡比**。`tilemap.js drawWater` 的 `globalAlpha 0.72` → 水體 **0.45**、最上一排水面 **0.66**（水面亮線保留）；`game.js draw()` 在 `drawWater` 之後以 `globalAlpha 0.5` **再畫一次玩家**（僅 `player.inWater && !dead`），粒子（氣泡 / 水花）改排在水層之後才畫。驗證：`shots/agent_polishui/water_w1r0_pond.png`（w1 r0 池塘 x≈52）、`water_w3r0.png`、`water_w3r1.png`（w3 r1 水道）— 三張卡比都明顯是粉紅色且看得到氣泡；對照組 `before_swim_w3r0.png`。
+- [Round 3] 完成：**R2-P2-13 橫幅與 toast 重疊**。`ui.js` 新增 `UI.bannerBottom(game)`（橫幅在畫面上時回傳底部 y=80，否則 0）、橫幅座標抽成 `BANNER.y/h`；`game.js draw()` 的 toast y 改成 `bannerBottom ? +4 : 40`。驗證：`shots/agent_polishui/banner_toast.png`（橫幅「WORLD 1／翠綠草原」＋下方「取得能力：火焰」兩行都可讀）、`toast_normal.png`（橫幅結束後 toast 回到 y=40）。
+- [Round 3] 完成：**R2-P2-16 標題選單壓 logo**。`ui.js` 新增 `UI.TITLE_LOGO_CY=38 / TITLE_MENU_TOP=64 / TITLE_MENU_BOTTOM=182`，logo 中心 46→38（sprite 160×48 ⇒ 佔 y 14~62）；`menu.js TitleMenu.draw` 面板改成固定 y0=64、底部最多到 182，行高 `min(19, floor((182-64-12)/n))` 自動收斂。驗證：`shots/agent_polishui/title_menu.png`（6 項）、`title_menu7.png`（7 項＝全解鎖）— 「STAR」完整露出、底部資訊列與提示列未被壓；對照組 `before_title_menu.png`。
+- [Round 3] 完成：**R2-P2-18 結算關名被切 ＋ ★ 改像素星**。`ui.js ResultScene.draw` 關名 y 24→21、`W n` 29→26、面板 y 40→43（高 150→147），列 y 48→49；「大星星 ★n/3」拆成「大星星」＋ 3 顆 `uifb_star`（`sprAt` 模式 `'c'`，未取得的以 `globalAlpha 0.32` 變暗）＋「n/3」。驗證：`shots/agent_polishui/result_w1.png`（2/3 星）、`result_w3_nostar.png`（0/3 星，含 TOTAL / BEST 列）。
+- [Round 3] 完成：**競技場結算魔王順序斷行**。`arena.js` 新增 `orderLines(names, maxw, o)`：只在名字之間（「→」處）換行，以 `UI.textWidth` 量寬，每行最多 3 個名字、固定 2 行，非末行結尾補「→」；繪製 y 174→170、行距 13→14。驗證：`shots/agent_polishui/arena_result.png`（第 1 行「大樹威斯比→洛洛洛 & 拉拉拉→克拉寇→」、第 2 行「魅塔騎士→迪迪迪大王」，無中文字中間斷行）。
+- [Round 3] 完成：**競技場登場字幕縮短**。`game.js loadRoom` 的 `bossIntroT = 150` 改為 `bossIntroMax = bossIntroT = (opts.arena || this.arena) ? 60 : 150`，`draw()` 的淡入淡出改讀 `bossIntroMax`（否則 60 幀版本不會淡出）。驗證：playwright 走 `KB.ArenaScene()` → 選能力 → Z，實測 `arena=true, bossIntroMax=60`；一般關卡 `w1 r3` 仍為 150。截圖 `shots/agent_polishui/arena_bossintro.png`、`arena_hud.png`。
+- [Round 3] 完成：**HUD 三狀態重疊檢查**。暫停 `shots/agent_polishui/hud_pause.png`（能力卡 + 選單 + HUD 不重疊）、魔王血條 `hud_boss.png`（血條 x 66~156 與左側「普通」x≤60、右側分數不衝突）、競技場 `arena_hud.png`（左能力 / 中 HP + 血條 / 右 ARENA 1/5 + 時間 + 番茄，皆無重疊）。
+- [Round 3] 驗證：`.venv/bin/python tools/engine_test.py` → **118/118 PASS**；`node --check` ui.js / menu.js / arena.js / game.js / tilemap.js 全通過；`tools/playthrough.py --level w1 --godmode` → `cleared=True deaths=0 frames=4443`；`tools/build.py` → `dist/卡比之星.html 763 KB`。未 commit。
+- [Round 3] 未完成 / 已知問題：標題選單 7 項時行高只有 15px（14px 中文行間僅 1px，略擠）——若之後再加選單項目需改成分頁；競技場結算第 1 行順序字串寬約 230px，已接近 240px 上限，若魔王中文名再加長需降到每行 2 個名字。

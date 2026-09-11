@@ -32,6 +32,8 @@
   // 中文可讀性：QA 實測 12px 高筆畫字（繼 / 續 / 圖 / 開）仍糊，選單文字一律 ≥ MS（14px）
   UI.MS = 14;         // 選單 / 標籤標準中文字級
   UI.MS_SMALL = 12;   // 空間真的不夠時的下限（例如兩欄說明表的右欄）
+  // 標題 logo 中心 y（sprite 160×48 ⇒ 佔 y 14~62）與標題選單面板可用的上 / 下界（menu.js TitleMenu 用）
+  UI.TITLE_LOGO_CY = 38; UI.TITLE_MENU_TOP = 64; UI.TITLE_MENU_BOTTOM = 182;
   function zhOpts(str, o) {
     o = o || {};
     if (o.font) return o;
@@ -370,7 +372,8 @@
     draw(ctx) {
       const t = this.t, f = this.frame;
       if (KB.BG && KB.BG.title) KB.BG.title(ctx, 0, 0, t); else drawTitleBg(ctx, this);
-      if (!sprAt(ctx, 'ui_title_logo', 128, 46, 'c')) drawLogoFallback(ctx, 128, 46, t);
+      // logo 160×48，中心 y=38 ⇒ 佔 y 14~62；標題選單面板從 y=64 起，不再壓到「STAR」（R2-P2-16）
+      if (!sprAt(ctx, 'ui_title_logo', 128, UI.TITLE_LOGO_CY, 'c')) drawLogoFallback(ctx, 128, UI.TITLE_LOGO_CY, t);
       // 卡比在草地上跳動（選單開啟時讓到左邊，不被選單蓋住）
       const groundY = 147, bounce = Math.abs(Math.sin(t * 3.4)) * 12, kx = this.menu ? 56 : 128;
       KB.rect(ctx, kx - 7 + Math.round(bounce / 6), groundY - 1, 14 - Math.round(bounce / 3), 2, 'rgba(0,40,0,0.35)');
@@ -632,9 +635,17 @@
 
   // ---------- 關卡開場橫幅（WORLD n + 關名）----------
   // 進入關卡第一房時滑入 → 停 90 幀 → 滑出；純繪製，完全不阻擋操作。
-  const BANNER = { slideIn: 20, hold: 90, slideOut: 20, dist: 320 };
+  const BANNER = { slideIn: 20, hold: 90, slideOut: 20, dist: 320, y: 32, h: 48 };
   const bn = { game: null, start: -1e9 };
   UI.resetLevelBanner = function () { bn.game = null; bn.start = -1e9; };
+  // 橫幅目前是否在畫面上；有的話回傳橫幅底部 y（game.js 把 toast 讓到底下，避免兩行字互相蓋掉 → R2-P2-13）
+  // 必須在 drawLevelBanner 之後呼叫（bn.game 由它初始化）。
+  UI.bannerBottom = function (game) {
+    if (!game || bn.game !== game || game.paused || game.clearT >= 0) return 0;
+    const age = (game.frame || 0) - bn.start, span = BANNER.slideIn + BANNER.hold + BANNER.slideOut;
+    if (age < 0 || age > span) return 0;
+    return BANNER.y + BANNER.h;
+  };
   UI.drawLevelBanner = function (ctx, game) {
     if (bn.game !== game) {
       bn.game = game;
@@ -650,12 +661,12 @@
     let off = 0;
     if (age < BANNER.slideIn) { const u = age / BANNER.slideIn; off = -BANNER.dist * Math.pow(1 - u, 3); }
     else if (age > BANNER.slideIn + BANNER.hold) { const u = (age - BANNER.slideIn - BANNER.hold) / BANNER.slideOut; off = BANNER.dist * u * u * u; }
-    const x = Math.round(23 + off);
+    const x = Math.round(23 + off), by = BANNER.y;
     const n = Math.max(0, KB.LEVELS.indexOf(game.level)) + 1, name = (game.level && game.level.name) || '';
-    panel(ctx, x, 32, 210, 48, 'rgba(10,16,34,0.88)');
-    bigText(ctx, 'WORLD ' + n, x + 105, 37, 2, { color: C.yellow, outline: '#603000', shadow: '#a06000', align: 'center', spacing: 1 });
-    KB.rect(ctx, x + 12, 57, 186, 1, '#405070');
-    fit(ctx, name, x + 105, 60, 190, { color: '#fff', align: 'center', size: 16 });
+    panel(ctx, x, by, 210, BANNER.h, 'rgba(10,16,34,0.88)');
+    bigText(ctx, 'WORLD ' + n, x + 105, by + 5, 2, { color: C.yellow, outline: '#603000', shadow: '#a06000', align: 'center', spacing: 1 });
+    KB.rect(ctx, x + 12, by + 25, 186, 1, '#405070');
+    fit(ctx, name, x + 105, by + 28, 190, { color: '#fff', align: 'center', size: 16 });
   };
 
   // ---------- 過關結算（KB.ResultScene）----------
@@ -681,7 +692,7 @@
         { label: 'SCORE', bm: true, val: score, fmt: pad7, color: '#fff' },
         { label: 'TIME', bm: true, val: g ? Math.max(0, g.timeAlive | 0) : 0, fmt: mmss, color: '#fff' },
         { label: '擊敗敵人', val: g ? Math.max(0, g.kills | 0) : 0, fmt: n => 'x' + n, color: '#fff' },
-        { label: '大星星 ★' + sc + '/' + UI.STAR_MAX, val: sc * STAR_BONUS, fmt: n => '+' + n, color: C.yellow },
+        { label: '大星星', star: sc, val: sc * STAR_BONUS, fmt: n => '+' + n, color: C.yellow },
         { label: 'HP 獎勵 ' + hp + '×' + HP_BONUS, val: hp * HP_BONUS, fmt: n => '+' + n, color: C.yellow },
       ];
       this.total = score + sc * STAR_BONUS + hp * HP_BONUS;
@@ -755,15 +766,30 @@
       drawStars(ctx, this.stars, this.t);
       for (const q of this.conf) KB.rect(ctx, Math.round(q.x), Math.round(q.y), 2, 3, q.c);
       bigText(ctx, 'STAGE CLEAR', 128, 2, 2, { color: C.yellow, outline: '#603000', shadow: '#a06000', align: 'center', spacing: 1 });
-      KB.text(ctx, 'W' + (this.levelIdx + 1), 10, 29, { color: C.cyan, outline: C.dark });
-      fit(ctx, this.levelName, 32, 24, 214, { color: '#fff', size: 16 });
-      panel(ctx, 8, 40, 240, 150);
+      // R2-P2-18：關名（16px）原本畫在 y=24、面板從 y=40 起 → 字底被面板上框線切掉。關名上移 3px、面板下移 3px。
+      KB.text(ctx, 'W' + (this.levelIdx + 1), 10, 26, { color: C.cyan, outline: C.dark });
+      fit(ctx, this.levelName, 32, 21, 214, { color: '#fff', size: 16 });
+      panel(ctx, 8, 43, 240, 147);
       // 逐項：已開始滾動的才顯示
       for (let i = 0; i < this.rows.length; i++) {
-        const r = this.rows[i], y = 48 + i * 18;
+        const r = this.rows[i], y = 49 + i * 18;
         if (i > this.i) continue;
         if (r.bm) KB.text(ctx, r.label, 18, y + 3, { color: '#c8d8f0' });
-        else fit(ctx, r.label, 18, y, 140, { color: '#c8d8f0', size: ms });
+        else {
+          const lw = fit(ctx, r.label, 18, y, 100, { color: '#c8d8f0', size: ms });
+          // 「★」用系統字在 Linux 上會糊 → 改用像素星（uifb_star / ui_star）
+          if (r.star !== undefined) {
+            let sx = 18 + lw + 8;
+            for (let k = 0; k < UI.STAR_MAX; k++) {
+              const on = k < r.star;
+              ctx.save(); ctx.globalAlpha = on ? 1 : 0.32;
+              if (!sprAt(ctx, pick('ui_star', 'uifb_star'), sx, y + 8, 'c')) KB.rect(ctx, sx - 4, y + 4, 8, 8, on ? C.yellow : '#5a6478');
+              ctx.restore();
+              sx += 12;
+            }
+            KB.text(ctx, r.star + '/' + UI.STAR_MAX, sx + 2, y + 5, { color: '#c8d8f0' });
+          }
+        }
         KB.text(ctx, r.fmt(Math.floor(this.cur[i])), 238, y + 3, { color: r.color, align: 'right' });
       }
       KB.rect(ctx, 16, 138, 224, 1, '#405070');

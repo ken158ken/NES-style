@@ -211,9 +211,13 @@
     drawWater(ctx, cam, t) {
       const x0 = Math.max(0, Math.floor(cam.x / T)), x1 = Math.min(this.w - 1, Math.floor((cam.x + KB.W) / T) + 1);
       const y0 = Math.max(0, Math.floor(cam.y / T)), y1 = Math.min(this.h - 1, Math.floor((cam.y + KB.VIEW_H) / T) + 1);
-      ctx.save(); ctx.globalAlpha = 0.72;
+      // R2-P1-14：0.72 的水層會把水中的卡比 / 敵人壓成同一個青藍色。
+      // 水體本身降到 0.45（粉紅的卡比看得出來），最上面一排（水面）保留 0.66 讓水面亮線仍然清楚。
+      ctx.save();
       for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++) {
         if (this.rows[ty][tx] !== '~') continue;
+        const surface = ty === 0 || this.rows[ty - 1][tx] !== '~';
+        ctx.globalAlpha = surface ? 0.66 : 0.45;
         const nm = this.tileSprite(tx, ty, 'green');
         KB.drawSpr(ctx, nm, tx * T - cam.x, ty * T - cam.y, { frame: KB.SPR[nm] && KB.SPR[nm].n > 1 ? Math.floor(t * 3) % KB.SPR[nm].n : undefined, _tl: true });
       }

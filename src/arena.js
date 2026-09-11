@@ -58,6 +58,22 @@
   function levelOfBoss(key) { return KB.LEVELS.find(l => l.boss === key) || KB.LEVELS[0]; }
   function bossRoomIdx(level) { const i = level.rooms.findIndex(r => r.bossRoom); return i >= 0 ? i : Math.max(0, level.rooms.length - 1); }
   function bossNameOf(key) { const l = levelOfBoss(key); return (l && l.bossName) || String(key).toUpperCase(); }
+  // 結算的「對戰順序」排版：只在名字之間（「→」處）換行，中文名絕不斷在字中間。
+  // 每行最多 PER_LINE 個名字，且以 UI.textWidth 量寬，放不下就提早換行；固定輸出 ≤ 2 行（多的併到第 2 行）。
+  const ARROW = '→', PER_LINE = 3;
+  function orderLines(names, maxw, o) {
+    const lines = []; let cur = [];
+    const wOf = arr => UI.textWidth(arr.join(ARROW) + (lines.length === 0 && arr.length ? ARROW : ''), o);
+    for (const nm of names) {
+      const next = cur.concat([nm]);
+      if (cur.length && (next.length > PER_LINE || wOf(next) > maxw)) { lines.push(cur); cur = [nm]; }
+      else cur = next;
+    }
+    if (cur.length) lines.push(cur);
+    // 固定兩行：多出來的名字併回第 2 行（正常 5 名魔王只會產生 2 行）
+    while (lines.length > 2) lines[1] = lines[1].concat(lines.splice(2, 1)[0]);
+    return lines.map((arr, i) => arr.join(ARROW) + (i < lines.length - 1 ? ARROW : ''));
+  }
   KB.arenaBossName = bossNameOf;
 
   function newArena(ability) {
@@ -269,9 +285,9 @@
         KB.text(ctx, rows[i][1], 228, y + 3, { color: rows[i][2], align: 'right' });
       }
       if (this.newBest && ((f >> 3) & 1)) KB.text(ctx, 'NEW RECORD!', 128, 162, { color: C.yellow, align: 'center' });
-      // 這次的對戰順序（名字長，最多折成 2 行）
-      const ol = UI.wrapLines(a.order.map(k => bossNameOf(k)).join('→'), 244, { size: 12 }, 2);
-      for (let i = 0; i < ol.length; i++) T(ctx, ol[i], 128, 174 + i * 13, { color: '#7c8ca8', align: 'center', size: 12 });
+      // 這次的對戰順序：固定兩行、每行最多 3 個名字，只在「→」處換行（中文名不會斷在字中間）
+      const ol = orderLines(a.order.map(k => bossNameOf(k)), 240, { size: 12 });
+      for (let i = 0; i < ol.length; i++) T(ctx, ol[i], 128, 170 + i * 14, { color: '#7c8ca8', align: 'center', size: 12 });
       if ((f % 60) < 42) fit(ctx, 'Z / ENTER：回到標題', 128, 202, 244, { color: '#fff', align: 'center', size: ms });
       UI.drawMuteToast(ctx); UI.drawFade(ctx, this);
     }

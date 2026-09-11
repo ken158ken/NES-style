@@ -377,10 +377,13 @@
     draw(ctx, scene) {
       if (this.page === 'help') { UI.drawHelp(ctx, { hint: 'Z / SELECT：返回選單' }); return; }
       if (this.sub) { this.sub.draw(ctx); return; }
-      const ms = MS(), n = this.items.length, rowH = n >= 6 ? 17 : 19, h = 18 + n * rowH, y0 = 180 - h;
+      // R2-P2-16：面板固定從 logo 底下（y=64）開始、最多長到 y=182（不壓底部資訊列），行高依項目數收斂
+      const ms = MS(), n = this.items.length;
+      const y0 = (UI.TITLE_MENU_TOP || 64), bot = (UI.TITLE_MENU_BOTTOM || 182);
+      const rowH = Math.max(14, Math.min(19, Math.floor((bot - y0 - 12) / n))), h = 12 + n * rowH;
       panel(ctx, 112, y0, 136, h);
       for (let i = 0; i < n; i++) {
-        const y = y0 + 8 + i * rowH, sel = this.sel === i;
+        const y = y0 + 6 + i * rowH, sel = this.sel === i;
         if (sel) cursor(ctx, 124, y + 3, this.frame);
         T(ctx, this.items[i].label, 142, y, { color: sel ? C.yellow : '#fff', size: ms });
       }
