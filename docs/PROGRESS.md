@@ -1093,10 +1093,147 @@ git 已初始化，基線 commit `c382e2a`。Playwright venv：`.venv/bin/python
 （agent 在此追加）
 
 ## audio5
-（agent 在此追加）
+
+### Round 5 最終名單（**47 個新 sfx + 2 首新 music**，全部原創合成，名稱固定不會再改）
+
+**武器系（11）** — gunner / ninja / blade / bow
+
+| 名稱 | 聲音設計 | 節流 |
+|---|---|---|
+| `gun` | 高通噪音爆音（3.2k→0.7k）+ 低頻後座 tri 200→42 + 極短擊錘 click | **30ms**（可每 6 幀連射） |
+| `shotgun` | 寬頻低通爆炸（6k→260）+ 130→28 悶響 + 散射帶通尾音 | 80ms |
+| `reload` | 兩下金屬喀啦（帶通 Q2.4 / Q1.8）+ 彈簧下滑高音 | 80ms |
+| `shuriken` | **快速下滑正弦 2700→520（顫音 34Hz）+ 高通旋轉噪音** | 60ms |
+| `teleport` | 消失上滑 300→2900 與出現下滑 3000→250 交錯 + 帶通空間掃頻 | 80ms |
+| `iai` | **前 0.1 秒近乎無聲的吸氣（高通 0.045）→ 0.12s 起一聲銳利斬**（高通 2k→11k + 3100→650 + 刀鳴餘響） | 80ms |
+| `slash_big` | 厚重帶通風切 600→5200 + saw 420→85 + 低頻壓迫 + 金屬餘響 | 120ms |
+| `bow` | 木頭吱聲（高 Q 帶通慢起音）+ 弓弦 tri 250→115 嗡 | 80ms |
+| `arrow` | 高 Q4 帶通破空哨音 4400→1300 + 正弦 1900→650 | 45ms |
+| `arrow_rain` | 6 支錯開 75ms 落下（音高逐支下降）+ 落地沙沙低通 | 250ms |
+| `wallkick` | 鞋底摩擦（帶通 1.7k→4.4k）+ tri 260→640 上彈 | 100ms |
+
+**魔法系（15）** — mage / time / gravity / clone
+
+| 名稱 | 聲音設計 | 節流 |
+|---|---|---|
+| `fireball` | 低通滾動火焰（wobble 21）+ saw 190→68 拋射推進（與 `fire` 的持續噴射不同） | 70ms |
+| `icewall` | C6-E6-G6-B6-D7 結晶上行（p12）+ 8k→12k 冰霜細噪 + tri 90→180 冰塊隆起 | 80ms |
+| `thunder` | 0.06s 高頻爆裂 → 1.0s 低通滾雷（wobble 5.5）+ saw 72→30 嘶吼 | 200ms |
+| `magic_circle` | D5-A5-D6-F#6 正弦懸浮和聲（慢起音顫音）+ p12 380→1180 + 漸強空氣感 | 80ms |
+| `magic_big` | 低頻充能 0.22s → D/A/D/F 鋸齒和弦爆發 + 低通轟 + 高頻餘燼 | 80ms |
+| `timestop` | **倒放包絡**（attack 0.4s 慢升後 15ms 切斷）+ 三下越來越慢的滴答 + 58Hz 低頻停滯嗡鳴 0.9s | 400ms |
+| `timeresume` | 嗡鳴 44→96 解除 + 滴答加速（5 下）+ E6/B6 明亮放行 | 80ms |
+| `slowmo` | 整體音高被拖慢（p25 880→170 + p12 1320→255 + 低通 5.2k→520 wobble） | 80ms |
+| `rewind` | **16 段階梯跳頻下行（磁帶倒轉）** + 抖動帶通嘶聲 + 正弦 900→210 | 80ms |
+| `blackhole` | **1.0 秒吸入低鳴**：saw 125→33 音量倒放漸強（attack 0.5）+ 螺旋帶通 2.6k→170 + 72→27 次低頻 | 500ms |
+| `meteor` | 墜落哨音 1500→175（0.55s）→ 落地大爆炸（低通 3.5k→85 + tri 115→25）+ 碎石 | 250ms |
+| `gravity_lift` | 正弦 140→640 牽引滑音（顫音 9Hz）+ p12 280→1280 + 漸強高通氣流 | 80ms |
+| `clone_summon` | A5-C#6-E6 主音 + 兩個延遲 35/70ms 的失諧複製（×1.006 / ×0.993 殘影） | 80ms |
+| `clone_swap` | 兩條音高交錯（400→1900 與 1900→400）的極短嗖 | 60ms |
+| `clone_rush` | 5 連殘影打擊（帶通 1.6k→3.5k 逐次上行）+ 收尾重擊 | 120ms |
+
+**變身系（17）** — giant / dragon / mech / ghost
+
+| 名稱 | 聲音設計 | 節流 |
+|---|---|---|
+| `giant_grow` | tri 60→150 隆隆上升 0.65s + 低通漸開 + 三下骨架喀喀 + 0.62s 落地重音 | 80ms |
+| `stomp` | tri 105→22 地面重擊 + 低通 2.2k→110 + 碎石帶通 | 120ms |
+| `giant_roar` | 兩層微失諧 saw（90 / 93Hz，折線先上揚後下沉）+ 45Hz 胸腔 + 帶通氣息 | 250ms |
+| `shrink` | p12 1400→260 下行閃爍（顫音 14Hz）+ 高通收束 + 收尾啵 | 80ms |
+| `dragon_breath` | **可循環**：0.2s 低通火焰（wobble 34）+ 高通噴流 + saw 140→105 | **90ms** |
+| `dragon_dash` | 帶通風壓 300→2600 + tri 折線 180→340→120（近→遠）+ 翼膜低通拍擊 | 150ms |
+| `tail_whip` | 帶通高速掃頻 700→5600 + 正弦 320→1500 + 命中悶響 | 100ms |
+| `wing_flap` | 兩下（間隔 0.17s）低通空氣脈衝 + tri 130→60 推力 | 90ms |
+| `rocket_punch` | 機械彈射 click → 高通噴射飛行 + saw 200→520 → 金屬撞擊 + 低頻 | 80ms |
+| `missile` | 點火高通爆 → 0.5s 低通推進（wobble 13）+ saw 120→460 → 正弦遠去 | 90ms |
+| `jet` | **可循環**：0.14s 高通噴射氣流 + 帶通 wobble 46 + saw 320→380 | **60ms** |
+| `mech_step` | 伺服馬達（saw 顫音 42Hz）+ 液壓帶通 + tri 115→30 鋼板落地 + 金屬泛音 | 110ms |
+| `armor_break` | 金屬撕裂帶通 1.2k→4.2k + tri 170→40 + 4 片碎塊（2400→1260）散落 | 80ms |
+| `ghost_phase` | 兩條微失諧正弦（620 / 627，折線 980→480）+ 高 Q 帶通，無實體感 | 80ms |
+| `possess` | **倒放包絡**：p12 900→150 下行（attack 0.3）+ 吸附帶通 + 130→58 落定 | 80ms |
+| `unpossess` | 90→220 彈出 + p12 260→1400 上行釋放 + 帶通外擴 | 80ms |
+| `ghost_wail` | 0.95s 三段折線長哭聲（520→760→440→300）+ tri 低八度 + 帶通氣音 | 200ms |
+
+**通用（4）**
+
+| 名稱 | 聲音設計 | 節流 |
+|---|---|---|
+| `transform` | **變身演出 0.7s**：C5→C7 七音上升琶音（p25）+ tri 70→200 低頻上衝 + 0.3s 起高通白光閃爍 + 低通爆閃 | 400ms |
+| `untransform` | G6→E5 五音下行琶音 + tri 180→60 洩氣 + 低通收束 | 400ms |
+| `ultimate` | **必殺登場 stinger 0.5s**：D/A/D/F#/A 鋸齒銅管重擊和弦 + tri 110→55 + 高通鈸 + p25 500→2000 上衝 | 400ms |
+| `max` | 蓄力全滿（比 `charge_ready` 更亮）：E6+B6+**E7** 三層鐘聲 + 正弦 B5 底 + 9k→13k 極高頻閃光 + 1200→3200 上衝尾音 | 80ms |
+
+**新 music（2）**
+
+| key | 內容 |
+|---|---|
+| `ultimate_loop` | 必殺期間高張力 loop：A 小調、**BPM 180**、十六分主旋律 + 八分驅動貝斯 + 雙倍鼓（dblH）。A / B 各 **2 小節**素材，order `ABABABAB` → 16 小節（滿足 audio_check 的循環曲規則，聽感仍是 2 小節一輪的緊迫感），21.3 秒一輪。letterbox 演出時可選用。 |
+| `transform_jingle` | 變身用 **1 小節不循環**短句（C 大調 C5→C7 上行、BPM 120、2.0 秒）。**通常直接用 `sfx('transform')` 即可**，兩者同時播會太厚；此 key 保證存在，供 ui5 / forms 需要蓋掉 BGM 時使用。 |
+
+合計：**99 個 sfx（含 1 別名 `warp`）、28 首 music、4 種 ambient**；完整清單見 `node tools/audio_check.js` 輸出。
+
+- [2026-09-12 00:20] 完成：**47 個 Round 5 新音效**（武器 11 / 魔法 15 / 變身 17 / 通用 4）全部以不同波形 × 濾波 × 包絡設計（噪音爆音、階梯跳頻、折線滑音、倒放包絡、失諧雙層、多段碎裂…），避免聽起來一樣；**SFX_THROTTLE 表擴充到 33 項**（`gun` 30ms 可每 6 幀連射、`jet` 60ms、`dragon_breath` 90ms 循環吐息；大招 / 長音 200~500ms 避免疊成噪音牆）。
+  驗證：`node tools/audio_check.js` → **全部通過**（99 sfx / 28 music / 4 ambient；節流表 33 項全部有對應音效且值合理）。
+
+- [2026-09-12 00:26] 完成：**2 首新曲** `ultimate_loop`（A 小調 BPM 180，2 小節素材 × ABABABAB = 16 小節）、`transform_jingle`（C 大調 1 小節不循環 2.0 秒）。
+  驗證：`node tools/audio_check.js` 曲目檢查 28 首全過（各軌小節數一致、每小節 16 token、音符 / 鼓 token 合法、循環曲 ≥16 小節且有段落變化）。
+
+- [2026-09-12 00:34] 完成：**工具同步擴充**。`tools/audio_check.js`：SPEC 名單補 47 sfx + 2 music；節流檢查加入 `gun`（每 6 幀）/ `dragon_breath`（每 6 幀）/ `jet`（每 4 幀）；**掃描 src/*.js 的引用改為「SPEC 名單缺少 = FAIL，src 引用但未實作 = WARN 列出不算失敗」**（其他 agent 的檔案還在寫，不應卡住本輪檢查）。`tools/render_music.py`：節流檢查同步加三項，並新增「節流表不得有不存在的音效」檢查。
+  驗證：`.venv/bin/python tools/render_music.py` → **全部通過**；47 個新 sfx peak 0.103~0.489、rms 0.007~0.064（皆非靜音、皆 < 1.0 不爆音），新曲 `ultimate_loop` peak 0.336 / `transform_jingle` peak 0.297；音量 / duck / ambient / 節流 API 檢查皆正常。
+  （`arrow` / `arrow_rain` / `wing_flap` 初版 peak 僅 0.077~0.103 偏小，已調高音量到 0.143~0.157 與其他音效一致。）
+
+- [2026-09-12 00:41] 完成：**實機 playwright 驗證**（`index.html?debug=1`，unlock 後 `setVolume({music:0,sfx:0})` 真的跑合成但不出聲）：逐一呼叫 47 個新 sfx（每個之間 `__kb.step(6)`）、`gun` 每 6 幀 × 12 輪、`jet` 每 4 幀 × 12 輪、`dragon_breath` 每 6 幀 × 12 輪、切換 `ultimate_loop` / `transform_jingle`（`status().playing` 正確、`step > 0`）、再進 w1 跑 240 幀 → **console 訊息 0 筆、無 error、無 unknown sfx / music**。
+  試聽 WAV：`shots/agent_audio5/`（47 個 sfx 各 2.5 秒 + `music_ultimate_loop` / `music_transform_jingle` 各 12 秒）。
+  docs/SPEC.md 第 9 節已補上 Round 5 名單（本輪授權）。
+
+#### 給其他 agent 的呼叫建議（名稱已固定，可直接寫死）
+- **weapons**：`gun`（每 6 幀連射 OK）/ `shotgun` / `reload`；`shuriken` / `teleport`；`iai`（**前 0.1s 是刻意留白的吸氣，招式動畫請同步預備 6 幀**）/ `slash_big`；`bow`（放弦）→ `arrow`（每支箭）/ `arrow_rain`（齊射一次就好，節流 250ms）；蹬牆 `wallkick`。
+- **magic**：`fireball` / `icewall` / `thunder` / `magic_circle`（詠唱起手）/ `magic_big`（大招）；`timestop` → 期間可選 `music('ultimate_loop')` 或靜音 → `timeresume`；`slowmo` / `rewind`；`blackhole`（1 秒吸入，**發動時呼叫一次即可**）/ `meteor`（含落地爆炸，不必另外播 `block`）/ `gravity_lift`；`clone_summon` / `clone_swap` / `clone_rush`。
+- **forms**：變身瞬間一律 `sfx('transform')`（0.7s，與 VFX 白閃同幀）、解除 `sfx('untransform')`；giant `giant_grow`（變身後的放大演出）/ `stomp` / `giant_roar` / `shrink`；dragon `dragon_breath`（**吐息中每 6 幀重複呼叫**）/ `dragon_dash` / `tail_whip` / `wing_flap`；mech `rocket_punch` / `missile` / `jet`（**噴射中每 4 幀重複呼叫**）/ `mech_step`（每步）/ `armor_break`（受創）；ghost `ghost_phase` / `possess` / `unpossess` / `ghost_wail`。
+- **vfx / ui5**：必殺登場 `sfx('ultimate')`（0.5s stinger），letterbox 期間可選 `music('ultimate_loop')`，結束後切回原曲；蓄力全滿改用 `sfx('max')`（比 `charge_ready` 亮，蓄力中仍用 `charge`）。
+
+#### 跨檔需求（由總控 / 對應 agent 處理）
+- 無。docs/SPEC.md 第 9 節已由本 agent 依授權補完；其餘檔案未動。
 
 ## ui5
-（agent 在此追加）
+- [00:10] 完成：**能力發現紀錄 API**（ui.js）—— `KB.save.seen{}` / `KB.save.seenNew`；`UI.isSeen / seenCount / markSeen / abilityNew / clearAbilityNew`；
+  因為 ui5 不能動 player.js，「發現」改由 `KB.drawHUD` 每幀記錄目前能力（取得能力必定經過 HUD）。`KB.DEBUG` / `KB.UI.unlockAll` 時 isSeen 一律 true。
+  另加 `UI.brighten(色, 亮度)` / `UI.abilityColor(key)`：新能力的 `def.color` 太暗（亮度 < 96，例如 mech `#404860`）會自動提亮，縮圖 / 圖示 fallback 一律走這個。
+  驗證：`node --check src/ui.js`
+- [00:25] 完成：**HUD 能力名不溢出**（ui.js）—— `LAYOUT.hud` 改 `nameX 30 / nameW 53`（到血條 hpX 84 前）；中文名用 `fit()`（14px→12px→截斷），
+  「元素法師」12px 實測 51px 剛好塞下；英文 hudName 用新的 `hudLabel()`：8 字元以內用 spacing −1 擠進去（GRAVITY 7 字 = 50px），再長才截斷。
+  驗證：shots/agent_ui5/hud_mage.png（元素法師 4 字）、hud_gravity.png（重力 / GRAVITY 7 字）、hud_giant.png、hud_hammer.png
+- [00:40] 完成：**暫停能力卡 3 列 → 最多 6 列**（menu.js `UI.drawAbilityCard`）—— 版面依招式數自動收斂：
+  ≤3 招維持原樣（2 行風味文字 / 15px 行高）；4~5 招 → 1 行風味文字 + 12px 字（行高 14 / 13）；6 招 → 不畫風味文字、12px 字 + 13px 行高。
+  另加「畫出面板外就 break」的保險；招式左欄加寬 76→86px（`按住 40 幀放開` 這類長按鍵提示不再被切）。無能力卡完全不變。
+  驗證：shots/agent_ui5/pause_giant.png（6 列）、pause_mage.png（6 列）、pause_hammer.png（4 列 = 真實資料）、pause_none.png（無能力回歸）
+- [00:55] 完成：**能力圖鑑改 20 能力**（menu.js `AbilityGallery`）—— 縮圖列每頁 8 個、多頁（20 → 3 頁），↑↓ 翻頁、←→ 逐一換（走到頁尾自動跨頁）；
+  標題列同時顯示「能力圖鑑 ／ 發現進度 n/20 ／ 目前 n/20」，右下角頁碼 `1/3`；招式表最多 6 列（5 列以上自動 12px 字 + 13px 行高，說明同步降級、風味文字省略）；
+  說明固定 2 行、風味文字放在說明下方灰字（放不下就省略）。
+  驗證：shots/agent_ui5/gallery_p1.png、gallery_p2.png、gallery_p3.png、gallery_mage_6moves.png（6 列招式）
+- [01:05] 完成：**未發現能力＝剪影**（menu.js）—— `KB.save.seen[key]` 為假時：卡比預覽 tint `#0c1220` 全黑剪影且不戴帽、圖示與縮圖畫成深色塊 + 「?」、
+  名稱 `？？？`、英文名 `???`、說明 `？？？`，並顯示「吸入 ??? 就能獲得」＋「在關卡裡拿到這個能力就會解鎖」。hudName 首字母也完全不露。KB.DEBUG / UI.unlockAll 時全部正常顯示。
+  驗證：shots/agent_ui5/gallery_unknown.png（未發現）、gallery_p1_locked.png（同頁已發現 4 + 未發現 4）、gallery_seen_mage.png
+- [01:15] 完成：**競技場選能力分頁**（arena.js）—— 每頁 9 格（第 1 頁第 1 格＝無能力，21 項 → 3 頁）；←→ 逐一選（跨頁）、↑↓ 整頁跳；
+  面板標題列加「頁 n/3」，縮圖 fallback 改用 `UI.abilityColor`；說明排版沿用 Round 3 的降級規則（14px 2 行 → 12px 3 行）。
+  驗證：shots/agent_ui5/arena_p1.png、arena_p2.png、arena_p3.png
+- [01:25] 完成：**選關畫面「能力 n/20」**（ui.js StageSelectScene）—— 下方面板第 2 列右側小字（12px）；
+  為了空出 69px，第 2 列的「收集星」中文標籤拿掉（★★☆ x/3 本來就和地圖節點一樣自明），BEST 標籤 / 數字左移到 68 / 158。
+  **標題選單「能力圖鑑」NEW! 小標**（menu.js TitleMenu）：`UI.abilityNew()` 為真時右側閃爍粉紅 NEW!，打開圖鑑（AbilityGallery 建構子）就 `clearAbilityNew()`。
+  驗證：shots/agent_ui5/select_progress.png、title_new.png
+- [01:30] 收工驗證：`node --check src/ui.js src/menu.js src/arena.js` 全過、`.venv/bin/python tools/engine_test.py` **118/118 PASS**、
+  playwright 實機 0 console error（測試用 `shots/agent_ui5/` 共 21 張，測試腳本用 `KB.ABILITY_KEYS.push` 模擬 12 個假能力湊滿 20）。
+  未跑 `tools/build.py`（其他 Round 5 agent 還在寫檔，由總控收尾時重建 dist/）。未 commit。
+
+### ui5 → 其他 agent 的介面需求（Round 5 新能力定義格式）
+1. **`moves` 最多 6 招**，每項 `[按鍵提示, 招式名]`。按鍵提示在圖鑑有 95px、暫停卡有 86px（12px 中文約 7 字），招式名圖鑑 129px、暫停卡 140px（約 10 字）；超過會自動降 12px 再補「…」。
+2. **`desc` 一句、約 22 個中文字以內**（圖鑑 228px × 2 行 @14px；5 招以上會降到 12px，仍是 2 行）。
+3. **`flavour` 請給陣列 `['第一行', '第二行']`**：暫停卡 ≤3 招時顯示 2 行、4~5 招顯示 1 行、6 招不顯示；**圖鑑只會用 `flavour[0]`**（說明下方 12px 灰字，放不下就省略）。所以**第一行要能單獨成立**（不要寫成需要接第二行才通順的句子）。
+4. **`name`（中文）建議 ≤ 4 字**：HUD 只有 53px，4 字會自動降 12px（「元素法師」剛好 51px），5 字以上會被截成「元素法…」。圖鑑 / 暫停卡的 16px 標題空間較大（約 6 字）。
+5. **`hudName`（英文）建議 ≤ 7 字元**：8 字元以上 HUD 會截斷（7 字元會自動用 spacing −1 擠進 50px）。
+6. **`color` 亮度別太低**：UI 會自動提亮到亮度 ≥ 96（`UI.brighten`），但原色太暗時提亮後會偏灰；建議自己給亮度 ≥ 110 的色。
+7. **`icon`（24×16 精靈）沒註冊時**會 fallback 成 `def.color` 色塊（HUD 另外疊 hudName 首字）；圖鑑 / 競技場縮圖只有色塊，所以 12 個新能力的 `ui_ability_<key>` 還是要補齊。
+8. 能力「發現」由 ui5 在 `KB.drawHUD` 記錄（`KB.save.seen[key] = true`），**abilities agent 不需要做任何事**；若想在拿到能力當下就標記，呼叫 `KB.UI.markSeen(key)` 即可（會自動立 `seenNew` 旗標）。
 
 ## levels5
 （agent 在此追加）

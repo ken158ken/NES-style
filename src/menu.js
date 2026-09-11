@@ -103,11 +103,13 @@
       moves: (d && d.moves) || t.moves || [],
       icon: key ? ((d && d.icon) || ('ui_ability_' + key)) : 'ui_ability_none',
       hat: key ? ((d && d.hat) || ('hat_' + key)) : null,
-      color: (d && d.color) || '#f8a0c8',
+      color: key ? UI.abilityColor(key) : '#f8a0c8',
     };
   };
 
-  // 能力卡片（暫停畫面上半）：需要 w ≥ 200、h ≥ 114（名稱 / 2 行風味文字 / 3 列招式）
+  // 能力卡片（暫停畫面上半）：需要 w ≥ 200、h ≥ 114
+  // Round 5：招式最多 6 招 → 版面隨招式數自動收斂（3 招以下維持原本 2 行風味文字 + 15px 行高，
+  // 4~5 招改 1 行風味文字 + 12px 字 / 13px 行高，6 招則不畫風味文字）。任何情況下都不會超出 y+h。
   UI.drawAbilityCard = function (ctx, x, y, w, h, key, opts) {
     opts = opts || {};
     const info = UI.abilityInfo(key), ms = MS();
@@ -117,18 +119,24 @@
     }
     T(ctx, info.name, x + 38, y + 2, { color: C.yellow, size: 16 });
     KB.text(ctx, info.en, x + w - 8, y + 11, { color: info.key ? info.color : '#98a8c0', align: 'right' });
-    // 風味文字（最多 2 行）
-    const fl = (info.flavour || []).slice(0, 2);
-    for (let i = 0; i < fl.length; i++) fit(ctx, fl[i], x + 8, y + 28 + i * 15, w - 16, { color: '#c8d8f0', size: ms });
-    KB.rect(ctx, x + 7, y + 61, w - 14, 1, '#405070');
-    // 招式表（最多 3 列）：左欄按鍵、右欄招式名；沒有按鍵的列＝補充說明
-    const moves = (info.moves || []).slice(0, 3);
-    for (let i = 0; i < moves.length; i++) {
-      const my = y + 64 + i * 15, k = moves[i][0], name = moves[i][1];
+    const moves = (info.moves || []).slice(0, 6), n = moves.length;
+    const big = n <= 3;
+    const flN = big ? 2 : (n >= 6 ? 0 : 1);
+    const flTop = big ? 28 : 26, flH = big ? 15 : 13, flSize = big ? ms : 12;
+    // 風味文字
+    const fl = (info.flavour || []).slice(0, flN);
+    for (let i = 0; i < fl.length; i++) fit(ctx, fl[i], x + 8, y + flTop + i * flH, w - 16, { color: '#c8d8f0', size: flSize });
+    const divY = big ? 61 : (flTop + flN * flH + 2);
+    KB.rect(ctx, x + 7, y + divY, w - 14, 1, '#405070');
+    // 招式表：左欄按鍵、右欄招式名；沒有按鍵的列＝補充說明
+    const rowH = big ? 15 : (n >= 5 ? 13 : 14), msz = big ? ms : 12, top = divY + 3;
+    for (let i = 0; i < n; i++) {
+      const my = y + top + i * rowH, k = moves[i][0], name = moves[i][1];
+      if (my + rowH > y + h - 2) break;      // 保險：絕不畫出面板外
       if (k) {
-        fit(ctx, k, x + 9, my, 76, { color: C.cyan, size: ms, nomix: true });
-        fit(ctx, name, x + 92, my, w - 100, { color: '#ffffff', size: ms });
-      } else fit(ctx, '・' + name, x + 9, my, w - 18, { color: '#98a8c0', size: ms });
+        fit(ctx, k, x + 9, my, 86, { color: C.cyan, size: msz, nomix: true });
+        fit(ctx, name, x + 100, my, w - 108, { color: '#ffffff', size: msz });
+      } else fit(ctx, '・' + name, x + 9, my, w - 18, { color: '#98a8c0', size: msz });
     }
   };
 
@@ -210,62 +218,104 @@
   KB.PauseMenu = PauseMenu;
 
   // ======================================================================
-  // 能力圖鑑（8 能力翻頁）
+  // 能力圖鑑（Round 5：20 能力 → 縮圖列每頁 8 個、多頁；未發現的畫剪影）
   // ======================================================================
+  const GAL_PER_PAGE = 8;
+  // 未發現的能力：名稱 / 說明 / 招式全部隱藏（連 hudName 首字都不露），只留剪影與「吸入 ??? 就能獲得」
+  const UNKNOWN_CN = '？？？', UNKNOWN_EN = '???';
+
   class AbilityGallery {
-    constructor() { this.i = 0; this.t = 0; this.frame = 0; }
-    get keys() { return (KB.ABILITY_KEYS || []).slice(); }
+    constructor() { this.i = 0; this.t = 0; this.frame = 0; UI.clearAbilityNew(); }
+    get keys() { return UI.abilityKeys(); }
+    get pages() { return Math.max(1, Math.ceil((this.keys.length || 1) / GAL_PER_PAGE)); }
+    get page() { return Math.floor(this.i / GAL_PER_PAGE); }
     update() {
       this.frame++; this.t += 1 / 60;
       const inp = KB.input, n = this.keys.length || 1;
       if (inp.pressed('right')) { this.i = (this.i + 1) % n; sfx('menu'); }
       if (inp.pressed('left')) { this.i = (this.i - 1 + n) % n; sfx('menu'); }
+      if (inp.pressed('down')) { this.i = Math.min(n - 1, this.i + GAL_PER_PAGE); sfx('menu'); }
+      if (inp.pressed('up')) { this.i = Math.max(0, this.i - GAL_PER_PAGE); sfx('menu'); }
       if (inp.pressed('select') || inp.pressed('start') || inp.pressed('jump') || inp.pressed('attack')) { sfx('menu_back'); return 'back'; }
       return null;
     }
     draw(ctx) {
-      // R3-P1-03：說明 / 招式名一律不截斷 —— 卡比預覽框縮成 52×40 靠左，
-      // 說明與招式表改用整列寬度（228px），說明 14px 排不進 2 行就整段降到 12px。
+      // 版面（面板 y 4~214）：標題列 4~23 ／ 卡比預覽 + 名稱 26~60 ／ 說明 62~ ／ 招式表 ~172 ／ 縮圖列 176~196 ／ 提示 199
+      // 招式最多 6 列：5 列以上改 12px 字 + 13px 行高，並讓說明降級、風味文字省略，保證不壓到縮圖列。
       const ms = MS();
       KB.rect(ctx, 0, 0, W, H, 'rgba(0,0,0,0.72)');
       panel(ctx, 4, 4, 248, 210);
-      const keys = this.keys, key = keys[this.i] || null, info = UI.abilityInfo(key);
-      T(ctx, '能力圖鑑', 128, 5, { color: C.yellow, align: 'center', size: 16 });
-      KB.text(ctx, (this.i + 1) + '/' + Math.max(1, keys.length), 242, 11, { color: C.grey, align: 'right' });
-      KB.rect(ctx, 14, 24, 228, 1, '#405070');
-      // 左：戴帽子的卡比（kirby_idle + hat_<key>）
-      KB.rect(ctx, 14, 28, 52, 40, '#101828'); KB.rect(ctx, 15, 29, 50, 38, '#20304c');
-      const gy = 64;
-      drawKirby(ctx, 'kirby_idle', 40, gy, { t: this.t, frame: 0 });
-      if (info.hat && has(info.hat)) sprAt(ctx, info.hat, 40, gy - 15, 'b', { t: this.t });
+      const keys = this.keys, total = Math.max(1, keys.length), key = keys[this.i] || null;
+      const seen = UI.isSeen(key), info = UI.abilityInfo(key);
+      // 標題列：能力圖鑑 ／ 發現進度 n/20 ／ 目前第幾個
+      T(ctx, '能力圖鑑', 10, 4, { color: C.yellow, size: 16 });
+      const sn = UI.seenCount();
+      T(ctx, '發現進度 ' + sn + '/' + total, 90, 8, { color: sn >= total ? C.yellow : '#8fa0bc', size: UI.MS_SMALL });
+      KB.text(ctx, (this.i + 1) + '/' + total, 242, 11, { color: C.grey, align: 'right' });
+      KB.rect(ctx, 14, 23, 228, 1, '#405070');
+      // 左：戴帽子的卡比（未發現 → 全黑剪影、不戴帽子）
+      KB.rect(ctx, 14, 26, 52, 34, '#101828'); KB.rect(ctx, 15, 27, 50, 32, '#20304c');
+      const gy = 57;
+      drawKirby(ctx, 'kirby_idle', 40, gy, { t: this.t, frame: 0, tint: seen ? undefined : '#0c1220' });
+      if (seen && info.hat && has(info.hat)) sprAt(ctx, info.hat, 40, gy - 15, 'b', { t: this.t });
       KB.rect(ctx, 26, gy + 1, 28, 2, 'rgba(0,0,0,0.35)');
-      // 右：圖示 + 名稱 + 英文名（與預覽框同一列）
-      if (!sprAt(ctx, info.icon, 74, 36, 'tl')) { KB.rect(ctx, 74, 36, 24, 16, '#181c28'); KB.rect(ctx, 75, 37, 22, 14, info.color); }
-      T(ctx, info.name, 106, 34, { color: C.yellow, size: 16 });
-      KB.text(ctx, info.en, 242, 40, { color: info.color, align: 'right' });
-      // 說明：整列寬、最多 2 行（wrapLines 不在標點前斷行、行首不會是「，。」）
-      let ds = ms, dl = info.desc ? UI.wrapLines(info.desc, 228, { size: ds }, 9) : [];
-      if (dl.length > 2) { ds = UI.MS_SMALL; dl = UI.wrapLines(info.desc, 228, { size: ds }, 2); }
-      for (let i = 0; i < dl.length; i++) T(ctx, dl[i], 14, 72 + i * (ds >= 14 ? 15 : 14), { color: '#c8d8f0', size: ds });
-      KB.rect(ctx, 14, 104, 228, 1, '#405070');
-      // 招式表（最多 4 列）：左欄按鍵 95px、右欄招式名 129px，塞不下先降 12px 再說
-      let y = 108;
-      for (const m of (info.moves || []).slice(0, 4)) {
-        if (m[0]) {
-          fit(ctx, m[0], 14, y, 95, { color: C.cyan, size: ms, nomix: true });
-          fit(ctx, m[1], 113, y, 129, { color: '#fff', size: ms });
-        } else fit(ctx, '・' + m[1], 14, y, 228, { color: '#98a8c0', size: ms });
-        y += 15;
+      // 右：圖示 + 名稱 + 英文名
+      if (!seen) {
+        KB.rect(ctx, 74, 28, 24, 16, '#181c28'); KB.rect(ctx, 75, 29, 22, 14, '#2c3650');
+        KB.text(ctx, '?', 86, 32, { color: '#6c7c98', align: 'center' });
+      } else if (!sprAt(ctx, info.icon, 74, 28, 'tl')) {
+        KB.rect(ctx, 74, 28, 24, 16, '#181c28'); KB.rect(ctx, 75, 29, 22, 14, info.color);
       }
-      // 全部能力縮圖列（目前選取者外框）
-      KB.rect(ctx, 14, 170, 228, 1, '#405070');
-      for (let i = 0; i < keys.length; i++) {
-        const x = 16 + i * 29, sel = i === this.i;
-        KB.rect(ctx, x, 174, 26, 20, sel ? C.yellow : '#101828');
-        KB.rect(ctx, x + 1, 175, 24, 18, '#20304c');
-        if (!sprAt(ctx, 'ui_ability_' + keys[i], x + 1, 176, 'tl')) KB.rect(ctx, x + 2, 177, 22, 14, UI.abilityInfo(keys[i]).color);
+      T(ctx, seen ? info.name : UNKNOWN_CN, 104, 26, { color: seen ? C.yellow : '#7c8ca8', size: 16 });
+      KB.text(ctx, seen ? info.en : UNKNOWN_EN, 242, 32, { color: seen ? info.color : '#5c6884', align: 'right' });
+      if (!seen) {
+        // 未發現：說明與招式全部隱藏，只給「去哪裡拿」的提示
+        T(ctx, UNKNOWN_CN, 14, 64, { color: '#8fa0bc', size: ms });
+        KB.rect(ctx, 14, 90, 228, 1, '#405070');
+        fit(ctx, '吸入 ??? 就能獲得', 128, 106, 228, { color: C.cyan, align: 'center', size: ms });
+        fit(ctx, '在關卡裡拿到這個能力就會解鎖', 128, 130, 228, { color: '#6c7c98', align: 'center', size: UI.MS_SMALL });
+      } else {
+        const moves = (info.moves || []).slice(0, 6), n = moves.length, compact = n >= 5;
+        // 說明：整列寬、最多 2 行（wrapLines 不在標點前斷行、行首不會是「，。」）
+        let ds = compact ? UI.MS_SMALL : ms;
+        let dl = info.desc ? UI.wrapLines(info.desc, 228, { size: ds }, 9) : [];
+        if (dl.length > 2) { ds = UI.MS_SMALL; dl = UI.wrapLines(info.desc, 228, { size: ds }, 2); }
+        const dlh = ds >= 14 ? 15 : 13;
+        for (let i = 0; i < dl.length; i++) T(ctx, dl[i], 14, 62 + i * dlh, { color: '#c8d8f0', size: ds });
+        // 風味文字（灰字、1 行，放不下就省略）
+        const divY = compact ? 90 : 104, descBot = 62 + dl.length * dlh, fl = (info.flavour || [])[0];
+        if (fl && descBot + 12 <= divY) fit(ctx, fl, 14, descBot, 228, { color: '#7c8ca8', size: UI.MS_SMALL });
+        KB.rect(ctx, 14, divY, 228, 1, '#405070');
+        // 招式表（最多 6 列）：左欄按鍵 95px、右欄招式名 129px
+        const rowH = compact ? 13 : 15, msz = compact ? UI.MS_SMALL : ms;
+        let y = divY + 4;
+        for (const m of moves) {
+          if (y + rowH > 173) break;
+          if (m[0]) {
+            fit(ctx, m[0], 14, y, 95, { color: C.cyan, size: msz, nomix: true });
+            fit(ctx, m[1], 113, y, 129, { color: '#fff', size: msz });
+          } else fit(ctx, '・' + m[1], 14, y, 228, { color: '#98a8c0', size: msz });
+          y += rowH;
+        }
       }
-      fit(ctx, '←→ 換頁　　SELECT / Z：返回', 128, 197, 236, { color: C.grey, align: 'center', size: ms });
+      // 縮圖列（每頁 8 個）：未發現的畫成剪影方塊 + 「?」
+      KB.rect(ctx, 14, 172, 228, 1, '#405070');
+      const p0 = this.page * GAL_PER_PAGE;
+      for (let s = 0; s < GAL_PER_PAGE; s++) {
+        const i = p0 + s; if (i >= keys.length) break;
+        const k = keys[i], x = 16 + s * 28, sel = i === this.i, ks = UI.isSeen(k);
+        KB.rect(ctx, x, 176, 26, 20, sel ? C.yellow : '#101828');
+        KB.rect(ctx, x + 1, 177, 24, 18, '#20304c');
+        if (!ks) {
+          KB.rect(ctx, x + 2, 178, 22, 14, '#2c3650');
+          KB.text(ctx, '?', x + 13, 181, { color: '#6c7c98', align: 'center' });
+        } else {
+          const d = KB.ABILITIES ? KB.ABILITIES[k] : null;
+          if (!sprAt(ctx, (d && d.icon) || ('ui_ability_' + k), x + 1, 178, 'tl')) KB.rect(ctx, x + 2, 179, 22, 14, UI.abilityColor(k));
+        }
+      }
+      fit(ctx, '←→ 選能力　↑↓ 翻頁　Z 返回', 113, 199, 202, { color: C.grey, align: 'center', size: ms });
+      KB.text(ctx, (this.page + 1) + '/' + this.pages, 242, 202, { color: C.grey, align: 'right' });
     }
   }
   KB.AbilityGallery = AbilityGallery;
@@ -387,10 +437,15 @@
       const y0 = (UI.TITLE_MENU_TOP || 64), bot = (UI.TITLE_MENU_BOTTOM || 182);
       const rowH = Math.max(14, Math.min(19, Math.floor((bot - y0 - 12) / n))), h = 12 + n * rowH;
       panel(ctx, 112, y0, 136, h);
+      const gnew = UI.abilityNew();
       for (let i = 0; i < n; i++) {
         const y = y0 + 6 + i * rowH, sel = this.sel === i;
         if (sel) cursor(ctx, 124, y + 3, this.frame);
         T(ctx, this.items[i].label, 142, y, { color: sel ? C.yellow : '#fff', size: ms });
+        // 能力圖鑑有新發現 → 右側閃爍 NEW!（打開圖鑑時清掉 KB.save.seenNew）
+        if (gnew && this.items[i].id === 'gallery' && ((this.frame >> 4) & 1)) {
+          KB.text(ctx, 'NEW!', 242, y + 4, { color: C.pink, align: 'right', outline: '#401828' });
+        }
       }
       fit(ctx, '↑↓ 選擇　Z 確認　SELECT 返回', 128, 204, 250, { color: '#7c8ca8', align: 'center', size: ms });
     }

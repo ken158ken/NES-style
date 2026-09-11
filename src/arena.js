@@ -160,6 +160,9 @@
   // ======================================================================
   const bestTime = () => ((KB.save && KB.save.arena && KB.save.arena.bestTime) | 0) || 0;
 
+  // 縮圖列每頁 9 格（第 1 頁的第 1 格是「無能力」）；20 能力 → 3 頁
+  const ARENA_PER_PAGE = 9;
+
   class ArenaScene {
     constructor() {
       this.keys = [null].concat(KB.ABILITY_KEYS || []);
@@ -168,12 +171,17 @@
     }
     enter() { music(['arena', 'select']); }
     get key() { return this.keys[this.i]; }
+    get pages() { return Math.max(1, Math.ceil(this.keys.length / ARENA_PER_PAGE)); }
+    get page() { return Math.floor(this.i / ARENA_PER_PAGE); }
     update(dt) {
       this.t += dt; this.frame++;
       if (UI.stepFade(this)) return;
       const inp = KB.input, n = this.keys.length;
+      // 左右：逐一換能力（走到頁尾自動跨頁）；上下：整頁跳
       if (inp.pressed('right')) { this.i = (this.i + 1) % n; sfx('menu'); }
       if (inp.pressed('left')) { this.i = (this.i - 1 + n) % n; sfx('menu'); }
+      if (inp.pressed('down')) { this.i = Math.min(n - 1, this.i + ARENA_PER_PAGE); sfx('menu'); }
+      if (inp.pressed('up')) { this.i = Math.max(0, this.i - ARENA_PER_PAGE); sfx('menu'); }
       if (inp.pressed('select')) { sfx('menu_back'); UI.leave(this, () => KB.setScene(new KB.TitleScene())); return; }
       if (inp.pressed('jump') || inp.pressed('attack') || inp.pressed('start')) {
         sfx('select');
@@ -195,7 +203,8 @@
       fit(ctx, '休息室的番茄整場共用 3 顆', 128, 64, 230, { color: '#c8b8e0', align: 'center', size: ms });
       // 選能力
       panel(ctx, 8, 88, 240, 76);
-      fit(ctx, '選擇出發能力', 16, 91, 120, { color: '#98a8c0', size: ms });
+      fit(ctx, '選擇出發能力', 16, 91, 90, { color: '#98a8c0', size: ms });
+      if (this.pages > 1) T(ctx, '頁 ' + (this.page + 1) + '/' + this.pages, 148, 93, { color: '#8fa0bc', size: 12 });
       KB.text(ctx, (this.i + 1) + '/' + this.keys.length, 240, 94, { color: C.grey, align: 'right' });
       // 左：戴帽子的卡比
       KB.rect(ctx, 16, 108, 56, 50, '#101828'); KB.rect(ctx, 17, 109, 54, 48, '#241c3c');
@@ -215,20 +224,23 @@
       const ax = ((f >> 3) & 1) ? 1 : 0;
       KB.text(ctx, '<', 12 - ax, 128, { color: C.cyan });
       KB.text(ctx, '>', 242 + ax, 128, { color: C.cyan });
-      // 能力縮圖列（9 格：無能力 + 8 能力）
-      for (let i = 0; i < this.keys.length; i++) {
-        const x = 8 + i * 27, sel = i === this.i, k = this.keys[i];
+      // 能力縮圖列（每頁 9 格；第 1 頁第 1 格＝無能力）
+      const p0 = this.page * ARENA_PER_PAGE;
+      for (let s = 0; s < ARENA_PER_PAGE; s++) {
+        const i = p0 + s; if (i >= this.keys.length) break;
+        const x = 8 + s * 27, sel = i === this.i, k = this.keys[i];
         KB.rect(ctx, x, 168, 25, 20, sel ? C.yellow : '#101828');
         KB.rect(ctx, x + 1, 169, 23, 18, '#20304c');
-        if (!sprAt(ctx, k ? ('ui_ability_' + k) : 'ui_ability_none', x, 170, 'tl')) {
-          if (k) KB.rect(ctx, x + 2, 171, 21, 14, UI.abilityInfo(k).color);
+        const d = k && KB.ABILITIES ? KB.ABILITIES[k] : null;
+        if (!sprAt(ctx, k ? ((d && d.icon) || ('ui_ability_' + k)) : 'ui_ability_none', x, 170, 'tl')) {
+          if (k) KB.rect(ctx, x + 2, 171, 21, 14, UI.abilityColor(k));
           else KB.text(ctx, '-', x + 12, 174, { color: '#98a8c0', align: 'center' });
         }
       }
       // 最佳時間
       const bt = bestTime();
       KB.text(ctx, 'BEST ' + (bt ? mmss(bt) : '--:--'), 240, 194, { color: bt ? C.yellow : C.grey, align: 'right' });
-      fit(ctx, '←→ 選能力　Z 開始', 10, 192, 150, { color: '#fff', size: ms });
+      fit(ctx, this.pages > 1 ? '←→ ↑↓ 選能力　Z 開始' : '←→ 選能力　Z 開始', 10, 192, 148, { color: '#fff', size: ms });
       fit(ctx, 'SELECT：返回標題', 128, 208, 244, { color: C.grey, align: 'center', size: ms });
       UI.drawMuteToast(ctx); UI.drawFade(ctx, this);
     }

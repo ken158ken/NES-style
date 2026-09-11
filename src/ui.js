@@ -11,7 +11,8 @@
   UI.muteToast = 0;
   UI.LAYOUT = {
     // HUD（y 192~224）：左 能力圖示+名稱 / 中 HP、魔王血條 / 右 上列分數、下列生命
-    hud: { iconX: 4, iconY: 200, nameX: 32, rowA: 197, rowB: 207, hpX: 84, hpY: 197, hpGap: 9, right: 251, faceX: 217, faceY: 206, livesY: 210 },
+    // nameW：能力名可用寬度（nameX 32 → 血條 hpX 84 之間留 2px），中文超過 3 字自動降 12px / 截斷
+    hud: { iconX: 4, iconY: 200, nameX: 30, nameW: 53, rowA: 197, rowB: 207, hpX: 84, hpY: 197, hpGap: 9, right: 251, faceX: 217, faceY: 206, livesY: 210 },
     bossBar: { cx: 111, y: 208, w: 90, h: 10 },     // 置中於 HP 列正下方；ui_boss_bar 90×10（內框 2px）
     mapNodes: [[30, 142], [80, 100], [128, 134], [176, 84], [226, 118]],
   };
@@ -143,6 +144,56 @@
   UI.drawStarRow = drawStarRow;
 
   const ICON_COL = { fire: '#f86030', sword: '#40b860', beam: '#f8d030', cutter: '#e8e0c0', spark: '#58c8f8', stone: '#909098', ice: '#88e0ff', hammer: '#c07840' };
+
+  // ---------- 能力發現進度（Round 5：20 種能力） ----------
+  // 存檔欄位：KB.save.seen = { fire: true, … }（已發現）、KB.save.seenNew = true（圖鑑有新東西）。
+  // player.js 不歸 ui5 管，所以「發現」是由 drawHUD 每幀記錄目前能力（取得能力必定經過 HUD）。
+  UI.abilityKeys = () => (KB.ABILITY_KEYS || []).slice();
+  UI.seenMap = function () {
+    if (!KB.save) KB.save = {};
+    if (!KB.save.seen || typeof KB.save.seen !== 'object') KB.save.seen = {};
+    return KB.save.seen;
+  };
+  UI.isSeen = function (key) {
+    if (!key) return true;                       // 「無能力」永遠可見
+    if (UI.unlockAll || KB.DEBUG) return true;   // ?debug=1 / KB.UI.unlockAll → 全部顯示
+    return !!UI.seenMap()[key];
+  };
+  UI.seenCount = function () { return UI.abilityKeys().filter(k => UI.isSeen(k)).length; };
+  UI.markSeen = function (key) {
+    if (!key) return false;
+    const m = UI.seenMap();
+    if (m[key]) return false;
+    m[key] = true; KB.save.seenNew = true;
+    try { KB.saveGame && KB.saveGame(); } catch (e) { }
+    return true;
+  };
+  UI.abilityNew = () => !!(KB.save && KB.save.seenNew);
+  UI.clearAbilityNew = function () {
+    if (!KB.save || !KB.save.seenNew) return;
+    KB.save.seenNew = false;
+    try { KB.saveGame && KB.saveGame(); } catch (e) { }
+  };
+  // 能力代表色：新能力自帶 def.color；太暗（深色面板上看不見）時自動提亮到亮度 ≥ 96
+  function hex2rgb(c) {
+    const s = String(c || '').replace('#', '');
+    if (s.length === 3) return [parseInt(s[0] + s[0], 16), parseInt(s[1] + s[1], 16), parseInt(s[2] + s[2], 16)];
+    if (s.length >= 6) return [parseInt(s.slice(0, 2), 16), parseInt(s.slice(2, 4), 16), parseInt(s.slice(4, 6), 16)];
+    return null;
+  }
+  const hx2 = v => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0');
+  UI.brighten = function (col, minLuma) {
+    const rgb = hex2rgb(col);
+    if (!rgb || rgb.some(isNaN)) return col || '#f8a0c8';
+    const l = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2], need = minLuma === undefined ? 96 : minLuma;
+    if (l >= need) return col;
+    const k = Math.min(1, (need - l) / Math.max(1, 255 - l));
+    return '#' + rgb.map(v => hx2(v + (255 - v) * k)).join('');
+  };
+  UI.abilityColor = function (key) {
+    const d = (key && KB.ABILITIES) ? KB.ABILITIES[key] : null;
+    return UI.brighten((d && d.color) || ICON_COL[key] || '#f8a0c8');
+  };
 
   // ---------- 共用繪圖工具 ----------
   // 不管美術設定的 anchor，以指定對齊方式繪製：'tl' 左上、'c' 置中、'b' 底部中央
@@ -585,14 +636,19 @@
       else if (!ok) { sprAt(ctx, pick('ui_lock', 'uifb_lock'), 188, 166, 'tl'); T(ctx, '未解鎖', 240, 164, { color: C.grey, align: 'right', size: UI.MS }); }
       else if (this.cleared(i)) { sprAt(ctx, 'uifb_flag', 196, 164, 'tl'); KB.text(ctx, 'CLEAR', 240, 167, { color: C.yellow, align: 'right' }); }
       else T(ctx, '出發！', 240, 164, { color: C.cyan, align: 'right', size: UI.MS });
-      // 第 2 列：收集星（本關）
-      if (lv) { T(ctx, '收集星', 16, 180, { color: '#c8d8f0', size: UI.MS }); drawStarRow(ctx, 64, 184, lv.id, { plate: false, left: true }); }
+      // 第 2 列：收集星（本關）／ 最佳分數 ／ 能力圖鑑發現進度
+      // Round 5：右側要放「能力 n/20」（12px 約 69px），所以收集星的中文標籤拿掉，只留 ★★☆ x/3
+      if (lv) drawStarRow(ctx, 16, 181, lv.id, { plate: false, left: true });   // ★★☆ 0/3 → x 16~61
       // 最佳分數（結算畫面寫入 KB.save.best[levelId]）
       if (lv) {
         const best = (KB.save && KB.save.best && KB.save.best[lv.id]) | 0;
-        KB.text(ctx, 'BEST', 130, 181, { color: '#98a8c0' });
-        KB.text(ctx, pad7(best), 240, 181, { color: best > 0 ? C.yellow : '#5c6884', align: 'right' });
+        KB.text(ctx, 'BEST', 68, 181, { color: '#98a8c0' });
+        KB.text(ctx, pad7(best), 158, 181, { color: best > 0 ? C.yellow : '#5c6884', align: 'right' });
       }
+      const seenN = UI.seenCount(), seenAll = UI.abilityKeys().length;
+      T(ctx, '能力 ' + seenN + '/' + seenAll, 242, 180, {
+        color: seenAll && seenN >= seenAll ? C.yellow : '#8fa0bc', align: 'right', size: UI.MS_SMALL,
+      });
       fit(ctx, '←→ 移動　Z 進入　SELECT 回標題', 128, 197, 234, { color: C.grey, align: 'center', size: UI.MS });
       drawMuteToast(ctx); drawFade(ctx, this);
     }
@@ -600,8 +656,17 @@
   KB.StageSelectScene = StageSelectScene;
 
   // ---------- HUD ----------
+  // 英數能力名（8×8 點陣字）塞進 maxw：7 字以內用 spacing -1 擠進去，再長就截斷
+  function hudLabel(ctx, str, x, y, maxw, color) {
+    let s = String(str), sp = 0;
+    if (s.length * 8 > maxw) {
+      sp = -1;
+      while (s.length > 1 && s.length * 7 + 1 > maxw) s = s.slice(0, -1);
+    }
+    KB.text(ctx, s, x, y, { color, spacing: sp });
+  }
   function drawAbilityIconFallback(ctx, x, y, key, hud) {
-    const col = key ? (ICON_COL[key] || '#f8a0c8') : '#303848';
+    const col = key ? UI.abilityColor(key) : '#303848';
     KB.rect(ctx, x, y, 24, 16, '#181c28'); KB.rect(ctx, x + 1, y + 1, 22, 14, col);
     ctx.globalAlpha = 0.35; KB.rect(ctx, x + 1, y + 1, 22, 1, '#fff'); KB.rect(ctx, x + 1, y + 1, 1, 14, '#fff'); ctx.globalAlpha = 0.3;
     KB.rect(ctx, x + 1, y + 14, 22, 1, '#000'); KB.rect(ctx, x + 22, y + 1, 1, 14, '#000'); ctx.globalAlpha = 1;
@@ -616,6 +681,7 @@
     const iconName = key ? ((def && def.icon) || ('ui_ability_' + key)) : 'ui_ability_none';
     const hud = key ? ((def && def.hudName) || KB.ABILITY_HUD[key] || String(key).toUpperCase()) : 'NORMAL';
     const cn = key ? ((def && def.name) || KB.ABILITY_NAMES[key] || '') : '普通';
+    if (key) UI.markSeen(key);      // 能力圖鑑的「發現」紀錄（player.js 不歸 ui5 管，改由 HUD 記錄）
     if (!sprAt(ctx, iconName, L.iconX, L.iconY, 'tl')) drawAbilityIconFallback(ctx, L.iconX, L.iconY, key, hud);
     if (game.abilityFlash > 0) {
       // 剛取得能力：圖示外框黃白閃爍 + 名稱閃爍
@@ -624,9 +690,9 @@
       if (on) { ctx.globalAlpha = 0.4; KB.rect(ctx, L.iconX, L.iconY, 24, 16, '#fff'); ctx.globalAlpha = 1; }
     }
     const flashName = game.abilityFlash > 0 && ((game.abilityFlash >> 2) & 1);
-    KB.text(ctx, hud, L.nameX, L.rowA, { color: flashName ? C.yellow : '#fff' });
-    // 中文能力名：14px（12px 時「鐵鎚」這種密集字會糊）
-    T(ctx, cn, L.nameX, L.rowB, { color: flashName ? '#fff' : '#ffc8dc', size: UI.MS });
+    hudLabel(ctx, hud, L.nameX, L.rowA, L.nameW, flashName ? C.yellow : '#fff');
+    // 中文能力名：14px（12px 時「鐵鎚」這種密集字會糊）；4 字以上（元素法師…）自動降 12px 不壓到血條
+    fit(ctx, cn, L.nameX, L.rowB, L.nameW, { color: flashName ? '#fff' : '#ffc8dc', size: UI.MS });
     // 中：血量
     const maxHp = p ? p.maxHp : KB.MAX_HP, hp = p ? Math.max(0, p.hp) : 0;
     const hurting = p && p.state !== 'dead' && p.invuln > KB.PHYS.invulnFrames - 30;
