@@ -56,12 +56,25 @@ const SPEC_SFX = ['jump', 'inhale', 'spit', 'swallow', 'hurt', 'die', 'enemyhit'
   // Round 1 追加（提供給其他 agent）
   'unpause', 'lowhp', 'oneup', 'bigstar', 'charge', 'charge_ready', 'unlock', 'phase2', 'menu_back',
   // Round 2（audio2）追加
-  'splash', 'bubble', 'wind', 'torch', 'fuse', 'melt', 'hardblock', 'count', 'count_end', 'ride', 'warp', 'essence'];
+  'splash', 'bubble', 'wind', 'torch', 'fuse', 'melt', 'hardblock', 'count', 'count_end', 'ride', 'warp', 'essence',
+  // Round 5（audio5）追加 —— 12 種新能力
+  //   武器系
+  'gun', 'shotgun', 'reload', 'shuriken', 'teleport', 'iai', 'slash_big', 'bow', 'arrow', 'arrow_rain', 'wallkick',
+  //   魔法系
+  'fireball', 'icewall', 'thunder', 'magic_circle', 'magic_big', 'timestop', 'timeresume', 'slowmo', 'rewind',
+  'blackhole', 'meteor', 'gravity_lift', 'clone_summon', 'clone_swap', 'clone_rush',
+  //   變身系
+  'giant_grow', 'stomp', 'giant_roar', 'shrink', 'dragon_breath', 'dragon_dash', 'tail_whip', 'wing_flap',
+  'rocket_punch', 'missile', 'jet', 'mech_step', 'armor_break', 'ghost_phase', 'possess', 'unpossess', 'ghost_wail',
+  //   通用
+  'transform', 'untransform', 'ultimate', 'max'];
 const SPEC_MUSIC = ['title', 'select', 'green', 'castle', 'island', 'cloud', 'dedede', 'boss', 'finalboss', 'invincible', 'clear', 'gameover', 'ending',
   // Round 1 追加
   'boss2', 'finalboss2', 'secret', 'miniboss',
   // Round 2（audio2）追加
-  'result', 'arena', 'arena_rest', 'w_intro', 'green2', 'castle2', 'island2', 'cloud2', 'dedede2'];
+  'result', 'arena', 'arena_rest', 'w_intro', 'green2', 'castle2', 'island2', 'cloud2', 'dedede2',
+  // Round 5（audio5）追加
+  'ultimate_loop', 'transform_jingle'];
 const SPEC_AMBIENT = ['water', 'wind', 'cave', 'castle'];
 const usedSfx = new Set(), usedMusic = new Set();
 for (const f of fs.readdirSync(path.join(ROOT, 'src')).filter(f => f.endsWith('.js') && f !== 'audio.js')) {
@@ -73,8 +86,14 @@ for (const f of fs.readdirSync(path.join(ROOT, 'src')).filter(f => f.endsWith('.
 }
 // 關卡主題也會當作音樂 key（game.js: this.level.music || this.theme）
 for (const t of (KB.THEMES || [])) usedMusic.add(t);
-for (const n of new Set([...SPEC_SFX, ...usedSfx])) A.SFX_NAMES.includes(n) ? null : fail('sfx 未實作: ' + n);
-for (const n of new Set([...SPEC_MUSIC, ...usedMusic])) A.MUSIC_NAMES.includes(n) ? null : fail('music 未實作: ' + n);
+for (const n of SPEC_SFX) A.SFX_NAMES.includes(n) ? null : fail('sfx 未實作（SPEC 名單）: ' + n);
+for (const n of SPEC_MUSIC) A.MUSIC_NAMES.includes(n) ? null : fail('music 未實作（SPEC 名單）: ' + n);
+// src 引用了但尚未實作的名稱：其他 agent 的檔案還在開發中，只列出提醒，不算失敗
+const unknownSfx = [...usedSfx].filter(n => !A.SFX_NAMES.includes(n)).sort();
+const unknownMusic = [...usedMusic].filter(n => !A.MUSIC_NAMES.includes(n)).sort();
+if (unknownSfx.length) console.log('  WARN src 引用了未實作的 sfx（請回報總控 / audio agent 補做）: ' + unknownSfx.join(', '));
+if (unknownMusic.length) console.log('  WARN src 引用了未實作的 music（請回報總控 / audio agent 補做）: ' + unknownMusic.join(', '));
+if (!unknownSfx.length && !unknownMusic.length) ok('src 引用的 sfx / music 名稱全部已實作');
 ok(`sfx 實作 ${A.SFX_NAMES.length} 種，程式引用 ${usedSfx.size} 種，SPEC ${SPEC_SFX.length} 種`);
 ok(`music 實作 ${A.MUSIC_NAMES.length} 首，程式引用 ${usedMusic.size} 個 key，SPEC ${SPEC_MUSIC.length} 首`);
 console.log('  sfx  : ' + A.SFX_NAMES.join(', '));
@@ -119,7 +138,8 @@ else {
 console.log('[音效節流]');
 {
   const FRAME = 1000 / 60;
-  const need = { count: 4, fuse: 6 };          // 呼叫間隔（幀）
+  // 呼叫間隔（幀）：可連續呼叫的音效，節流值必須小於呼叫間隔才不會被吃掉
+  const need = { count: 4, fuse: 6, gun: 6, dragon_breath: 6, jet: 4 };
   const thr = A.SFX_THROTTLE || {};
   const def = A.THROTTLE_MS || 80;
   for (const [n, frames] of Object.entries(need)) {

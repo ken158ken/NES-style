@@ -26,7 +26,18 @@
   const THROTTLE_MS = 80;                               // 同一音效 80ms 內不重複（預設）
   // 特例節流（毫秒，0 = 不節流）：會被高頻重複呼叫的音效需要放寬，否則會被吃掉
   //   count 每 4 幀呼叫（≈67ms）、fuse 每 6 幀（≈100ms）、bubble 水中氣泡不定期
-  const SFX_THROTTLE = { count: 25, fuse: 50, bubble: 45, torch: 90, melt: 90, splash: 120, wind: 150 };
+  //   Round 5：gun 每 6 幀連射（30ms）、jet 噴射循環（60ms）、dragon_breath 吐息循環（90ms），
+  //   其餘長音 / 大招放寬節流避免疊成噪音牆
+  const SFX_THROTTLE = {
+    count: 25, fuse: 50, bubble: 45, torch: 90, melt: 90, splash: 120, wind: 150,
+    // ---- Round 5：可連續呼叫的招式 ----
+    gun: 30, jet: 60, dragon_breath: 90, arrow: 45, shuriken: 60, fireball: 70,
+    wing_flap: 90, missile: 90, mech_step: 110, clone_rush: 120, clone_swap: 60,
+    stomp: 120, slash_big: 120, wallkick: 100, tail_whip: 100, dragon_dash: 150,
+    // ---- Round 5：長音 / 演出用（避免重疊）----
+    thunder: 200, meteor: 250, arrow_rain: 250, ghost_wail: 200, giant_roar: 250,
+    blackhole: 500, timestop: 400, transform: 400, untransform: 400, ultimate: 400,
+  };
   const LOOKAHEAD = 0.1, TICK_MS = 25;                  // 預排參數
   const nowMs = () => (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
 
@@ -418,6 +429,346 @@
       ['G5', 'B5', 'D6', 'G6'].forEach((n, i) => tone(b, 'p25', F(n), t + i * 0.05, i === 3 ? 0.26 : 0.07, 0.19));
       tone(b, 'p12', F('B5'), t + 0.15, 0.26, 0.09);
       noise(b, t, 0.34, 0.06, { type: 'highpass', f0: 7500, f1: 10000, decay: 0.12 });
+    },
+    // ---- Round 5（audio5）：12 種新能力的招式音效 + 變身音 ----
+    // 【武器系】gunner 槍手 / ninja 忍者 / blade 居合 / bow 弓
+    // 槍：極短噪音爆音 + 低頻後座推力（節流 30ms，可每 6 幀連射）
+    gun(b, t) {
+      noise(b, t, 0.07, 0.42, { type: 'highpass', f0: 3200, f1: 700, q: 0.9, attack: 0.001, release: 0.025 });
+      tone(b, 'tri', 200, t, 0.06, 0.4, { to: 42, slideT: 0.04, attack: 0.001, release: 0.02 });
+      tone(b, 'sq', 1500, t, 0.022, 0.09, { to: 520, attack: 0.001, release: 0.008 });
+    },
+    // 霰彈槍：寬頻爆炸 + 低頻悶響 + 散射尾音
+    shotgun(b, t) {
+      noise(b, t, 0.34, 0.46, { type: 'lowpass', f0: 6000, f1: 260, q: 0.7, attack: 0.002, release: 0.14 });
+      tone(b, 'tri', 130, t, 0.24, 0.46, { to: 28, slideT: 0.1, attack: 0.001 });
+      noise(b, t + 0.03, 0.26, 0.15, { type: 'bandpass', f0: 800, f1: 2600, q: 0.9, release: 0.1 });
+    },
+    // 換彈：兩下金屬喀啦（拉柄 + 上膛）+ 彈簧高音
+    reload(b, t) {
+      noise(b, t, 0.05, 0.3, { type: 'bandpass', f0: 2500, q: 2.4, attack: 0.001, release: 0.02 });
+      tone(b, 'sq', 330, t, 0.04, 0.15, { to: 170, attack: 0.001, release: 0.015 });
+      noise(b, t + 0.14, 0.06, 0.26, { type: 'bandpass', f0: 1500, q: 1.8, attack: 0.001, release: 0.03 });
+      tone(b, 'sq', 210, t + 0.14, 0.05, 0.17, { to: 100, attack: 0.001 });
+      tone(b, 'sine', 2700, t + 0.21, 0.1, 0.06, { to: 1700, release: 0.05 });
+    },
+    // 手裏劍：快速下滑正弦 + 高通旋轉噪音
+    shuriken(b, t) {
+      tone(b, 'sine', 2700, t, 0.26, 0.2, { to: 520, attack: 0.003, release: 0.06, vib: { rate: 34, depth: 0.05 } });
+      noise(b, t, 0.24, 0.11, { type: 'highpass', f0: 5200, f1: 2000, q: 1.1, wobble: 32, release: 0.08 });
+    },
+    // 瞬移：消失（上滑）與出現（下滑）兩段交錯 + 空間掃頻
+    teleport(b, t) {
+      tone(b, 'sine', 300, t, 0.2, 0.17, { to: 2900, attack: 0.004, release: 0.05 });
+      tone(b, 'p12', 1500, t + 0.02, 0.16, 0.07, { to: 3400, release: 0.04 });
+      tone(b, 'sine', 3000, t + 0.16, 0.22, 0.15, { to: 250, release: 0.07 });
+      noise(b, t, 0.36, 0.13, { type: 'bandpass', f0: 900, f1: 6500, q: 2.6, attack: 0.02, release: 0.12 });
+    },
+    // 居合：先 0.1 秒近乎無聲的吸氣，再一聲銳利斬擊
+    iai(b, t) {
+      noise(b, t, 0.1, 0.045, { type: 'highpass', f0: 6500, f1: 9500, attack: 0.05, release: 0.03 });
+      const s = t + 0.12;
+      noise(b, s, 0.11, 0.36, { type: 'highpass', f0: 2000, f1: 11000, q: 0.9, attack: 0.002, release: 0.05 });
+      tone(b, 'sq', 3100, s, 0.07, 0.1, { to: 650, attack: 0.001, release: 0.03 });
+      tone(b, 'p12', 4200, s + 0.05, 0.34, 0.07, { decay: 0.07, sustain: 0.22, release: 0.14 });
+    },
+    // 大斬擊：厚重風切 + 低頻壓迫 + 刀身金屬餘響
+    slash_big(b, t) {
+      noise(b, t, 0.32, 0.32, { type: 'bandpass', f0: 600, f1: 5200, q: 0.8, attack: 0.012, release: 0.14 });
+      tone(b, 'saw', 420, t, 0.26, 0.15, { to: 85, slideT: 0.2, release: 0.08 });
+      tone(b, 'tri', 150, t + 0.08, 0.3, 0.3, { to: 42, release: 0.12 });
+      tone(b, 'p25', 1760, t + 0.16, 0.4, 0.08, { decay: 0.1, sustain: 0.3, release: 0.18, vib: { rate: 5, depth: 0.008 } });
+    },
+    // 拉弓 → 放弦：木頭吱聲 + 弓弦低嗡
+    bow(b, t) {
+      noise(b, t, 0.18, 0.09, { type: 'bandpass', f0: 420, f1: 1100, q: 3.5, attack: 0.06, release: 0.05 });
+      tone(b, 'tri', 250, t + 0.11, 0.16, 0.3, { to: 115, attack: 0.002, release: 0.07 });
+      tone(b, 'sq', 500, t + 0.11, 0.06, 0.09, { to: 190, attack: 0.001, release: 0.02 });
+    },
+    // 箭：高 Q 帶通破空哨音（由高掃到低）
+    arrow(b, t) {
+      noise(b, t, 0.22, 0.34, { type: 'bandpass', f0: 4400, f1: 1300, q: 4, attack: 0.008, release: 0.08 });
+      tone(b, 'sine', 1900, t, 0.2, 0.12, { to: 650, release: 0.06 });
+    },
+    // 箭雨：6 支錯開落下（音高逐支下降）+ 落地沙沙
+    arrow_rain(b, t) {
+      for (let i = 0; i < 6; i++) {
+        const tt = t + i * 0.075;
+        noise(b, tt, 0.3, 0.17, { type: 'bandpass', f0: 3600 - i * 260, f1: 1000, q: 4.5, attack: 0.02, release: 0.1 });
+        tone(b, 'sine', 1500 - i * 120, tt, 0.26, 0.075, { to: 480, release: 0.08 });
+      }
+      noise(b, t + 0.5, 0.34, 0.18, { type: 'lowpass', f0: 2400, f1: 380, decay: 0.1, release: 0.14 });
+    },
+    // 蹬牆：鞋底摩擦 + 向上彈起
+    wallkick(b, t) {
+      noise(b, t, 0.1, 0.26, { type: 'bandpass', f0: 1700, f1: 4400, q: 1.4, attack: 0.002, release: 0.04 });
+      tone(b, 'tri', 260, t, 0.13, 0.26, { to: 640, slideT: 0.08, release: 0.05 });
+      tone(b, 'sq', 170, t, 0.05, 0.11, { to: 85, release: 0.02 });
+    },
+
+    // 【魔法系】mage 元素法師 / time 時間 / gravity 重力 / clone 分身
+    // 火球：滾動火焰 + 低頻拋射推進（與 fire 的持續噴射不同）
+    fireball(b, t) {
+      noise(b, t, 0.36, 0.28, { type: 'lowpass', f0: 1700, f1: 620, q: 0.8, wobble: 21, attack: 0.012, release: 0.14 });
+      tone(b, 'saw', 190, t, 0.3, 0.13, { to: 68, slideT: 0.26, release: 0.1, vib: { rate: 13, depth: 0.06 } });
+      noise(b, t, 0.08, 0.2, { type: 'highpass', f0: 3200, f1: 1200, attack: 0.001, release: 0.03 });
+    },
+    // 冰牆：結晶上行五音 + 冰霜細噪 + 冰塊隆起的低頻上滑
+    icewall(b, t) {
+      ['C6', 'E6', 'G6', 'B6', 'D7'].forEach((n, i) => tone(b, 'p12', F(n), t + i * 0.05, 0.14, 0.15, { decay: 0.05, sustain: 0.3, release: 0.07 }));
+      noise(b, t, 0.45, 0.1, { type: 'highpass', f0: 8000, f1: 12000, decay: 0.12, release: 0.15 });
+      tone(b, 'tri', 90, t, 0.4, 0.26, { to: 180, slideT: 0.3, release: 0.12 });
+      noise(b, t + 0.24, 0.14, 0.14, { type: 'bandpass', f0: 3000, q: 1.6, release: 0.06 });
+    },
+    // 雷：瞬間爆裂 + 滾動雷鳴 + 低頻嘶吼
+    thunder(b, t) {
+      noise(b, t, 0.06, 0.5, { type: 'highpass', f0: 4200, f1: 1500, attack: 0.001, release: 0.02 });
+      noise(b, t + 0.03, 1.0, 0.3, { type: 'lowpass', f0: 2000, f1: 130, q: 0.7, wobble: 5.5, attack: 0.005, release: 0.4 });
+      tone(b, 'saw', 72, t + 0.02, 0.7, 0.18, { to: 30, release: 0.3, vib: { rate: 4.5, depth: 0.18 } });
+    },
+    // 魔法陣展開：懸浮和聲（正弦）+ 緩慢上行 + 漸強空氣感
+    magic_circle(b, t) {
+      ['D5', 'A5', 'D6', 'F#6'].forEach((n, i) => tone(b, 'sine', F(n), t + i * 0.06, 0.5 - i * 0.05, 0.11, { attack: 0.05, release: 0.16, vib: { rate: 5.5, depth: 0.01, delay: 0.1 } }));
+      tone(b, 'p12', 380, t, 0.5, 0.07, { to: 1180, attack: 0.06, release: 0.14 });
+      noise(b, t, 0.55, 0.09, { type: 'bandpass', f0: 1200, f1: 5000, q: 1.2, attack: 0.22, release: 0.18 });
+    },
+    // 大魔法：低頻充能 → 鋸齒和弦爆發 → 高頻餘燼
+    magic_big(b, t) {
+      tone(b, 'sine', 70, t, 0.26, 0.24, { to: 150, attack: 0.1, release: 0.06 });
+      const s = t + 0.22;
+      ['D4', 'A4', 'D5', 'F5'].forEach(n => tone(b, 'saw', F(n), s, 0.5, 0.085, { decay: 0.12, sustain: 0.45, release: 0.2, vib: { rate: 6, depth: 0.012, delay: 0.12 } }));
+      noise(b, s, 0.55, 0.3, { type: 'lowpass', f0: 4000, f1: 200, q: 0.6, release: 0.25 });
+      tone(b, 'tri', 120, s, 0.4, 0.32, { to: 34, slideT: 0.25, release: 0.15 });
+      noise(b, s + 0.3, 0.4, 0.07, { type: 'highpass', f0: 7000, f1: 11000, decay: 0.15, release: 0.18 });
+    },
+    // 時間停止：倒放包絡（慢慢升起後突然靜止）+ 三下越來越慢的滴答 + 低頻停滯嗡鳴
+    timestop(b, t) {
+      tone(b, 'p12', 300, t, 0.46, 0.15, { to: 920, attack: 0.4, release: 0.015 });
+      noise(b, t, 0.46, 0.15, { type: 'bandpass', f0: 600, f1: 3200, q: 1.6, attack: 0.42, release: 0.015 });
+      [0, 0.17, 0.4].forEach((d, i) => tone(b, 'sq', 1600 - i * 100, t + d, 0.03, 0.14 - i * 0.02, { to: 880, attack: 0.001, release: 0.012 }));
+      tone(b, 'sine', 58, t + 0.47, 0.9, 0.32, { to: 44, attack: 0.03, release: 0.4, vib: { rate: 3.5, depth: 0.05 } });
+      tone(b, 'tri', 87, t + 0.47, 0.8, 0.09, { to: 66, attack: 0.05, release: 0.35 });
+    },
+    // 時間恢復：嗡鳴解除上滑 + 滴答加速 + 明亮放行雙音
+    timeresume(b, t) {
+      tone(b, 'sine', 44, t, 0.34, 0.3, { to: 96, release: 0.1 });
+      [0, 0.14, 0.24, 0.31, 0.36].forEach((d, i) => tone(b, 'sq', 1100 + i * 180, t + d, 0.03, 0.09 + i * 0.012, { to: 700 + i * 180, attack: 0.001, release: 0.012 }));
+      tone(b, 'p25', F('E6'), t + 0.4, 0.26, 0.16, { release: 0.1 });
+      tone(b, 'p12', F('B6'), t + 0.4, 0.26, 0.08, { release: 0.1 });
+      noise(b, t + 0.38, 0.3, 0.07, { type: 'highpass', f0: 6500, f1: 10000, decay: 0.1, release: 0.12 });
+    },
+    // 慢動作：整體音高像轉盤被拖慢（下滑 + 抖動 + 低通變悶）
+    slowmo(b, t) {
+      tone(b, 'p25', 880, t, 0.6, 0.15, { to: 170, release: 0.12, vib: { rate: 6, depth: 0.035 } });
+      tone(b, 'p12', 1320, t, 0.55, 0.07, { to: 255, release: 0.1 });
+      noise(b, t, 0.6, 0.1, { type: 'lowpass', f0: 5200, f1: 520, q: 0.8, wobble: 6.5, release: 0.15 });
+    },
+    // 倒帶：高速階梯跳頻下行（磁帶倒轉）+ 抖動帶通嘶聲
+    rewind(b, t) {
+      const steps = [];
+      for (let i = 0; i < 16; i++) steps.push([i * 0.028, 2600 - i * 130 + (i % 2 ? 420 : 0)]);
+      tone(b, 'sq', 2600, t, 0.46, 0.12, { steps, attack: 0.002, release: 0.04 });
+      noise(b, t, 0.46, 0.12, { type: 'bandpass', f0: 5200, f1: 1100, q: 2.2, wobble: 26, release: 0.06 });
+      tone(b, 'sine', 900, t, 0.44, 0.08, { to: 210, release: 0.06 });
+    },
+    // 黑洞：1 秒吸入低鳴（音量倒放漸強、音高持續下墜、螺旋帶通）
+    blackhole(b, t) {
+      tone(b, 'saw', 125, t, 1.0, 0.24, { to: 33, attack: 0.5, release: 0.12, vib: { rate: 2.2, depth: 0.1 } });
+      noise(b, t, 1.0, 0.2, { type: 'bandpass', f0: 2600, f1: 170, q: 1.8, attack: 0.6, release: 0.1, wobble: 3.2 });
+      tone(b, 'sine', 72, t, 1.0, 0.2, { to: 27, attack: 0.72, release: 0.1 });
+    },
+    // 隕石：墜落哨音 → 落地大爆炸 + 碎石
+    meteor(b, t) {
+      tone(b, 'sine', 1500, t, 0.55, 0.13, { to: 175, release: 0.1, vib: { rate: 5, depth: 0.02 } });
+      noise(b, t, 0.55, 0.13, { type: 'bandpass', f0: 3200, f1: 480, q: 1.3, attack: 0.06, release: 0.1 });
+      const i = t + 0.55;
+      noise(b, i, 0.55, 0.42, { type: 'lowpass', f0: 3500, f1: 85, q: 0.6, release: 0.22 });
+      tone(b, 'tri', 115, i, 0.45, 0.44, { to: 25, slideT: 0.22, release: 0.18 });
+      noise(b, i + 0.12, 0.4, 0.1, { type: 'bandpass', f0: 1800, f1: 600, q: 0.9, release: 0.18 });
+    },
+    // 重力上浮：向上牽引的顫動滑音 + 漸強氣流
+    gravity_lift(b, t) {
+      tone(b, 'sine', 140, t, 0.6, 0.24, { to: 640, attack: 0.06, release: 0.14, vib: { rate: 9, depth: 0.05 } });
+      tone(b, 'p12', 280, t + 0.06, 0.5, 0.09, { to: 1280, release: 0.12 });
+      noise(b, t, 0.6, 0.1, { type: 'highpass', f0: 700, f1: 5200, attack: 0.2, release: 0.16 });
+    },
+    // 分身生成：主音 + 兩個延遲失諧的複製（多重殘影感）
+    clone_summon(b, t) {
+      ['A5', 'C#6', 'E6'].forEach((n, i) => {
+        const f = F(n), tt = t + i * 0.055;
+        tone(b, 'p25', f, tt, 0.13, 0.16, { release: 0.05 });
+        tone(b, 'p25', f * 1.006, tt + 0.035, 0.12, 0.09, { release: 0.05 });
+        tone(b, 'p25', f * 0.993, tt + 0.07, 0.11, 0.055, { release: 0.05 });
+      });
+      noise(b, t, 0.4, 0.06, { type: 'highpass', f0: 6500, f1: 9500, decay: 0.12, release: 0.14 });
+    },
+    // 分身交換：兩條音高交錯（一升一降）的極短嗖
+    clone_swap(b, t) {
+      tone(b, 'p12', 400, t, 0.14, 0.15, { to: 1900, attack: 0.002, release: 0.04 });
+      tone(b, 'p12', 1900, t, 0.14, 0.13, { to: 400, attack: 0.002, release: 0.04 });
+      noise(b, t, 0.16, 0.12, { type: 'bandpass', f0: 2400, f1: 900, q: 2.6, release: 0.05 });
+    },
+    // 分身連擊：5 連殘影打擊（音高逐次上行）+ 收尾重擊
+    clone_rush(b, t) {
+      for (let i = 0; i < 5; i++) {
+        const tt = t + i * 0.055;
+        noise(b, tt, 0.06, 0.2 - i * 0.02, { type: 'bandpass', f0: 1600 + i * 480, q: 1.6, attack: 0.001, release: 0.03 });
+        tone(b, 'sq', 520 + i * 130, tt, 0.05, 0.12, { to: 260 + i * 60, attack: 0.001, release: 0.02 });
+      }
+      tone(b, 'tri', 150, t + 0.28, 0.16, 0.3, { to: 50, release: 0.07 });
+    },
+
+    // 【變身系】giant 巨大化 / dragon 龍化 / mech 機甲 / ghost 幽靈
+    // 巨大化：低頻隆隆上升 + 骨架撐開的喀喀 + 落地重音
+    giant_grow(b, t) {
+      tone(b, 'tri', 60, t, 0.65, 0.4, { to: 150, slideT: 0.55, attack: 0.05, release: 0.12, vib: { rate: 4, depth: 0.05 } });
+      noise(b, t, 0.65, 0.2, { type: 'lowpass', f0: 300, f1: 2000, q: 0.9, attack: 0.18, release: 0.16 });
+      [0.1, 0.26, 0.42].forEach((d, i) => tone(b, 'sq', 180 + i * 70, t + d, 0.07, 0.1, { to: 90 + i * 40, release: 0.03 }));
+      tone(b, 'tri', 120, t + 0.62, 0.3, 0.42, { to: 30, slideT: 0.14, release: 0.12 });
+      noise(b, t + 0.62, 0.3, 0.26, { type: 'lowpass', f0: 1600, f1: 120, release: 0.14 });
+    },
+    // 踩踏：地面重擊 + 碎石彈跳
+    stomp(b, t) {
+      tone(b, 'tri', 105, t, 0.34, 0.5, { to: 22, slideT: 0.16, attack: 0.001, release: 0.14 });
+      noise(b, t, 0.3, 0.34, { type: 'lowpass', f0: 2200, f1: 110, q: 0.7, release: 0.14 });
+      noise(b, t + 0.08, 0.26, 0.11, { type: 'bandpass', f0: 2600, f1: 1100, q: 1.4, decay: 0.06, release: 0.12 });
+    },
+    // 巨人咆哮：兩層微失諧鋸齒吼叫（先上揚後下沉）+ 低頻胸腔
+    giant_roar(b, t) {
+      tone(b, 'saw', 90, t, 0.8, 0.19, { seg: [[0.25, 150], [0.8, 70]], attack: 0.06, release: 0.2, vib: { rate: 6.5, depth: 0.07 } });
+      tone(b, 'saw', 93, t + 0.02, 0.78, 0.14, { seg: [[0.25, 155], [0.78, 72]], attack: 0.06, release: 0.2 });
+      tone(b, 'tri', 45, t, 0.85, 0.28, { to: 34, attack: 0.05, release: 0.25 });
+      noise(b, t, 0.8, 0.13, { type: 'bandpass', f0: 900, f1: 400, q: 0.8, wobble: 7, attack: 0.08, release: 0.25 });
+    },
+    // 縮小：快速下行閃爍（giant_grow 的反向，短促）+ 收尾啵
+    shrink(b, t) {
+      tone(b, 'p12', 1400, t, 0.32, 0.15, { to: 260, release: 0.08, vib: { rate: 14, depth: 0.03 } });
+      tone(b, 'sine', 700, t, 0.3, 0.11, { to: 140, release: 0.08 });
+      noise(b, t, 0.3, 0.09, { type: 'highpass', f0: 6000, f1: 1200, release: 0.1 });
+      tone(b, 'sq', 200, t + 0.28, 0.06, 0.12, { to: 420, attack: 0.001, release: 0.03 });
+    },
+    // 龍息：可循環呼叫的火焰噴流（節流 90ms，連續呼叫即為持續吐息）
+    dragon_breath(b, t) {
+      noise(b, t, 0.2, 0.26, { type: 'lowpass', f0: 2600, f1: 1200, q: 0.6, wobble: 34, attack: 0.02, release: 0.07 });
+      noise(b, t, 0.2, 0.12, { type: 'highpass', f0: 3400, f1: 5200, attack: 0.03, release: 0.07 });
+      tone(b, 'saw', 140, t, 0.18, 0.11, { to: 105, release: 0.06, vib: { rate: 19, depth: 0.08 } });
+    },
+    // 龍衝刺：低空掠過的風壓（先近後遠）+ 翼膜拍擊
+    dragon_dash(b, t) {
+      noise(b, t, 0.4, 0.3, { type: 'bandpass', f0: 300, f1: 2600, q: 0.7, attack: 0.05, release: 0.16 });
+      tone(b, 'tri', 180, t, 0.36, 0.22, { seg: [[0.14, 340], [0.36, 120]], attack: 0.02, release: 0.12 });
+      noise(b, t + 0.2, 0.16, 0.18, { type: 'lowpass', f0: 900, f1: 250, attack: 0.01, release: 0.07 });
+    },
+    // 尾巴掃擊：高速帶通掃頻 + 命中悶響
+    tail_whip(b, t) {
+      noise(b, t, 0.18, 0.3, { type: 'bandpass', f0: 700, f1: 5600, q: 1.8, attack: 0.01, release: 0.05 });
+      tone(b, 'sine', 320, t, 0.16, 0.14, { to: 1500, release: 0.04 });
+      tone(b, 'tri', 160, t + 0.15, 0.18, 0.32, { to: 48, slideT: 0.08, release: 0.08 });
+    },
+    // 拍翅：兩下空氣脈衝（低通噪音鼓起 + 低頻推力）
+    wing_flap(b, t) {
+      [0, 0.17].forEach((d, i) => {
+        noise(b, t + d, 0.16, 0.34 - i * 0.06, { type: 'lowpass', f0: 1500, f1: 400, q: 1.1, attack: 0.05, release: 0.06 });
+        tone(b, 'tri', 130 - i * 20, t + d, 0.14, 0.18, { to: 60, attack: 0.02, release: 0.05 });
+      });
+    },
+    // 火箭拳：機械彈射 → 噴射飛行 → 金屬撞擊
+    rocket_punch(b, t) {
+      noise(b, t, 0.05, 0.26, { type: 'bandpass', f0: 2200, q: 2.2, attack: 0.001, release: 0.02 });
+      tone(b, 'sq', 260, t, 0.05, 0.14, { to: 130, attack: 0.001, release: 0.02 });
+      noise(b, t + 0.05, 0.3, 0.24, { type: 'highpass', f0: 900, f1: 2800, q: 0.8, attack: 0.02, release: 0.1 });
+      tone(b, 'saw', 200, t + 0.05, 0.28, 0.13, { to: 520, release: 0.08 });
+      tone(b, 'sq', 1400, t + 0.34, 0.2, 0.12, { decay: 0.05, sustain: 0.25, release: 0.09 });
+      tone(b, 'tri', 140, t + 0.34, 0.16, 0.3, { to: 45, release: 0.07 });
+    },
+    // 飛彈發射：點火 → 推進上升 → 遠去
+    missile(b, t) {
+      noise(b, t, 0.08, 0.3, { type: 'highpass', f0: 2000, f1: 5000, attack: 0.002, release: 0.03 });
+      noise(b, t + 0.04, 0.5, 0.22, { type: 'lowpass', f0: 1200, f1: 3000, q: 0.7, wobble: 13, attack: 0.05, release: 0.2 });
+      tone(b, 'saw', 120, t + 0.04, 0.46, 0.14, { to: 460, slideT: 0.4, release: 0.16, vib: { rate: 8, depth: 0.03 } });
+      tone(b, 'sine', 600, t + 0.2, 0.34, 0.06, { to: 1500, release: 0.12 });
+    },
+    // 噴射：可循環呼叫的噴射氣流（節流 60ms）
+    jet(b, t) {
+      noise(b, t, 0.14, 0.2, { type: 'highpass', f0: 2600, f1: 4200, q: 0.7, attack: 0.02, release: 0.05 });
+      noise(b, t, 0.14, 0.12, { type: 'bandpass', f0: 700, q: 1.2, wobble: 46, attack: 0.02, release: 0.05 });
+      tone(b, 'saw', 320, t, 0.12, 0.05, { to: 380, release: 0.04 });
+    },
+    // 機甲步伐：伺服馬達 + 液壓洩壓 + 鋼板落地
+    mech_step(b, t) {
+      tone(b, 'saw', 420, t, 0.12, 0.07, { to: 260, attack: 0.01, release: 0.04, vib: { rate: 42, depth: 0.05 } });
+      noise(b, t + 0.1, 0.06, 0.22, { type: 'bandpass', f0: 3000, q: 2, attack: 0.001, release: 0.03 });
+      tone(b, 'tri', 115, t + 0.1, 0.26, 0.42, { to: 30, slideT: 0.12, release: 0.1 });
+      noise(b, t + 0.1, 0.22, 0.16, { type: 'lowpass', f0: 1600, f1: 160, release: 0.1 });
+      tone(b, 'sq', 1900, t + 0.1, 0.14, 0.05, { decay: 0.03, sustain: 0.2, release: 0.06 });
+    },
+    // 裝甲碎裂：金屬撕裂 + 4 片碎塊散落
+    armor_break(b, t) {
+      noise(b, t, 0.18, 0.36, { type: 'bandpass', f0: 1200, f1: 4200, q: 0.8, attack: 0.002, release: 0.07 });
+      tone(b, 'tri', 170, t, 0.22, 0.36, { to: 40, slideT: 0.1, release: 0.09 });
+      [0.1, 0.19, 0.27, 0.38].forEach((d, i) => {
+        tone(b, 'sq', 2400 - i * 380, t + d, 0.13, 0.1 - i * 0.015, { decay: 0.03, sustain: 0.2, release: 0.06 });
+        noise(b, t + d, 0.07, 0.12 - i * 0.02, { type: 'highpass', f0: 5000 + i * 800, attack: 0.001, release: 0.03 });
+      });
+    },
+    // 幽靈穿透：空靈微失諧雙音掃過（無實體感）
+    ghost_phase(b, t) {
+      tone(b, 'sine', 620, t, 0.5, 0.12, { seg: [[0.2, 980], [0.5, 480]], attack: 0.08, release: 0.18, vib: { rate: 4.5, depth: 0.03 } });
+      tone(b, 'sine', 627, t, 0.5, 0.09, { seg: [[0.2, 992], [0.5, 486]], attack: 0.1, release: 0.18 });
+      noise(b, t, 0.5, 0.1, { type: 'bandpass', f0: 2600, f1: 900, q: 3, attack: 0.12, release: 0.2 });
+    },
+    // 附身：向內吸附的下行滑音（倒放包絡）+ 低頻落定
+    possess(b, t) {
+      tone(b, 'p12', 900, t, 0.45, 0.13, { to: 150, attack: 0.3, release: 0.03 });
+      noise(b, t, 0.45, 0.14, { type: 'bandpass', f0: 3000, f1: 500, q: 2.2, attack: 0.32, release: 0.03 });
+      tone(b, 'sine', 130, t + 0.44, 0.35, 0.28, { to: 58, release: 0.14 });
+    },
+    // 解除附身：向外彈出 + 上行釋放
+    unpossess(b, t) {
+      tone(b, 'sine', 90, t, 0.12, 0.3, { to: 220, attack: 0.002, release: 0.05 });
+      tone(b, 'p12', 260, t + 0.06, 0.34, 0.12, { to: 1400, release: 0.1 });
+      noise(b, t + 0.04, 0.34, 0.12, { type: 'bandpass', f0: 700, f1: 5200, q: 2, attack: 0.02, release: 0.12 });
+    },
+    // 幽靈哀嚎：緩慢起伏的長哭聲（三段折線滑音 + 顫音）
+    ghost_wail(b, t) {
+      tone(b, 'sine', 520, t, 0.95, 0.15, { seg: [[0.3, 760], [0.62, 440], [0.95, 300]], attack: 0.12, release: 0.3, vib: { rate: 5.5, depth: 0.04, delay: 0.1 } });
+      tone(b, 'tri', 261, t + 0.05, 0.9, 0.09, { seg: [[0.3, 380], [0.6, 220], [0.9, 150]], attack: 0.15, release: 0.3 });
+      noise(b, t, 0.95, 0.07, { type: 'bandpass', f0: 1400, f1: 700, q: 2.5, attack: 0.25, release: 0.3, wobble: 5 });
+    },
+
+    // 【通用】變身演出 / 必殺 / 蓄力全滿
+    // 變身：上升琶音（C 大調七音）+ 白光閃爍，約 0.7 秒
+    transform(b, t) {
+      ['C5', 'E5', 'G5', 'C6', 'E6', 'G6', 'C7'].forEach((n, i) =>
+        tone(b, 'p25', F(n), t + i * 0.055, i === 6 ? 0.34 : 0.1, 0.15,
+          i === 6 ? { release: 0.14, vib: { rate: 7, depth: 0.012, delay: 0.08 } } : { release: 0.04 }));
+      tone(b, 'p12', F('G6'), t + 0.33, 0.36, 0.08, { release: 0.14 });
+      tone(b, 'tri', 70, t, 0.42, 0.3, { to: 200, slideT: 0.36, attack: 0.04, release: 0.1 });
+      noise(b, t + 0.3, 0.4, 0.16, { type: 'highpass', f0: 3000, f1: 11000, attack: 0.008, decay: 0.1, release: 0.2 });
+      noise(b, t + 0.3, 0.36, 0.14, { type: 'lowpass', f0: 4000, f1: 300, release: 0.16 });
+    },
+    // 解除變身：下行琶音 + 洩氣
+    untransform(b, t) {
+      ['G6', 'E6', 'C6', 'G5', 'E5'].forEach((n, i) => tone(b, 'p25', F(n), t + i * 0.055, 0.1, 0.14, { release: 0.04 }));
+      tone(b, 'tri', 180, t + 0.22, 0.26, 0.22, { to: 60, release: 0.1 });
+      noise(b, t + 0.2, 0.3, 0.12, { type: 'lowpass', f0: 3000, f1: 400, release: 0.12 });
+    },
+    // 必殺登場 stinger（約 0.5 秒）：D 大調銅管式重擊和弦 + 鈸 + 上衝
+    ultimate(b, t) {
+      ['D4', 'A4', 'D5', 'F#5', 'A5'].forEach(n => tone(b, 'saw', F(n), t, 0.42, 0.07, { decay: 0.08, sustain: 0.55, release: 0.14, vib: { rate: 6, depth: 0.01, delay: 0.14 } }));
+      tone(b, 'tri', 110, t, 0.4, 0.38, { to: 55, slideT: 0.3, release: 0.14 });
+      noise(b, t, 0.5, 0.2, { type: 'highpass', f0: 4000, f1: 9000, decay: 0.14, release: 0.26 });
+      tone(b, 'p25', 500, t + 0.28, 0.24, 0.12, { to: 2000, release: 0.1 });
+      noise(b, t + 0.3, 0.2, 0.18, { type: 'lowpass', f0: 2200, f1: 300, release: 0.1 });
+    },
+    // 蓄力全滿（比 charge_ready 更亮）：雙八度鐘聲 + 極高頻閃光 + 上衝尾音
+    max(b, t) {
+      tone(b, 'p25', F('E6'), t, 0.3, 0.16, { release: 0.12 });
+      tone(b, 'p25', F('B6'), t, 0.34, 0.13, { release: 0.14, vib: { rate: 8, depth: 0.01, delay: 0.08 } });
+      tone(b, 'p12', F('E7'), t + 0.04, 0.32, 0.08, { release: 0.14 });
+      tone(b, 'sine', F('B5'), t, 0.3, 0.1, { release: 0.12 });
+      noise(b, t, 0.36, 0.1, { type: 'highpass', f0: 9000, f1: 13000, decay: 0.07, release: 0.14 });
+      tone(b, 'p12', 1200, t + 0.16, 0.2, 0.07, { to: 3200, release: 0.08 });
     },
   };
 
@@ -1423,6 +1774,47 @@
       },
     };
   }
+
+  // ---- Round 5（audio5）----
+  // ultimate_loop：必殺期間的 2 小節高張力 loop（A 小調、BPM 180、十六分驅動 + 雙倍鼓）
+  //   素材 A / B 各 2 小節，order 交替 8 次 → 16 小節，聽感仍是「2 小節一循環」的緊迫感
+  SONGS.ultimate_loop = {
+    bpm: 180, loop: true, gain: 1.05, order: ['A', 'B', 'A', 'B', 'A', 'B', 'A', 'B'],
+    sec: {
+      A: {
+        p1: ['A5 - E6 - A6 - G6 - E6 - D6 - C6 - B5 -',
+          'A5 - C6 - E6 - G6 - F6 - E6 - D6 - C6 -'],
+        p2: ['A4 - E5 - A4 - E5 - A4 - E5 - A4 - E5 -',
+          'F4 - C5 - F4 - C5 - G4 - D5 - G4 - D5 -'],
+        bass: ['A2 . A2 . A2 . A2 . A2 . A2 . A2 . G2 .',
+          'F2 . F2 . F2 . F2 . G2 . G2 . G2 . G2 .'],
+        drum: [D.dblH, D.dblH],
+      },
+      B: {
+        p1: ['E6 - A6 - E6 - C6 - A5 - B5 - C6 - E6 -',
+          'F6 - E6 - D6 - C6 - B5 - - - . . . .'],
+        p2: ['C5 - E5 - C5 - E5 - A4 - E5 - A4 - E5 -',
+          'F4 - C5 - G4 - D5 - E4 - B4 - E4 - G4 -'],
+        bass: ['A2 . A2 . C3 . C3 . A2 . A2 . E2 . E2 .',
+          'F2 . F2 . G2 . G2 . A2 . A2 . A2 . E2 .'],
+        drum: [D.dblH, D.fill],
+      },
+    },
+  };
+
+  // transform_jingle：變身用 1 小節短句（C 大調上行，不循環，2.0 秒）
+  //   與 sfx('transform') 同時呼叫會太厚，兩者擇一即可（通常直接用 sfx）
+  SONGS.transform_jingle = {
+    bpm: 120, loop: false,
+    sec: {
+      A: {
+        p1: ['C5 E5 G5 C6 E6 G6 C7 - - - - - - - - -'],
+        p2: ['E4 - G4 - C5 - E5 - G5 - - - - - - -'],
+        bass: ['C3 - - - G2 - - - C3 - - - C3 - - -'],
+        drum: ['k . . . h . . . k . s . c . . .'],
+      },
+    },
+  };
 
   // ======================================================================
   // 音序器

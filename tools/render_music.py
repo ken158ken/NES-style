@@ -75,13 +75,17 @@ def main():
                 print('  <-- music() / music(null) 影響了 ambient（應互相獨立）'); bad += 1
             if amb['afterBad'] is not None or amb['afterNull'] is not None:
                 print('  <-- ambient(null) / 未知名稱處理異常'); bad += 1
-        # 高頻音效節流：count 每 4 幀、fuse 每 6 幀呼叫必須放行
+        # 高頻音效節流：可連續呼叫的音效（count 每 4 幀、fuse / gun / dragon_breath 每 6 幀、jet 每 4 幀）必須放行
         thr = pg.evaluate("()=>({t: KB.audio.SFX_THROTTLE, d: KB.audio.THROTTLE_MS})")
-        for name, frames in (('count', 4), ('fuse', 6)):
+        for name, frames in (('count', 4), ('fuse', 6), ('gun', 6), ('dragon_breath', 6), ('jet', 4)):
             v = thr['t'].get(name, thr['d'])
             if v >= frames * 1000 / 60:
                 print(f"  <-- sfx '{name}' 節流 {v}ms ≥ 呼叫間隔 {frames*1000/60:.0f}ms"); bad += 1
-        print('throttle     :', thr)
+        names_all = set(pg.evaluate("()=>KB.audio.SFX_NAMES"))
+        ghost = sorted(set(thr['t']) - names_all)
+        if ghost:
+            print('  <-- 節流表有不存在的音效:', ','.join(ghost)); bad += len(ghost)
+        print('throttle     :', f"{len(thr['t'])} 項（預設 {thr['d']}ms）", thr['t'])
         # 音量 / duck API（提供給 ui-menu）
         api = pg.evaluate("()=>['setVolume','getVolume','duck','setMute','status'].filter(k=>typeof KB.audio[k]!=='function')")
         if api:

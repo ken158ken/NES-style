@@ -175,11 +175,17 @@ __kb.state()                  // 回傳 JSON 快照
 `KB.audio.sfx(name)`：`jump land float exhale spit swallow hurt die enemyhit enemydie block item ability door boss_hurt boss_die menu select slide sword fire beam cutter spark ice hammer stone clear pause`
 ＋ Round 1：`unpause lowhp oneup bigstar charge charge_ready unlock phase2 menu_back`
 ＋ Round 2：`splash bubble wind torch fuse melt hardblock count count_end ride(=warp) essence`
+＋ Round 5（12 種新能力，共 47 個）：
+　武器系 `gun shotgun reload shuriken teleport iai slash_big bow arrow arrow_rain wallkick`
+　魔法系 `fireball icewall thunder magic_circle magic_big timestop timeresume slowmo rewind blackhole meteor gravity_lift clone_summon clone_swap clone_rush`
+　變身系 `giant_grow stomp giant_roar shrink dragon_breath dragon_dash tail_whip wing_flap rocket_punch missile jet mech_step armor_break ghost_phase possess unpossess ghost_wail`
+　通用 `transform`（變身演出 0.7s）`untransform` `ultimate`（必殺 stinger 0.5s）`max`（蓄力全滿，比 charge_ready 亮）
 `KB.audio.music(key|null)`：`title select green castle island cloud dedede boss finalboss invincible clear gameover ending`
 ＋ `boss2 finalboss2 secret miniboss result arena arena_rest w_intro green2 castle2 island2 cloud2 dedede2`
+＋ Round 5：`ultimate_loop`（必殺期間高張力 loop，2 小節素材交替 × 8）、`transform_jingle`（變身 1 小節短句，不循環 2.0 秒）
 `KB.audio.ambient(key|null)`：環境音層 `water wind cave castle`（跟隨音效音量；與 music 獨立；同 key 不重啟，切房可直接呼叫）
 `KB.audio.setVolume({music,sfx})` / `getVolume()` / `duck(on)` / `setMute(m)` / `toggleMute()` / `status()`
-每音效節流見 `KB.audio.SFX_THROTTLE`（count 25ms、fuse 50ms…預設 80ms）。
+每音效節流見 `KB.audio.SFX_THROTTLE`（count 25ms、gun 30ms（可每 6 幀連射）、jet 60ms、dragon_breath 90ms、大招 200~500ms…預設 80ms）。
 `KB.audio.unlock()` 於第一次使用者輸入時呼叫。無聲環境（headless）需全部 try/catch。完整清單以 `node tools/audio_check.js` 輸出為準。
 
 ## 10. 手感參數（const.js，勿隨意改）
