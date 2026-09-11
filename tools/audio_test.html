@@ -37,6 +37,9 @@
 <div class="row" id="sfx"></div>
 <h2>音樂 music(key)</h2>
 <div class="row" id="music"></div>
+<h2>環境音層 ambient(key)</h2>
+<div class="hint">與音樂完全獨立：停止音樂不會停掉環境音；音量跟隨「音效」滑桿。</div>
+<div class="row" id="amb"></div>
 <div id="render"></div>
 
 <script src="../src/const.js"></script>
@@ -55,6 +58,16 @@
     b.onclick = () => { KB.audio.unlock(); KB.audio.music(k); };
     $('music').appendChild(b);
   }
+  for (const k of (KB.audio.AMBIENT_NAMES || [])) {
+    const b = document.createElement('button'); b.textContent = k; b.dataset.amb = k;
+    b.onclick = () => { KB.audio.unlock(); KB.audio.ambient(KB.audio.status().ambient === k ? null : k); };
+    $('amb').appendChild(b);
+  }
+  {
+    const b = document.createElement('button'); b.textContent = '停止環境音';
+    b.onclick = () => KB.audio.ambient(null);
+    $('amb').appendChild(b);
+  }
   $('mute').onclick = () => { KB.audio.unlock(); KB.audio.toggleMute(); };
   let ducked = false;
   $('duck').onclick = () => { KB.audio.unlock(); ducked = !ducked; KB.audio.duck(ducked); };
@@ -70,6 +83,7 @@
     $('omusic').textContent = st.volume.music.toFixed(2);
     $('osfx').textContent = st.volume.sfx.toFixed(2);
     for (const b of $('music').children) b.classList.toggle('on', b.dataset.key === st.playing);
+    for (const b of $('amb').children) if (b.dataset.amb) b.classList.toggle('on', b.dataset.amb === st.ambient);
   }, 200);
 
   function stats(buf) {
@@ -81,6 +95,7 @@
     const out = [];
     for (const n of KB.audio.SFX_NAMES) { try { out.push('sfx   ' + n.padEnd(10) + JSON.stringify(stats(await KB.audio.renderSfx(n)))); } catch (e) { out.push('sfx   ' + n + ' ERROR ' + e); } $('render').textContent = out.join('\n'); }
     for (const k of KB.audio.MUSIC_NAMES) { try { out.push('music ' + k.padEnd(10) + JSON.stringify(stats(await KB.audio.renderSong(k, 6)))); } catch (e) { out.push('music ' + k + ' ERROR ' + e); } $('render').textContent = out.join('\n'); }
+    for (const k of (KB.audio.AMBIENT_NAMES || [])) { try { out.push('amb   ' + k.padEnd(10) + JSON.stringify(stats(await KB.audio.renderAmbient(k, 5)))); } catch (e) { out.push('amb   ' + k + ' ERROR ' + e); } $('render').textContent = out.join('\n'); }
   };
   // 供自動化測試呼叫
   window.__audioStats = stats;

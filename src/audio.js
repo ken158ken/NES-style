@@ -7,10 +7,14 @@
 // - 所有旋律皆為本專案原創
 // - 所有對外呼叫皆 try/catch：無 AudioContext / headless / 尚未 unlock 一律靜默不拋錯；?mute=1 靜音；M 鍵切換靜音
 //
-// 介面：KB.audio.sfx(name) / music(key|null) / unlock() / setMute(bool) / toggleMute() / status()
+// - 環境音層（ambient）：獨立的循環噪音層（noise buffer + 濾波 + 慢速 LFO），掛在 sfxBus 之下受音效音量控制，
+//   與 music() 完全獨立（music(null) 不影響 ambient，反之亦然）；切房時由關卡 room.ambient 呼叫
+//
+// 介面：KB.audio.sfx(name) / music(key|null) / ambient(key|null) / unlock() / setMute(bool) / toggleMute() / status()
 //       KB.audio.setVolume({music, sfx}) / getVolume() → {music, sfx, muted}（0~1，存 KB.save.settings.audio）
 //       KB.audio.duck(on)   暫停時把音樂平滑降到 30%（ui-menu 於暫停 / 恢復呼叫）
-//       KB.audio.SFX_NAMES / MUSIC_NAMES / SONGS / compileSong / noteFreq / renderSong / renderSfx（離線渲染，供測試工具）
+//       KB.audio.SFX_NAMES / MUSIC_NAMES / AMBIENT_NAMES / SONGS / SFX_THROTTLE
+//       KB.audio.compileSong / noteFreq / renderSong / renderSfx / renderAmbient（離線渲染，供測試工具）
 (function () {
   const W = (typeof window !== 'undefined') ? window : {};
   const AC = W.AudioContext || W.webkitAudioContext || null;
@@ -19,7 +23,10 @@
   const UVOL = { music: 1, sfx: 1 };                    // 使用者音量 0~1（乘在基準上），存檔於 KB.save.settings.audio
   const DUCK_PAUSE = 0.3, DUCK_TMP = 0.35;              // 暫停 / 短暫閃避時的音樂倍率
   const SAVE_KEY = 'kirbystar_save';
-  const THROTTLE_MS = 80;                               // 同一音效 80ms 內不重複
+  const THROTTLE_MS = 80;                               // 同一音效 80ms 內不重複（預設）
+  // 特例節流（毫秒，0 = 不節流）：會被高頻重複呼叫的音效需要放寬，否則會被吃掉
+  //   count 每 4 幀呼叫（≈67ms）、fuse 每 6 幀（≈100ms）、bubble 水中氣泡不定期
+  const SFX_THROTTLE = { count: 25, fuse: 50, bubble: 45, torch: 90, melt: 90, splash: 120, wind: 150 };
   const LOOKAHEAD = 0.1, TICK_MS = 25;                  // 預排參數
   const nowMs = () => (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
 
@@ -38,7 +45,7 @@
   // ======================================================================
   // AudioContext 與共用資源
   // ======================================================================
-  let ctx = null, res = null, master = null, comp = null, sfxBus = null, musicBus = null;
+  let ctx = null, res = null, master = null, comp = null, sfxBus = null, musicBus = null, ambBus = null;
   let unlocked = false, muted = !!(KB.MUTE), pendingMusic = undefined, autoSusp = false;
   const warned = {};
   function warnOnce(msg) { if (!warned[msg]) { warned[msg] = true; try { console.warn('[audio]', msg); } catch (e) { } } }
@@ -69,6 +76,7 @@
     catch (e) { master.connect(ctx.destination); }
     sfxBus = ctx.createGain(); sfxBus.gain.value = VOL.sfx * UVOL.sfx; sfxBus.connect(master);
     musicBus = ctx.createGain(); musicBus.gain.value = VOL.music * UVOL.music * duckFactor(); musicBus.connect(master);
+    ambBus = ctx.createGain(); ambBus.gain.value = 1; ambBus.connect(sfxBus);   // 環境音掛在音效匯流排下（受 sfx 音量控制）
     if (ctx.addEventListener) ctx.addEventListener('statechange', () => { try { if (ctx.state === 'running') { unlocked = true; startPending(); } } catch (e) { } });
   }
   function setWave(o, w) {
@@ -345,7 +353,166 @@
     },
     // 選單返回 / 取消：下行兩音
     menu_back(b, t) { tone(b, 'sq', 660, t, 0.05, 0.18); tone(b, 'sq', 440, t + 0.06, 0.12, 0.18); },
+
+    // ---- Round 2（audio2）----
+    // 入水噗通：低頻撲通 + 由高掃到低的水花噪音 + 幾顆水珠
+    splash(b, t) {
+      tone(b, 'tri', 320, t, 0.18, 0.42, { to: 70, slideT: 0.12 });
+      noise(b, t, 0.3, 0.3, { type: 'lowpass', f0: 4000, f1: 400, q: 0.9 });
+      noise(b, t + 0.06, 0.26, 0.14, { type: 'bandpass', f0: 1800, f1: 5200, q: 1.4 });
+      tone(b, 'sine', 900, t + 0.12, 0.1, 0.1, { to: 1600 });
+    },
+    // 小氣泡：短促上滑 blip（水中每隔一陣子呼叫）
+    bubble(b, t) {
+      tone(b, 'sine', 420, t, 0.11, 0.22, { to: 1250, attack: 0.004, release: 0.04 });
+      noise(b, t, 0.06, 0.06, { type: 'bandpass', f0: 2200, q: 2 });
+    },
+    // 短風聲：帶通噪音緩慢掃過（可循環呼叫；節流 150ms）
+    wind(b, t) {
+      noise(b, t, 0.9, 0.2, { type: 'bandpass', f0: 500, f1: 1400, q: 1.1, wobble: 1.6, attack: 0.25, release: 0.35 });
+      noise(b, t + 0.1, 0.7, 0.07, { type: 'highpass', f0: 3000, f1: 6000, attack: 0.2, release: 0.3 });
+    },
+    // 火把劈啪：火焰底噪 + 3 顆爆裂
+    torch(b, t) {
+      noise(b, t, 0.36, 0.18, { type: 'lowpass', f0: 700, f1: 1500, q: 0.6, wobble: 17 });
+      for (let i = 0; i < 3; i++) {
+        const tt = t + 0.03 + i * 0.107;
+        noise(b, tt, 0.035, 0.17 - i * 0.035, { type: 'bandpass', f0: 2600 + i * 900, q: 2.4, attack: 0.001, release: 0.02 });
+      }
+    },
+    // 導火線嘶嘶：短促（每 6 幀重複呼叫，節流 50ms，疊起來即為連續燃燒聲）
+    fuse(b, t) {
+      noise(b, t, 0.13, 0.15, { type: 'highpass', f0: 3800, f1: 6500, q: 0.9, attack: 0.01, release: 0.05 });
+      noise(b, t, 0.12, 0.06, { type: 'bandpass', f0: 1500, q: 1.2, wobble: 40 });
+    },
+    // 冰融化：兩滴水滴滴答 + 細碎高頻
+    melt(b, t) {
+      tone(b, 'sine', 1500, t, 0.12, 0.2, { to: 420, attack: 0.003, release: 0.05 });
+      tone(b, 'sine', 1180, t + 0.17, 0.12, 0.14, { to: 340, attack: 0.003, release: 0.05 });
+      noise(b, t, 0.3, 0.06, { type: 'highpass', f0: 7000, decay: 0.1 });
+    },
+    // 硬磚（打不破）：兩個失諧高音金屬叮 + 悶響
+    hardblock(b, t) {
+      tone(b, 'sq', 1760, t, 0.2, 0.14, { decay: 0.04, sustain: 0.25, release: 0.08 });
+      tone(b, 'sq', 2093, t, 0.18, 0.1, { decay: 0.04, sustain: 0.2, release: 0.08 });
+      tone(b, 'tri', 150, t, 0.1, 0.3, { to: 60 });
+      noise(b, t, 0.09, 0.22, { type: 'bandpass', f0: 3200, q: 1.1 });
+    },
+    // 結算計數 tick（每 4 幀呼叫，節流 25ms）
+    count(b, t) { tone(b, 'p12', 1450, t, 0.04, 0.14, { attack: 0.002, release: 0.015 }); },
+    // 計數結束：叮咚
+    count_end(b, t) {
+      tone(b, 'p25', F('G6'), t, 0.1, 0.18);
+      tone(b, 'p25', F('C7'), t + 0.1, 0.3, 0.18, { vib: { rate: 7, depth: 0.01, delay: 0.08 } });
+      tone(b, 'p12', F('E6'), t + 0.1, 0.3, 0.09);
+      noise(b, t, 0.4, 0.06, { type: 'highpass', f0: 8000, decay: 0.12 });
+    },
+    // 傳送星起飛：上升咻 + 星光琶音
+    ride(b, t) {
+      noise(b, t, 0.55, 0.22, { type: 'bandpass', f0: 400, f1: 5200, q: 1.3, attack: 0.03 });
+      tone(b, 'p12', 260, t, 0.5, 0.15, { to: 2000, slideT: 0.42, vib: { rate: 9, depth: 0.02, delay: 0.1 } });
+      ['C6', 'E6', 'G6', 'C7'].forEach((n, i) => tone(b, 'p25', F(n), t + 0.12 + i * 0.07, 0.09, 0.11));
+    },
+    // 能力台座取得：短琶音（比 ability 短、偏明亮，不 duck 音樂）
+    essence(b, t) {
+      ['G5', 'B5', 'D6', 'G6'].forEach((n, i) => tone(b, 'p25', F(n), t + i * 0.05, i === 3 ? 0.26 : 0.07, 0.19));
+      tone(b, 'p12', F('B5'), t + 0.15, 0.26, 0.09);
+      noise(b, t, 0.34, 0.06, { type: 'highpass', f0: 7500, f1: 10000, decay: 0.12 });
+    },
   };
+
+  // 別名：player.js（player2 的 rideStar）以 'warp' 呼叫傳送星起飛音，與 'ride' 同一個聲音
+  SFX.warp = SFX.ride;
+
+  // ======================================================================
+  // 環境音層（ambient）：低音量循環噪音床，獨立於音樂，受 sfx 音量控制
+  // ======================================================================
+  // layers[]: type 濾波型別、f 中心頻率、q、vol 音量、rate 噪音播放速率、
+  //           lfo {rate,depth} 濾波頻率慢速擺動、amp {rate,depth} 音量起伏；drone 低頻正弦襯底
+  const AMBIENT = {
+    // 水下：悶厚的低頻水聲 + 緩慢冒泡的中頻
+    water: {
+      fade: 1.0,
+      layers: [
+        { type: 'lowpass', f: 520, q: 1.0, vol: 0.095, rate: 0.6, lfo: { rate: 0.18, depth: 180 } },
+        { type: 'bandpass', f: 1400, q: 1.5, vol: 0.036, lfo: { rate: 0.7, depth: 600 }, amp: { rate: 0.45, depth: 0.7 } },
+      ],
+    },
+    // 空中 / 山頂：持續呼嘯的風
+    wind: {
+      fade: 1.4,
+      layers: [
+        { type: 'bandpass', f: 760, q: 1.1, vol: 0.075, lfo: { rate: 0.13, depth: 420 }, amp: { rate: 0.09, depth: 0.75 } },
+        { type: 'highpass', f: 3600, vol: 0.022, lfo: { rate: 0.21, depth: 1500 }, amp: { rate: 0.15, depth: 0.8 } },
+      ],
+    },
+    // 洞窟：極低頻空氣聲 + 低音嗡鳴
+    cave: {
+      fade: 1.6,
+      layers: [
+        { type: 'lowpass', f: 300, q: 1.4, vol: 0.105, rate: 0.5, lfo: { rate: 0.07, depth: 90 } },
+      ],
+      drone: { f: 58, vol: 0.03 },
+    },
+    // 城堡：石室低鳴 + 遠處火把的高頻空氣感
+    castle: {
+      fade: 1.4,
+      layers: [
+        { type: 'lowpass', f: 400, q: 0.8, vol: 0.082, rate: 0.55, lfo: { rate: 0.05, depth: 110 } },
+        { type: 'bandpass', f: 2600, q: 0.9, vol: 0.026, amp: { rate: 0.11, depth: 0.85 } },
+      ],
+      drone: { f: 98, vol: 0.024 },
+    },
+  };
+
+  // 於 bus 上建立一個 ambient 聲部；回傳 { stop(at, fade) }。ctx 為當下的 AudioContext（離線渲染時會被暫時替換）
+  function makeAmbient(bus, t, key) {
+    const spec = AMBIENT[key];
+    if (!spec || !ctx || !res) return null;
+    const c = ctx, nodes = [], g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(1, t + (spec.fade || 1.2));
+    g.connect(bus);
+    for (const L of spec.layers) {
+      const src = c.createBufferSource(); src.buffer = res.noise; src.loop = true;
+      if (L.rate) src.playbackRate.value = L.rate;
+      const lg = c.createGain(); lg.gain.value = L.vol;
+      let last = src;
+      if (L.type) {
+        const f = c.createBiquadFilter(); f.type = L.type; f.Q.value = L.q || 0.8; f.frequency.value = L.f;
+        src.connect(f); last = f;
+        if (L.lfo) {
+          const o = c.createOscillator(), og = c.createGain();
+          o.type = 'sine'; o.frequency.value = L.lfo.rate; og.gain.value = L.lfo.depth;
+          o.connect(og); og.connect(f.frequency); o.start(t); nodes.push(o);
+        }
+      }
+      if (L.amp) {
+        const o = c.createOscillator(), og = c.createGain();
+        o.type = 'sine'; o.frequency.value = L.amp.rate; og.gain.value = L.vol * L.amp.depth;
+        o.connect(og); og.connect(lg.gain); o.start(t); nodes.push(o);
+      }
+      last.connect(lg); lg.connect(g);
+      src.start(t, Math.random() * 0.5); nodes.push(src);
+    }
+    if (spec.drone) {
+      const o = c.createOscillator(), og = c.createGain();
+      o.type = 'sine'; o.frequency.value = spec.drone.f; og.gain.value = spec.drone.vol;
+      o.connect(og); og.connect(g); o.start(t); nodes.push(o);
+    }
+    return {
+      key, g,
+      stop(at, fade) {
+        fade = fade || 0.5;
+        try {
+          g.gain.cancelScheduledValues(at);
+          g.gain.setTargetAtTime(0, at, fade / 3);
+          for (const n of nodes) { try { n.stop(at + fade + 0.25); } catch (e) { } }
+          setTimeout(() => { try { g.disconnect(); } catch (e) { } }, (fade + 0.6) * 1000);
+        } catch (e) { }
+      },
+    };
+  }
 
   // ======================================================================
   // 音樂資料
@@ -937,6 +1104,327 @@
   }
 
   // ======================================================================
+  // Round 2（audio2）：結算 / 競技場 / 關卡開場 / 各世界第二首曲
+  // ======================================================================
+
+  // ---- result：結算，C 大調 8 小節明亮號角（不循環，結尾停在主和弦）----
+  SONGS.result = {
+    bpm: 140, loop: false, order: ['A'],
+    sec: {
+      A: {
+        p1: ['C5 - E5 - G5 - - - C6 - - - - - - -',
+          'A5 - - - G5 - E5 - F5 - - - - - . .',
+          'D5 - F5 - A5 - - - D6 - - - - - - -',
+          'C6 - - - B5 - A5 - G5 - - - - - . .',
+          'E5 - G5 - C6 - E6 - G6 - - - - - - -',
+          'F6 - E6 - D6 - C6 - E6 - - - - - . .',
+          'D6 - - - F6 - - - E6 - - - G6 - - -',
+          'C6 - - - - - - - - - - - - - - -'],
+        p2: ['E4 - G4 - C5 - - - E5 - - - - - - -',
+          'C5 - - - B4 - G4 - A4 - - - - - . .',
+          'F4 - A4 - D5 - - - F5 - - - - - - -',
+          'E5 - - - D5 - C5 - B4 - - - - - . .',
+          'G4 - C5 - E5 - G5 - C6 - - - - - - -',
+          'A5 - G5 - F5 - E5 - G5 - - - - - . .',
+          'F5 - - - A5 - - - G5 - - - B5 - - -',
+          'E5 - - - - - - - - - - - - - - -'],
+        bass: [half('C3', 'C3'), half('F2', 'G2'), half('D3', 'D3'), half('G2', 'G2'),
+          half('C3', 'E3'), half('F2', 'C3'), half('G2', 'D3'), hold('C3')],
+        drum: ['k . . . s . . . k . . . s . . .', 'k . . . s . . . k . . . s . . .',
+          'k . . . s . . . k . . . s . . .', 'k . . . s . . . k . . . s . s s',
+          'k . h . s . h . k . h . s . h .', 'k . h . s . h . k . h . s . h .',
+          'k . h . s . h . k . s . s s s s', 'c . . . . . . . . . . . . . . .'],
+      },
+    },
+  };
+
+  // ---- w_intro：關卡開場 2 小節短句（不循環）----
+  SONGS.w_intro = {
+    bpm: 160, loop: false, order: ['A'],
+    sec: {
+      A: {
+        p1: ['C5 - E5 - G5 - C6 - E6 - - - D6 - - -',
+          'G6 - - - E6 - C6 - G5 - - - - - - -'],
+        p2: ['E4 - G4 - C5 - E5 - G5 - - - F5 - - -',
+          'B5 - - - G5 - E5 - C5 - - - - - - -'],
+        bass: [half('C3', 'G2'), hold('C3')],
+        drum: ['k . . . s . . . k . . . s . s s', 'c . . . . . . . . . . . . . . .'],
+      },
+    },
+  };
+
+  // ---- arena：競技場（Boss Rush）E 小調、BPM 160、緊湊 16 小節 loop ----
+  {
+    const A1 = 'E5 - B4 - E5 - G5 - B5 - - - A5 - G5 -';
+    const A2 = 'F#5 - - - A5 - F#5 - E5 - - - B4 - - -';
+    const B1 = 'B5 - - - E6 - - - D6 - B5 - A5 - G5 -';
+    const B2 = 'F#5 - - - A5 - - - G5 - E5 - D5 - . .';
+    SONGS.arena = {
+      bpm: 160, loop: true, order: ['A', 'B'], inst: { p1: 'sq' }, vol: { p1: 0.19, p2: 0.11, bass: 0.32 },
+      sec: {
+        A: {
+          p1: [A1, A2,
+            'G5 - D5 - G5 - B5 - D6 - - - C6 - B5 -',
+            'A5 - - - C6 - A5 - F#5 - - - . . . .',
+            A1, A2,
+            'C6 - - - B5 - A5 - G5 - - - F#5 - - -',
+            'B5 - - - F#5 - - - E5 - - - . . . .'],
+          p2: [stab('G4', 'B4'), stab('A4', 'C5'), stab('G4', 'B4'), stab('F#4', 'A4'),
+            stab('G4', 'B4'), stab('E4', 'A4'), stab('G4', 'C5'), stab('F#4', 'B4')],
+          bass: [dr8('E2', 'E3'), dr8('D2', 'A2'), dr8('G2', 'D3'), dr8('A2', 'E3'),
+            dr8('E2', 'E3'), dr8('C2', 'G2'), dr8('A2', 'E3'), dr8('B2', 'F#3')],
+          drum: [D.tight, D.tight, D.tight, D.tightF, D.tight, D.tight, D.tight, D.tightF],
+        },
+        B: {
+          p1: [B1, B2,
+            'C6 - - - E6 - - - G6 - - - F#6 - E6 -',
+            'D6 - - - B5 - - - G5 - - - . . . .',
+            B1, B2,
+            'F#5 - A5 - C6 - E6 - D6 - C6 - B5 - A5 -',
+            'E5 - - - - - - - . . B4 - D5 - F#5 -'],
+          p2: [stab('E4', 'G4'), stab('D4', 'F#4'), stab('E4', 'G4'), stab('G4', 'B4'),
+            stab('E4', 'G4'), stab('F#4', 'A4'), stab('D4', 'F#4'), stab('E4', 'B4')],
+          bass: [dr8('E2', 'B2'), dr8('D2', 'A2'), dr8('C2', 'G2'), dr8('G2', 'D3'),
+            dr8('E2', 'B2'), dr8('F#2', 'C#3'), dr8('D2', 'A2'), dr8('E2', 'B2')],
+          drum: [D.tight, D.tight, D.tight, D.tightF, D.tight, D.tight, D.tight, D.bossF],
+        },
+      },
+    };
+  }
+
+  // ---- arena_rest：競技場休息房，G 大調 8 小節柔和 loop（order 走兩輪 = 16 小節）----
+  SONGS.arena_rest = {
+    bpm: 96, loop: true, gain: 0.85, order: ['A', 'B', 'A', 'B'],
+    inst: { p1: 'sq', p2: 'p12' }, vol: { p1: 0.16, p2: 0.1, bass: 0.24 },
+    sec: {
+      A: {
+        p1: ['D5 - - - G5 - - - B5 - - - - - - -',
+          'A5 - - - - - G5 - E5 - - - D5 - - -',
+          'C5 - E5 - G5 - - - A5 - - - B5 - - -',
+          'G5 - - - - - - - . . . . D5 - - -'],
+        p2: [arpE('G4', 'B4', 'D5', 'B4'), arpE('E4', 'G4', 'B4', 'G4'),
+          arpE('C4', 'E4', 'G4', 'E4'), arpE('D4', 'F#4', 'A4', 'F#4')],
+        bass: [hold('G2'), hold('E2'), hold('C3'), hold('D3')],
+        drum: [D.quiet, D.quiet, D.quiet, D.sparse],
+      },
+      B: {
+        p1: ['B5 - - - A5 - - - G5 - - - - - - -',
+          'E5 - - - G5 - - - A5 - - - B5 - - -',
+          'D6 - - - - - B5 - G5 - - - A5 - - -',
+          'G5 - - - - - - - - - - - . . . .'],
+        p2: [arpE('G4', 'B4', 'E5', 'B4'), arpE('E4', 'A4', 'C5', 'A4'),
+          arpE('G4', 'B4', 'D5', 'B4'), arpE('D4', 'G4', 'B4', 'G4')],
+        bass: [hold('E2'), hold('A2'), hold('G2'), hold('D3')],
+        drum: [D.quiet, D.quiet, D.quiet, D.none],
+      },
+    },
+  };
+
+  // ---- green2：草原第二曲（C 大調，與 green 同調不同旋律，供後半房間）----
+  {
+    const A1 = 'E5 - G5 - C6 - - - B5 - C6 - D6 - - -';
+    const B1 = 'A5 - - - G5 - A5 - C6 - - - A5 - G5 -';
+    SONGS.green2 = {
+      bpm: 158, loop: true, order: ['A', 'B'],
+      sec: {
+        A: {
+          p1: [A1,
+            'A5 - C6 - E6 - - - D6 - C6 - A5 - - -',
+            'F5 - A5 - C6 - - - A5 - G5 - F5 - E5 -',
+            'D5 - - - G5 - - - B5 - - - D6 - - -',
+            A1,
+            'A5 - C6 - E6 - - - G6 - E6 - C6 - - -',
+            'D6 - B5 - G5 - A5 - B5 - - - D6 - - -',
+            'C6 - - - - - - - . . . . E5 F5 G5 -'],
+          p2: [cmp('E4', 'G4'), cmp('E4', 'A4'), cmp('F4', 'A4'), cmp('D4', 'G4'),
+            cmp('E4', 'G4'), cmp('E4', 'A4'), cmp('D4', 'G4'), 'E4 - G4 - C5 - - - . . . . . . . .'],
+          bass: [oom('C3', 'G2'), oom('A2', 'E3'), oom('F2', 'C3'), oom('G2', 'D3'),
+            oom('C3', 'G2'), oom('A2', 'E3'), oom('G2', 'D3'), 'C3 - - . G2 - - . C3 - - - . . . .'],
+          drum: [D.basic, D.basic, D.basic, D.fill, D.basic, D.basic, D.basic, D.fill],
+        },
+        B: {
+          p1: [B1,
+            'B5 - - - A5 - B5 - D6 - - - B5 - A5 -',
+            'G5 - B5 - D6 - G6 - E6 - D6 - B5 - G5 -',
+            'A5 - - - C6 - - - E6 - - - - - . .',
+            B1,
+            'B5 - - - A5 - B5 - D6 - - - F6 - E6 -',
+            'C6 - D6 - E6 - G6 - F6 - E6 - D6 - C6 -',
+            'G5 - - - E5 - - - C5 - - - . . . .'],
+          p2: [tres('F4', 'A4', 'C5'), tres('G4', 'B4', 'D5'), tres('E4', 'G4', 'B4'), tres('E4', 'A4', 'C5'),
+            tres('F4', 'A4', 'C5'), tres('G4', 'B4', 'D5'), tres('E4', 'G4', 'C5'), 'E4 - - - G4 - - - C5 - - - . . . .'],
+          bass: [oom('F2', 'C3'), oom('G2', 'D3'), oom('E2', 'B2'), oom('A2', 'E3'),
+            oom('F2', 'C3'), oom('G2', 'D3'), oom('C3', 'G2'), 'C3 - - - G2 - - - C3 - - - . . . .'],
+          drum: [D.basic, D.basic, D.basic, D.fill, D.basic, D.basic, D.basic, D.fill],
+        },
+      },
+    };
+  }
+
+  // ---- castle2：城堡第二曲（D 小調，比 castle 多一點推進感）----
+  {
+    const Dm = arpE('D4', 'F4', 'A4', 'F4'), Bb = arpE('Bb3', 'D4', 'F4', 'D4'), A = arpE('A3', 'C#4', 'E4', 'C#4'),
+      Gm = arpE('G3', 'Bb3', 'D4', 'Bb3'), C = arpE('C4', 'E4', 'G4', 'E4');
+    const bs = (r, f) => `${r} - - - - - - - ${r} - - - ${f} - ${r} -`;
+    const A1 = 'A4 - - - D5 - - - F5 - - - E5 - - -';
+    const B1 = 'F5 - - - E5 - D5 - A5 - - - - - - -';
+    SONGS.castle2 = {
+      bpm: 108, loop: true, gain: 0.9, order: ['A', 'B'], inst: { p1: 'sq' },
+      sec: {
+        A: {
+          p1: [A1,
+            'D5 - - - - - - - C#5 - - - - - . .',
+            'D5 - F5 - A5 - - - G5 - F5 - E5 - - -',
+            'F5 - - - - - - - - - - - . . . .',
+            A1,
+            'G5 - - - - - - - F5 - E5 - D5 - - -',
+            'Bb4 - - - D5 - - - G5 - - - F5 - E5 -',
+            'D5 - - - - - - - - - - - - - - -'],
+          p2: [Dm, Dm, Gm, Dm, Dm, Bb, Gm, A],
+          bass: [bs('D2', 'A2'), bs('D2', 'A2'), bs('G2', 'D2'), bs('D2', 'A2'),
+            bs('D2', 'A2'), bs('Bb2', 'F2'), bs('G2', 'D2'), hold('A2')],
+          drum: [D.sparse, D.sparse2, D.sparse, D.sparse2, D.sparse, D.sparse2, D.sparse, D.sparse2],
+        },
+        B: {
+          p1: [B1,
+            'G5 - - - F5 - E5 - D5 - - - C#5 - - -',
+            'D6 - - - A5 - F5 - D5 - - - E5 - - -',
+            'F5 - - - - - - - . . . . . . . .',
+            B1,
+            'A5 - - - G5 - F5 - E5 - - - D5 - - -',
+            'C#5 - E5 - A5 - - - G5 - F5 - E5 - D5 -',
+            'D5 - - - - - - - A4 - - - . . . .'],
+          p2: [Bb, A, Dm, Dm, Bb, Gm, C, Dm],
+          bass: [bs('Bb2', 'F2'), bs('A2', 'E2'), bs('D2', 'A2'), bs('D2', 'A2'),
+            bs('Bb2', 'F2'), bs('G2', 'D2'), bs('C3', 'G2'), hold('D2')],
+          drum: [D.sparse2, D.sparse2, D.sparse2, D.sparse, D.sparse2, D.sparse2, D.sparse2, D.sparse],
+        },
+      },
+    };
+  }
+
+  // ---- island2：海島第二曲（F 大調 calypso，比 island 更律動）----
+  {
+    const A1 = '. . F5 - A5 - . C6 - - A5 - G5 - - -';
+    const B1 = 'C6 - - - . A5 - - F5 - - - G5 - - -';
+    SONGS.island2 = {
+      bpm: 106, loop: true, order: ['A', 'B'], inst: { p1: 'sq', p2: 'p25' },
+      sec: {
+        A: {
+          p1: [A1,
+            '. . G5 - Bb5 - . D6 - - C6 - A5 - - -',
+            '. . A5 - C6 - . F6 - - D6 - C6 - - -',
+            '. . G5 - E5 - . C5 - - F5 - - - - -',
+            A1,
+            '. . G5 - Bb5 - . D6 - - C6 - Bb5 - - -',
+            '. . A5 - C6 - . E6 - - D6 - C6 - A5 -',
+            'F5 - - - - - - - . . . . . . . .'],
+          p2: [cal('A4', 'C5'), cal('G4', 'Bb4'), cal('A4', 'C5'), cal('G4', 'C5'),
+            cal('A4', 'C5'), cal('G4', 'Bb4'), cal('A4', 'D5'), cal('A4', 'C5')],
+          bass: [syn('F2', 'C3'), syn('G2', 'D3'), syn('F2', 'C3'), syn('C3', 'G2'),
+            syn('F2', 'C3'), syn('G2', 'D3'), syn('D3', 'A2'), syn('F2', 'C3')],
+          drum: [D.calyp, D.calyp, D.calyp, D.calyp, D.calyp, D.calyp, D.calyp, D.calyp],
+        },
+        B: {
+          p1: [B1,
+            'A5 - - - . G5 - - E5 - - - C5 - - -',
+            'D6 - - - . C6 - - Bb5 - - - A5 - - -',
+            'G5 - - - . Bb5 - - A5 - - - - - . .',
+            B1,
+            'D6 - - - . C6 - - Bb5 - - - D6 - - -',
+            'E6 - - - . D6 - - C6 - - - Bb5 - G5 -',
+            'F5 - - - - - - - . . . . . . . .'],
+          p2: [cal('A4', 'C5'), cal('G4', 'C5'), cal('A4', 'D5'), cal('G4', 'Bb4'),
+            cal('A4', 'C5'), cal('G4', 'Bb4'), cal('G4', 'C5'), cal('A4', 'C5')],
+          bass: [syn('F2', 'C3'), syn('C3', 'G2'), syn('D3', 'A2'), syn('G2', 'D3'),
+            syn('F2', 'C3'), syn('G2', 'D3'), syn('C3', 'G2'), syn('F2', 'C3')],
+          drum: [D.calyp, D.calyp, D.calyp, D.calyp, D.calyp, D.calyp, D.calyp, D.calyp],
+        },
+      },
+    };
+  }
+
+  // ---- cloud2：雲之國第二曲（D 大調，長音旋律 + 十六分琶音）----
+  {
+    const Dm7 = arpUD('D4', 'F#4', 'A4', 'C#5'), G7 = arpUD('G4', 'B4', 'D5', 'F#5'),
+      Bm = arpUD('B3', 'D4', 'F#4', 'A4'), A = arpUD('A3', 'C#4', 'E4', 'A4'), Em = arpUD('E4', 'G4', 'B4', 'E5');
+    const A1 = 'A5 - - - - - F#5 - D5 - - - E5 - - -';
+    const B1 = 'B5 - - - A5 - F#5 - E5 - - - - - - -';
+    SONGS.cloud2 = {
+      bpm: 120, loop: true, order: ['A', 'B'], vol: { p2: 0.1 },
+      sec: {
+        A: {
+          p1: [A1,
+            'F#5 - - - - - - - A5 - - - B5 - - -',
+            'D6 - - - C#6 - - - B5 - - - A5 - - -',
+            'F#5 - - - - - - - - - - - . . . .',
+            A1,
+            'F#5 - - - - - - - E5 - - - D5 - - -',
+            'B5 - - - D6 - - - F#6 - - - E6 - - -',
+            'D6 - - - - - - - . . . . . . . .'],
+          p2: [Dm7, Bm, G7, A, Dm7, Bm, G7, Dm7],
+          bass: [hold('D2'), hold('B2'), hold('G2'), hold('A2'), hold('D2'), hold('B2'), hold('G2'), hold('D2')],
+          drum: [D.hats, D.soft, D.hats, D.soft, D.hats, D.soft, D.hats, D.soft],
+        },
+        B: {
+          p1: [B1,
+            'G5 - - - A5 - B5 - D6 - - - C#6 - - -',
+            'E6 - - - - - D6 - B5 - - - A5 - - -',
+            'F#5 - - - - - - - . . . . . . . .',
+            B1,
+            'A5 - - - - - B5 - C#6 - - - D6 - - -',
+            'F#6 - - - E6 - - - D6 - - - B5 - - -',
+            'A5 - - - - - - - D6 - - - . . . .'],
+          p2: [Em, G7, Bm, A, Em, G7, A, Dm7],
+          bass: [hold('E2'), hold('G2'), hold('B2'), hold('A2'), hold('E2'), hold('G2'), half('A2', 'A2'), hold('D2')],
+          drum: [D.soft, D.soft, D.soft, D.hats, D.soft, D.soft, D.soft, D.hats],
+        },
+      },
+    };
+  }
+
+  // ---- dedede2：城主第二曲（Bb 大調進行曲，比 dedede 更高亢）----
+  {
+    const A1 = 'F5 - - Bb5 D6 - - - C6 - - Bb5 A5 - - -';
+    const B1 = 'D6 - - - F6 - - - Bb6 - - - - - - -';
+    SONGS.dedede2 = {
+      bpm: 126, loop: true, order: ['A', 'B'], inst: { p1: 'sq', p2: 'p25' },
+      sec: {
+        A: {
+          p1: [A1,
+            'Bb5 - - - F5 - - - D5 - - - - - . .',
+            'Eb5 - - G5 Bb5 - - - C6 - - Bb5 G5 - - -',
+            'F5 - - - C5 - - - F5 - - - - - - -',
+            A1,
+            'C6 - - - Eb6 - - - D6 - - C6 Bb5 - - -',
+            'G5 - - Bb5 Eb6 - - - D6 - - - C6 - - -',
+            'Bb5 - - - F5 - - - Bb5 - - - . . . .'],
+          p2: [mar('D4', 'F4'), mar('D4', 'F4'), mar('Eb4', 'G4'), mar('C4', 'F4'),
+            mar('D4', 'F4'), mar('C4', 'Eb4'), mar('D4', 'G4'), 'D4 - - - F4 - - - Bb3 - - - . . . .'],
+          bass: [oct('Bb2', 'F2'), oct('Bb2', 'F2'), oct('Eb2', 'Bb2'), oct('F2', 'C3'),
+            oct('Bb2', 'F2'), oct('C3', 'G2'), oct('Eb2', 'Bb2'), 'Bb2 - . . F2 - . . Bb2 - - - . . . .'],
+          drum: [D.march, D.march, D.march, D.marchF, D.march, D.march, D.march, D.marchF],
+        },
+        B: {
+          p1: [B1,
+            'A6 - - - F6 - - - D6 - - - - - . .',
+            'Eb6 - - - C6 - Eb6 - G6 - - - F6 - - -',
+            'Eb6 - - D6 C6 - - - Bb5 - - - - - - -',
+            B1,
+            'G6 - - - Eb6 - - - C6 - - - - - - -',
+            'F6 - - Eb6 D6 - - C6 Bb5 - - - D6 - - -',
+            'Bb5 - - - - - - - . . . . . . . .'],
+          p2: [mar('D4', 'F4'), mar('D4', 'F4'), mar('Eb4', 'G4'), mar('C4', 'Eb4'),
+            mar('D4', 'F4'), mar('Eb4', 'G4'), mar('C4', 'F4'), 'D4 - - - Bb3 - - - . . . . . . . .'],
+          bass: [oct('Bb2', 'F2'), oct('Bb2', 'F2'), oct('Eb2', 'Bb2'), oct('C3', 'G2'),
+            oct('Bb2', 'F2'), oct('Eb2', 'Bb2'), oct('F2', 'C3'), 'Bb2 - . . F2 - . . Bb2 - - - . . . .'],
+          drum: [D.march, D.march, D.march, D.marchF, D.march, D.march, D.march, D.marchF],
+        },
+      },
+    };
+  }
+
+  // ======================================================================
   // 音序器
   // ======================================================================
   const TRACKS = ['p1', 'p2', 'bass', 'drum'];
@@ -1023,9 +1511,18 @@
     tick();
   }
   function startPending() {
+    if (pendingAmb !== undefined) { const a = pendingAmb; pendingAmb = undefined; KB.audio.ambient(a); }
     if (pendingMusic === undefined) return;
     const k = pendingMusic; pendingMusic = undefined;
     KB.audio.music(k);
+  }
+
+  // ---- 環境音層的播放狀態（與音樂完全獨立）----
+  let ambCur = null, pendingAmb = undefined;
+  function stopAmbient(fade) {
+    if (!ambCur) return;
+    try { ambCur.stop(ctx ? ctx.currentTime : 0, fade || 0.5); } catch (e) { }
+    ambCur = null;
   }
 
   // 離線渲染（測試工具用）：回傳 Promise<AudioBuffer>
@@ -1053,6 +1550,15 @@
       while (t < seconds) { scheduleStep(p, i, t); t += c.stepDur; i++; if (i >= c.len) { if (song.loop === false) break; i = 0; } }
     });
   }
+  function renderAmbient(key, seconds) {
+    if (!AMBIENT[key]) return Promise.reject(new Error('unknown ambient ' + key));
+    seconds = seconds || 4;
+    return withOffline(seconds, (oc, bus) => {
+      bus.gain.value = VOL.master * VOL.sfx;
+      const v = makeAmbient(bus, 0.02, key);
+      if (v) v.stop(Math.max(0.1, seconds - 0.45), 0.35);
+    });
+  }
   function renderSfx(name, seconds) {
     const fn = SFX[name]; if (!fn) return Promise.reject(new Error('unknown sfx ' + name));
     seconds = seconds || 2.5;
@@ -1068,9 +1574,12 @@
     get unlocked() { return unlocked; },
     get muted() { return muted; },
     musicKey: null,
+    ambientKey: null,
     SFX_NAMES: Object.keys(SFX),
     MUSIC_NAMES: Object.keys(SONGS),
-    SONGS, TRACKS, compileSong, noteFreq, renderSong, renderSfx,
+    AMBIENT_NAMES: Object.keys(AMBIENT),
+    SFX_THROTTLE, THROTTLE_MS,
+    SONGS, AMBIENT, TRACKS, compileSong, noteFreq, renderSong, renderSfx, renderAmbient,
 
     // 第一次使用者輸入時呼叫（keydown / pointerdown / 手把）
     unlock() {
@@ -1089,7 +1598,8 @@
         if (!fn) { warnOnce('unknown sfx: ' + name); return; }
         if (!ctx || !unlocked || muted || ctx.state !== 'running') return;
         const n = nowMs();
-        if (lastPlay[name] && n - lastPlay[name] < THROTTLE_MS) return;
+        const th = (SFX_THROTTLE[name] !== undefined) ? SFX_THROTTLE[name] : THROTTLE_MS;
+        if (th && lastPlay[name] && n - lastPlay[name] < th) return;
         lastPlay[name] = n;
         if (name === 'ability') duckFor(0.4);        // 能力取得 jingle：音樂短暫閃避
         fn(sfxBus, ctx.currentTime + 0.005);
@@ -1106,6 +1616,22 @@
         if (cur && cur.key === key && !cur.ended) return;   // 同曲不重啟
         startSong(key);
       } catch (e) { }
+    },
+    // 環境音層：ambient('water' | 'wind' | 'cave' | 'castle') 開始循環，ambient(null) 淡出停止。
+    // 與 music() 完全獨立（music(null) 不會停掉 ambient）；音量跟隨 sfx 音量；同 key 重複呼叫不重啟。
+    ambient(key) {
+      try {
+        if (key === undefined) key = null;
+        if (key !== null && !AMBIENT[key]) { warnOnce('unknown ambient: ' + key); key = null; }
+        this.ambientKey = key;
+        if (!ctx || !unlocked || ctx.state !== 'running') { pendingAmb = key; if (key === null) stopAmbient(0.2); return; }
+        pendingAmb = undefined;
+        if (ambCur && ambCur.key === key) return;
+        stopAmbient(key === null ? 0.6 : 0.35);
+        if (key === null) return;
+        ambCur = makeAmbient(ambBus || sfxBus, ctx.currentTime + 0.02, key);
+      } catch (e) { }
+      return this.ambientKey;
     },
     setMute(m) {
       try {
@@ -1137,7 +1663,9 @@
         unlocked, muted, ctxState: ctx ? ctx.state : null, playing: cur ? cur.key : null,
         step: cur ? cur.step : 0, bars: cur ? cur.len / STEPS : 0, pending: pendingMusic,
         volume: { music: UVOL.music, sfx: UVOL.sfx }, ducked: duckHold,
+        ambient: ambCur ? ambCur.key : null, ambientPending: pendingAmb,
         sfxCount: Object.keys(SFX).length, musicCount: Object.keys(SONGS).length,
+        ambientCount: Object.keys(AMBIENT).length,
       };
     },
   };

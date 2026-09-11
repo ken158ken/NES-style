@@ -172,9 +172,15 @@ __kb.state()                  // 回傳 JSON 快照
 精靈總表：`python tools/shot.py --scene sheet --filter kirby --out shots/sheet_kirby.png`
 
 ## 9. 音訊（audio.js）
-`KB.audio.sfx('jump'|'inhale'|'spit'|'swallow'|'hurt'|'die'|'enemyhit'|'enemydie'|'block'|'item'|'1up'|'ability'|'door'|'boss_hurt'|'boss_die'|'menu'|'select'|'float'|'exhale'|'sword'|'fire'|'beam'|'cutter'|'spark'|'ice'|'hammer'|'stone'|'land'|'slide'|'clear')`
-`KB.audio.music('title'|'select'|'green'|'castle'|'island'|'cloud'|'dedede'|'boss'|'finalboss'|'invincible'|'clear'|'gameover'|'ending'|null)`
-`KB.audio.unlock()` 於第一次使用者輸入時呼叫。無聲環境（headless）需全部 try/catch。
+`KB.audio.sfx(name)`：`jump land float exhale spit swallow hurt die enemyhit enemydie block item ability door boss_hurt boss_die menu select slide sword fire beam cutter spark ice hammer stone clear pause`
+＋ Round 1：`unpause lowhp oneup bigstar charge charge_ready unlock phase2 menu_back`
+＋ Round 2：`splash bubble wind torch fuse melt hardblock count count_end ride(=warp) essence`
+`KB.audio.music(key|null)`：`title select green castle island cloud dedede boss finalboss invincible clear gameover ending`
+＋ `boss2 finalboss2 secret miniboss result arena arena_rest w_intro green2 castle2 island2 cloud2 dedede2`
+`KB.audio.ambient(key|null)`：環境音層 `water wind cave castle`（跟隨音效音量；與 music 獨立；同 key 不重啟，切房可直接呼叫）
+`KB.audio.setVolume({music,sfx})` / `getVolume()` / `duck(on)` / `setMute(m)` / `toggleMute()` / `status()`
+每音效節流見 `KB.audio.SFX_THROTTLE`（count 25ms、fuse 50ms…預設 80ms）。
+`KB.audio.unlock()` 於第一次使用者輸入時呼叫。無聲環境（headless）需全部 try/catch。完整清單以 `node tools/audio_check.js` 輸出為準。
 
 ## 10. 手感參數（const.js，勿隨意改）
 走 1.3 / 跑 2.2 / 跳 -4.4（可變高度）/ 重力 0.24 / 最大落速 4.2 / 漂浮：按跳 -1.6、重力 0.06、落速 0.8 / 滑鏟 3.0 × 22 幀 / 含物走 1.0

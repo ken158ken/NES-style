@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-以 Playwright(Chromium) 開啟 tools/audio_test.html，用 OfflineAudioContext 離線渲染每個音效與每首曲子，
+以 Playwright(Chromium) 開啟 tools/audio_test.html，用 OfflineAudioContext 離線渲染每個音效、每首曲子與每個環境音層，
 檢查：不拋錯、輸出非靜音（peak > 門檻）、不爆音（peak < 1.0）。
 也可輸出 WAV 供人耳試聽。
 用法：
@@ -23,6 +23,7 @@ def write_wav(path, samples, sr):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--secs', type=float, default=8.0, help='每首曲子渲染秒數（循環曲）')
+    ap.add_argument('--amb-secs', type=float, default=5.0, help='每個環境音層渲染秒數')
     ap.add_argument('--wav', default='', help='輸出 WAV 目錄')
     ap.add_argument('--only', default='', help='只處理這些名稱（逗號分隔）')
     a = ap.parse_args()
@@ -52,6 +53,35 @@ def main():
         pg.wait_for_timeout(200)
         st3 = pg.evaluate("()=>KB.audio.status()")
         print('after stop   :', st3)
+        # 環境音層 ambient()：逐一切換、同 key 不重啟、music(null) 不影響、ambient(null) 停止
+        amb = pg.evaluate("""()=>{
+            const out = {names: KB.audio.AMBIENT_NAMES.slice(), steps: []};
+            for (const k of KB.audio.AMBIENT_NAMES) { KB.audio.ambient(k); KB.audio.ambient(k); out.steps.push([k, KB.audio.status().ambient]); }
+            KB.audio.ambient('water'); KB.audio.music('green');
+            out.afterMusic = KB.audio.status().ambient;
+            KB.audio.music(null);
+            out.afterMusicNull = KB.audio.status().ambient;
+            KB.audio.ambient('zzz');
+            out.afterBad = KB.audio.status().ambient;
+            KB.audio.ambient(null);
+            out.afterNull = KB.audio.status().ambient;
+            return out;
+        }""")
+        print('ambient      :', amb)
+        if st1.get('ctxState') == 'running':
+            if not all(a == b for a, b in amb['steps']):
+                print('  <-- ambient 切換異常'); bad += 1
+            if amb['afterMusic'] != 'water' or amb['afterMusicNull'] != 'water':
+                print('  <-- music() / music(null) 影響了 ambient（應互相獨立）'); bad += 1
+            if amb['afterBad'] is not None or amb['afterNull'] is not None:
+                print('  <-- ambient(null) / 未知名稱處理異常'); bad += 1
+        # 高頻音效節流：count 每 4 幀、fuse 每 6 幀呼叫必須放行
+        thr = pg.evaluate("()=>({t: KB.audio.SFX_THROTTLE, d: KB.audio.THROTTLE_MS})")
+        for name, frames in (('count', 4), ('fuse', 6)):
+            v = thr['t'].get(name, thr['d'])
+            if v >= frames * 1000 / 60:
+                print(f"  <-- sfx '{name}' 節流 {v}ms ≥ 呼叫間隔 {frames*1000/60:.0f}ms"); bad += 1
+        print('throttle     :', thr)
         # 音量 / duck API（提供給 ui-menu）
         api = pg.evaluate("()=>['setVolume','getVolume','duck','setMute','status'].filter(k=>typeof KB.audio[k]!=='function')")
         if api:
@@ -76,18 +106,22 @@ def main():
         else:
             print('  (此環境 AudioContext 無法啟動，略過即時音序器檢查)')
         js = """async ([kind, name, secs, wantData]) => {
-            const buf = kind === 'sfx' ? await KB.audio.renderSfx(name) : await KB.audio.renderSong(name, secs);
+            const buf = kind === 'sfx' ? await KB.audio.renderSfx(name)
+                      : kind === 'amb' ? await KB.audio.renderAmbient(name, secs)
+                      : await KB.audio.renderSong(name, secs);
             const st = window.__audioStats(buf);
             if (wantData) st.data = Array.from(buf.getChannelData(0));
             st.sr = buf.sampleRate;
             return st;
         }"""
-        names = [('sfx', n) for n in pg.evaluate("()=>KB.audio.SFX_NAMES")] + [('music', n) for n in pg.evaluate("()=>KB.audio.MUSIC_NAMES")]
+        names = ([('sfx', n) for n in pg.evaluate("()=>KB.audio.SFX_NAMES")]
+                 + [('music', n) for n in pg.evaluate("()=>KB.audio.MUSIC_NAMES")]
+                 + [('amb', n) for n in pg.evaluate("()=>KB.audio.AMBIENT_NAMES")])
         for kind, name in names:
             if only and name not in only:
                 continue
             try:
-                secs = a.secs if kind == 'music' else None
+                secs = a.secs if kind == 'music' else (a.amb_secs if kind == 'amb' else None)
                 st = pg.evaluate(js, [kind, name, secs, bool(a.wav)])
                 flag = ''
                 if st['peak'] < 0.02: flag = '  <-- 幾乎無聲'; bad += 1
