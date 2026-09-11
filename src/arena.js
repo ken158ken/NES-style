@@ -207,8 +207,9 @@
       if (!sprAt(ctx, info.icon, 80, 110, 'tl')) { KB.rect(ctx, 80, 110, 24, 16, '#181c28'); KB.rect(ctx, 81, 111, 22, 14, info.color); }
       T(ctx, info.name, 112, 106, { color: C.yellow, size: 16 });
       KB.text(ctx, info.en, 240, 112, { color: info.color, align: 'right' });
-      const dl = info.desc ? UI.wrapLines(info.desc, 156, { size: ms }, 2) : [];
-      for (let i = 0; i < dl.length; i++) T(ctx, dl[i], 80, 128 + i * 15, { color: '#c8d8f0', size: ms });
+      let ds = ms, dl = info.desc ? UI.wrapLines(info.desc, 156, { size: ds }, 2) : [];
+      if (info.desc && dl.join('').replace(/…/g, '').length < info.desc.length) { ds = 12; dl = UI.wrapLines(info.desc, 156, { size: ds }, 2); }
+      for (let i = 0; i < dl.length; i++) T(ctx, dl[i], 80, 128 + i * 15, { color: '#c8d8f0', size: ds });
       // 左右箭頭
       const ax = ((f >> 3) & 1) ? 1 : 0;
       KB.text(ctx, '<', 12 - ax, 128, { color: C.cyan });

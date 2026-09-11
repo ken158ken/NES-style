@@ -267,23 +267,37 @@
   }
   UI.fitText = fit;
   // 中文逐字斷行（無空白也能斷）；超過 maxLines 時最後一行補「…」
+  // R2-P2-10 / R3-P1-03：禁則處理 —— 行首不可是「，。；：、！？）」…」、行尾不可是「（「」，
+  // 遇到就把斷點往前挪（最多 2 字）。maxw 可傳陣列（逐行寬度，最後一個值會沿用）。
+  const NO_START = '，。、；：！？）」』】》〉…‧・,.;:!?)]}';
+  const NO_END = '（「『【《〈([{';
   UI.wrapLines = function (str, maxw, o, maxLines) {
     o = o || {}; maxLines = Math.max(1, maxLines || 2);
+    const ws = Array.isArray(maxw) ? maxw : null;
+    const lineW = n => (ws ? ws[Math.min(n, ws.length - 1)] : maxw);
     const chars = Array.from(String(str)), out = [];
-    let cur = '';
-    for (let i = 0; i < chars.length; i++) {
-      const t = cur + chars[i];
-      if (cur && TW(t, o) > maxw) {
-        if (out.length === maxLines - 1) {          // 已經是最後一行 → 截斷補「…」
-          let last = cur;
-          while (last.length > 1 && TW(last + '…', o) > maxw) last = last.slice(0, -1);
-          out.push(last + '…');
-          return out;
-        }
-        out.push(cur); cur = chars[i];
-      } else cur = t;
+    let i = 0;
+    while (i < chars.length) {
+      const w = lineW(out.length);
+      let j = i, cur = '';
+      while (j < chars.length) {                      // 逐字塞到放不下為止
+        const t = cur + chars[j];
+        if (cur && TW(t, o) > w) break;
+        cur = t; j++;
+      }
+      if (j < chars.length) {                         // 斷行禁則：把斷點往前挪
+        let k = 0;
+        while (j > i + 1 && k < 2 && (NO_START.indexOf(chars[j]) >= 0 || NO_END.indexOf(chars[j - 1]) >= 0)) { j--; k++; }
+        cur = chars.slice(i, j).join('');
+      }
+      if (j < chars.length && out.length === maxLines - 1) {   // 已經是最後一行 → 截斷補「…」
+        let last = chars.slice(i).join('');
+        while (last.length > 1 && TW(last + '…', o) > w) last = last.slice(0, -1);
+        out.push(last + '…');
+        return out;
+      }
+      out.push(cur); i = j;
     }
-    if (cur) out.push(cur);
     return out;
   };
   // 量測 fit() 實際會用的寬度（不繪製）
@@ -403,6 +417,39 @@
     }
     return paths;
   }
+  // 選關關名標籤排版（R3-P2-04）：一次算好所有標籤的位置，保證彼此不重疊、
+  // 不壓到節點本體 / 節點下方的 ★ 列 / 上方 HUD，並整塊夾在 x 4~250、y 4~157（資訊面板從 y=158 起）。
+  const LBL_H = 18;
+  function mapLabelLayout(nodes, widths) {
+    const X0 = 4, X1 = 250, Y0 = 4, Y1 = 156;
+    const hit = (a, b) => a[0] < b[0] + b[2] && b[0] < a[0] + a[2] && a[1] < b[1] + b[3] && b[1] < a[1] + a[3];
+    // 不可侵入區：左上標題列、右上生命 / 分數、每個節點（含旗子與卡比）與節點下方的 ★ 列
+    const fixed = [[4, 2, 124, 30], [200, 0, 56, 32]];
+    for (const [x, y] of nodes) { fixed.push([x - 10, y - 14, 27, 22]); fixed.push([x - 12, y + 7, 23, 10]); }
+    const out = [];
+    for (let i = 0; i < nodes.length; i++) {
+      const [x, y] = nodes[i], w = widths[i];
+      // 候選位置：正上 / 正下 / 左右 / 四個斜角 / 再遠一點，每個再試 5 種水平微調
+      const anchors = [
+        [x - w / 2, y - 33], [x - w / 2, y + 19], [x + 12, y - 9], [x - 12 - w, y - 9],
+        [x + 12, y - 30], [x - 12 - w, y - 30], [x + 12, y + 12], [x - 12 - w, y + 12],
+        [x - w / 2, y - 46], [x - w / 2, y + 34],
+      ];
+      let best = null;
+      for (const [ax, ay] of anchors) {
+        for (const sh of [0, -16, 16, -32, 32]) {
+          const r = [Math.round(Math.max(X0, Math.min(X1 - w, ax + sh))), Math.round(ay), w, LBL_H];
+          if (r[1] < Y0 || r[1] + LBL_H > Y1) continue;
+          if (fixed.some(b => hit(r, b)) || out.some(b => hit(r, b))) continue;
+          best = r; break;
+        }
+        if (best) break;
+      }
+      if (!best) return null;                 // 這個字級 / 樣式排不下 → 交給呼叫端換更窄的版本
+      out.push(best);
+    }
+    return out;
+  }
   function drawMapBg(ctx, sc) {
     bands(ctx, 0, 72, ['#3c78d8', '#54a0e8', '#78c4f4']);
     KB.circle(ctx, 30, 84, 26, '#9cd0ec'); KB.circle(ctx, 110, 86, 36, '#9cd0ec'); KB.circle(ctx, 200, 82, 30, '#9cd0ec'); KB.circle(ctx, 252, 88, 24, '#9cd0ec');
@@ -433,6 +480,22 @@
     canEnter(i) { return this.exists(i) && this.unlocked(i); }
     themeOf(i) { const l = this.level(i); return (l && l.theme) || KB.THEMES[i] || 'green'; }
     nameOf(i) { const l = this.level(i); return (l && l.name) || KB.THEME_NAMES[this.themeOf(i)] || ('WORLD ' + (i + 1)); }
+    // 關名標籤：先試「W# + 關名」，排不下就退成只有關名（14px → 12px）；算一次就快取
+    labels() {
+      if (this._lbl) return this._lbl;
+      const nodes = this.nodes;
+      for (const v of [{ pre: true, size: UI.MS }, { pre: false, size: UI.MS }, { pre: false, size: UI.MS_SMALL }]) {
+        const ws = nodes.map((_, i) => (v.pre ? KB.textWidth('W' + (i + 1)) + 4 : 0) + TW(this.nameOf(i), { size: v.size }) + 4);
+        const rs = mapLabelLayout(nodes, ws);
+        if (rs) return (this._lbl = { pre: v.pre, size: v.size, rs });
+      }
+      // 理論上不會走到：全部排不下就退回節點正上方（仍夾在畫面內）
+      const rs = nodes.map(([x, y], i) => {
+        const w = TW(this.nameOf(i), { size: UI.MS_SMALL }) + 4;
+        return [Math.round(Math.max(4, Math.min(250 - w, x - w / 2))), Math.max(4, Math.min(139, y - 33)), w, LBL_H];
+      });
+      return (this._lbl = { pre: false, size: UI.MS_SMALL, rs });
+    }
     enter() { KB.session = KB.session || { lives: KB.START_LIVES, score: 0 }; music('select'); }
     update(dt) {
       this.t += dt; this.frame++;
@@ -488,17 +551,16 @@
         const ok = this.canEnter(i + 1);
         dottedPath(ctx, this.paths[i], ok ? '#fff8e8' : 'rgba(20,30,50,0.45)', 6, ok ? (f >> 1) : 0);
       }
-      // 節點與標籤（標籤加深色底板，比描邊乾淨，12px 中文才不會糊成一團）
+      // 節點與標籤（標籤加深色底板，比描邊乾淨；位置由 mapLabelLayout 算過，保證不互壓）
+      for (let i = 0; i < nodes.length; i++) this.drawNode(ctx, i, nodes[i][0], nodes[i][1]);
+      const lb = this.labels();
       for (let i = 0; i < nodes.length; i++) {
-        const [x, y] = nodes[i], ok = this.canEnter(i);
-        this.drawNode(ctx, i, x, y);
-        const label = 'W' + (i + 1), name = this.nameOf(i);
-        const lw = KB.textWidth(label), nw = TW(name, { size: UI.MS }), tw = lw + 4 + nw;
-        const sx = Math.max(8, Math.min(W - 8 - tw, Math.round(x - tw / 2)));
-        const col = ok ? '#fff' : '#b0b8c8';
-        KB.rect(ctx, sx - 2, y - 33, tw + 4, 18, 'rgba(8,14,28,0.7)');
-        KB.text(ctx, label, sx, y - 28, { color: ok ? C.yellow : col });
-        T(ctx, name, sx + lw + 4, y - 32, { color: col, size: UI.MS });
+        const r = lb.rs[i], ok = this.canEnter(i);
+        const col = !ok ? '#b0b8c8' : (i === this.cur ? C.yellow : '#fff');
+        KB.rect(ctx, r[0], r[1], r[2], LBL_H, 'rgba(8,14,28,0.72)');
+        let tx = r[0] + 2;
+        if (lb.pre) { const label = 'W' + (i + 1); KB.text(ctx, label, tx, r[1] + 5, { color: ok ? C.yellow : col }); tx += KB.textWidth(label) + 4; }
+        T(ctx, this.nameOf(i), tx, r[1] + 1, { color: col, size: lb.size });
       }
       // 卡比
       const [kx, ky] = this.kirbyPos();

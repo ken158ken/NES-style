@@ -948,3 +948,24 @@ git 已初始化，基線 commit `c382e2a`。Playwright venv：`.venv/bin/python
   ② R3-P1-02 魔王曲線不遞增（w4 魅塔騎士 10/10 樣本 100%、w1 威斯比修過頭變成最好打）；
   ③ R3-P1-03 能力圖鑑 7/8 頁說明被截斷（R2-P2-09 未修、且惡化）；④ R3-P2-04 選關關名標籤重疊；⑤ R3-P2-05/06 w4 的保底武器位置與一格寬雲洞。
   **我沒有動過 src/**（唯讀），也沒有跑 `tools/build.py`（dist 由總控收尾時再 build）。
+
+# Round 4（2026-09-11）
+
+## fix-ui
+> 檔案：`src/menu.js`（能力圖鑑）、`src/ui.js`（`UI.wrapLines`、選關標籤排版）。截圖：`shots/agent_fixui/`。
+
+- [Round 4] 完成：**R3-P1-03 能力圖鑑不再截斷**。面板加高成 `4,4,248,210`；卡比預覽框由 68×70 縮成 52×40 靠左，
+  說明與招式表改吃整列寬度（228px）：說明最多 2 行（14px 排不進 2 行就整段降 12px，目前 8 頁都是 14px），
+  招式表由 3 列放寬成 **4 列**（劍 / 鐵鎚的第 4 招現在看得到），左欄按鍵 95px、右欄招式名 129px（`fit` 會先降 12px 再考慮截斷，實測 8 頁都不需要）。
+  `UI.wrapLines` 同時補上**斷行禁則**（行首不可是「，。、；：！？）」…」、行尾不可是「（「」，斷點最多往前挪 2 字）並支援逐行寬度陣列 → R2-P2-10 一併修掉（第 7 頁冰凍不再以「，」開頭）。
+  驗證：`shots/agent_fixui/gal_p1~p8.png` 逐張 Read，8/8 說明與招式名完整、無「…」；另用頁內 `UI.wrapLines / UI.textWidth` 逐能力驗算（wrap 後字串＝原字串、行數 ≤ 2、每欄 12px 內放得下）0 筆例外。
+- [Round 4] 完成：**R3-P2-04 選關關名標籤不再重疊**。新增 `mapLabelLayout()`（ui.js）：一次算好 5 個標籤位置，
+  候選位置＝正上 / 正下 / 左右 / 四斜角 / 更遠，各再試 5 種水平微調，逐一排除「壓到別的標籤 / 節點本體（含旗子、卡比）/ 節點下方 ★ 列 / 左上標題列 / 右上生命分數」，
+  並夾在 x 4~250、y 4~156（資訊面板從 y=158 起）。標籤樣式自動退讓：先試「W# + 關名」，排不下就只留關名（14px → 12px）——
+  以目前 5 個節點座標算出來的結果是 **只留關名、14px**，W# 仍在下方資訊面板顯示，且**目前選取的關名改成黃色**以補上對應關係。
+  實測座標：W1 `[4,109]`、W2 `[49,67]`、W3 `[97,101]`、W4 `[145,51]`、W5 `[188,137]`（皆 62×18），W5 右緣 250（不再頂到外框），W2 的 ★ 列完全露出來。
+  驗證：`shots/agent_fixui/select_nosave.png`（無存檔）、`shots/agent_fixui/select_save.png`（stars w1=2/3、w2=1/3 + cleared w1/w2）與放大圖
+  `shots/agent_fixui/z_select_save_labels.png`、`z_select_nosave_labels.png`，另用頁內 `StageSelectScene.labels()` 做矩形碰撞驗算 0 筆重疊 / 0 筆出界。
+- [Round 4] 驗證：`.venv/bin/python tools/engine_test.py` **118/118 PASS**、`node --check src/ui.js src/menu.js` 通過。未 commit、未跑 build.py。
+- [Round 4] 跨檔需求（給總控）：`src/arena.js:210` 競技場選能力頁的說明仍是 `wrapLines(desc,156,…,2)`，
+  對 spark / sword / stone 這種長 desc 還是會補「…」（與 R3-P1-03 同源）。arena.js 不在本 agent 可改範圍，建議比照圖鑑改成整列寬或 12px。

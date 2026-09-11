@@ -224,43 +224,48 @@
       return null;
     }
     draw(ctx) {
+      // R3-P1-03：說明 / 招式名一律不截斷 —— 卡比預覽框縮成 52×40 靠左，
+      // 說明與招式表改用整列寬度（228px），說明 14px 排不進 2 行就整段降到 12px。
       const ms = MS();
       KB.rect(ctx, 0, 0, W, H, 'rgba(0,0,0,0.72)');
-      panel(ctx, 4, 4, 248, 190);
+      panel(ctx, 4, 4, 248, 210);
       const keys = this.keys, key = keys[this.i] || null, info = UI.abilityInfo(key);
-      T(ctx, '能力圖鑑', 128, 7, { color: C.yellow, align: 'center', size: 16 });
-      KB.text(ctx, (this.i + 1) + '/' + Math.max(1, keys.length), 242, 13, { color: C.grey, align: 'right' });
-      KB.rect(ctx, 14, 32, 228, 1, '#405070');
+      T(ctx, '能力圖鑑', 128, 5, { color: C.yellow, align: 'center', size: 16 });
+      KB.text(ctx, (this.i + 1) + '/' + Math.max(1, keys.length), 242, 11, { color: C.grey, align: 'right' });
+      KB.rect(ctx, 14, 24, 228, 1, '#405070');
       // 左：戴帽子的卡比（kirby_idle + hat_<key>）
-      KB.rect(ctx, 14, 38, 68, 70, '#101828'); KB.rect(ctx, 15, 39, 66, 68, '#20304c');
-      const gy = 100;
-      drawKirby(ctx, 'kirby_idle', 48, gy, { t: this.t, frame: 0 });
-      if (info.hat && has(info.hat)) sprAt(ctx, info.hat, 48, gy - 15, 'b', { t: this.t });
-      KB.rect(ctx, 34, gy + 1, 28, 2, 'rgba(0,0,0,0.35)');
-      // 右：圖示 + 名稱 + 說明（最多 2 行）+ 招式
-      if (!sprAt(ctx, info.icon, 90, 40, 'tl')) { KB.rect(ctx, 90, 40, 24, 16, '#181c28'); KB.rect(ctx, 91, 41, 22, 14, info.color); }
-      T(ctx, info.name, 120, 36, { color: C.yellow, size: 16 });
-      KB.text(ctx, info.en, 242, 42, { color: info.color, align: 'right' });
-      const dl = info.desc ? UI.wrapLines(info.desc, 152, { size: ms }, 2) : [];
-      for (let i = 0; i < dl.length; i++) T(ctx, dl[i], 90, 58 + i * 15, { color: '#c8d8f0', size: ms });
-      KB.rect(ctx, 90, 90, 152, 1, '#405070');
-      let y = 94;
-      for (const m of (info.moves || []).slice(0, 3)) {
+      KB.rect(ctx, 14, 28, 52, 40, '#101828'); KB.rect(ctx, 15, 29, 50, 38, '#20304c');
+      const gy = 64;
+      drawKirby(ctx, 'kirby_idle', 40, gy, { t: this.t, frame: 0 });
+      if (info.hat && has(info.hat)) sprAt(ctx, info.hat, 40, gy - 15, 'b', { t: this.t });
+      KB.rect(ctx, 26, gy + 1, 28, 2, 'rgba(0,0,0,0.35)');
+      // 右：圖示 + 名稱 + 英文名（與預覽框同一列）
+      if (!sprAt(ctx, info.icon, 74, 36, 'tl')) { KB.rect(ctx, 74, 36, 24, 16, '#181c28'); KB.rect(ctx, 75, 37, 22, 14, info.color); }
+      T(ctx, info.name, 106, 34, { color: C.yellow, size: 16 });
+      KB.text(ctx, info.en, 242, 40, { color: info.color, align: 'right' });
+      // 說明：整列寬、最多 2 行（wrapLines 不在標點前斷行、行首不會是「，。」）
+      let ds = ms, dl = info.desc ? UI.wrapLines(info.desc, 228, { size: ds }, 9) : [];
+      if (dl.length > 2) { ds = UI.MS_SMALL; dl = UI.wrapLines(info.desc, 228, { size: ds }, 2); }
+      for (let i = 0; i < dl.length; i++) T(ctx, dl[i], 14, 72 + i * (ds >= 14 ? 15 : 14), { color: '#c8d8f0', size: ds });
+      KB.rect(ctx, 14, 104, 228, 1, '#405070');
+      // 招式表（最多 4 列）：左欄按鍵 95px、右欄招式名 129px，塞不下先降 12px 再說
+      let y = 108;
+      for (const m of (info.moves || []).slice(0, 4)) {
         if (m[0]) {
-          fit(ctx, m[0], 90, y, 62, { color: C.cyan, size: ms, nomix: true });
-          fit(ctx, m[1], 156, y, 86, { color: '#fff', size: ms });
-        } else fit(ctx, '・' + m[1], 90, y, 152, { color: '#98a8c0', size: ms });
+          fit(ctx, m[0], 14, y, 95, { color: C.cyan, size: ms, nomix: true });
+          fit(ctx, m[1], 113, y, 129, { color: '#fff', size: ms });
+        } else fit(ctx, '・' + m[1], 14, y, 228, { color: '#98a8c0', size: ms });
         y += 15;
       }
       // 全部能力縮圖列（目前選取者外框）
-      KB.rect(ctx, 14, 142, 228, 1, '#405070');
+      KB.rect(ctx, 14, 170, 228, 1, '#405070');
       for (let i = 0; i < keys.length; i++) {
         const x = 16 + i * 29, sel = i === this.i;
-        KB.rect(ctx, x, 147, 26, 22, sel ? C.yellow : '#101828');
-        KB.rect(ctx, x + 1, 148, 24, 20, '#20304c');
-        if (!sprAt(ctx, 'ui_ability_' + keys[i], x + 1, 150, 'tl')) KB.rect(ctx, x + 2, 151, 22, 14, UI.abilityInfo(keys[i]).color);
+        KB.rect(ctx, x, 174, 26, 20, sel ? C.yellow : '#101828');
+        KB.rect(ctx, x + 1, 175, 24, 18, '#20304c');
+        if (!sprAt(ctx, 'ui_ability_' + keys[i], x + 1, 176, 'tl')) KB.rect(ctx, x + 2, 177, 22, 14, UI.abilityInfo(keys[i]).color);
       }
-      fit(ctx, '←→ 換頁　　SELECT / Z：返回', 128, 174, 236, { color: C.grey, align: 'center', size: ms });
+      fit(ctx, '←→ 換頁　　SELECT / Z：返回', 128, 197, 236, { color: C.grey, align: 'center', size: ms });
     }
   }
   KB.AbilityGallery = AbilityGallery;
