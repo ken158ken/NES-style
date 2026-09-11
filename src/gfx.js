@@ -158,27 +158,80 @@
     return (glyphCache[key] = f);
   }
 
+  // ---------- 中文（系統字型）→ 像素 ----------
+  // 舊作法（1 倍字級 + alpha>110 門檻）在沒有細明體內嵌點陣的機器（Linux / Mac）上，
+  // 12px 中文的筆畫 alpha 不足而被整條砍掉 → 只剩斷斷續續的細線。
+  // 新作法：以 N 倍字級（預設 4 倍＝48px）渲染到離屏畫布，再以「區塊平均覆蓋率」縮回目標字級並二值化
+  //（覆蓋率 ≥ 41% 即填滿）—— 筆畫一律至少 1px 實心且粗細一致，不依賴任何字型的內嵌點陣，
+  // 因此 Windows / Linux / Mac 結果一致。字型一律用黑體（筆畫等寬，縮小後最清楚）。
+  KB.ZH_FONT = '"Noto Sans CJK TC","Noto Sans TC","Microsoft JhengHei","微軟正黑體","PingFang TC","Heiti TC","Hiragino Sans GB","Droid Sans Fallback","WenQuanYi Zen Hei",sans-serif';
+  KB.defaultFont = size => size + 'px ' + KB.ZH_FONT;
+  // scale：超取樣倍率（字級 ×N 渲染）；cover：區塊覆蓋率門檻 0~255（越低筆畫越粗，105 ≈ 41%）；
+  // boldFrom：此字級以上改用粗體（標題）。改參數後呼叫 KB.clearTextCache()。
+  KB.TEXT_CFG = { scale: 4, cover: 105, boldFrom: 16 };
+
+  function scaleFont(font, size, S) {
+    const big = (size * S) + 'px';
+    let done = false;
+    let r = font.replace(/(\d*\.?\d+)px/, () => { done = true; return big; });
+    if (!done) r = big + ' ' + KB.ZH_FONT;
+    if (size >= KB.TEXT_CFG.boldFrom && !/bold|[5-9]00/.test(r)) r = 'bold ' + r;
+    return r;
+  }
+
+  const maskCache = new Map();
+  // 產生白色遮罩（已二值化）；同一串字不同顏色共用，避免重複超取樣
+  function textMask(str, font, size) {
+    const key = str + '|' + font + '|' + size;
+    let m = maskCache.get(key); if (m) return m;
+    const cfg = KB.TEXT_CFG, S = Math.max(1, cfg.scale | 0);
+    const bigFont = scaleFont(font, size, S);
+    const tmp = makeCanvas(4, 4), tc = tmp.getContext('2d');
+    tc.font = bigFont;
+    const wB = Math.max(S, Math.ceil(tc.measureText(str).width)) + 2 * S, hB = Math.ceil(size * S * 1.45) + 2 * S;
+    const big = makeCanvas(wB, hB), bc = big.getContext('2d');
+    bc.font = bigFont; bc.textBaseline = 'top'; bc.fillStyle = '#ffffff'; bc.fillText(str, S, S);
+    const src = bc.getImageData(0, 0, wB, hB).data;
+    const w = Math.ceil(wB / S), h = Math.ceil(hB / S);
+    const cv = makeCanvas(w, h), c = cv.getContext('2d');
+    const img = c.createImageData(w, h), d = img.data;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        let sum = 0, n = 0;
+        for (let j = 0; j < S; j++) {
+          const sy = y * S + j; if (sy >= hB) break;
+          for (let i = 0; i < S; i++) {
+            const sx = x * S + i; if (sx >= wB) break;
+            sum += src[(sy * wB + sx) * 4 + 3]; n++;
+          }
+        }
+        if (n && sum / n >= cfg.cover) {
+          const k = (y * w + x) * 4; d[k] = 255; d[k + 1] = 255; d[k + 2] = 255; d[k + 3] = 255;
+        }
+      }
+    }
+    c.putImageData(img, 0, 0);
+    m = { cv, w, h };
+    if (maskCache.size > 300) maskCache.clear();
+    maskCache.set(key, m);
+    return m;
+  }
+
   const textCache = new Map();
   function renderTextCanvas(str, font, color, size) {
     const key = str + '|' + font + '|' + color + '|' + size;
     if (textCache.has(key)) return textCache.get(key);
-    const tmp = makeCanvas(4, 4), tc = tmp.getContext('2d');
-    tc.font = font;
-    const w = Math.ceil(tc.measureText(str).width) + 2, h = Math.ceil(size * 1.4) + 2;
-    const cv = makeCanvas(w, h), c = cv.getContext('2d');
-    c.font = font; c.textBaseline = 'top'; c.fillStyle = color; c.fillText(str, 1, 1);
-    // 去除反鋸齒 → 純像素
-    const img = c.getImageData(0, 0, w, h), d = img.data, col = hexToRGBA(color);
-    for (let i = 0; i < d.length; i += 4) {
-      if (d[i + 3] > 110) { d[i] = col[0]; d[i + 1] = col[1]; d[i + 2] = col[2]; d[i + 3] = 255; }
-      else d[i + 3] = 0;
-    }
-    c.putImageData(img, 0, 0);
-    const r = { cv, w, h };
+    const m = textMask(str, font, size);
+    const cv = makeCanvas(m.w, m.h), c = cv.getContext('2d');
+    c.drawImage(m.cv, 0, 0);
+    c.globalCompositeOperation = 'source-in';
+    c.fillStyle = color; c.fillRect(0, 0, m.w, m.h);
+    const r = { cv, w: m.w, h: m.h };
     if (textCache.size > 400) textCache.clear();
     textCache.set(key, r);
     return r;
   }
+  KB.clearTextCache = function () { textCache.clear(); maskCache.clear(); };
 
   /**
    * 畫文字。ASCII 有點陣字時用點陣，否則（含中文）用系統字轉像素。
@@ -207,7 +260,7 @@
       draw(0, 0, color);
       return w;
     }
-    const font = opts.font || ('bold ' + size + 'px "Microsoft JhengHei","PingFang TC","Noto Sans CJK TC",sans-serif');
+    const font = opts.font || KB.defaultFont(size);
     const r = renderTextCanvas(str, font, color, size);
     let sx = x; if (align === 'center') sx = x - Math.floor(r.w / 2); else if (align === 'right') sx = x - r.w;
     if (opts.outline) {
@@ -223,7 +276,7 @@
     opts = opts || {}; const size = opts.size || 8;
     const allBitmap = size === 8 && String(str).split('').every(ch => KB.FONT[ch] || ch === ' ');
     if (allBitmap) return String(str).length * 8;
-    const font = opts.font || ('bold ' + size + 'px "Microsoft JhengHei","PingFang TC","Noto Sans CJK TC",sans-serif');
+    const font = opts.font || KB.defaultFont(size);
     return renderTextCanvas(String(str), font, opts.color || '#fff', size).w;
   };
 

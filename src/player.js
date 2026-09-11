@@ -24,6 +24,10 @@
       this.inhaleFx = null; this.anim = 'kirby_idle'; this.animT = 0; this.animFps = null;
       this.hitboxes = [];
       this.faceAnimCache = null; this.landT = 0;
+      // 手感輔助
+      this.coyoteT = 0; this.jumpBufT = 0; this.dustCd = 0; this.skidT = 0;
+      this.exhaleLockT = 0; this.hurtFlashT = 0; this.dropT = 0; this.dropThrough = false;
+      this.slideBounceT = 0; this.slideBox = null; this.landImpact = 0;
       this.name = 'kirby';
     }
 
@@ -34,6 +38,7 @@
       if (prev === 'attack' && s !== 'attack') { const d = this.abilityDef; if (d && d.onEnd) d.onEnd(this); }
       this.state = s; this.stateT = 0; this.animT = 0;
       if (prev === 'crouch' || prev === 'slide') this.setCrouchBox(false);
+      if (prev === 'slide' && this.slideBox) { this.slideBox.dead = true; this.slideBox = null; }
       if (s === 'crouch' || s === 'slide') this.setCrouchBox(true);
       if (s !== 'inhale') this.stopInhale();
       if (s !== 'attack' && s !== 'stone') { this.attackLock = false; this.attackTimer = 0; }
@@ -56,6 +61,16 @@
       if (this.invincibleT > 0) { this.invincibleT--; if (this.invincibleT === 0 && KB.game) KB.game.resumeMusic(); }
       if (this.landT > 0) this.landT--;
       const map = KB.game.map, inp = KB.input;
+      // ---- 手感計時器：coyote time / jump buffer / 其他 ----
+      if (this.onGround && this.state !== 'dead' && this.state !== 'door') this.coyoteT = P.coyote;
+      else if (this.coyoteT > 0) this.coyoteT--;
+      if (inp.pressed('jump')) this.jumpBufT = P.jumpBuffer;
+      else if (this.jumpBufT > 0) this.jumpBufT--;
+      if (this.exhaleLockT > 0) this.exhaleLockT--;
+      if (this.hurtFlashT > 0) this.hurtFlashT--;
+      if (this.dustCd > 0) this.dustCd--;
+      if (this.skidT > 0) this.skidT--;
+      if (this.dropT > 0) { this.dropT--; this.dropThrough = true; } else this.dropThrough = false;
       this.wasInWater = this.inWater;
       this.inWater = map.inWater(this.cx, this.cy);
 
@@ -75,7 +90,13 @@
       if (this.state === 'attack') { this.updateAttack(); return; }
       if (this.state === 'inhale') { this.updateInhale(); return; }
       if (this.state === 'spit' || this.state === 'swallow' || this.state === 'exhale') {
-        this.vx *= 0.8; this.physics(); if (this.stateT > 14) this.setState(this.onGround ? 'idle' : 'fall'); return;
+        const wasExhale = this.state === 'exhale';
+        this.vx *= 0.8; this.physics();
+        if (this.stateT > 14) {
+          if (wasExhale) this.exhaleLockT = P.exhaleLock;   // 吐氣結束後仍有 8 幀不能再漂浮
+          this.setState(this.onGround ? 'idle' : 'fall');
+        }
+        return;
       }
       if (this.state === 'slide') { this.updateSlide(); return; }
       if (this.state === 'float') { this.updateFloat(); return; }
@@ -91,6 +112,11 @@
       }
       if (this.tapT > 0) this.tapT--;
       if (dirIn === 0 && this.onGround) this.running = false;
+      // 起跑 / 急轉身煞車：腳下揚塵
+      if (this.onGround && dirIn !== 0 && this.dustCd <= 0) {
+        if (Math.sign(this.vx) === -dirIn && Math.abs(this.vx) > 1.0) { this.skidT = 6; this.footDust(5, -dirIn, 1.4); this.dustCd = 4; }
+        else if (Math.abs(this.vx) < 0.12) { this.footDust(3, -dirIn); this.dustCd = 12; }
+      }
       if (dirIn !== 0) {
         this.dir = dirIn;
         const acc = this.onGround ? P.accel : P.airAccel;
@@ -115,22 +141,21 @@
       if (this.onGround && inp.down('down') && !this.full) {
         if (this.state !== 'crouch') this.setState('crouch');
         this.vx *= 0.7;
-        if (inp.pressed('jump')) { this.startSlide(); return; }
+        // ↓+跳：站在單向平台上＝穿下去；實心地面＝滑鏟
+        if (this.jumpBufT > 0) {
+          this.jumpBufT = 0;
+          if (KB.physics.onPlatformOnly(map, this)) { this.dropDown(); return; }
+          this.startSlide(); return;
+        }
         if (inp.pressed('attack') && this.abilityDef && this.abilityDef.onCrouchAttack) { this.abilityDef.onCrouchAttack(this); }
         this.physics(); return;
       } else if (this.state === 'crouch') this.setState('idle');
 
-      // 平台下穿
-      this.dropThrough = false;
-
-      // 跳躍
-      if (inp.pressed('jump')) {
-        if (this.onGround) {
-          this.vy = this.full ? P.fullJump : P.jump; this.jumped = true; this.jumpHold = 10; this.onGround = false;
-          this.setState('jump'); KB.audio.sfx('jump');
-        } else if (!this.full) {
-          this.startFloat(); return;
-        }
+      // 跳躍（coyote time + jump buffer）
+      if (this.jumpBufT > 0 && (this.onGround || this.coyoteT > 0)) {
+        this.doJump();
+      } else if (inp.pressed('jump') && !this.onGround && !this.full && this.exhaleLockT <= 0 && !this.landingSoon()) {
+        this.startFloat(); return;
       }
       if (this.jumpHold > 0) { this.jumpHold--; if (!inp.down('jump') && this.vy < P.jumpCut) { this.vy = P.jumpCut; this.jumpHold = 0; } }
 
@@ -149,13 +174,14 @@
       // 丟棄能力
       if (inp.pressed('select') && this.ability) { this.dropAbility(true); }
 
+      const vyPre = this.vy;
       this.physics();
       this.afterPhysics();
       if (this.state === 'dead' || this.state === 'hurt') return;
 
       // 狀態判定
       if (this.onGround) {
-        if (this.state === 'jump' || this.state === 'fall') { this.setState('idle'); this.landT = 6; KB.audio.sfx('land'); this.jumped = false; }
+        if (this.state === 'jump' || this.state === 'fall') { this.setState('idle'); this.onLand(vyPre); this.jumped = false; }
         if (Math.abs(this.vx) > 0.2 && dirIn !== 0) this.setState(this.running ? 'run' : 'walk');
         else if (this.state === 'walk' || this.state === 'run') this.setState('idle');
       } else {
@@ -174,10 +200,54 @@
       }
     }
 
+    // ---------- 跳躍 / 落地手感 ----------
+    doJump() {
+      this.jumpBufT = 0; this.coyoteT = 0;
+      this.vy = this.full ? P.fullJump : P.jump; this.jumped = true; this.jumpHold = 10; this.onGround = false;
+      this.setState('jump'); KB.audio.sfx('jump');
+      this.footDust(2, -this.dir);
+    }
+    /** 是否即將落地（jump buffer 幀數內）：此時按跳要暫存，不要變成漂浮 */
+    landingSoon() {
+      if (this.vy < 0) return false;
+      // 之後 n 幀的落下距離；上限 12px —— 卡比在空中按跳原則上是「漂浮」，
+      // 只有真的快貼地（漂浮已無意義）時才改成暫存跳躍。
+      const n = P.jumpBuffer;
+      const d = Math.min(12, this.vy * n + P.grav * n * (n + 1) / 2);
+      return KB.physics.groundWithin(KB.game.map, this, d);
+    }
+    /** 落地：擠壓 + 揚塵 */
+    onLand(vy) {
+      this.landT = P.landFrames;
+      this.landImpact = Math.max(0.4, Math.min(1, (vy || 0) / P.maxFall));
+      KB.audio.sfx('land');
+      KB.particles(this.cx, this.bottom, ['#f0f0f0', '#d0d0d8', '#b8b8c0', '#e8e8f0'], this.landImpact > 0.7 ? 4 : 3,
+        { spread: 1.1, grav: 0.05, life: 18, up: 0.25 });
+    }
+    /** 腳下揚塵（起跑 / 煞車 / 起跳）；d 為塵土噴出方向 */
+    footDust(n, d, power) {
+      d = d || 0; power = power || 1;
+      KB.particles(this.cx + d * 4, this.bottom - 2, ['#f0f0f0', '#d8d8e0', '#ffffff'], n,
+        { spread: 0.8 * power, grav: 0.04, life: 15 + 6 * power, up: 0.35, vx: d * 0.6 * power, size: 2 });
+    }
+    /** 單向平台下穿 */
+    dropDown() {
+      this.dropT = P.dropFrames; this.dropThrough = true;
+      this.setState('fall'); this.onGround = false; this.coyoteT = 0;
+      this.vy = P.dropVy; this.y += 1; this.jumped = false;
+      this.footDust(3, 0); KB.audio.sfx('slide');
+    }
+
     // ---------- 漂浮 ----------
     startFloat() {
       this.setState('float'); this.vy = P.floatUp; this.floatFrame = 0; this.floatAnimT = 0; KB.audio.sfx('float');
-      this.running = false;
+      this.running = false; this.jumpBufT = 0;
+      this.floatPuff();
+    }
+    /** 每次拍動吐出 1~2 顆小空氣粒子 */
+    floatPuff() {
+      KB.particles(this.cx - this.dir * 5, this.cy + 5, ['#ffffff', '#dcf0ff', '#eef6ff'], 1 + (Math.random() < 0.5 ? 1 : 0),
+        { spread: 0.7, grav: -0.015, life: 20, up: 0.2, vx: -this.dir * 0.35 });
     }
     updateFloat() {
       const inp = KB.input;
@@ -185,21 +255,28 @@
       if (dirIn) { this.dir = dirIn; this.vx += dirIn * 0.1; }
       else this.vx *= 0.92;
       this.vx = Math.max(-1.0, Math.min(1.0, this.vx));
-      if (inp.pressed('jump')) { this.vy = P.floatUp; this.floatAnimT = 0; KB.audio.sfx('float'); }
-      if (inp.pressed('attack') || (inp.down('down') && this.onGround)) { this.exhale(); return; }
+      // 每按一次跳＝拍動一次（動畫重播 + 吐氣粒子）
+      if (inp.pressed('jump')) { this.vy = P.floatUp; this.floatAnimT = 0; KB.audio.sfx('float'); this.floatPuff(); this.jumpBufT = 0; }
+      // 只有「攻擊鍵」會吐氣；按 ↓ 或 ↓+攻擊都不吐氣（避免誤觸）
+      if (inp.pressed('attack') && !inp.down('down')) { this.exhale(); return; }
       if (inp.pressed('up') && this.onGround) { const d = KB.game.doorAt(this); if (d) { this.enterDoor(d); return; } }
       this.floatAnimT++;
       this.grav = P.floatGrav; this.maxFall = P.floatMaxFall;
+      const vyPre = this.vy;
       this.physics();
       this.grav = P.grav; this.maxFall = P.maxFall;
       if (this.hitCeil) this.vy = 0.2;
       this.afterPhysics();
-      if (this.inWater) { this.setState('swim'); }
+      if (this.inWater) { this.setState('swim'); return; }
+      // 輕輕落地：回到站立（保留擠壓 / 揚塵）
+      if (this.onGround && this.stateT > 2) { this.setState('idle'); this.onLand(vyPre); this.jumped = false; }
     }
     exhale() {
       this.setState('exhale'); KB.audio.sfx('exhale');
       KB.shoot({ spr: 'proj_airpuff', x: this.cx + this.dir * 10, y: this.cy, vx: this.dir * 2.6, dmg: 1, owner: 'player', life: 22, w: 10, h: 10, dir: this.dir, solid: true, fxHit: 'fx_poof' });
       this.vy = 0.5;
+      this.exhaleLockT = P.exhaleLock;   // 吐氣後短暫不可再漂浮
+      this.jumpBufT = 0;
     }
 
     // ---------- 吸入 ----------
@@ -221,6 +298,12 @@
       const mouth = { x: this.dir > 0 ? this.cx + 2 : this.cx - 12, y: this.cy - 6, w: 10, h: 12 };
       if (!this.inhaleFx || this.inhaleFx.dead) { this.inhaleFx = KB.fx('fx_inhale_wind', 0, 0, { loop: true, life: 99999, fps: 10 }); }
       this.inhaleFx.x = this.cx + this.dir * 30; this.inhaleFx.y = this.cy + 10; this.inhaleFx.flip = this.dir < 0;
+      // 嘴前方持續有小粒子被吸進嘴巴（每 2 幀 1 顆，從 40px 外飛向嘴）
+      if (this.inhaleT % 2 === 0) {
+        const px = this.cx + this.dir * 40, py = this.cy + (Math.random() - 0.5) * 26;
+        KB.particles(px, py, ['#ffffff', '#d8f0ff', '#e8e8f8'], 1,
+          { spread: 0.15, grav: 0, life: 20, up: 0, vx: -this.dir * 2.0, vy: (my - py) / 18 });
+      }
       const map = KB.game.map;
       for (const e of KB.game.entities) {
         if (e.dead || e === this) continue;
@@ -230,10 +313,17 @@
         if (e.freezeT > 0) continue;
         e.beingInhaled = true; e.inhaleSrc = this;
         e.pullTo ? e.pullTo(mx, my, 2.4) : (e.x += (mx - e.cx) * 0.15, e.y += (my - e.cy) * 0.15);
+        // 被吸的敵人抖動 ±1px（理想作法是在 Entity.draw 加繪製偏移，見 PROGRESS 跨檔需求）
+        e.x += (Math.random() - 0.5) * 2; e.y += (Math.random() - 0.5) * 2;
         if (e.overlapsRect(mouth.x, mouth.y, mouth.w, mouth.h)) {
           e.beingInhaled = false; e.inhaleSrc = null;
           e.onInhaled(this);
-          if (this.mouth) { this.setState('full'); KB.audio.sfx('swallow'); KB.fx('fx_sparkle', this.cx, this.cy); this.stopInhale(); this.physics(); return; }
+          if (this.mouth) {
+            this.setState('full'); KB.audio.sfx('swallow'); KB.fx('fx_sparkle', this.cx, this.cy);
+            KB.particles(mx, my, ['#ffffff', '#ffe040'], 5, { spread: 1.6, grav: 0.05, life: 18 });
+            if (KB.game) KB.game.freezeT = Math.max(KB.game.freezeT, P.inhaleFreeze);   // 吸到東西 hit-stop
+            this.stopInhale(); this.physics(); return;
+          }
         }
       }
       // 星星方塊
@@ -242,7 +332,9 @@
         const ch = map.get(tx, ty);
         if (ch === '*') {
           map.set(tx, ty, '.'); KB.particles(tx * 16 + 8, ty * 16 + 8, '#ffd040', 5, { spread: 1.5 });
-          this.mouth = { ability: null, name: 'star', score: 10 }; this.setState('full'); KB.audio.sfx('swallow'); this.stopInhale(); this.physics(); return;
+          this.mouth = { ability: null, name: 'star', score: 10 }; this.setState('full'); KB.audio.sfx('swallow');
+          if (KB.game) KB.game.freezeT = Math.max(KB.game.freezeT, P.inhaleFreeze);
+          this.stopInhale(); this.physics(); return;
         }
       }
       this.physics();
@@ -329,14 +421,37 @@
 
     // ---------- 滑鏟 ----------
     startSlide() {
-      this.setState('slide'); this.slideT = P.slideFrames; this.vx = this.dir * P.slide; KB.audio.sfx('slide');
-      KB.hitbox({ x: this.x, y: this.y, w: this.w + 6, h: this.h, dmg: 2, owner: 'player', type: 'slide', follow: this, ox: -this.w / 2 - 3, oy: 0, life: P.slideFrames, rehit: 0, pierce: true, knock: 2 });
+      this.setState('slide'); this.slideT = P.slideFrames; this.slideBounceT = 0; this.vx = this.dir * P.slide; KB.audio.sfx('slide');
+      this.footDust(3, -this.dir);
+      this.slideBox = KB.hitbox({ x: this.x, y: this.y, w: this.w + 6, h: this.h, dmg: 2, owner: 'player', type: 'slide', follow: this, ox: -this.w / 2 - 3, oy: 0, life: P.slideFrames, rehit: 0, pierce: true, knock: 2 });
+    }
+    endSlide() {
+      if (this.slideBox) { this.slideBox.dead = true; this.slideBox = null; }
     }
     updateSlide() {
+      // 撞牆回彈：0.8px/frame，3 幀
+      if (this.slideBounceT > 0) {
+        this.slideBounceT--;
+        this.vx = -this.dir * P.slideBounce;
+        this.physics(); this.afterPhysics();
+        if (this.slideBounceT <= 0) { this.setState(KB.input.down('down') && this.onGround ? 'crouch' : 'idle'); this.vx = 0; }
+        return;
+      }
+      // 滑鏟中按跳＝取消成跳躍（保留 70% 水平速度）
+      if (this.jumpBufT > 0 && (this.onGround || this.coyoteT > 0)) {
+        const keep = this.vx * P.slideCancelKeep;
+        this.endSlide(); this.doJump(); this.vx = keep;
+        return;
+      }
       this.slideT--;
       this.vx = this.dir * P.slide * Math.max(0.35, this.slideT / P.slideFrames);
       this.physics(); this.afterPhysics();
-      if (this.slideT <= 0 || this.hitWall) { this.setState(KB.input.down('down') && this.onGround ? 'crouch' : 'idle'); this.vx *= 0.3; }
+      if (this.hitWall) {
+        this.endSlide(); this.slideT = 0; this.slideBounceT = P.slideBounceFrames; this.vx = -this.dir * P.slideBounce;
+        KB.particles(this.cx + this.dir * 7, this.cy + 3, ['#e8e8e8', '#c8c8d0'], 4, { spread: 1.2, grav: 0.05, life: 16, vx: -this.dir * 0.6 });
+        return;
+      }
+      if (this.slideT <= 0) { this.endSlide(); this.setState(KB.input.down('down') && this.onGround ? 'crouch' : 'idle'); this.vx *= 0.3; }
     }
 
     // ---------- 游泳 ----------
@@ -398,7 +513,13 @@
       const kdir = this.cx < from ? -1 : 1;
       this.vx = kdir * P.knockback; this.vy = -2.2;
       this.invuln = P.invulnFrames; this.hurtTimer = P.hurtFrames;
-      this.mouth = null; this.stopInhale();
+      this.mouth = null; this.stopInhale(); this.endSlide();
+      // 受傷反饋：hit-stop + 畫面微震 + 閃白
+      this.hurtFlashT = 2; this.jumpBufT = 0; this.coyoteT = 0;
+      if (KB.game) {
+        KB.game.freezeT = Math.max(KB.game.freezeT || 0, P.hurtFreeze);
+        KB.game.shake = Math.max(KB.game.shake || 0, P.hurtShake);
+      }
       if (this.stoneBox) { this.stoneBox.dead = true; this.stoneBox = null; }
       if (this.ability) this.dropAbility(true);
       KB.fx('fx_hit', this.cx, this.cy + 6);
@@ -459,8 +580,8 @@
     }
     draw(g) {
       if (this.state === 'dead' && this.deadT < 30 && (this.deadT & 2)) return;
-      if (this.invuln > 0 && this.state !== 'dead' && (this.invuln & 2)) return; // 閃爍
-      const [anim, fps] = this.currentAnim();
+      if (this.invuln > 0 && this.state !== 'dead' && (this.invuln & 2) && this.hurtFlashT <= 0) return; // 閃爍
+      let [anim, fps] = this.currentAnim();
       const opts = { flip: this.dir < 0, fps };
       if (this.state === 'idle') opts.frame = (this.stateT % 200) > 190 ? 1 : 0;
       else if (this.state === 'climb' && !this.climbing) opts.frame = 0;
@@ -469,6 +590,15 @@
       else if (this.state === 'attack') opts.t = this.stateT / 60;
       else opts.t = this.stateT / 60;
       if (this.invincibleT > 0) { const hues = ['#ffffff', '#ffe040', '#ff80c0', '#80e0ff']; if ((this.stateT >> 1) & 1) opts.tint = hues[(this.stateT >> 2) % 4]; }
+      // 落地擠壓：gfx 支援 scaleX/scaleY（anchor=bottom，擠壓以腳底為基準）
+      let squash = 0;
+      if (this.landT > 0 && ['idle', 'walk', 'run', 'crouch'].indexOf(this.state) >= 0) {
+        const k = (this.landT / P.landFrames) * (this.landImpact || 1);
+        if (KB.SPR[anim]) { squash = P.landSquash * k; opts.scaleX = 1 + squash; opts.scaleY = 1 - squash; }
+        else { anim = 'kirby_crouch'; opts.frame = 0; }   // 無 scale 支援時退回蹲下幀
+      }
+      // 受傷瞬間閃白一幀
+      if (this.hurtFlashT > 0) opts.tint = '#ffffff';
       let bob = 0;
       if (this.state === 'float') bob = Math.round(Math.sin(this.t * 6) * 1);
       g.spr(anim, this.cx, this.bottom + bob, opts);
@@ -479,7 +609,7 @@
           const off = KB.HAT_OFFSET[this.state] || (this.full ? KB.HAT_OFFSET.full : KB.HAT_OFFSET.default);
           const ho = d && d.hatOffset && d.hatOffset[this.state] ? d.hatOffset[this.state] : null;
           const ox = ho ? ho[0] : off[0], oy = ho ? ho[1] : off[1];
-          if (oy < 90) g.spr(hat, this.cx + ox * this.dir, this.y + oy + bob, { flip: this.dir < 0, t: this.t, tint: opts.tint });
+          if (oy < 90) g.spr(hat, this.cx + ox * this.dir, this.y + oy + bob + Math.round(squash * 18), { flip: this.dir < 0, t: this.t, tint: opts.tint });
         }
       }
       if (KB.DEBUG && KB.showHitbox) g.rect(this.x, this.y, this.w, this.h, 'rgba(0,255,0,0.3)');

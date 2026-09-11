@@ -52,6 +52,24 @@ def main():
         pg.wait_for_timeout(200)
         st3 = pg.evaluate("()=>KB.audio.status()")
         print('after stop   :', st3)
+        # 音量 / duck API（提供給 ui-menu）
+        api = pg.evaluate("()=>['setVolume','getVolume','duck','setMute','status'].filter(k=>typeof KB.audio[k]!=='function')")
+        if api:
+            print('  <-- 缺少 API:', api); bad += 1
+        vol = pg.evaluate("""()=>{
+            const before = KB.audio.getVolume();
+            KB.audio.setVolume({music:0.35}); const a = KB.audio.getVolume();
+            KB.audio.setVolume({sfx:0.5});    const b = KB.audio.getVolume();
+            KB.audio.setVolume({music:2, sfx:-1}); const c = KB.audio.getVolume();
+            KB.audio.duck(true);  const d = KB.audio.status().ducked;
+            KB.audio.duck(false); const e = KB.audio.status().ducked;
+            KB.audio.setVolume(before);
+            return {a, b, c, d, e, restored: KB.audio.getVolume()};
+        }""")
+        okvol = (vol['a']['music'] == 0.35 and vol['b']['sfx'] == 0.5 and vol['b']['music'] == 0.35
+                 and vol['c']['music'] == 1 and vol['c']['sfx'] == 0 and vol['d'] is True and vol['e'] is False)
+        print('volume/duck  :', vol, '' if okvol else '  <-- 音量 / duck API 異常')
+        if not okvol: bad += 1
         if st1.get('ctxState') == 'running':
             if not (st1['unlocked'] and st1['playing'] == 'green' and st1['step'] > 0 and not st1['muted']): print('  <-- 即時音序器狀態異常'); bad += 1
             if not (st2['playing'] == 'boss' and st3['playing'] is None): print('  <-- 切歌 / 停止異常'); bad += 1
@@ -80,6 +98,10 @@ def main():
             except Exception as e:
                 bad += 1
                 print(f'{kind:5} {name:10} ERROR {e}')
+        if only:
+            missing = sorted(only - {n for _, n in names})
+            if missing:
+                print('  <-- --only 指定了不存在的名稱:', ','.join(missing)); bad += len(missing)
         b.close()
     errs = [l for l in logs if 'error' in l.lower()]
     if errs:

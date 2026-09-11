@@ -21,7 +21,7 @@
       this.score = opts.score !== undefined ? opts.score : (KB.session ? KB.session.score : 0);
       this.entities = []; this.parts = []; this.popups = [];
       this.cam = { x: 0, y: 0 }; this.shake = 0; this.t = 0; this.frame = 0;
-      this.fade = 1; this.fadeDir = -1; this.fadeCb = null; this.paused = false; this.pauseSel = 0;
+      this.fade = 1; this.fadeDir = -1; this.fadeCb = null; this.paused = false; this.pauseSel = 0; this.pauseMenu = null;
       this.boss = null; this.bossIntroT = 0; this.bossName = ''; this.clearT = -1; this.abilityFlash = 0;
       this.toasts = []; this.roomIdx = 0; this.checkpoint = null; this.freezeT = 0;
       this.timeAlive = 0; this.musicKey = null;
@@ -131,9 +131,18 @@
         if (this.fade <= 0 && this.fadeDir < 0) { this.fade = 0; this.fadeDir = 0; }
         if (this.fadeDir > 0) return;
       }
-      // 暫停
-      if (KB.input.pressed('start') && this.clearT < 0 && this.player.state !== 'dead') { this.paused = !this.paused; KB.audio.sfx(this.paused ? 'pause' : 'menu'); this.pauseSel = 0; return; }
-      if (this.paused) { this.updatePause(); return; }
+      // 暫停（選單邏輯在 src/menu.js 的 KB.PauseMenu；此處只負責開啟與轉呼叫）
+      if (!this.paused && KB.input.pressed('start') && this.clearT < 0 && this.player.state !== 'dead') {
+        this.paused = true; this.pauseSel = 0;
+        this.pauseMenu = KB.PauseMenu ? new KB.PauseMenu(this) : null;
+        KB.audio.sfx('pause'); if (KB.audio.duck) KB.audio.duck(true); return;
+      }
+      if (this.paused) {
+        if (this.pauseMenu) this.pauseMenu.update(this);
+        else if (KB.input.pressed('start')) { this.paused = false; if (KB.audio.duck) KB.audio.duck(false); KB.audio.sfx('unpause'); }
+        else this.updatePause();
+        return;
+      }
       // 魔王登場
       if (this.bossIntroT > 0) {
         this.bossIntroT--;
@@ -264,17 +273,37 @@
 
     // ---------- 鏡頭 ----------
     updateCamera(snap) {
-      const p = this.player, map = this.map;
+      const p = this.player, map = this.map, C = KB.CAM;
       const maxX = Math.max(0, map.pw - KB.W), maxY = Math.max(0, map.ph - KB.VIEW_H);
-      let tx = p.cx - KB.W / 2 + (p.dir * 24), ty = p.bottom - KB.VIEW_H * 0.62;
+      // ---- 水平前瞻：依速度平滑（靜止 12px、全速跑 40px）----
+      const spd = Math.min(1, Math.abs(p.vx) / KB.PHYS.run);
+      const wantLook = (C.lookIdle + (C.lookRun - C.lookIdle) * spd) * (p.dir < 0 ? -1 : 1);
+      if (snap || this.lookAhead === undefined) this.lookAhead = wantLook;
+      else this.lookAhead += (wantLook - this.lookAhead) * C.lookLerp;
+      let tx = p.cx - KB.W / 2 + this.lookAhead;
+      // ---- 垂直死區：玩家在畫面 40%~70% 高度內時鏡頭不動 ----
+      let ty = snap ? p.bottom - KB.VIEW_H * C.restY : this.cam.y;
+      if (!snap) {
+        const sy = p.bottom - ty, top = KB.VIEW_H * C.deadTop, bot = KB.VIEW_H * C.deadBottom;
+        if (sy < top) ty = p.bottom - top;
+        else if (sy > bot) ty = p.bottom - bot;
+      }
       if (this.boss && !this.boss.dead && this.isBossRoom) {
-        // 魔王房：以玩家與魔王中點取景，但玩家一定要在畫面內
-        if (this.bossIntroT > 0 && this.bossIntroT < 140) tx = this.boss.cx - KB.W / 2 + (this.boss.introCamX || 0);   // 登場：鏡頭平移到魔王
-        else { tx = (p.cx + this.boss.cx) / 2 - KB.W / 2; tx = Math.max(p.cx - KB.W + 40, Math.min(p.cx - 40, tx)); }
+        const b = this.boss, m = C.bossMargin;
+        if (this.bossIntroT > 0 && this.bossIntroT < 140) tx = b.cx - KB.W / 2 + (b.introCamX || 0);   // 登場：鏡頭平移到魔王
+        else {
+          // 魔王房：以兩者中點取景；若距離超過畫面寬，保證玩家在畫面內並盡量偏向魔王
+          const mid = (p.cx + b.cx) / 2 - KB.W / 2;
+          const lo = p.cx - (KB.W - m), hi = p.cx - m;   // 玩家距左 / 右邊緣至少 m px
+          tx = Math.max(lo, Math.min(hi, mid));
+          // 垂直同樣兼顧魔王，但玩家一定看得到
+          let bty = (p.bottom + b.bottom) / 2 - KB.VIEW_H * C.restY;
+          ty = Math.max(p.bottom - KB.VIEW_H + 32, Math.min(p.bottom - 32, bty));
+        }
       }
       tx = Math.max(0, Math.min(maxX, tx)); ty = Math.max(0, Math.min(maxY, ty));
       if (snap) { this.cam.x = tx; this.cam.y = ty; return; }
-      this.cam.x += (tx - this.cam.x) * 0.12; this.cam.y += (ty - this.cam.y) * 0.12;
+      this.cam.x += (tx - this.cam.x) * C.follow; this.cam.y += (ty - this.cam.y) * C.follow;
       if (Math.abs(tx - this.cam.x) < 0.3) this.cam.x = tx; if (Math.abs(ty - this.cam.y) < 0.3) this.cam.y = ty;
     }
 
@@ -309,6 +338,8 @@
         (KB.UI && KB.UI.text ? KB.UI.text : KB.text)(ctx, '過關！', KB.W / 2, 60, { color: '#ffe040', align: 'center', size: 16, outline: '#603000' });
       }
       ctx.restore();
+      // 遊戲內「?」提示（進新關卡 toast / 右上角常駐問號）
+      if (KB.UI && KB.UI.drawGameHint) KB.UI.drawGameHint(ctx, this);
       // HUD
       if (KB.drawHUD) KB.drawHUD(ctx, this); else this.drawHUDFallback(ctx);
       // 魔王血條
@@ -317,7 +348,8 @@
       // 提示
       for (const tt of this.toasts) (KB.UI && KB.UI.text ? KB.UI.text : KB.text)(ctx, tt.msg, KB.W / 2, 40, { color: '#fff', align: 'center', outline: '#000' });
       if (this.paused) {
-        if (KB.drawPause) KB.drawPause(ctx, this);
+        if (this.pauseMenu) this.pauseMenu.draw(ctx, this);
+        else if (KB.drawPause) KB.drawPause(ctx, this);
         else { KB.rect(ctx, 0, 0, KB.W, KB.H, 'rgba(0,0,0,0.5)'); KB.text(ctx, 'PAUSE', KB.W / 2, 90, { color: '#fff', align: 'center', size: 12 }); KB.text(ctx, (this.pauseSel === 0 ? '> ' : '  ') + '繼續', KB.W / 2, 110, { color: '#fff', align: 'center' }); KB.text(ctx, (this.pauseSel === 1 ? '> ' : '  ') + '離開關卡', KB.W / 2, 124, { color: '#fff', align: 'center' }); }
       }
       if (this.fade > 0) { ctx.fillStyle = 'rgba(0,0,0,' + this.fade.toFixed(2) + ')'; ctx.fillRect(0, 0, KB.W, KB.H); }

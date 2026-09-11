@@ -1,7 +1,7 @@
 // UI：標題畫面 / 選關地圖 / HUD / 魔王血條 / 暫停 / Game Over / 結局
 // 所有精靈皆先以 KB.has 檢查；缺圖時改用本檔註冊的 uifb_* 備援圖或純繪圖，畫面本身就要完整好看。
 // 版面常數集中在 KB.UI.LAYOUT，美術 / game.js 可依此對齊。
-// 文字：ASCII 走 8×8 點陣字；中文一律 12px / 16px 細明體（有內嵌點陣，轉像素後仍清晰；8~10px 中文不可讀）。
+// 文字：ASCII 走 8×8 點陣字；中文一律 12px / 16px 黑體（gfx.js 超取樣轉像素；8~10px 中文不可讀）。
 //       其他檔案可用 KB.UI.text / KB.UI.textWidth / KB.UI.bigText 取得相同效果。
 (function () {
   'use strict';
@@ -13,7 +13,7 @@
     // HUD（y 192~224）：左 能力圖示+名稱 / 中 HP、魔王血條 / 右 上列分數、下列生命
     hud: { iconX: 4, iconY: 200, nameX: 32, rowA: 197, rowB: 207, hpX: 84, hpY: 197, hpGap: 9, right: 251, faceX: 217, faceY: 206, livesY: 210 },
     bossBar: { cx: 111, y: 208, w: 90, h: 10 },     // 置中於 HP 列正下方；ui_boss_bar 90×10（內框 2px）
-    mapNodes: [[30, 148], [80, 104], [128, 140], [176, 88], [226, 124]],
+    mapNodes: [[30, 142], [80, 100], [128, 134], [176, 84], [226, 118]],
   };
   const C = { navy: '#101828', panel: '#182038', border: '#f0f0f8', yellow: '#ffe040', pink: '#ffb0d0', grey: '#98a8c0', dark: '#202838', cyan: '#80e0ff' };
   const pad7 = n => String(Math.max(0, Math.floor(n || 0))).padStart(7, '0');
@@ -24,16 +24,20 @@
   const clearedOf = id => !!(KB.save && KB.save.cleared && KB.save.cleared[id]);
 
   // ---------- 文字工具 ----------
-  // 中文字型：細明體系列在 12 / 16px 有內嵌點陣，轉像素後最清楚；缺字型時退回正黑體 / 蘋方 / Noto。
-  const ZH = '"MingLiU","PMingLiU","SimSun","NSimSun","MS Gothic","Microsoft JhengHei","PingFang TC","Noto Sans CJK TC",sans-serif';
+  // 中文字型：一律用黑體（筆畫等寬），由 gfx.js 以 3 倍字級超取樣後二值化成像素字，
+  // 不依賴細明體的內嵌點陣 → Windows / Linux / Mac 結果一致。
+  const ZH = KB.ZH_FONT;
   UI.zhFont = s => s + 'px ' + ZH;
   const bitmapOK = s => String(s).split('').every(ch => KB.FONT[ch] || ch === ' ');
+  // 中文可讀性：QA 實測 12px 高筆畫字（繼 / 續 / 圖 / 開）仍糊，選單文字一律 ≥ MS（14px）
+  UI.MS = 14;         // 選單 / 標籤標準中文字級
+  UI.MS_SMALL = 12;   // 空間真的不夠時的下限（例如兩欄說明表的右欄）
   function zhOpts(str, o) {
     o = o || {};
     if (o.font) return o;
     const size = o.size || 8;
     if (size === 8 && bitmapOK(str)) return o;          // 純 ASCII → 點陣字
-    const s = size < 11 ? 12 : size;                      // 中文最小 12px
+    const s = size < 12 ? 12 : size;                      // 中文最小 12px
     return Object.assign({}, o, { size: s, font: UI.zhFont(s) });
   }
   // 12px 混排：英數（點陣字可用者）用 8×8 點陣字、其餘用細明體，逐段繪製
@@ -47,15 +51,18 @@
   }
   const isMixed = rs => rs.some(r => r.bm && r.s.trim()) && rs.some(r => !r.bm);
   function runWidth(r, o) { return r.bm ? r.s.length * 8 : KB.textWidth(r.s, { size: o.size, font: o.font }); }
-  // 與 KB.text 同介面；含中文時自動套用細明體並將字級提升到 ≥12；12px 時英數混排點陣字
+  // 混排：12~16px 中文旁的英數改用 8×8 點陣字（更銳利也更省寬度）；bmDY 讓點陣字對齊中文的視覺中線
+  const canMix = o => !!o.font && !o.nomix && o.size >= 12 && o.size <= 16;
+  const bmDY = size => Math.round(size / 4);
+  // 與 KB.text 同介面；含中文時自動套用黑體並把字級提升到 ≥12
   function T(ctx, str, x, y, o) {
     o = zhOpts(str, o);
-    if (o.size !== 12 || !o.font || o.nomix) return KB.text(ctx, str, x, y, o);
+    if (!canMix(o)) return KB.text(ctx, str, x, y, o);
     const rs = runs(str); if (!isMixed(rs)) return KB.text(ctx, str, x, y, o);
-    const ws = rs.map(r => runWidth(r, o)), total = ws.reduce((a, b) => a + b, 0);
+    const ws = rs.map(r => runWidth(r, o)), total = ws.reduce((a, b) => a + b, 0), dy = bmDY(o.size);
     let sx = Math.round(x); if (o.align === 'center') sx = Math.round(x - total / 2); else if (o.align === 'right') sx = Math.round(x - total);
     rs.forEach((r, i) => {
-      if (r.bm) KB.text(ctx, r.s, sx, y + 3, { color: o.color, outline: o.outline, shadow: o.shadow });
+      if (r.bm) KB.text(ctx, r.s, sx, y + dy, { color: o.color, outline: o.outline, shadow: o.shadow });
       else KB.text(ctx, r.s, sx, y, { color: o.color, size: o.size, font: o.font, outline: o.outline, shadow: o.shadow });
       sx += ws[i];
     });
@@ -63,7 +70,7 @@
   }
   function TW(str, o) {
     o = zhOpts(str, o);
-    if (o.size !== 12 || !o.font || o.nomix) return KB.textWidth(str, o);
+    if (!canMix(o)) return KB.textWidth(str, o);
     const rs = runs(str); if (!isMixed(rs)) return KB.textWidth(str, o);
     return rs.reduce((a, r) => a + runWidth(r, o), 0);
   }
@@ -102,6 +109,11 @@
   reg('uifb_cursor', ['kk.....', 'kwk....', 'kwwk...', 'kwwwk..', 'kwwk...', 'kwk....', 'kk.....']);
   reg('uifb_star', ['....k....', '...kyk...', '...kyk...', 'kkkkykkkk', 'kyyyyyyyk', '.kyyyyyk.', '..kyyyk..', '.kyykyyk.', 'kkk...kkk']);
   reg('uifb_lock', ['..kkk..', '.ksssk.', '.ks.sk.', 'kkkkkkk', 'kyyyyyk', 'kyykyyk', 'kyyyyyk', 'kkkkkkk']);
+  // 收集星（選關節點下方的 ★ x/3）：實心＝已拿、空心＝未拿
+  reg('uifb_ministar', ['..k..', '.kyk.', 'kyyyk', 'kykyk', 'k.k.k']);
+  reg('uifb_ministar_off', ['..k..', '.ksk.', 'ksssk', 'ksksk', 'k.k.k']);
+  // 通關旗（節點右上角）
+  reg('uifb_flag', ['k......', 'kcccck.', 'kccccck', 'kcccck.', 'k......', 'k......', 'kk.....']);
   reg('uifb_node', [
     '....kkkkkkkk....', '..kkhhhhhhhhkk..', '.khhhgggggggggk.', 'khhgggggggggggGk', 'khggggggggggggGk', 'kggggggggggggGGk',
     'kgggggggggggGGGk', 'kGgggggggggGGGGk', 'kGGggggggGGGGGGk', '.kGGGGGGGGGGGGk.', '..kkGGGGGGGGkk..', '....kkkkkkkk....']);
@@ -110,6 +122,24 @@
     cloud: ['#a0c8f8', '#6888d8', '#e8f0ff'], dedede: ['#d84848', '#902020', '#f09090'], locked: ['#606870', '#383c48', '#808890'],
   };
   for (const k in NODE_COL) { const [g, G, h] = NODE_COL[k]; if (!KB.SPR['uifb_node_' + k]) KB.spriteRecolor('uifb_node', 'uifb_node_' + k, { '#58d048': g, '#289028': G, '#98f070': h }); }
+  // 收集星：levels-bosses agent 會設定 KB.save.stars[levelId] = [bool, bool, bool]
+  UI.STAR_MAX = 3;
+  function starsOf(id) { const a = KB.save && KB.save.stars ? KB.save.stars[id] : null; return Array.isArray(a) ? a : []; }
+  function starCount(id) { return starsOf(id).filter(Boolean).length; }
+  UI.starCount = starCount;
+  // 節點下方：★★☆ + 數字（回傳畫出的寬度）
+  function drawStarRow(ctx, x, y, id, opts) {
+    opts = opts || {};
+    const got = starCount(id), n = UI.STAR_MAX, gap = 6;
+    const w = n * gap - 1 + (opts.count === false ? 0 : 19);
+    let sx = Math.round(opts.left ? x : x - w / 2);
+    if (opts.plate !== false) KB.rect(ctx, sx - 2, y - 1, w + 4, 8, 'rgba(8,14,28,0.6)');
+    for (let i = 0; i < n; i++) sprAt(ctx, i < got ? 'uifb_ministar' : 'uifb_ministar_off', sx + i * gap, y + 1, 'tl');
+    if (opts.count !== false) KB.text(ctx, got + '/' + n, sx + n * gap + 3, y, { color: got >= n ? C.yellow : '#e8eef8' });
+    return w;
+  }
+  UI.drawStarRow = drawStarRow;
+
   const ICON_COL = { fire: '#f86030', sword: '#40b860', beam: '#f8d030', cutter: '#e8e0c0', spark: '#58c8f8', stone: '#909098', ice: '#88e0ff', hammer: '#c07840' };
 
   // ---------- 共用繪圖工具 ----------
@@ -180,11 +210,18 @@
   function drawMuteToast(ctx) {
     if (UI.muteToast <= 0) return; UI.muteToast--;
     const muted = !!(KB.audio && KB.audio.muted);
-    KB.rect(ctx, 88, VH - 26, 80, 18, 'rgba(0,0,0,0.65)');
-    T(ctx, muted ? '靜音：開' : '靜音：關', 128, VH - 24, { color: muted ? C.yellow : '#fff', align: 'center', size: 12 });
+    KB.rect(ctx, 86, VH - 28, 84, 21, 'rgba(0,0,0,0.72)');
+    T(ctx, muted ? '靜音：開' : '靜音：關', 128, VH - 25, { color: muted ? C.yellow : '#fff', align: 'center', size: UI.MS });
   }
   // M 鍵靜音由 audio.js 切換（KB.audio.toggleMute）；UI 層只負責顯示提示（避免重複切換而互相抵銷）
   window.addEventListener('keydown', e => { if (e.code === 'KeyM' && !e.repeat && KB.audio) UI.muteToast = 90; });
+
+  // 供 menu.js（暫停選單 / 標題選單 / 能力圖鑑 / 設定）共用的繪圖工具
+  UI.C = C; UI.panel = panel; UI.cursor = cursor; UI.sprAt = sprAt; UI.drawKirby = drawKirby;
+  UI.has = has; UI.pick = pick; UI.sfx = sfx; UI.music = music; UI.bands = bands;
+  UI.stepFade = stepFade; UI.leave = leave; UI.drawFade = drawFade;
+  UI.mkStars = mkStars; UI.drawStars = drawStars; UI.mkClouds = mkClouds; UI.drawClouds = drawClouds;
+  UI.drawMuteToast = drawMuteToast; UI.pad7 = pad7;
 
   // ---------- 標題畫面 ----------
   function drawTitleBg(ctx, sc) {
@@ -206,50 +243,115 @@
     KB.rect(ctx, cx - 34, cy + 22, 68, 13, '#e83060'); KB.rect(ctx, cx - 36, cy + 23, 72, 11, '#e83060');
     KB.text(ctx, 'FAN GAME', cx, cy + 25, { color: '#fff', align: 'center' });
   }
-  function drawHelp(ctx) {
+  // 單行塞進 maxw：先照原字級，放不下就降到 12px，再放不下才截斷補「…」
+  function fit(ctx, str, x, y, maxw, o) {
+    let s = String(str);
+    o = o || {};
+    if (TW(s, o) <= maxw) return T(ctx, s, x, y, o);
+    if ((o.size || 8) > 12) {
+      const o2 = Object.assign({}, o, { size: 12, font: undefined });
+      if (TW(s, o2) <= maxw) return T(ctx, s, x, y, o2);
+      o = o2;
+    }
+    while (s.length > 1 && TW(s + '…', o) > maxw) s = s.slice(0, -1);
+    return T(ctx, s + '…', x, y, o);
+  }
+  UI.fitText = fit;
+  // 中文逐字斷行（無空白也能斷）；超過 maxLines 時最後一行補「…」
+  UI.wrapLines = function (str, maxw, o, maxLines) {
+    o = o || {}; maxLines = Math.max(1, maxLines || 2);
+    const chars = Array.from(String(str)), out = [];
+    let cur = '';
+    for (let i = 0; i < chars.length; i++) {
+      const t = cur + chars[i];
+      if (cur && TW(t, o) > maxw) {
+        if (out.length === maxLines - 1) {          // 已經是最後一行 → 截斷補「…」
+          let last = cur;
+          while (last.length > 1 && TW(last + '…', o) > maxw) last = last.slice(0, -1);
+          out.push(last + '…');
+          return out;
+        }
+        out.push(cur); cur = chars[i];
+      } else cur = t;
+    }
+    if (cur) out.push(cur);
+    return out;
+  };
+  // 量測 fit() 實際會用的寬度（不繪製）
+  UI.fitWidth = function (str, maxw, o) {
+    o = o || {}; const w = TW(str, o);
+    if (w <= maxw) return w;
+    if ((o.size || 8) > 12) { const w2 = TW(str, Object.assign({}, o, { size: 12, font: undefined })); if (w2 <= maxw) return w2; }
+    return maxw;
+  };
+  // 操作說明（標題畫面 / 暫停子頁共用）；列數由 input.js 的 HELP 決定，自動調整行距並截斷過長說明
+  function drawHelp(ctx, opts) {
+    opts = opts || {};
     KB.rect(ctx, 0, 0, W, H, 'rgba(0,0,0,0.62)');
     panel(ctx, 6, 6, 244, 188);
-    T(ctx, '操作說明', 128, 11, { color: C.yellow, align: 'center', size: 16, outline: '#402000' });
-    KB.rect(ctx, 20, 31, 216, 1, '#405070');
+    T(ctx, '操作說明', 128, 10, { color: C.yellow, align: 'center', size: 16, outline: '#402000' });
+    KB.rect(ctx, 20, 30, 216, 1, '#405070');
     const rows = (KB.input && KB.input.HELP) || [];
-    let y = 36;
-    // 兩欄空間有限：整列用細明體（nomix），避免點陣英數把欄位撐爆
-    for (const [k, d] of rows) { T(ctx, k, 14, y, { color: C.cyan, size: 12, nomix: true }); T(ctx, d, 104, y, { color: '#fff', size: 12, nomix: true }); y += 18; }
-    T(ctx, 'M：靜音　　SELECT：返回', 128, 172, { color: C.grey, align: 'center', size: 12 });
+    const top = 35, bottom = 170, n = Math.max(1, rows.length);
+    const gap = Math.max(11, Math.min(18, Math.floor((bottom - top) / n)));
+    let y = top + Math.max(0, Math.floor((bottom - top - gap * n) / 2));
+    // 兩欄：左欄按鍵（x 12，寬 78）、右欄說明（x 94，寬 152）
+    // 同一欄用同一字級（14px 放不下才整欄降 12px），避免每列字級不同看起來參差
+    const KW = 88, DW = 146;
+    const allFit = (i, w, o) => rows.every(r => TW(r[i], o) <= w);
+    const kSize = allFit(0, KW, { size: UI.MS, nomix: true }) ? UI.MS : UI.MS_SMALL;
+    const dSize = allFit(1, DW, { size: UI.MS }) ? UI.MS : UI.MS_SMALL;
+    for (const [k, d] of rows) {
+      fit(ctx, k, 12, y, KW, { color: C.cyan, size: kSize, nomix: true });
+      fit(ctx, d, 100, y, DW, { color: '#fff', size: dSize });
+      y += gap;
+    }
+    fit(ctx, opts.hint || 'M：靜音　　SELECT：返回', 128, 173, 238, { color: C.grey, align: 'center', size: UI.MS });
   }
+  UI.drawHelp = drawHelp;
 
   class TitleScene {
     constructor() {
       this.t = 0; this.frame = 0; this.fade = 1; this.leaving = null; this.help = false;
+      this.menu = null;
       this.clouds = mkClouds(5, 11, 14, 80); this.stars = mkStars(12, 5, 0, 0, W, 60);
     }
     enter() { KB.session = { lives: KB.START_LIVES, score: 0 }; music('title'); }
+    // 從標題進入遊戲：cont=true → 接續（第一個未通關的世界）；否則從 W1 開始
+    startGame(cont) {
+      let idx = 0;
+      if (cont) { idx = KB.LEVELS.findIndex(l => !clearedOf(l.id)); if (idx < 0) idx = KB.LEVELS.length - 1; }
+      KB.session = { lives: KB.START_LIVES, score: 0 };
+      leave(this, () => KB.setScene(new StageSelectScene(Math.max(0, idx))));
+    }
     update(dt) {
       this.t += dt; this.frame++;
       if (stepFade(this)) return;
       const inp = KB.input;
+      // 按 START 後交給標題選單（menu.js 的 KB.TitleMenu）；沒有 menu.js 時維持舊行為
+      if (this.menu) { this.menu.update(this); return; }
       if (inp.pressed('select')) { this.help = !this.help; sfx('menu'); return; }
       if (inp.pressed('start') || inp.pressed('jump')) {
         if (this.help) { this.help = false; sfx('menu'); return; }
         sfx('select');
-        let idx = KB.LEVELS.findIndex(l => !clearedOf(l.id));
-        if (idx < 0) idx = KB.LEVELS.length - 1;
-        leave(this, () => KB.setScene(new StageSelectScene(Math.max(0, idx))));
+        if (KB.TitleMenu) { this.menu = new KB.TitleMenu(this); return; }
+        this.startGame(true);
       }
     }
     draw(ctx) {
       const t = this.t, f = this.frame;
       if (KB.BG && KB.BG.title) KB.BG.title(ctx, 0, 0, t); else drawTitleBg(ctx, this);
       if (!sprAt(ctx, 'ui_title_logo', 128, 46, 'c')) drawLogoFallback(ctx, 128, 46, t);
-      // 卡比在草地上跳動
-      const groundY = 147, bounce = Math.abs(Math.sin(t * 3.4)) * 12;
-      KB.rect(ctx, 128 - 7 + Math.round(bounce / 6), groundY - 1, 14 - Math.round(bounce / 3), 2, 'rgba(0,40,0,0.35)');
-      drawKirby(ctx, 'ui_title_kirby', 128, groundY - Math.round(bounce), { t, squash: bounce < 1.2 });
-      if ((f % 60) < 42 && !this.help) KB.text(ctx, 'PRESS START', 128, 164, { color: '#fff', align: 'center', outline: '#203040', spacing: 1 });
+      // 卡比在草地上跳動（選單開啟時讓到左邊，不被選單蓋住）
+      const groundY = 147, bounce = Math.abs(Math.sin(t * 3.4)) * 12, kx = this.menu ? 56 : 128;
+      KB.rect(ctx, kx - 7 + Math.round(bounce / 6), groundY - 1, 14 - Math.round(bounce / 3), 2, 'rgba(0,40,0,0.35)');
+      drawKirby(ctx, 'ui_title_kirby', kx, groundY - Math.round(bounce), { t, squash: bounce < 1.2 });
+      if ((f % 60) < 42 && !this.help && !this.menu) KB.text(ctx, 'PRESS START', 128, 164, { color: '#fff', align: 'center', outline: '#203040', spacing: 1 });
       // 底部資訊列
       KB.rect(ctx, 0, 184, W, H - 184, C.navy); KB.rect(ctx, 0, 184, W, 1, '#405070');
-      T(ctx, '同人作品　按 M 靜音' + (KB.audio && KB.audio.muted ? '（已靜音）' : ''), 128, 187, { color: '#c8d4e4', align: 'center', size: 12 });
-      T(ctx, 'SELECT：操作說明　　Z / ENTER：開始', 128, 204, { color: '#7c8ca8', align: 'center', size: 12 });
+      fit(ctx, '同人作品　按 M 靜音' + (KB.audio && KB.audio.muted ? '（已靜音）' : ''), 128, 186, 250, { color: '#c8d4e4', align: 'center', size: UI.MS });
+      if (!this.menu) fit(ctx, 'SELECT：操作說明　　Z / ENTER：開始', 128, 204, 250, { color: '#7c8ca8', align: 'center', size: UI.MS });
+      if (this.menu) this.menu.draw(ctx, this);
       if (this.help) drawHelp(ctx);
       drawMuteToast(ctx); drawFade(ctx, this);
     }
@@ -330,7 +432,7 @@
       return [pts[k][0] + (pts[k + 1][0] - pts[k][0]) * f, pts[k][1] + (pts[k + 1][1] - pts[k][1]) * f];
     }
     drawNode(ctx, i, x, y) {
-      const ok = this.canEnter(i), theme = this.themeOf(i), cleared = this.cleared(i);
+      const ok = this.canEnter(i), theme = this.themeOf(i), cleared = this.cleared(i), lv = this.level(i);
       KB.rect(ctx, x - 7, y + 5, 14, 2, 'rgba(0,40,0,0.3)');
       if (!ok) {
         // 鎖定 / 尚未製作：灰色節點 + 鎖
@@ -342,7 +444,9 @@
       if (has('uifb_node_' + theme)) sprAt(ctx, 'uifb_node_' + theme, x, y, 'c');
       else sprAt(ctx, pick('ui_map_node', 'uifb_node'), x, y, 'c', { frame: 0 });
       // 已通關：插旗
-      if (cleared) { if (!sprAt(ctx, 'ui_map_flag', x + 9, y + 2, 'b')) sprAt(ctx, 'uifb_star', x + 9, y - 7, 'c'); }
+      if (cleared) { if (!sprAt(ctx, 'ui_map_flag', x + 10, y + 3, 'b')) sprAt(ctx, 'uifb_flag', x + 8, y - 9, 'tl'); }
+      // 節點下方：收集星 ★ x/3（levels-bosses 提供 KB.save.stars[levelId]）
+      if (lv) drawStarRow(ctx, x, y + 9, lv.id, { count: false });
     }
     draw(ctx) {
       const f = this.frame, nodes = this.nodes;
@@ -352,16 +456,17 @@
         const ok = this.canEnter(i + 1);
         dottedPath(ctx, this.paths[i], ok ? '#fff8e8' : 'rgba(20,30,50,0.45)', 6, ok ? (f >> 1) : 0);
       }
-      // 節點與標籤
+      // 節點與標籤（標籤加深色底板，比描邊乾淨，12px 中文才不會糊成一團）
       for (let i = 0; i < nodes.length; i++) {
         const [x, y] = nodes[i], ok = this.canEnter(i);
         this.drawNode(ctx, i, x, y);
         const label = 'W' + (i + 1), name = this.nameOf(i);
-        const lw = KB.textWidth(label), nw = TW(name, { size: 12 }), tw = lw + 4 + nw;
-        const sx = Math.max(3, Math.min(W - 3 - tw, Math.round(x - tw / 2)));
+        const lw = KB.textWidth(label), nw = TW(name, { size: UI.MS }), tw = lw + 4 + nw;
+        const sx = Math.max(8, Math.min(W - 8 - tw, Math.round(x - tw / 2)));
         const col = ok ? '#fff' : '#b0b8c8';
-        KB.text(ctx, label, sx, y - 27, { color: ok ? C.yellow : col, outline: C.dark });
-        T(ctx, name, sx + lw + 4, y - 30, { color: col, size: 12, outline: C.dark });
+        KB.rect(ctx, sx - 2, y - 33, tw + 4, 18, 'rgba(8,14,28,0.7)');
+        KB.text(ctx, label, sx, y - 28, { color: ok ? C.yellow : col });
+        T(ctx, name, sx + lw + 4, y - 32, { color: col, size: UI.MS });
       }
       // 卡比
       const [kx, ky] = this.kirbyPos();
@@ -372,21 +477,23 @@
       drawKirby(ctx, 'ui_map_kirby', Math.round(kx + bx), Math.round(ky + 3 - hop), { t: this.t, flip: this.facing < 0 });
       // 上方：標題 / 生命 / 分數
       KB.text(ctx, 'STAGE SELECT', 8, 5, { color: '#fff', outline: C.dark, spacing: 1 });
-      T(ctx, '選擇關卡', 8, 15, { color: C.yellow, size: 12, outline: C.dark });
+      KB.rect(ctx, 6, 14, TW('選擇關卡', { size: UI.MS }) + 4, 17, 'rgba(8,14,28,0.6)'); T(ctx, '選擇關卡', 8, 15, { color: C.yellow, size: UI.MS });
       const ses = KB.session || { lives: KB.START_LIVES, score: 0 };
       sprAt(ctx, pick('ui_kirby_face', 'uifb_face'), 216, 3, 'tl');
       KB.text(ctx, 'x' + Math.max(0, ses.lives | 0), 250, 7, { color: '#fff', align: 'right', outline: C.dark });
       KB.text(ctx, 'SCORE ' + pad7(ses.score), 250, 22, { color: '#fff', align: 'right', outline: C.dark });
-      // 下方資訊面板
-      panel(ctx, 8, 174, 240, 44);
-      const i = this.cur, ok = this.canEnter(i);
-      KB.text(ctx, 'W' + (i + 1), 16, 183, { color: C.yellow });
-      T(ctx, this.nameOf(i), 38, 178, { color: '#fff', size: 16, outline: C.navy });
-      if (!this.exists(i)) T(ctx, '製作中…', 240, 181, { color: C.grey, align: 'right', size: 12 });
-      else if (!ok) { sprAt(ctx, pick('ui_lock', 'uifb_lock'), 194, 183, 'tl'); T(ctx, '未解鎖', 240, 181, { color: C.grey, align: 'right', size: 12 }); }
-      else if (this.cleared(i)) { sprAt(ctx, 'uifb_star', 196, 187, 'c'); KB.text(ctx, 'CLEAR', 240, 183, { color: C.yellow, align: 'right' }); }
-      else T(ctx, '出發！', 240, 181, { color: C.cyan, align: 'right', size: 12 });
-      T(ctx, '←→ 移動　Z 進入　SELECT 回標題', 128, 200, { color: C.grey, align: 'center', size: 12 });
+      // 下方資訊面板：第 1 列 關卡名 / 第 2 列 收集星 + 狀態 / 第 3 列 操作提示
+      panel(ctx, 8, 158, 240, 60);
+      const i = this.cur, ok = this.canEnter(i), lv = this.level(i);
+      KB.text(ctx, 'W' + (i + 1), 16, 167, { color: C.yellow });
+      T(ctx, this.nameOf(i), 38, 162, { color: '#fff', size: 16 });
+      if (!this.exists(i)) T(ctx, '製作中…', 240, 164, { color: C.grey, align: 'right', size: UI.MS });
+      else if (!ok) { sprAt(ctx, pick('ui_lock', 'uifb_lock'), 188, 166, 'tl'); T(ctx, '未解鎖', 240, 164, { color: C.grey, align: 'right', size: UI.MS }); }
+      else if (this.cleared(i)) { sprAt(ctx, 'uifb_flag', 196, 164, 'tl'); KB.text(ctx, 'CLEAR', 240, 167, { color: C.yellow, align: 'right' }); }
+      else T(ctx, '出發！', 240, 164, { color: C.cyan, align: 'right', size: UI.MS });
+      // 第 2 列：收集星（本關）
+      if (lv) { T(ctx, '收集星', 16, 182, { color: '#c8d8f0', size: UI.MS }); drawStarRow(ctx, 64, 186, lv.id, { plate: false, left: true }); }
+      fit(ctx, '←→ 移動　Z 進入　SELECT 回標題', 128, 198, 234, { color: C.grey, align: 'center', size: UI.MS });
       drawMuteToast(ctx); drawFade(ctx, this);
     }
   }
@@ -422,6 +529,8 @@
     // 中：血量
     const maxHp = p ? p.maxHp : KB.MAX_HP, hp = p ? Math.max(0, p.hp) : 0;
     const hurting = p && p.state !== 'dead' && p.invuln > KB.PHYS.invulnFrames - 30;
+    // 低血量警示：HP ≤ 1 時每 90 幀一聲（audio agent 提供 sfx('lowhp')）
+    if (p && p.state !== 'dead' && hp > 0 && hp <= 1 && f % 90 === 0) sfx('lowhp');
     for (let i = 0; i < maxHp; i++) {
       let full = i < hp; const o = {};
       if (hurting && i === hp && ((f >> 2) & 1)) { full = true; o.tint = '#fff'; }
@@ -471,7 +580,7 @@
     for (let i = 0; i < opts.length; i++) {
       const y = 84 + i * 17, sel = game.pauseSel === i;
       if (sel) cursor(ctx, 90, y + 2, game.frame || 0);
-      T(ctx, opts[i], 104, y, { color: sel ? C.yellow : '#fff', size: 12, outline: C.navy });
+      T(ctx, opts[i], 104, y, { color: sel ? C.yellow : '#fff', size: UI.MS });
     }
     T(ctx, '↑↓ 選擇　Z 確認', 128, 121, { color: C.grey, align: 'center', size: 12 });
   };
@@ -514,9 +623,9 @@
       for (let i = 0; i < 2; i++) {
         const y = 154 + i * 18, sel = this.sel === i;
         if (sel) cursor(ctx, 92, y + 2, f);
-        T(ctx, opts[i], 106, y, { color: sel ? C.yellow : '#fff', size: 12, outline: '#202030' });
+        T(ctx, opts[i], 106, y, { color: sel ? C.yellow : '#fff', size: UI.MS });
       }
-      T(ctx, '回到地圖：生命與分數重置', 128, 196, { color: '#687090', align: 'center', size: 12 });
+      fit(ctx, '回到地圖：生命與分數重置', 128, 195, 244, { color: '#8890a8', align: 'center', size: UI.MS });
       drawMuteToast(ctx); drawFade(ctx, this);
     }
   }
@@ -530,10 +639,10 @@
       this.t = 0; this.frame = 0; this.fade = 1; this.leaving = null;
       this.lines = [
         { s: '和平回到了普普星！', size: 16, color: C.yellow, y: 12 },
-        { s: '感謝遊玩', size: 12, color: '#fff', y: 38 },
-        { s: '本作為同人致敬作品', size: 12, color: '#c8d8f0', y: 56 },
-        { s: '所有美術與音樂皆為原創', size: 12, color: '#c8d8f0', y: 70 },
-        { s: 'FINAL SCORE ' + pad7(this.score), size: 8, color: '#fff', y: 90 },
+        { s: '感謝遊玩', size: 16, color: '#fff', y: 38 },
+        { s: '本作為同人致敬作品', size: 14, color: '#c8d8f0', y: 60 },
+        { s: '所有美術與音樂皆為原創', size: 14, color: '#c8d8f0', y: 76 },
+        { s: 'FINAL SCORE ' + pad7(this.score), size: 8, color: '#fff', y: 96 },
       ];
       this.gapUnits = 8; this.reveal = 0;
       this.total = this.lines.reduce((a, l) => a + l.s.length + this.gapUnits, 0);

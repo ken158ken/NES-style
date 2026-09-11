@@ -39,12 +39,23 @@ fill(72, 10, 79, 11, '.')
 fill(86, 6, 86, 9, '#')
 MAP = [''.join(r) for r in grid]
 ROOM2 = ['.' * 32] * 10 + ['#' * 32] * 2
+# 房間 2：高塔（20×24，地面 row 22-23，每 3 列一片單向平台）→ 測垂直死區鏡頭
+TW, TH = 20, 24
+tall = [['.'] * TW for _ in range(TH)]
+for x in range(TW):
+    tall[22][x] = '#'; tall[23][x] = '#'
+for ty in range(19, 4, -3):
+    for x in range(6, 13): tall[ty][x] = '='
+ROOM3 = [''.join(r) for r in tall]
 TEST_LEVEL = "KB.LEVELS.push(" + json.dumps({
     'id': 'test', 'name': 'ENGINE TEST', 'theme': 'green', 'music': None, 'boss': None,
     'rooms': [
         {'map': MAP, 'spawn': [2, 9], 'entities': [], 'doors': [{'x': DOOR_X, 'y': 9, 'to': {'room': 1, 'x': 2, 'y': 9}}]},
         {'map': ROOM2, 'spawn': [2, 9], 'entities': [], 'noBoss': True},
+        {'map': ROOM3, 'spawn': [2, 21], 'entities': [], 'noBoss': True},
     ]}, ensure_ascii=False) + ");"
+
+KB_LOOK_IDLE = 12   # 與 const.js KB.CAM.lookIdle 一致
 
 results = []
 def check(name, cond, info=''):
@@ -241,6 +252,249 @@ def main():
         press('right', 40); release(1)
         q = pl(); check('enemy contact hurts', q['hp'] == 5 and q['state'] in ('hurt', 'idle', 'fall'), (q['hp'], q['state']))
         step(30); check('invuln prevents second hit', pl()['hp'] == 5, pl()['hp'])
+
+        # ================= player-feel（手感）=================
+        def jsv(expr): return pg.evaluate("()=>(" + expr + ")")
+        def parts(): return pg.evaluate("()=>KB.game.parts.length")
+
+        # 17. coyote time：走出平台邊緣 3 幀內按跳仍可起跳
+        goto(10, 7); step(3)          # 站在 row8 單向平台（腳 y=128）
+        pg.evaluate("(o)=>__kb.press(o)", {'right': True})
+        air = -1
+        for i in range(60):
+            step(1)
+            if not pl()['onGround']: air = i; break
+        release(1)
+        step(2)                        # 離地第 3 幀
+        coy = jsv('KB.player.coyoteT')
+        tap('jump', 1); step(1)
+        q = pl()
+        check('coyote time: 離地 3 幀仍可起跳', q['state'] == 'jump' and q['vy'] < 0, (air, coy, q['state'], q['vy']))
+
+        # 18. 超過 coyote 視窗（8 幀）→ 變成漂浮
+        goto(10, 7); step(3)
+        pg.evaluate("(o)=>__kb.press(o)", {'right': True})
+        for i in range(60):
+            step(1)
+            if not pl()['onGround']: break
+        release(1); step(7)
+        check('coyote 逾時 → 改為漂浮', jsv('KB.player.coyoteT') == 0, jsv('KB.player.coyoteT'))
+        tap('jump', 1); step(1)
+        check('離地過久按跳＝漂浮', pl()['state'] == 'float', pl()['state'])
+        release(2)
+
+        # 19. jump buffer：落地前 4 幀按跳 → 著地瞬間自動起跳（而不是漂浮）
+        goto(2, 9); step(3)
+        tap('jump', 1)
+        nfall = 0
+        for i in range(120):
+            step(1); nfall += 1
+            if pl()['onGround']: break
+        goto(2, 9); step(3)          # 同樣的跳躍，在落地前 4 幀按跳
+        tap('jump', 1)
+        step(max(1, nfall - 5))
+        tap('jump', 1)
+        states = []
+        for i in range(8): step(1); q = pl(); states.append((q['state'], q['vy']))
+        jumped = any(s == 'jump' and v < 0 for s, v in states)
+        check('jump buffer: 落地前 4 幀按跳 → 著地瞬間起跳',
+              jumped and not any(s == 'float' for s, v in states), (nfall, states))
+        release(1); step(60)
+
+        # 20. 落地擠壓 + 揚塵
+        goto(2, 9); step(5)
+        pg.evaluate("()=>{KB.game.parts.length=0}")
+        press('jump', 12); release(1)
+        landed = False
+        for i in range(60):
+            step(1)
+            if pl()['onGround'] and pl()['state'] == 'idle': landed = True; break
+        check('落地擠壓 landT>0', landed and jsv('KB.player.landT') > 0, (landed, jsv('KB.player.landT')))
+        check('落地揚塵 3~4 顆', 3 <= parts() <= 6, parts())
+        shot('land_squash')
+
+        # 21. 起跑 / 急轉身揚塵
+        goto(2, 9); step(10)
+        pg.evaluate("()=>{KB.game.parts.length=0}")
+        press('right', 3)
+        check('起跑揚塵', parts() >= 2, parts())
+        press('right', 40)
+        pg.evaluate("()=>{KB.game.parts.length=0}")
+        press('left', 3)
+        check('急轉身煞車揚塵', parts() >= 3, parts())
+        release(2)
+
+        # 22. 吸入：嘴前粒子、敵人被吸抖動、吸到東西 hit-stop 2 幀
+        goto(4, 9); step(2); spawn_enemy('waddledee', 9, 9)
+        pg.evaluate("()=>{KB.game.parts.length=0}")
+        pg.evaluate("(o)=>__kb.press(o)", {'attack': True})
+        step(6)
+        check('吸入粒子（嘴前方）', parts() >= 2, parts())
+        # 等敵人走進吸力範圍，觀察抖動（連續幀位移不是平滑的等差）
+        xs = []
+        being = False
+        for i in range(120):
+            step(1)
+            e = pg.evaluate("()=>{const e=KB.game.entities.find(x=>x.type==='enemy');return e?{b:!!e.beingInhaled,x:e.x}:null}")
+            if e and e['b']:
+                being = True; xs.append(e['x'])
+                if len(xs) >= 6: break
+        d = [round(xs[i + 1] - xs[i], 3) for i in range(len(xs) - 1)] if len(xs) > 2 else []
+        check('敵人被吸中會抖動（beingInhaled + 位移抖動）',
+              being and len(d) >= 3 and (max(d) - min(d)) > 0.5, (being, d))
+        maxfz = 0
+        for i in range(80):
+            step(1); maxfz = max(maxfz, jsv('KB.game.freezeT'))
+            if pl()['mouth']: break
+        release(1)
+        check('吸到東西 hit-stop 2 幀', maxfz == 2 and pl()['mouth'] is not None, (maxfz, pl()['mouth']))
+        step(6)
+
+        # 23. 漂浮：拍動粒子、吐氣後 8 幀不可再漂
+        goto(2, 9); step(3)
+        press('jump', 4); release(1); tap('jump', 1); step(2)
+        check('進入漂浮', pl()['state'] == 'float', pl()['state'])
+        pg.evaluate("()=>{KB.game.parts.length=0}")
+        tap('jump', 1); step(1)
+        check('每次拍動吐出空氣粒子', 1 <= parts() <= 3, parts())
+        for i in range(20): tap('jump', 1); step(4)      # 飛高一點，留足夠落下空間
+        tap('attack', 1); step(1)
+        check('攻擊鍵吐氣', pl()['state'] == 'exhale', pl()['state'])
+        step(15)                                          # exhale 狀態（14 幀）結束 → 上鎖 8 幀
+        lock = jsv('KB.player.exhaleLockT')
+        check('吐氣後 exhaleLock 生效（8 幀）', lock >= 7, lock)
+        tap('jump', 1); step(1)
+        check('吐氣後 8 幀內按跳不會漂浮', pl()['state'] != 'float', pl()['state'])
+        step(8); air = not pl()['onGround']; tap('jump', 1); step(1)
+        check('鎖定結束後可再漂浮', air and pl()['state'] == 'float', (air, pl()['state'], pl()['y']))
+        release(1); step(180)
+
+        # 24. 漂浮中 ↓+攻擊 不吐氣（只有攻擊鍵才吐氣）
+        goto(2, 9); step(3)
+        press('jump', 4); release(1); tap('jump', 1); step(2)
+        check('漂浮中(2)', pl()['state'] == 'float', pl()['state'])
+        press('down,attack', 2)
+        check('↓+攻擊 不吐氣', pl()['state'] == 'float', pl()['state'])
+        release(1); tap('attack', 1); step(1)
+        check('單獨攻擊鍵才吐氣', pl()['state'] == 'exhale', pl()['state'])
+        release(1); step(120)
+
+        # 25. 滑鏟：按跳取消成跳躍（保留 70% 水平速度）
+        goto(4, 9); step(3)
+        press('right', 30)
+        press('down', 2); press('down,jump', 1); press('down', 2)
+        check('滑鏟中(2)', pl()['state'] == 'slide', pl()['state'])
+        vx0 = pl()['vx']
+        press('down', 1)
+        pg.evaluate("()=>__kb.press({down:true,jump:true})"); step(1)
+        q = pl()
+        check('滑鏟跳取消', q['state'] == 'jump' and q['vy'] < 0, (q['state'], q['vy']))
+        check('取消後保留 ~70% 水平速度', abs(q['vx'] - vx0 * 0.7) < 0.35, (vx0, q['vx']))
+        release(1); step(60)
+
+        # 26. 滑鏟撞牆：立即停止並小幅回彈
+        goto(83, 9); step(3)
+        press('right', 20)
+        press('down', 2); press('down,jump', 1); release(1)
+        bounced = None
+        for i in range(40):
+            step(1); q = pl()
+            if q['vx'] < -0.1: bounced = q; break
+        check('滑鏟撞牆回彈 0.8px/frame', bounced is not None and abs(abs(bounced['vx']) - 0.8) < 0.05, bounced and bounced['vx'])
+        step(1)
+        check('回彈期間仍為 slide（3 幀後結束）', jsv('KB.player.slideBounceT') >= 0, jsv('KB.player.slideBounceT'))
+        step(6)
+        check('回彈結束回到 idle/crouch', pl()['state'] in ('idle', 'crouch'), pl()['state'])
+
+        # 27. 受傷：hit-stop 3 幀 + 震動 4 + 閃白
+        goto(4, 9); step(2); spawn_enemy('waddledee', 7, 9)
+        hp0 = pl()['hp']; maxfz = 0; maxshake = 0; flash = 0
+        pg.evaluate("(o)=>__kb.press(o)", {'right': True})
+        for i in range(60):
+            step(1)
+            maxfz = max(maxfz, jsv('KB.game.freezeT')); maxshake = max(maxshake, jsv('KB.game.shake'))
+            flash = max(flash, jsv('KB.player.hurtFlashT'))
+            if pl()['hp'] < hp0 and maxfz: break
+        release(1)
+        check('受傷 hit-stop 3 幀', maxfz == 3, maxfz)
+        # shake 在設定的同一幀末就會 -1，所以外部觀察值為 hurtShake-1
+        hs = pg.evaluate("()=>KB.PHYS.hurtShake")
+        check('受傷畫面震動（KB.game.shake = %d）' % hs, maxshake >= hs - 1, (maxshake, hs))
+        check('受傷閃白（tint 一幀）', flash > 0, flash)
+        shot('hurt')
+
+        # 28. 單向平台下穿：↓+跳 穿下去（不是滑鏟）
+        goto(10, 7); step(4)
+        q0 = pl()
+        check('站在單向平台上', q0['onGround'] and abs(q0['y'] - (128 - 15)) < 1, q0['y'])
+        press('down', 3)
+        pg.evaluate("()=>__kb.press({down:true,jump:true})"); step(1)
+        st1 = pl()['state']
+        release(1); step(50)
+        q = pl()
+        check('平台上 ↓+跳 ＝下穿（非滑鏟）', st1 != 'slide' and q['onGround'] and abs(q['y'] - GROUND_Y) < 1, (st1, q['y']))
+        shot('dropthrough')
+        # 實心地面 ↓+跳 仍為滑鏟
+        goto(4, 9); step(3)
+        press('down', 3); press('down,jump', 1); press('down', 1)
+        check('實心地面 ↓+跳 ＝滑鏟', pl()['state'] == 'slide', pl()['state'])
+        release(1); step(30)
+
+        # 29. 鏡頭：前瞻量依速度（靜止 12 / 跑步 40）
+        goto(2, 9); step(3)
+        pg.evaluate("()=>{for(let i=0;i<200;i++)KB.game.updateCamera();}")
+        look_idle = jsv('KB.game.lookAhead')
+        check('鏡頭前瞻：靜止 ~12px', abs(look_idle - KB_LOOK_IDLE) < 1.5, look_idle)
+        tap('right', 2); step(3); press('right', 60)
+        pg.evaluate("()=>{for(let i=0;i<300;i++)KB.game.updateCamera();}")
+        look_run = jsv('KB.game.lookAhead')
+        check('鏡頭前瞻：跑步 ~40px', look_run > 34, look_run)
+        check('鏡頭前瞻平滑（無跳動）', jsv('Math.abs(KB.game.cam.x-(KB.player.cx-128+KB.game.lookAhead))') < 1.5)
+        release(2)
+
+        # 30. 鏡頭：垂直死區（畫面 40%~70%）—— 在高塔房（24 列）中央測試，避開地圖上下夾限
+        goto(2, 21, room=2); step(5)
+        pg.evaluate("""()=>{const g=KB.game;KB.player.y=185;g.cam.y=200-192*0.62;for(let i=0;i<200;i++)g.updateCamera();}""")
+        base = pg.evaluate("()=>[KB.game.cam.y, KB.player.bottom-KB.game.cam.y]")
+        check('死區中央：鏡頭穩定', 0.40 * 192 <= base[1] <= 0.70 * 192, base)
+        moved = pg.evaluate("""()=>{const g=KB.game;const y0=g.cam.y;KB.player.y-=30;for(let i=0;i<150;i++)g.updateCamera();return [y0,g.cam.y,KB.player.bottom-g.cam.y]}""")
+        check('垂直死區內鏡頭不動', abs(moved[1] - moved[0]) < 0.5, moved)
+        out = pg.evaluate("""()=>{const g=KB.game;const y0=g.cam.y;KB.player.y-=45;for(let i=0;i<250;i++)g.updateCamera();return [y0,g.cam.y,KB.player.bottom-g.cam.y]}""")
+        check('超出死區上緣（<40%）鏡頭跟隨', out[1] < out[0] - 5 and abs(out[2] - 0.40 * 192) < 2, out)
+        down = pg.evaluate("""()=>{const g=KB.game;const y0=g.cam.y;KB.player.y+=150;for(let i=0;i<300;i++)g.updateCamera();return [y0,g.cam.y,KB.player.bottom-g.cam.y]}""")
+        check('超出死區下緣（>70%）鏡頭跟隨', down[1] > down[0] + 5 and abs(down[2] - 0.70 * 192) < 2, down)
+
+        # 31. 鏡頭：魔王房同框
+        goto(2, 9); step(3)
+        near = pg.evaluate("""()=>{const g=KB.game,p=KB.player;g.isBossRoom=true;
+          g.boss={dead:false,cx:p.cx+150,bottom:p.bottom,x:p.cx+130,y:p.bottom-40,w:40,h:40};
+          for(let i=0;i<300;i++)g.updateCamera();
+          return {cam:g.cam.x, pl:p.cx-g.cam.x, bo:g.boss.cx-g.cam.x}}""")
+        check('魔王房：距離近 → 兩者同框', 0 < near['pl'] < 256 and 0 < near['bo'] < 256, near)
+        far = pg.evaluate("""()=>{const g=KB.game,p=KB.player;g.isBossRoom=true;
+          g.boss={dead:false,cx:p.cx+340,bottom:p.bottom,x:p.cx+320,y:p.bottom-40,w:40,h:40};
+          for(let i=0;i<300;i++)g.updateCamera();
+          return {cam:g.cam.x, pl:p.cx-g.cam.x, margin:KB.CAM.bossMargin}}""")
+        check('魔王房：距離超過畫面寬 → 玩家仍在畫面內且鏡頭偏向魔王',
+              abs(far['pl'] - far['margin']) < 1.0, far)
+        pg.evaluate("()=>{KB.game.boss=null;KB.game.isBossRoom=false;}")
+
+        # 32. 輸入：BINDINGS / rebind / keyNames
+        b1 = pg.evaluate("()=>KB.input.BINDINGS.jump")
+        check('input.BINDINGS 存在', isinstance(b1, list) and 'KeyZ' in b1, b1)
+        names = pg.evaluate("()=>KB.input.keyNames('jump')")
+        check('input.keyNames 可讀', isinstance(names, list) and '空白鍵' in names, names)
+        ok = pg.evaluate("()=>KB.input.rebind('jump',['KeyB'])")
+        check('input.rebind 成功', ok is True and pg.evaluate("()=>KB.input.BINDINGS.jump")[0] == 'KeyB')
+        check('rebind 後 keyNames 更新', pg.evaluate("()=>KB.input.keyNames('jump')") == ['B'])
+        check('rebind 未知動作回傳 false', pg.evaluate("()=>KB.input.rebind('nope',['KeyB'])") is False)
+        pg.evaluate("()=>KB.input.resetBindings()")
+        check('resetBindings 還原', pg.evaluate("()=>KB.input.BINDINGS.jump").count('KeyZ') == 1)
+        check('手把死區 0.35', abs(pg.evaluate("()=>KB.input.deadzone") - 0.35) < 1e-6)
+        gp = pg.evaluate("()=>KB.input.GAMEPAD")
+        check('手把 D-pad + X/Y/B 對應', gp['left'] == [14] and gp['jump'] == [0, 1] and gp['attack'] == [2, 3], gp)
+        check('HELP 格式不變（[鍵, 說明] 字串對）',
+              pg.evaluate("()=>KB.input.HELP.every(r=>Array.isArray(r)&&r.length===2&&typeof r[0]==='string'&&typeof r[1]==='string')") is True)
 
         b.close()
     print('---')

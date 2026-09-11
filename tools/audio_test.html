@@ -14,6 +14,8 @@
   #status { font-family: monospace; font-size: 12px; color: #9f9; margin: 8px 0; white-space: pre; }
   .hint { color: #aaa; font-size: 12px; }
   #render { margin-top: 6px; font-family: monospace; font-size: 12px; color: #ccc; white-space: pre; }
+  label.vol { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; background: #2a2a44; border-radius: 6px; padding: 4px 10px; }
+  label.vol output { font-family: monospace; color: #9f9; width: 32px; text-align: right; }
 </style>
 </head>
 <body>
@@ -24,7 +26,12 @@
 <div class="row">
   <button id="mute">靜音 (M)</button>
   <button onclick="KB.audio.music(null)">停止音樂</button>
+  <button id="duck">暫停閃避 duck(on)</button>
   <button id="renderAll">離線渲染全部（檢查峰值）</button>
+</div>
+<div class="row" style="margin-top:6px">
+  <label class="vol">音樂 <input id="vmusic" type="range" min="0" max="1" step="0.05"><output id="omusic"></output></label>
+  <label class="vol">音效 <input id="vsfx" type="range" min="0" max="1" step="0.05"><output id="osfx"></output></label>
 </div>
 <h2>音效 sfx(name)</h2>
 <div class="row" id="sfx"></div>
@@ -49,10 +56,19 @@
     $('music').appendChild(b);
   }
   $('mute').onclick = () => { KB.audio.unlock(); KB.audio.toggleMute(); };
+  let ducked = false;
+  $('duck').onclick = () => { KB.audio.unlock(); ducked = !ducked; KB.audio.duck(ducked); };
+  const v0 = KB.audio.getVolume();
+  $('vmusic').value = v0.music; $('vsfx').value = v0.sfx;
+  $('vmusic').oninput = () => KB.audio.setVolume({ music: +$('vmusic').value });
+  $('vsfx').oninput = () => { KB.audio.setVolume({ sfx: +$('vsfx').value }); KB.audio.unlock(); KB.audio.sfx('menu'); };
   setInterval(() => {
     const st = KB.audio.status();
     $('status').textContent = JSON.stringify(st);
     $('mute').classList.toggle('on', st.muted);
+    $('duck').classList.toggle('on', !!st.ducked);
+    $('omusic').textContent = st.volume.music.toFixed(2);
+    $('osfx').textContent = st.volume.sfx.toFixed(2);
     for (const b of $('music').children) b.classList.toggle('on', b.dataset.key === st.playing);
   }, 200);
 

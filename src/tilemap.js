@@ -240,6 +240,32 @@
       }
       return false;
     },
+    // 往下 dist px 內是否有可落腳的表面（jump buffer 用）；表面必須在腳底或更下方
+    groundWithin(map, e, dist) {
+      const bottom = e.y + e.h, cx = e.x + e.w / 2, y1 = bottom + dist;
+      for (let ty = Math.floor(bottom / T); ty <= Math.floor(y1 / T); ty++) {
+        const s = map.slopeSurface(cx, ty);
+        if (s !== null && s >= bottom - 1 && s <= y1) return true;
+        if (ty * T < bottom - 1) continue;   // 磁磚表面在腳上方 → 不算
+        for (const fx of [e.x + 1, e.x + e.w - 2]) {
+          const tx = Math.floor(fx / T), ch = map.get(tx, ty);
+          if (SOLID[ch] || ch === '=' || (ch === 'H' && map.get(tx, ty - 1) !== 'H')) return true;
+        }
+      }
+      return false;
+    },
+    // 腳下是否只踩在單向平台 / 梯子頂端（可穿下去），實心磚 / 斜坡則回傳 false
+    onPlatformOnly(map, e) {
+      const bottom = e.y + e.h, cx = e.x + e.w / 2;
+      if (map.slopeSurface(cx, Math.floor(bottom / T)) !== null) return false;
+      let plat = false;
+      for (const fx of [e.x + 1, e.x + e.w - 2]) {
+        const tx = Math.floor(fx / T), ty = Math.floor(bottom / T), ch = map.get(tx, ty);
+        if (SOLID[ch] || SLOPE[ch]) return false;
+        if (ch === '=' || (ch === 'H' && map.get(tx, ty - 1) !== 'H')) plat = true;
+      }
+      return plat;
+    },
     // 前方是否有懸崖（用於敵人 AI）
     edgeAhead(map, e) {
       const px = e.dir > 0 ? e.x + e.w + 2 : e.x - 2, py = e.y + e.h + 2;

@@ -16,7 +16,33 @@ window.KB = window.KB || {};
     climb: 1.0,
     accel: 0.18, friction: 0.22, airAccel: 0.12,
     knockback: 2.0, hurtFrames: 24, invulnFrames: 90,
+    // ---- 手感輔助（不影響上方速度 / 重力數值）----
+    coyote: 5,            // 離地後仍可起跳的幀數
+    jumpBuffer: 6,        // 落地前按跳的暫存幀數
+    landFrames: 8,        // 落地擠壓 / 揚塵的持續幀數
+    landSquash: 0.32,     // 落地擠壓最大比例
+    exhaleLock: 8,        // 吐氣後不可再漂浮的幀數
+    slideCancelKeep: 0.7, // 滑鏟跳取消保留的水平速度比例
+    slideBounce: 0.8,     // 滑鏟撞牆回彈速度（px/frame）
+    slideBounceFrames: 3, // 回彈幀數
+    dropFrames: 7,        // 單向平台下穿的穿透幀數
+    dropVy: 1.0,          // 下穿初速
+    hurtFreeze: 3,        // 受傷 hit-stop
+    hurtShake: 4,         // 受傷震動
+    inhaleFreeze: 2,      // 吸到東西 hit-stop
   };
+  // 鏡頭手感（game.js updateCamera）
+  KB.CAM = {
+    lookIdle: 12,       // 靜止時的前瞻量（px）
+    lookRun: 40,        // 全速跑時的前瞻量（px）
+    lookLerp: 0.05,     // 前瞻量平滑係數（避免轉向時跳動）
+    follow: 0.12,       // 鏡頭跟隨係數
+    deadTop: 0.40,      // 垂直死區上緣（畫面高度比例）
+    deadBottom: 0.70,   // 垂直死區下緣
+    restY: 0.62,        // 重置 / 切房時玩家所在的畫面高度比例
+    bossMargin: 28,     // 魔王房：玩家距畫面邊緣至少保留的 px
+  };
+
   KB.GRAV = KB.PHYS.grav;
   KB.MAXFALL = KB.PHYS.maxFall;
   KB.MAX_HP = 6;

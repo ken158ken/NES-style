@@ -7,13 +7,18 @@
 // - 所有旋律皆為本專案原創
 // - 所有對外呼叫皆 try/catch：無 AudioContext / headless / 尚未 unlock 一律靜默不拋錯；?mute=1 靜音；M 鍵切換靜音
 //
-// 介面：KB.audio.sfx(name) / music(key|null) / unlock() / setMute(bool) / toggleMute()
+// 介面：KB.audio.sfx(name) / music(key|null) / unlock() / setMute(bool) / toggleMute() / status()
+//       KB.audio.setVolume({music, sfx}) / getVolume() → {music, sfx, muted}（0~1，存 KB.save.settings.audio）
+//       KB.audio.duck(on)   暫停時把音樂平滑降到 30%（ui-menu 於暫停 / 恢復呼叫）
 //       KB.audio.SFX_NAMES / MUSIC_NAMES / SONGS / compileSong / noteFreq / renderSong / renderSfx（離線渲染，供測試工具）
 (function () {
   const W = (typeof window !== 'undefined') ? window : {};
   const AC = W.AudioContext || W.webkitAudioContext || null;
   const OAC = W.OfflineAudioContext || W.webkitOfflineAudioContext || null;
-  const VOL = { master: 0.5, sfx: 1.0, music: 0.6 };   // 主音量 0.5；音樂比音效小
+  const VOL = { master: 0.5, sfx: 1.0, music: 0.6 };   // 混音基準：主音量 0.5；音樂比音效小
+  const UVOL = { music: 1, sfx: 1 };                    // 使用者音量 0~1（乘在基準上），存檔於 KB.save.settings.audio
+  const DUCK_PAUSE = 0.3, DUCK_TMP = 0.35;              // 暫停 / 短暫閃避時的音樂倍率
+  const SAVE_KEY = 'kirbystar_save';
   const THROTTLE_MS = 80;                               // 同一音效 80ms 內不重複
   const LOOKAHEAD = 0.1, TICK_MS = 25;                  // 預排參數
   const nowMs = () => (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
@@ -62,14 +67,75 @@
     master = ctx.createGain(); master.gain.value = muted ? 0 : VOL.master;
     try { comp = ctx.createDynamicsCompressor(); comp.threshold.value = -10; comp.ratio.value = 6; comp.attack.value = 0.003; comp.release.value = 0.15; master.connect(comp); comp.connect(ctx.destination); }
     catch (e) { master.connect(ctx.destination); }
-    sfxBus = ctx.createGain(); sfxBus.gain.value = VOL.sfx; sfxBus.connect(master);
-    musicBus = ctx.createGain(); musicBus.gain.value = VOL.music; musicBus.connect(master);
+    sfxBus = ctx.createGain(); sfxBus.gain.value = VOL.sfx * UVOL.sfx; sfxBus.connect(master);
+    musicBus = ctx.createGain(); musicBus.gain.value = VOL.music * UVOL.music * duckFactor(); musicBus.connect(master);
     if (ctx.addEventListener) ctx.addEventListener('statechange', () => { try { if (ctx.state === 'running') { unlocked = true; startPending(); } } catch (e) { } });
   }
   function setWave(o, w) {
     if (w === 'p25' && res && res.p25) { o.setPeriodicWave(res.p25); return; }
     if (w === 'p12' && res && res.p12) { o.setPeriodicWave(res.p12); return; }
     o.type = (w === 'tri') ? 'triangle' : (w === 'saw') ? 'sawtooth' : (w === 'sine') ? 'sine' : 'square';
+  }
+
+  // ======================================================================
+  // 音量 / 閃避（duck）
+  // ======================================================================
+  // 音樂倍率：暫停中 30%；短暫閃避（能力取得 jingle）35%；兩者同時取較低
+  let duckHold = false, duckTmp = false, duckTimer = null;
+  function duckFactor() { return duckHold ? DUCK_PAUSE : (duckTmp ? DUCK_TMP : 1); }
+  const clamp01 = (v) => v < 0 ? 0 : v > 1 ? 1 : v;
+  function applyVolume(fast) {
+    try {
+      if (!ctx) return;
+      const t = ctx.currentTime, tc = fast ? 0.008 : 0.04;
+      if (sfxBus) sfxBus.gain.setTargetAtTime(VOL.sfx * UVOL.sfx, t, 0.008);
+      if (musicBus) musicBus.gain.setTargetAtTime(VOL.music * UVOL.music * duckFactor(), t, tc);
+    } catch (e) { }
+  }
+  // 短暫閃避音樂 sec 秒（重複呼叫會延長）
+  function duckFor(sec) {
+    try {
+      duckTmp = true;
+      if (duckTimer) clearTimeout(duckTimer);
+      duckTimer = setTimeout(() => { duckTimer = null; duckTmp = false; applyVolume(); }, Math.max(0, sec) * 1000);
+      applyVolume();
+    } catch (e) { }
+  }
+
+  // ---- 音量存檔（KB.save.settings.audio = {music, sfx}）----
+  let volFromSave = false;
+  function readSavedAudio() {
+    try {
+      if (KB.save && KB.save.settings && KB.save.settings.audio) { volFromSave = true; return KB.save.settings.audio; }
+      const ls = W.localStorage; if (!ls) return null;
+      const raw = ls.getItem(SAVE_KEY); if (!raw) return null;
+      const o = JSON.parse(raw);
+      return (o && o.settings && o.settings.audio) || null;
+    } catch (e) { return null; }
+  }
+  function loadVolume() {
+    try {
+      const a = readSavedAudio(); if (!a) return;
+      if (typeof a.music === 'number' && isFinite(a.music)) UVOL.music = clamp01(a.music);
+      if (typeof a.sfx === 'number' && isFinite(a.sfx)) UVOL.sfx = clamp01(a.sfx);
+      applyVolume(true);
+    } catch (e) { }
+  }
+  function saveVolume() {
+    try {
+      const data = { music: UVOL.music, sfx: UVOL.sfx };
+      if (KB.save) {
+        KB.save.settings = KB.save.settings || {};
+        KB.save.settings.audio = data;
+        volFromSave = true;
+        if (typeof KB.saveGame === 'function') KB.saveGame();
+        return;
+      }
+      const ls = W.localStorage; if (!ls) return;          // KB.save 尚未建立（audio.js 早於 game.js 載入）
+      let o = {}; try { o = JSON.parse(ls.getItem(SAVE_KEY) || '{}') || {}; } catch (e) { o = {}; }
+      o.settings = o.settings || {}; o.settings.audio = data;
+      ls.setItem(SAVE_KEY, JSON.stringify(o));
+    } catch (e) { }
   }
 
   // ======================================================================
@@ -181,10 +247,13 @@
     block(b, t) { noise(b, t, 0.18, 0.32, { type: 'lowpass', f0: 2000, f1: 150 }); tone(b, 'sq', 140, t, 0.12, 0.2, { to: 55 }); },
     item(b, t) { tone(b, 'p25', F('C6'), t, 0.06, 0.2); tone(b, 'p25', F('G6'), t + 0.06, 0.12, 0.2); },
     '1up'(b, t) { tone(b, 'p25', F('A5'), t, 0.1, 0.22); tone(b, 'p25', F('E6'), t + 0.1, 0.32, 0.22); },
+    // 能力取得：3 音短 jingle（C5→G5→E6），sfx('ability') 會自動 duck 音樂 0.4 秒
     ability(b, t) {
-      ['C5', 'E5', 'G5', 'C6', 'E6', 'G6'].forEach((n, i) => tone(b, 'p25', F(n), t + i * 0.055, 0.07, 0.22));
-      tone(b, 'p25', F('C7'), t + 0.33, 0.35, 0.22, { vib: { rate: 7, depth: 0.01, delay: 0.1 } });
-      noise(b, t, 0.5, 0.07, { type: 'highpass', f0: 6000, f1: 9000 });
+      tone(b, 'p25', F('C5'), t, 0.09, 0.22);
+      tone(b, 'p25', F('G5'), t + 0.09, 0.09, 0.22);
+      tone(b, 'p25', F('E6'), t + 0.18, 0.3, 0.22, { vib: { rate: 7, depth: 0.012, delay: 0.08 } });
+      tone(b, 'p12', F('C6'), t + 0.18, 0.3, 0.1);
+      noise(b, t, 0.28, 0.06, { type: 'highpass', f0: 6000, f1: 9000 });
     },
     door(b, t) { tone(b, 'sq', 720, t, 0.32, 0.2, { to: 110, vib: { rate: 28, depth: 0.12 } }); noise(b, t, 0.3, 0.12, { type: 'lowpass', f0: 250, f1: 2500 }); },
     boss_hurt(b, t) { tone(b, 'saw', 280, t, 0.3, 0.25, { to: 70, vib: { rate: 20, depth: 0.1 } }); noise(b, t, 0.28, 0.28, { type: 'lowpass', f0: 2200, f1: 200 }); },
@@ -227,6 +296,55 @@
       noise(b, t + 0.28, 0.4, 0.06, { type: 'highpass', f0: 7000, decay: 0.1 });
     },
     pause(b, t) { tone(b, 'sq', 880, t, 0.07, 0.2); tone(b, 'sq', 660, t + 0.08, 0.12, 0.2); },
+    // 解除暫停：與 pause 音高相反（低→高）
+    unpause(b, t) { tone(b, 'sq', 660, t, 0.07, 0.2); tone(b, 'sq', 880, t + 0.08, 0.12, 0.2); },
+    // 低血量警示：短促雙音（HUD 每 90 幀呼叫一次）
+    lowhp(b, t) {
+      tone(b, 'p12', F('E6'), t, 0.07, 0.15, { to: F('D#6') });
+      tone(b, 'p12', F('B5'), t + 0.11, 0.09, 0.15);
+    },
+    // 1UP：0.6 秒小旋律
+    oneup(b, t) {
+      ['E5', 'G5', 'C6', 'E6'].forEach((n, i) => tone(b, 'p25', F(n), t + i * 0.1, 0.11, 0.2));
+      tone(b, 'p25', F('G6'), t + 0.4, 0.2, 0.22, { vib: { rate: 8, depth: 0.012, delay: 0.05 } });
+      tone(b, 'p12', F('C6'), t + 0.4, 0.2, 0.1);
+      noise(b, t, 0.6, 0.05, { type: 'highpass', f0: 7000, f1: 10000, decay: 0.2 });
+    },
+    // 大星星：5 音上行琶音 + 閃光噪音
+    bigstar(b, t) {
+      ['C5', 'E5', 'G5', 'C6', 'E6'].forEach((n, i) =>
+        tone(b, 'p25', F(n), t + i * 0.07, i === 4 ? 0.4 : 0.09, 0.2, i === 4 ? { vib: { rate: 7, depth: 0.012, delay: 0.1 } } : null));
+      tone(b, 'p12', F('G6'), t + 0.28, 0.4, 0.09);
+      noise(b, t, 0.6, 0.06, { type: 'highpass', f0: 7000, f1: 11000, decay: 0.15 });
+    },
+    // 蓄力中：短促上升音（可連續呼叫）
+    charge(b, t) {
+      tone(b, 'p12', 180, t, 0.26, 0.13, { to: 900 });
+      noise(b, t, 0.26, 0.07, { type: 'bandpass', f0: 400, f1: 2600, q: 1.2 });
+    },
+    // 蓄力完成：叮
+    charge_ready(b, t) {
+      tone(b, 'p25', F('B6'), t, 0.2, 0.17);
+      tone(b, 'p25', F('E6'), t, 0.24, 0.11);
+      noise(b, t, 0.24, 0.07, { type: 'highpass', f0: 8000, decay: 0.06 });
+    },
+    // 門 / 機關解鎖：機械聲 + 上行兩音
+    unlock(b, t) {
+      noise(b, t, 0.09, 0.3, { type: 'lowpass', f0: 1200, f1: 300 });
+      tone(b, 'sq', 150, t, 0.1, 0.25, { to: 90 });
+      tone(b, 'p25', F('G5'), t + 0.15, 0.1, 0.2);
+      tone(b, 'p25', F('C6'), t + 0.25, 0.28, 0.2, { vib: { rate: 7, depth: 0.01, delay: 0.1 } });
+    },
+    // 魔王二階段登場：低頻重擊 + 失諧上行嘶吼
+    phase2(b, t) {
+      tone(b, 'tri', 90, t, 0.5, 0.5, { to: 38, slideT: 0.3 });
+      noise(b, t, 0.5, 0.35, { type: 'lowpass', f0: 2200, f1: 150 });
+      tone(b, 'saw', 110, t + 0.05, 0.7, 0.15, { to: 220, slideT: 0.6, vib: { rate: 9, depth: 0.05, delay: 0.1 } });
+      tone(b, 'saw', 116, t + 0.05, 0.7, 0.11, { to: 233, slideT: 0.6 });
+      noise(b, t + 0.45, 0.5, 0.16, { type: 'highpass', f0: 3000, f1: 7000, decay: 0.2 });
+    },
+    // 選單返回 / 取消：下行兩音
+    menu_back(b, t) { tone(b, 'sq', 660, t, 0.05, 0.18); tone(b, 'sq', 440, t + 0.06, 0.12, 0.18); },
   };
 
   // ======================================================================
@@ -695,6 +813,129 @@
     };
   }
 
+  // ---- 變奏工具：移調（鼓軌不動），由既有曲目衍生第二階段 / 變奏曲 ----
+  const SHARP = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+  function shiftTok(tok, semis) {
+    if (tok === '.' || tok === '-') return tok;
+    const k = noteNum(tok); if (k === null) return tok;
+    const n = k + semis;
+    return SHARP[((n % 12) + 12) % 12] + (Math.floor(n / 12) - 1);
+  }
+  const shiftBar = (bar, semis) => bar.trim().split(/\s+/).map(t => shiftTok(t, semis)).join(' ');
+  // p1 / p2（預設連 bass）整體移調；bpm 可變；bass / drum 可整段替換（陣列長度需與原段落相同）
+  function variation(srcKey, o) {
+    const s = SONGS[srcKey];
+    const out = { bpm: o.bpm || s.bpm, loop: true, order: (s.order || Object.keys(s.sec)).slice(), sec: {} };
+    if (s.inst) out.inst = s.inst;
+    if (o.vol || s.vol) out.vol = o.vol || s.vol;
+    if (o.gain || s.gain) out.gain = o.gain || s.gain;
+    for (const name of Object.keys(s.sec)) {
+      const sec = s.sec[name];
+      out.sec[name] = {
+        p1: sec.p1.map(b => shiftBar(b, o.semis)),
+        p2: sec.p2.map(b => shiftBar(b, o.semis)),
+        bass: (o.bass && o.bass[name]) || sec.bass.map(b => shiftBar(b, o.semis)),
+        drum: (o.drum && o.drum[name]) || sec.drum.slice(),
+      };
+    }
+    return out;
+  }
+  const dr8 = (r, x) => `${r} - ${r} - ${x} - ${r} - ${r} - ${r} - ${x} - ${r} -`;   // 八分音符驅動貝斯
+  D.tight = 'k . h k s . h h k k h . s . s h';      // 短促密集鼓
+  D.tightF = 'k h s h k h s s k h s s s s s s';     // 短促鼓 fill
+
+  // ---- boss2：boss 的第二階段變奏（BPM +12、升 2 半音 E 小調→F# 小調、低音 8 分音符、短促鼓）----
+  SONGS.boss2 = variation('boss', {
+    bpm: 184, semis: 2, vol: { p1: 0.19, p2: 0.11, bass: 0.34 },
+    bass: {
+      A: [dr8('F#2', 'F#3'), dr8('F#2', 'C#3'), dr8('D2', 'A2'), dr8('C#2', 'G#2'),
+        dr8('F#2', 'F#3'), dr8('F#2', 'C#3'), dr8('D2', 'A2'), dr8('C#2', 'G#2')],
+      B: [dr8('B2', 'F#3'), dr8('F#2', 'C#3'), dr8('D2', 'A2'), dr8('C#2', 'G#2'),
+        dr8('B2', 'F#3'), dr8('F#2', 'C#3'), dr8('D2', 'A2'), dr8('C#2', 'G#2')],
+    },
+    drum: {
+      A: [D.tight, D.tight, D.tight, D.tightF, D.tight, D.tight, D.tight, D.tightF],
+      B: [D.tight, D.tight, D.tight, D.tightF, D.tight, D.tight, D.tight, D.tightF],
+    },
+  });
+
+  // ---- finalboss2：finalboss 的第二階段變奏（BPM +12、升 2 半音 D 小調→E 小調、雙倍鼓）----
+  SONGS.finalboss2 = variation('finalboss', {
+    bpm: 196, semis: 2, gain: 0.95,
+    drum: {
+      A: [D.dblH, D.dblH, D.dblH, D.tightF, D.dblH, D.dblH, D.dblH, D.tightF],
+      B: [D.dblH, D.dblH, D.dblH, D.tightF, D.dblH, D.dblH, D.dblH, D.tightF],
+    },
+  });
+
+  // ---- secret：秘密房，A 小調 8 小節神祕短循環（A/B 各 4 小節，order 走兩輪）----
+  SONGS.secret = {
+    bpm: 100, loop: true, gain: 0.85, order: ['A', 'B', 'A', 'B'],
+    inst: { p1: 'p12', p2: 'sine' }, vol: { p1: 0.16, p2: 0.1, bass: 0.24 },
+    sec: {
+      A: {
+        p1: ['A5 - - - . . C6 - B5 - - - - - - -',
+          'E5 - - - . . G#5 - A5 - - - - - - -',
+          'D6 - - - C6 - B5 - A5 - - - G#5 - - -',
+          'A5 - - - - - - - . . . . . . . .'],
+        p2: [arpE('A4', 'C5', 'E5', 'C5'), arpE('E4', 'G#4', 'B4', 'G#4'),
+          arpE('F4', 'A4', 'D5', 'A4'), arpE('E4', 'G#4', 'B4', 'G#4')],
+        bass: [hold('A2'), hold('E2'), hold('F2'), hold('E2')],
+        drum: [D.hats, D.none, D.hats, D.sparse],
+      },
+      B: {
+        p1: ['F5 - - - A5 - - - C6 - - - - - - -',
+          'E5 - - - G5 - - - B5 - - - - - - -',
+          'C6 - B5 - A5 - G#5 - F5 - E5 - D5 - C5 -',
+          'B4 - - - - - - - E5 - - - . . . .'],
+        p2: [arpE('F4', 'A4', 'C5', 'A4'), arpE('E4', 'G4', 'B4', 'G4'),
+          arpE('A4', 'C5', 'E5', 'C5'), arpE('E4', 'G#4', 'B4', 'G#4')],
+        bass: [hold('F2'), hold('E2'), hold('A2'), hold('E2')],
+        drum: [D.hats, D.none, D.hats, D.sparse2],
+      },
+    },
+  };
+
+  // ---- miniboss：中魔王，A 小調 16 小節緊湊 loop ----
+  {
+    const A1 = 'A5 A5 - E5 - A5 - C6 - - B5 - A5 - - -';
+    const A2 = 'G5 G5 - D5 - G5 - B5 - - A5 - G5 - - -';
+    const B1 = 'E6 - - - C6 - E6 - A5 - - - C6 - E6 -';
+    const B2 = 'D6 - - - B5 - D6 - G5 - - - B5 - D6 -';
+    const END = 'A5 - - - E5 - - - A4 - - - . . . .';
+    SONGS.miniboss = {
+      bpm: 168, loop: true, order: ['A', 'B'], inst: { p1: 'sq' }, vol: { p1: 0.19, p2: 0.11, bass: 0.3 },
+      sec: {
+        A: {
+          p1: [A1, A2,
+            'F5 - A5 - C6 - A5 - E5 - G5 - B5 - G5 -',
+            'E5 - - - . . G#5 - B5 - - - E5 - . .',
+            A1, A2,
+            'F5 - - - E5 - D5 - C6 - - - B5 - A5 -',
+            END],
+          p2: [stab('C5', 'E5'), stab('B4', 'D5'), stab('A4', 'C5'), stab('G#4', 'B4'),
+            stab('C5', 'E5'), stab('B4', 'D5'), stab('A4', 'C5'), stab('G#4', 'B4')],
+          bass: [dr8('A2', 'A3'), dr8('G2', 'G3'), dr8('F2', 'C3'), dr8('E2', 'B2'),
+            dr8('A2', 'A3'), dr8('G2', 'G3'), dr8('F2', 'C3'), dr8('E2', 'B2')],
+          drum: [D.boss, D.boss, D.boss, D.bossF, D.boss, D.boss, D.boss, D.bossF],
+        },
+        B: {
+          p1: [B1, B2,
+            'C6 - E6 - A6 - - - G#6 - E6 - C6 - A5 -',
+            'B5 - - - E6 - - - B5 - G#5 - E5 - . .',
+            B1, B2,
+            'F6 - E6 - D6 - C6 - B5 - A5 - G#5 - B5 -',
+            END],
+          p2: [stab('C5', 'E5'), stab('B4', 'D5'), stab('C5', 'E5'), stab('G#4', 'B4'),
+            stab('C5', 'E5'), stab('B4', 'D5'), stab('A4', 'C5'), stab('G#4', 'B4')],
+          bass: [dr8('A2', 'E3'), dr8('G2', 'D3'), dr8('A2', 'E3'), dr8('E2', 'B2'),
+            dr8('A2', 'E3'), dr8('G2', 'D3'), dr8('F2', 'C3'), dr8('E2', 'B2')],
+          drum: [D.tight, D.tight, D.tight, D.tightF, D.tight, D.tight, D.tight, D.tightF],
+        },
+      },
+    };
+  }
+
   // ======================================================================
   // 音序器
   // ======================================================================
@@ -835,6 +1076,7 @@
     unlock() {
       try {
         if (!AC) return;
+        if (!volFromSave && KB.save) loadVolume();   // game.js 建立 KB.save 之後才讀得到存檔設定
         if (!ctx) createCtx();
         if (ctx.state === 'running') { unlocked = true; startPending(); return; }
         const p = ctx.resume && ctx.resume();
@@ -849,6 +1091,7 @@
         const n = nowMs();
         if (lastPlay[name] && n - lastPlay[name] < THROTTLE_MS) return;
         lastPlay[name] = n;
+        if (name === 'ability') duckFor(0.4);        // 能力取得 jingle：音樂短暫閃避
         fn(sfxBus, ctx.currentTime + 0.005);
       } catch (e) { }
     },
@@ -871,9 +1114,35 @@
       } catch (e) { }
     },
     toggleMute() { this.setMute(!muted); return muted; },
+    // 音樂 / 音效音量（0~1，任一可省略）。寫入 KB.save.settings.audio 並存檔。
+    setVolume(v) {
+      try {
+        v = v || {};
+        let changed = false;
+        if (typeof v.music === 'number' && isFinite(v.music)) { UVOL.music = clamp01(v.music); changed = true; }
+        if (typeof v.sfx === 'number' && isFinite(v.sfx)) { UVOL.sfx = clamp01(v.sfx); changed = true; }
+        if (changed) { applyVolume(true); saveVolume(); }
+      } catch (e) { }
+      return this.getVolume();
+    },
+    getVolume() { return { music: UVOL.music, sfx: UVOL.sfx, muted }; },
+    // 暫停時呼叫 duck(true) 讓音樂平滑降到 30%，恢復時 duck(false)
+    duck(on) {
+      try { duckHold = (on === undefined) ? true : !!on; applyVolume(); } catch (e) { }
+      return duckHold;
+    },
     // 目前播放狀態（除錯 / 測試頁）
-    status() { return { unlocked, muted, ctxState: ctx ? ctx.state : null, playing: cur ? cur.key : null, step: cur ? cur.step : 0, bars: cur ? cur.len / STEPS : 0, pending: pendingMusic }; },
+    status() {
+      return {
+        unlocked, muted, ctxState: ctx ? ctx.state : null, playing: cur ? cur.key : null,
+        step: cur ? cur.step : 0, bars: cur ? cur.len / STEPS : 0, pending: pendingMusic,
+        volume: { music: UVOL.music, sfx: UVOL.sfx }, ducked: duckHold,
+        sfxCount: Object.keys(SFX).length, musicCount: Object.keys(SONGS).length,
+      };
+    },
   };
+
+  loadVolume();   // 啟動時先由 localStorage 讀回音量（KB.save 由 game.js 稍後建立，unlock() 會再讀一次）
 
   // M 鍵切換靜音；分頁隱藏時暫停 AudioContext（避免背景堆積排程），顯示時恢復
   try {

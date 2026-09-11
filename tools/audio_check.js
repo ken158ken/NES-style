@@ -24,15 +24,37 @@ const ok = (m) => console.log('  ok   ' + m);
 
 // ---------- 介面 ----------
 console.log('[介面]');
-for (const k of ['sfx', 'music', 'unlock', 'setMute', 'toggleMute']) (typeof A[k] === 'function') ? ok(k + '()') : fail(k + '() 缺少');
+for (const k of ['sfx', 'music', 'unlock', 'setMute', 'toggleMute', 'setVolume', 'getVolume', 'duck', 'status']) (typeof A[k] === 'function') ? ok(k + '()') : fail(k + '() 缺少');
 // 無 AudioContext 環境下呼叫不得拋錯
 try { A.unlock(); A.sfx('jump'); A.sfx('nope'); A.music('green'); A.music('green'); A.music(null); A.music('zzz'); A.setMute(true); A.toggleMute(); ok('無 AudioContext 時全部呼叫不拋錯'); }
 catch (e) { fail('無 AudioContext 時拋錯: ' + e); }
+// 全部音效 / 音樂逐一呼叫（含 duck / 音量）不得拋錯
+try {
+  for (const n of A.SFX_NAMES) A.sfx(n);
+  for (const k of A.MUSIC_NAMES) A.music(k);
+  A.music(null); A.duck(true); A.duck(false); A.setMute(false);
+  ok('逐一呼叫全部 sfx / music / duck 不拋錯');
+} catch (e) { fail('逐一呼叫拋錯: ' + e); }
+// 音量 API：0~1 夾限、回傳格式、任一參數可省略
+try {
+  const v0 = A.getVolume();
+  if (typeof v0.music !== 'number' || typeof v0.sfx !== 'number' || typeof v0.muted !== 'boolean') fail('getVolume() 應回傳 {music, sfx, muted}');
+  A.setVolume({ music: 0.4 }); if (A.getVolume().music !== 0.4 || A.getVolume().sfx !== v0.sfx) fail('setVolume({music}) 未正確套用 / 影響了 sfx');
+  A.setVolume({ sfx: 0.25 }); if (A.getVolume().sfx !== 0.25) fail('setVolume({sfx}) 未正確套用');
+  A.setVolume({ music: 5, sfx: -3 }); const c = A.getVolume(); if (c.music !== 1 || c.sfx !== 0) fail('setVolume 未夾限到 0~1');
+  A.setVolume({}); A.setVolume(); A.setVolume({ music: 'x' });
+  A.setVolume({ music: v0.music, sfx: v0.sfx });
+  ok('setVolume / getVolume（夾限、可省略、存檔）');
+} catch (e) { fail('音量 API 拋錯: ' + e); }
 
 // ---------- 名稱比對 ----------
 console.log('[音效 / 音樂名稱]');
-const SPEC_SFX = ['jump', 'inhale', 'spit', 'swallow', 'hurt', 'die', 'enemyhit', 'enemydie', 'block', 'item', '1up', 'ability', 'door', 'boss_hurt', 'boss_die', 'menu', 'select', 'float', 'exhale', 'sword', 'fire', 'beam', 'cutter', 'spark', 'ice', 'hammer', 'stone', 'land', 'slide', 'clear', 'pause'];
-const SPEC_MUSIC = ['title', 'select', 'green', 'castle', 'island', 'cloud', 'dedede', 'boss', 'finalboss', 'invincible', 'clear', 'gameover', 'ending'];
+const SPEC_SFX = ['jump', 'inhale', 'spit', 'swallow', 'hurt', 'die', 'enemyhit', 'enemydie', 'block', 'item', '1up', 'ability', 'door', 'boss_hurt', 'boss_die', 'menu', 'select', 'float', 'exhale', 'sword', 'fire', 'beam', 'cutter', 'spark', 'ice', 'hammer', 'stone', 'land', 'slide', 'clear', 'pause',
+  // Round 1 追加（提供給其他 agent）
+  'unpause', 'lowhp', 'oneup', 'bigstar', 'charge', 'charge_ready', 'unlock', 'phase2', 'menu_back'];
+const SPEC_MUSIC = ['title', 'select', 'green', 'castle', 'island', 'cloud', 'dedede', 'boss', 'finalboss', 'invincible', 'clear', 'gameover', 'ending',
+  // Round 1 追加
+  'boss2', 'finalboss2', 'secret', 'miniboss'];
 const usedSfx = new Set(), usedMusic = new Set();
 for (const f of fs.readdirSync(path.join(ROOT, 'src')).filter(f => f.endsWith('.js') && f !== 'audio.js')) {
   const src = fs.readFileSync(path.join(ROOT, 'src', f), 'utf8');
@@ -47,7 +69,8 @@ for (const n of new Set([...SPEC_SFX, ...usedSfx])) A.SFX_NAMES.includes(n) ? nu
 for (const n of new Set([...SPEC_MUSIC, ...usedMusic])) A.MUSIC_NAMES.includes(n) ? null : fail('music 未實作: ' + n);
 ok(`sfx 實作 ${A.SFX_NAMES.length} 種，程式引用 ${usedSfx.size} 種，SPEC ${SPEC_SFX.length} 種`);
 ok(`music 實作 ${A.MUSIC_NAMES.length} 首，程式引用 ${usedMusic.size} 個 key，SPEC ${SPEC_MUSIC.length} 首`);
-console.log('  sfx: ' + A.SFX_NAMES.join(', '));
+console.log('  sfx  : ' + A.SFX_NAMES.join(', '));
+console.log('  music: ' + A.MUSIC_NAMES.join(', '));
 
 // ---------- 曲目檢查 ----------
 console.log('[曲目]');
