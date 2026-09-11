@@ -1621,3 +1621,17 @@ git 已初始化，基線 commit `c382e2a`。Playwright venv：`.venv/bin/python
 - 機器人跑 `mech`(11960) / `time`(25935) 還是偏慢（招式演出長、常被打掉能力再去撿），雖然都在 30000 幀內通關，
   但 time 的餘裕只有約 4000 幀；若之後 w4 / w5 要跑 time，建議 `--maxframes` 開到 45000。
 - **沒有跑 `tools/build.py`**（沿用 levels5 的作法，等總控收尾統一重建 `dist/`）。未 commit。
+- [02:20] 完成：**20 能力 × 93 招逐招驗收**（`shots/agent_qa5/grid_<key>.png` 20 張總表全部用 Read 逐格看過）＝ **OK 87 / 有問題 6**。
+  93 項全部「收招後 240 幀 `VFX.list`＝0、hitbox 消失、state 回 idle/fall」，**沒有殘留效果也沒有卡死**；洋紅像素偵測器（每張 PNG 數 `#ff00ff`）一次都沒觸發。
+  Round 5 三個已知 bug 全部驗證**已修**：clone 墊腳（空中連按 6 次 X，y 無上升）、time 加速（全速跑 150 幀 x 最遠 278＜房寬 1024）、forms `kirby_attack_*`（giant/dragon/ghost 全程 missing []）。
+  **最大新發現：10 個蓄力必殺的「按住 N 幀」標示全部偏低**（鐵鎚 40→實測 70、居合/機甲 50→70、光束/電擊 45→50、法師/重力/分身/龍化/槍手 60→66），門檻表 `shots/agent_qa5/charge.json`。
+- [02:40] 完成：**變身演出**（sword/gunner/mage/giant/ghost × 10 連拍 × 2 情境）＋ **UI 驗收**（圖鑑 3 頁 × 全解鎖/剪影、競技場 3 頁、暫停卡 giant/mage/hammer、HUD 4 字名、選關能力 n/20、設定特效強度 high/mid/low 實測粒子 20/14/8）。
+  變身橫幅與「WORLD n」開場橫幅**逐列掃描確認沒有像素重疊**（WORLD y 25~78、變身 y 104~129），但會同時出現「黑邊＋兩條橫幅」→ 列 P2 不是 P1（證據 `tfb_giant.png`、`z_banner_overlap2.png`）。
+- [02:55] 完成：**關卡實戰**（25 個房間全掃）：12 種新敵人 40 隻、22 個能力台座（含 w5r4 武器庫 4 座）**位置與 levels5 表 100% 一致**；吸入測試 5/5 給對能力。
+  **全套測試**：engine 118/118、enemy 393/393、boss ALL PASS、weapons 94/94、magic 102/102、forms 139/139、audio_check 全過、level_check 0 error/1 warning。
+  **playthrough**：5 世界 sword --godmode 全 cleared deaths=0；12 種新能力 w1 **11/12 通關**，唯一失敗 **time**（30000 幀卡在 r0 x≈1340，現場 25 顆 abilitystar）。
+  **效能**：三個必殺連續觸發後 300 幀＝**120.6 ms（0.40 ms/幀，單幀最大 14.3 ms）**，基準 86.5 ms；600 幀後 VFX 歸 0。
+- [03:10] 收工：`docs/QA_REPORT.md` 追加 **Round 5 章節**（R5-0 摘要 / R5-1 招式表 93 列 / R5-1a 蓄力門檻表 / R5-2 變身演出 / R5-3 關卡實戰 / R5-4 UI / R5-5 測試 / R5-6 效能 / R5-7 問題清單 **P0×0・P1×4・P2×10** / R5-8 重現指令）。
+  P1 四項：**R5-P1-01 time 過不了 w1（magic）**、**R5-P1-02 幽靈 noclip 按住 ↓ 沉出地圖 → 死亡＋掉能力（forms）**、**R5-P1-03 蓄力門檻與招式表不符（weapons/forms/magic/abilities）**、**R5-P1-04 附身 <8 幀就解除且要貼到會吃傷害的距離（forms）**。
+  工具與數據都留在 `shots/agent_qa5/`：`mshot.py`／`grid.py`／`tshot.py`／`tgrid.py`／`eshot.py`／`probe1~7_*.py`、`moves.json`／`charge.json`／`levels.json`。
+  未做：非無敵（不加 --godmode）的新能力難度量測、w2~w5 的 12 能力 playthrough（只跑 w1）、競技場實戰。src/ 全程唯讀，未跑 build.py、未 commit。

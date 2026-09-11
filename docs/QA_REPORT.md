@@ -620,3 +620,352 @@ $PY $Q --scene ending --steps 60 --seq "5:220" --out shots/agent_qa3/f16_ending_
 # 放大切圖（確認 1~2px 的重疊）：zoom.py <in> <out> <遊戲座標cx> <cy> <半寬> <半高> <放大倍率>
 $PY shots/agent_qa3/zoom.py shots/agent_qa3/f05_select.png shots/agent_qa3/z_select_labels.png 100 115 60 30 4
 ```
+
+---
+
+# Round 5（qa5 agent）— 20 能力 × 變身特效全面驗收
+
+> 執行者：**qa5** agent　｜　執行時間：**2026-09-12 01:15 ~ 03:10**　｜　截圖目錄：`shots/agent_qa5/`
+> 自製工具（都在 `shots/agent_qa5/`）：
+> - `mshot.py`：**招式批次驗收**。每招開一個乾淨分頁 → `goto game(w1 r0, --ability)` → 開 hitbox → 在卡比前方 40px 生一隻 waddledee → 跑按鍵腳本 → **每 4 幀連拍 6 張**，每張同時記錄 `state / VFX.list 長度 / hitbox 數 / proj 數 / freezeT / 座標 / HP`，收招後再空跑 **240 幀**檢查殘留，最後印 `missing()` 與 pageerror；每張 PNG 另用 Pillow 數 `#ff00ff` 像素（洋紅方塊自動偵測）。
+> - `grid.py`：把每個能力的 6 幀 × 每招拼成一張總表（原尺寸 1:1，不縮放），**20 張總表全部用 Read 工具逐格看過**。
+> - `tshot.py` / `tgrid.py`：`KB.player.giveAbility(key)` 之後每 6 幀連拍 10 張（`--lead` 控制要不要和「WORLD n」開場橫幅同框）。
+> - `eshot.py`：跳到新敵人座標附近，觀察 120 幀行為 + 吸入 + 吞下，記錄能力是否正確。
+> 另外沿用 `shots/agent_qa3/qshot.py`（`--prejs/--js`）拍 UI。
+> **本輪 200 餘張截圖全部 `missing sprites: []`、0 pageerror、0 console error**（唯一的洋紅偵測器一次都沒觸發）。
+> ⚠️ 本輪與 **fix5** agent 平行進行：`abilities_magic.js` / `abilities_forms.js` / `art/kirby_forms.js` 在 01:29~01:30 被改過，
+> 所以 magic 4 種 + forms 4 種 + hammer / blade 的截圖與數據**全部在 fix5 改完之後重跑過一次**（`moves.json` 是重跑後的版本）。
+
+## R5-0. 執行摘要
+
+| 項目 | 結果 |
+|---|---|
+| 招式逐招驗收（20 能力 / **93 個測試**）| **OK 87 / 有問題 6**；動畫幀 0 洋紅、判定框位置合理、**93 項收招後 `VFX.list` 全部歸 0、hitbox 全部消失**（無殘留、無卡死）|
+| Round 5 三個已知 bug | **clone 墊腳無上限 ✅ 已修**（空中連按 6 次 X，y 完全沒上升）、**time 加速衝出地圖 ✅ 已修**（全速跑 150 幀 x 最遠 278 ＜ 房寬 1024）、**forms 缺 `kirby_attack_*` ✅ 已修**（giant/dragon/ghost 全程 `missing sprites: []`）|
+| 變身演出（5 代表能力 × 10 連拍 × 2 情境）| 放射光 / 剪影 / ring / 魔法陣 / 白閃 / 橫幅 / 黑邊 / zoom **全部有出現**；與「WORLD n」橫幅**沒有像素重疊**（實測 WORLD 佔 y 25~78、變身橫幅 y 104~129），但會**同時出現兩條橫幅 + 上下黑邊** → R5-P2-10 |
+| 關卡實戰 | 25 個房間全掃過：**12 種新敵人 40 隻、22 個能力台座（含 w5 r4 武器庫 4 座）全部在位**，座標與 levels5 表一致；吸入測試 5/5 給對能力（pistolo→gunner、archerwaddle→bow、bolt→mech、drako→dragon、wizzle→mage）|
+| 全套測試 | `engine_test 118/118`、`enemy_test 393/393`、`boss_test ALL PASS`、`test_weapons 94/94`、`test_magic 102/102`、`test_forms 139/139`、`audio_check 全部通過`、`level_check 0 error / 1 warning`、`node --check` 全通過 |
+| playthrough | **5 世界 sword --godmode 全部 cleared、deaths=0**（w1 4256 / w2 9781 / w3 6258 / w4 10221 / w5 11328 幀）；**12 種新能力 w1 → 11/12 通關**，唯一失敗是 **time**（30000 幀卡在 r0）→ R5-P1-01 |
+| 效能（3 個必殺連續觸發後 300 幀）| **120.6 ms / 300 幀＝ 0.40 ms 每幀**（單幀最大 14.3 ms），對照無特效基準 86.5 ms / 0.29 ms；單獨測 gunner 179.9ms、clone 159.5ms、mage 131.0ms，全部遠低於 16.7 ms/幀 預算；**跑完 600 幀後 `VFX.list` 歸 0** |
+| Round 5 新問題 | **P0 × 0、P1 × 4、P2 × 9** |
+
+**最值得注意的三句話**：
+1. **蓄力必殺的「按住 N 幀」標示全部偏低**：鐵鎚寫 40（實測 70 才出得來）、居合 / 機甲寫 50（實測 70）、光束 / 電擊寫 45（實測 50）、法師 / 重力 / 分身 / 龍化 / 槍手寫 60（實測 66）。玩家照著暫停卡按會以為招式壞掉 —— 這是本輪最影響手感的一項（R5-P1-03）。
+2. **幽靈的 noclip 會把人沉出地圖**：`--ability ghost` 開場就是 noclip，按住 ↓ 約 150 幀 → 沉到房間底 → noclip 到期 → 直接墜落死亡（lives 3→2、能力掉光）。普通操作就能觸發（R5-P1-02）。
+3. **time 是唯一過不了 w1 的能力**，而且現場堆了 **25 顆 `abilitystar`**（機器人反覆受傷掉能力 / 撿回來）——上一輪的「飛出地圖」已經修好，但卡關還在（R5-P1-01）。
+
+---
+
+## R5-1. 20 能力 × 每招驗收表
+
+> 測試環境一律：`w1 r0`、`--hitbox`、前方 40px 生一隻 waddledee、變身系（giant/dragon/mech/ghost）先跑 110 幀讓變身演出結束。
+> 「殘留」欄＝**收招後再空跑 240 幀**的 `VFX.list` 長度與 hitbox 數；全部 0＝沒有殘留效果、沒有卡在 attack 狀態。
+> 每一格的視覺（動畫幀、判定框位置、特效有沒有出現）都是打開 `grid_<key>.png` 用 Read 看過的。
+
+| 能力 | 招式（測試腳本 id）| 動畫/精靈 | 判定框 | 特效 | 收招 | 殘留 | 判定 |
+|---|---|---|---|---|---|---|---|
+| 火焰 fire | X 噴火（x）| 無洋紅 | hitbox 1 / proj 0 | vfx 4 | → idle | vfx 0 / hitbox 0 | OK |
+| 火焰 fire | ↓+X 火焰衝刺（dx）| 無洋紅 | hitbox 1 / proj 0 | vfx 3 | → idle | vfx 0 / hitbox 0 | OK |
+| 火焰 fire | 空中 X 火焰旋轉（air）| 無洋紅 | hitbox 1 / proj 0 | vfx 3 | → idle | vfx 0 / hitbox 0 | OK |
+| 劍 sword | X 揮砍（x）| 無洋紅 | hitbox 1 / proj 1 | vfx 4 | → idle | vfx 0 / hitbox 0 | OK |
+| 劍 sword | 空中 X 迴旋斬（air）| 無洋紅 | hitbox 1 / proj 0 | vfx 5 | → idle | vfx 0 / hitbox 0 | OK |
+| 劍 sword | ↑+X 上挑斬（ux）| 無洋紅 | hitbox 1 / proj 0 | vfx 1 | → idle | vfx 0 / hitbox 0 | OK |
+| 劍 sword | 滿血 X 劍氣（beamsw）| 無洋紅 | hitbox 1 / proj 0 | vfx 4 | → idle | vfx 0 / hitbox 0 | OK |
+| 光束 beam | X 甩光束（x）| 無洋紅 | hitbox 1 / proj 0 | vfx 1 | → idle | vfx 0 / hitbox 0 | OK |
+| 光束 beam | 按住 45 放開 星潮光束（charge）| 無洋紅 | hitbox 0 / proj 1 | vfx 8 | → idle | vfx 0 / hitbox 0 | OK |
+| 光束 beam | ↓+X 牽星光環（dx）| 無洋紅 | hitbox 0 / proj 0 | vfx 1 | → idle | vfx 0 / hitbox 0 | OK |
+| 刀刃 cutter | X 迴旋刃（x）| 無洋紅 | hitbox 0 / proj 1 | vfx 1 | → idle | vfx 0 / hitbox 0 | OK |
+| 刀刃 cutter | ↑+X 上拋刃（ux）| 無洋紅 | hitbox 0 / proj 1 | vfx 1 | → idle | vfx 0 / hitbox 0 | OK |
+| 刀刃 cutter | ↓+X 下劈（dx）| 無洋紅 | hitbox 1 / proj 0 | vfx 2 | → idle | vfx 0 / hitbox 0 | OK |
+| 刀刃 cutter | 空中 X 下劈（air）| 無洋紅 | hitbox 1 / proj 0 | vfx 2 | → idle | vfx 0 / hitbox 0 | OK |
+| 電擊 spark | X 放電（x）| 無洋紅 | hitbox 1 / proj 0 | vfx 4 | → idle | vfx 0 / hitbox 0 | OK |
+| 電擊 spark | 放電中 ←→ 帶電慢走（walk）| 無洋紅 | hitbox 1 / proj 0 | vfx 5 | → idle | vfx 0 / hitbox 0 | OK |
+| 電擊 spark | 蓄力 45 放開 電擊波（charge）| 無洋紅 | hitbox 1 / proj 0 | vfx 12 | → idle | vfx 0 / hitbox 0 | OK |
+| 石頭 stone | X 變石（x）| 無洋紅 | hitbox 1 / proj 0 | vfx 1 | → stone | vfx 0 / hitbox 1 | OK |
+| 石頭 stone | 落地衝擊（land）| 無洋紅 | hitbox 1 / proj 0 | vfx 1 | → stone | vfx 0 / hitbox 1 | OK（落地衝擊在拍攝視窗前結束，改由 `shots/agent_vfx/ab_stone_land.png` 佐證；石頭狀態 240 幀後仍是 stone＝正常，需再按 X） |
+| 石頭 stone | 再按 X 解除（off）| 無洋紅 | hitbox 0 / proj 0 | vfx 0 | → idle | vfx 0 / hitbox 0 | OK |
+| 冰凍 ice | X 噴冰（x）| 無洋紅 | hitbox 1 / proj 1 | vfx 5 | → idle | vfx 0 / hitbox 0 | OK |
+| 冰凍 ice | ↓+X 冰塊飛踢（dx）| 無洋紅 | hitbox 0 / proj 1 | vfx 0 | → idle | vfx 0 / hitbox 0 | OK |
+| 冰凍 ice | 空中 X 冰晶散射（air）| 無洋紅 | hitbox 0 / proj 5 | vfx 4 | → idle | vfx 0 / hitbox 0 | OK |
+| 鐵鎚 hammer | X 掄鎚（x）| 無洋紅 | hitbox 1 / proj 0 | vfx 2 | → idle | vfx 0 / hitbox 0 | OK |
+| 鐵鎚 hammer | 按住 40 放開 大迴旋（charge）| 無洋紅 | hitbox 0 / proj 0 | vfx 0 | → idle | vfx 0 / hitbox 0 | **問題**：按住 45 幀放開沒有任何反應（招式表寫「按住 40 幀」）→ R5-P1-03 |
+| 鐵鎚 hammer | 空中 X 落地震（air）| 無洋紅 | hitbox 2 / proj 0 | vfx 5 | → idle | vfx 0 / hitbox 0 | OK |
+| 鐵鎚 hammer | ↓+X 巨鎚敲擊（dx）| 無洋紅 | hitbox 1 / proj 0 | vfx 5 | → idle | vfx 0 / hitbox 0 | OK |
+| 鐵鎚 hammer | 按住 95 放開 大迴旋（charge2）| 無洋紅 | hitbox 1 / proj 0 | vfx 3 | → idle | vfx 0 / hitbox 0 | OK（按住 95 幀放開 → 大迴旋前進 60px、有判定框） |
+| 槍手 gunner | X 按住 雙槍連射（x）| 無洋紅 | hitbox 0 / proj 4 | vfx 4 | → idle | vfx 0 / hitbox 0 | OK |
+| 槍手 gunner | ↓+X 蓄力霰彈（dx）| 無洋紅 | hitbox 0 / proj 3 | vfx 7 | → idle | vfx 0 / hitbox 0 | OK |
+| 槍手 gunner | 空中 X 俯衝掃射（air）| 無洋紅 | hitbox 0 / proj 1 | vfx 4 | → idle | vfx 0 / hitbox 0 | OK |
+| 槍手 gunner | ↑+X 對空三連（ux）| 無洋紅 | hitbox 0 / proj 3 | vfx 2 | → idle | vfx 0 / hitbox 0 | OK |
+| 槍手 gunner | 蓄力放開 子彈時間（ult）| 無洋紅 | hitbox 0 / proj 11 | vfx 42 | → idle | vfx 0 / hitbox 0 | OK |
+| 忍者 ninja | X 手裡劍三連（x）| 無洋紅 | hitbox 0 / proj 2 | vfx 5 | → idle | vfx 0 / hitbox 0 | OK |
+| 忍者 ninja | ↓+X 替身瞬移（dx）| 無洋紅 | hitbox 1 / proj 0 | vfx 7 | → idle | vfx 0 / hitbox 0 | OK |
+| 忍者 ninja | 空中 X 飛踢（air）| 無洋紅 | hitbox 1 / proj 0 | vfx 5 | → idle | vfx 0 / hitbox 0 | OK |
+| 忍者 ninja | 貼牆＋跳 壁跳（wall）| 無洋紅 | hitbox 0 / proj 0 | vfx 0 | → idle | vfx 0 / hitbox 0 | **未重現**：w1 r0 沒有可貼的牆（見 R5-P2-12），壁跳由 `test_weapons` 覆蓋 |
+| 忍者 ninja | 蓄力放開 影分身斬（ult）| 無洋紅 | hitbox 0 / proj 0 | vfx 8 | → idle | vfx 0 / hitbox 0 | OK |
+| 居合 blade | X 三段連斬（x）| 無洋紅 | hitbox 1 / proj 0 | vfx 3 | → idle | vfx 0 / hitbox 0 | OK |
+| 居合 blade | 按住 X 居合架式（hold）| 無洋紅 | hitbox 0 / proj 0 | vfx 2 | → idle | vfx 0 / hitbox 0 | OK |
+| 居合 blade | 蓄力放開 居合一閃（ult）| 無洋紅 | hitbox 0 / proj 0 | vfx 1 | → idle | vfx 0 / hitbox 0 | **問題**：按住 56 幀放開沒有反應（招式表寫蓄滿 50 幀）→ R5-P1-03 |
+| 居合 blade | 空中 X 落下斬（air）| 無洋紅 | hitbox 2 / proj 0 | vfx 6 | → idle | vfx 0 / hitbox 0 | OK |
+| 居合 blade | ↑+X 上撩斬（ux）| 無洋紅 | hitbox 1 / proj 0 | vfx 1 | → idle | vfx 0 / hitbox 0 | OK |
+| 居合 blade | 按住 100 放開 居合一閃（ult2）| 無洋紅 | hitbox 1 / proj 0 | vfx 10 | → idle | vfx 0 / hitbox 0 | OK（按住 100 幀放開 → 居合一閃，vfx 10、判定框 1） |
+| 弓 bow | X 射箭（x）| 無洋紅 | hitbox 0 / proj 0 | vfx 1 | → idle | vfx 0 / hitbox 0 | OK |
+| 弓 bow | 蓄力 40 貫穿箭（c40）| 無洋紅 | hitbox 0 / proj 1 | vfx 7 | → idle | vfx 0 / hitbox 0 | OK |
+| 弓 bow | 蓄力 80 流星箭（c80）| 無洋紅 | hitbox 0 / proj 1 | vfx 12 | → idle | vfx 0 / hitbox 0 | OK |
+| 弓 bow | 空中 X 箭雨（air）| 無洋紅 | hitbox 0 / proj 5 | vfx 6 | → idle | vfx 0 / hitbox 0 | OK |
+| 弓 bow | ↓+X 陷阱箭（dx）| 無洋紅 | hitbox 0 / proj 0 | vfx 1 | → idle | vfx 0 / hitbox 0 | OK |
+| 元素法師 mage | X 火球（x）| 無洋紅 | hitbox 1 / proj 1 | vfx 5 | → idle | vfx 0 / hitbox 0 | OK |
+| 元素法師 mage | ↑+X 冰牆（ux）| 無洋紅 | hitbox 0 / proj 0 | vfx 0 | → idle | vfx 0 / hitbox 0 | OK |
+| 元素法師 mage | ↓+X 雷擊召喚（dx）| 無洋紅 | hitbox 1 / proj 0 | vfx 3 | → idle | vfx 0 / hitbox 0 | OK |
+| 元素法師 mage | 空中 X 風刃三連（air）| 無洋紅 | hitbox 0 / proj 3 | vfx 1 | → idle | vfx 0 / hitbox 0 | OK |
+| 元素法師 mage | 按住 60 放開 元素風暴（ult）| 無洋紅 | hitbox 1 / proj 0 | vfx 10 | → idle | vfx 0 / hitbox 0 | OK |
+| 時間 time | X 時間停止（x）| 無洋紅 | hitbox 0 / proj 0 | vfx 6 | → idle | vfx 0 / hitbox 0 | OK |
+| 時間 time | 時停中 X 近身連拳（punch）| 無洋紅 | hitbox 0 / proj 0 | vfx 3 | → idle | vfx 0 / hitbox 0 | OK |
+| 時間 time | ↓+X 慢動作（dx）| 無洋紅 | hitbox 0 / proj 0 | vfx 3 | → idle | vfx 0 / hitbox 0 | OK |
+| 時間 time | ↑+X 加速（ux）| 無洋紅 | hitbox 0 / proj 0 | vfx 4 | → idle | vfx 0 / hitbox 0 | OK |
+| 時間 time | 空中 X 回溯（air）| 無洋紅 | hitbox 0 / proj 0 | vfx 3 | → idle | vfx 0 / hitbox 0 | OK |
+| 時間 time | ↑+X 加速後全速右跑（R5 已知 bug）（haste2）| 無洋紅 | hitbox 0 / proj 0 | vfx 0 | → idle | vfx 0 / hitbox 0 | OK（加速後全速右跑 150 幀，x 最遠 278＜房寬 1024，**沒有衝出地圖**＝ Round 5 已知 bug 2 已修） |
+| 重力 gravity | X 黑洞（x）| 無洋紅 | hitbox 0 / proj 0 | vfx 3 | → idle | vfx 0 / hitbox 0 | OK |
+| 重力 gravity | ↓+X 反重力（dx）| 無洋紅 | hitbox 0 / proj 0 | vfx 3 | → idle | vfx 0 / hitbox 0 | OK |
+| 重力 gravity | 空中 X 隕石三連（air）| 無洋紅 | hitbox 1 / proj 3 | vfx 5 | → idle | vfx 0 / hitbox 0 | OK |
+| 重力 gravity | ↑+X 浮空（ux）| 無洋紅 | hitbox 0 / proj 0 | vfx 4 | → fall | vfx 0 / hitbox 0 | OK |
+| 重力 gravity | 按住 60 放開 奇點（ult）| 無洋紅 | hitbox 1 / proj 0 | vfx 8 | → idle | vfx 0 / hitbox 0 | OK |
+| 分身 clone | X 全員吐星（x）| 無洋紅 | hitbox 0 / proj 2 | vfx 1 | → idle | vfx 0 / hitbox 0 | OK |
+| 分身 clone | ↓+X 交換位置（dx）| 無洋紅 | hitbox 0 / proj 1 | vfx 3 | → idle | vfx 0 / hitbox 0 | OK |
+| 分身 clone | 空中 X 分身墊腳（air）| 無洋紅 | hitbox 0 / proj 0 | vfx 2 | → idle | vfx 0 / hitbox 0 | OK |
+| 分身 clone | 按住 60 放開 百裂分身（ult）| 無洋紅 | hitbox 1 / proj 0 | vfx 5 | → idle | vfx 0 / hitbox 0 | OK |
+| 分身 clone | 被動 分身自動射擊（passive）| 無洋紅 | hitbox 0 / proj 0 | vfx 0 | → idle | vfx 0 / hitbox 0 | OK |
+| 分身 clone | 空中連按 X 墊腳上限（R5 已知 bug）（airspam）| 無洋紅 | hitbox 0 / proj 3 | vfx 0 | → idle | vfx 0 / hitbox 0 | OK（空中連按 6 次 X，y 完全沒有上升＝ Round 5 已知 bug 1「墊腳無上限」已修） |
+| 巨大化 giant | X 巨腳踩踏（x）| 無洋紅 | hitbox 0 / proj 0 | vfx 3 | → idle | vfx 0 / hitbox 0 | OK（招式本身正常；本次被 waddledee 碰到 → 變身即刻解除，見 R5-P2-13） |
+| 巨大化 giant | ↓+X 巨人衝撞（dx）| 無洋紅 | hitbox 1 / proj 0 | vfx 1 | → idle | vfx 0 / hitbox 0 | OK |
+| 巨大化 giant | 空中 X 屁股墜落（air）| 無洋紅 | hitbox 2 / proj 0 | vfx 4 | → idle | vfx 0 / hitbox 0 | OK |
+| 巨大化 giant | ↑+X 大口吸（ux）| 無洋紅 | hitbox 0 / proj 0 | vfx 0 | → full | vfx 0 / hitbox 0 | OK |
+| 巨大化 giant | 限時 900 幀縮小（timer）| 無洋紅 | hitbox 0 / proj 0 | vfx 5 | → idle | vfx 0 / hitbox 0 | OK |
+| 龍化 dragon | 按住跳 飛行（fly）| 無洋紅 | hitbox 0 / proj 0 | vfx 0 | → idle | vfx 0 / hitbox 0 | OK |
+| 龍化 dragon | X 龍息（x）| 無洋紅 | hitbox 1 / proj 0 | vfx 0 | → idle | vfx 0 / hitbox 0 | OK |
+| 龍化 dragon | ↓+X 尾擊（dx）| 無洋紅 | hitbox 0 / proj 0 | vfx 0 | → idle | vfx 0 / hitbox 0 | OK |
+| 龍化 dragon | 空中 X 俯衝（air）| 無洋紅 | hitbox 2 / proj 0 | vfx 5 | → idle | vfx 0 / hitbox 0 | OK |
+| 龍化 dragon | X 蓄滿放開 龍炎彈（ult）| 無洋紅 | hitbox 0 / proj 1 | vfx 5 | → idle | vfx 0 / hitbox 0 | OK |
+| 機甲 mech | X 火箭拳（x）| 無洋紅 | hitbox 0 / proj 1 | vfx 3 | → idle | vfx 0 / hitbox 0 | OK |
+| 機甲 mech | ↑+X 追蹤飛彈（ux）| 無洋紅 | hitbox 1 / proj 2 | vfx 2 | → idle | vfx 0 / hitbox 0 | OK |
+| 機甲 mech | 空中 X 噴射墜踩（air）| 無洋紅 | hitbox 2 / proj 0 | vfx 3 | → idle | vfx 0 / hitbox 0 | OK |
+| 機甲 mech | 按住跳 噴射跳（jet）| 無洋紅 | hitbox 0 / proj 0 | vfx 0 | → idle | vfx 0 / hitbox 0 | OK |
+| 機甲 mech | X 蓄滿放開 全彈發射（ult）| 無洋紅 | hitbox 0 / proj 0 | vfx 0 | → idle | vfx 0 / hitbox 0 | **問題**：按住 56 幀放開沒有反應（招式表寫蓄滿 50 幀）→ R5-P1-03 |
+| 機甲 mech | 按住 100 放開 全彈發射（ult2）| 無洋紅 | hitbox 0 / proj 3 | vfx 3 | → idle | vfx 0 / hitbox 0 | OK（按住 100 幀放開 → 全彈發射，5 顆飛彈 + 黑邊） |
+| 幽靈 ghost | X 穿牆開關（x）| 無洋紅 | hitbox 0 / proj 0 | vfx 0 | → idle | vfx 0 / hitbox 0 | OK |
+| 幽靈 ghost | ↓+X 附身（dx）| 無洋紅 | hitbox 0 / proj 0 | vfx 1 | → idle | vfx 0 / hitbox 0 | **問題**：40px 外 → textPop「沒有目標」；貼近到 16px 可附身但 <8 幀就解除，且 noclip 沉出地圖 → R5-P1-02 / 04 |
+| 幽靈 ghost | 空中 X 幽靈哀嚎（air）| 無洋紅 | hitbox 0 / proj 0 | vfx 0 | → idle | vfx 0 / hitbox 0 | OK |
+| 幽靈 ghost | ↑+X 隱身（ux）| 無洋紅 | hitbox 1 / proj 0 | vfx 2 | → idle | vfx 0 / hitbox 0 | OK |
+| 幽靈 ghost | 穿牆中 ↑↓ 飄浮（float）| 無洋紅 | hitbox 0 / proj 0 | vfx 0 | → idle | vfx 0 / hitbox 0 | OK |
+| 幽靈 ghost | ↓+X 附身（單次觸發）（possess2）| 無洋紅 | hitbox 0 / proj 0 | vfx 0 | → idle | vfx 0 / hitbox 0 | **問題**：附身後角色沉到房間底部（y 183）→ R5-P1-02 |
+
+合計 93 項：OK 87 / 有問題 6
+
+### R5-1a. 蓄力門檻實測（`shots/agent_qa5/charge.json`）
+
+> 方法：`press attack N` → `release` → 之後 40 幀內取 `VFX.list / proj / hitbox / 位移` 的峰值，峰值明顯跳升＝必殺成立。
+
+| 能力 | 招式表寫的 | 40 | 45 | 50 | 56 | 60 | 66 | 70 | 80~100 | 實測最低成立 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| beam 星潮光束 | 按住 45 幀放開 | ✗ | ✗ | ✅ | – | ✅ | – | – | – | **50** |
+| spark 電擊波 | 按住 45 幀放開 | ✗ | ✗ | ✅ | – | ✅ | – | – | – | **50** |
+| hammer 大迴旋 | 按住 40 幀放開 | ✗ | ✗ | ✗ | – | ✗ | – | ✅ | ✅ | **70**（差 30 幀）|
+| blade 居合一閃 | 蓄滿 50 幀 | ✗ | – | ✗ | – | ✗ | – | ✅ | ✅ | **70**（差 20 幀）|
+| mech 全彈發射 | 蓄滿 50 幀 | ✗ | – | ✗ | ✗ | ✗ | – | ✅ | ✅ | **70**（差 20 幀）|
+| gunner 子彈時間 | 蓄力放開 | – | – | ✗ | – | ✗ | ✅ | ✅ | ✅ | **66** |
+| mage 元素風暴 | 按住 60 幀放開 | – | – | ✗ | – | ✗ | ✅ | ✅ | ✅ | **66** |
+| gravity 奇點 | 按住 60 幀放開 | – | – | ✗ | – | 部分 | ✅ | ✅ | ✅ | **66** |
+| clone 百裂分身 | 按住 60 幀放開 | – | – | ✗ | – | ✗ | ✅ | ✅ | ✅ | **66** |
+| dragon 龍炎彈 | 蓄滿 60 幀 | – | – | ✗ | – | ✗ | ✅ | ✅ | ✅ | **66** |
+| bow 流星箭 | 蓄力 80 | 貫穿箭 | – | 貫穿箭 | – | – | – | – | ✅(80) | **80 ✅符合** |
+| ninja 影分身斬 | 蓄力放開 | – | – | ✅ | – | ✅ | ✅ | ✅ | ✅ | **≤50 ✅** |
+
+---
+
+## R5-2. 變身演出（sword / gunner / mage / giant / ghost）
+
+截圖：`tf_<key>.png`（開場橫幅已消失，lead 150 幀）、`tfb_<key>.png`（**開場橫幅還在**，lead 8 幀），各 10 張／每 6 幀。
+
+| 檢查項 | 結果 |
+|---|---|
+| 放射光線（12 條）| ✅ `tf_sword_00/01`、`tf_giant_00/01` 都看得到以卡比為中心的白色放射線 |
+| 白色剪影閃 | ✅ 停格期間卡比被白色剪影蓋住（`tf_mage_00`）|
+| ring ×3 + burst + 魔法陣 | ✅ `tf_sword_02~04`（綠色 ring + 旋轉魔法陣）、`tf_mage_02~04`（紫色）|
+| 白閃 flash | ✅ `tf_*_01`（整個世界層變白）|
+| 名稱橫幅（中文 16px + 點陣英文）| ✅「劍 / SWORD」「槍手 / GUNNER」「元素法師 / MAGE」「巨大化 / GIANT」「幽靈 / GHOST」全部置中、不溢出、可讀 |
+| 上下黑邊 letterbox | ✅ 22px，`ENTER：暫停／說明` 提示畫在黑邊上仍可讀 |
+| zoom punch | ✅（`tf_giant_03` 世界層明顯被放大）|
+| 收尾 | ✅ 5 個能力 200 幀後 `VFX.list === 0`、`state` 回 idle、`form` 正確保留（giant/ghost 仍是變身中）|
+| 停格 | 只有 `def.transform` 的 4 種（giant/dragon/mech/ghost）有 `freezeT 10`，sword/gunner/mage 沒有 → 與 forms 文件一致 |
+| **與「WORLD n」橫幅重疊** | **沒有像素重疊**：實測 WORLD 橫幅佔 y **25~78**、變身橫幅佔 y **104~129**（`z_banner_overlap.png` / `z_banner_overlap2.png` 是逐列掃描後的放大圖）。但畫面上會**同時出現「黑邊 + WORLD 橫幅 + 變身橫幅」三條帶狀元素**，上半畫面幾乎被佔滿 → 列為 **R5-P2-10**（嚴重度 P2，不是 P1）|
+
+**額外發現**（`sp/double_get_a~c.png`）：現在**所有能力**（含 Round 1 的 8 種）取得時都會播完整演出 —— `player.js` `giveAbility` 的註解寫著
+「總控：所有能力都播變身演出；只有整體變身（`def.transform`）才加 10 幀停格」，所以這是刻意的。
+但**連續取得兩個能力時，舊橫幅不會被立刻換掉**：`giveAbility('fire')` → 18 幀後 `giveAbility('mech')`，畫面上還是「火焰 / FIRE」橫幅而 HUD 已經是 MECH，約 10~20 幀後才換成「機甲 / MECH」→ **R5-P2-14**。
+
+---
+
+## R5-3. 關卡實戰（w1~w5）
+
+### 3a. 全房間掃描（25 個房間，`KB.game.entities` 逐房列舉）
+
+| 敵人 | 能力 | 實際出現（世界 / 房 / 磁磚）| 隻數 |
+|---|---|---|---|
+| pistolo | gunner | w1r0(46,9)、w4r0(28,9)、w5r0(88,9) | 3 |
+| mimi | clone | w1r0(20,9)、w4r0(73,9)、w5r1(27,9) | 3 |
+| kagedee | ninja | w1r1(14,9)、w4r3(25,9)、w5r3(44,9) | 3 |
+| wizzle | mage | w1r2(22,9)、w4r1(28,18)、w5r2(59,9) | 3 |
+| ronin | blade | w2r0(38,9)、w2r2(60,9)、w4r2(79,9)、w5r0(62,9) | 4 |
+| archerwaddle | bow | w2r0(16,7)、w4r2(89,6)、w5r0(51,7) | 3 |
+| tiktok | time | w2r0(79,9)、w2r3(30,9)、w4r3(29,9)、w5r1(44,9) | 4 |
+| gravitron | gravity | w3r0(30,5)、w3r3(33,5)、w4r3(36,5)、w5r2(35,5) | 4 |
+| bigbloom | giant | w3r0(35,8)、w4r3(44,8)、w5r0(38,8) | 3 |
+| bolt | mech | w3r1(50,9)、w4r0(84,9)、w5r3(35,9)、w5r4(23,21) | 4 |
+| drako | dragon | w3r0(33,3)、w4r0(65,6)、w5r2(66,4) | 3 |
+| boodee | ghost | w3r1(57,7)、w4r1(17,9)、w5r1(60,5) | 3 |
+| **合計** | | **與 levels5 的放置表 100% 一致** | **40** |
+
+能力台座 22 座（含 w5 r4 **武器庫**：blade(6,21) / gunner(8,21) / mage(10,21) / giant(12,21) 一字排開）全部在位，
+`essence` 的 `ui_ability_<key>_mini` 圖示都畫得出來（無洋紅）。
+
+### 3b. 行為 / 吸入測試（`shots/agent_qa5/lv/*.png`，每隻 2 張：觀察 120 幀 + 吸入）
+
+| 敵人 | 觀察（120 幀後）| 吸入 → 能力 |
+|---|---|---|
+| pistolo (w1r0) | 站在 (736,144) 平地、hp 2、`walk`，不卡牆 | ✅ 吸進嘴 → 吞下得 **gunner** |
+| archerwaddle (w2r0) | 站在拱窗高台 (256,112)、hp 2 | ✅ → **bow** |
+| bolt (w3r1) | 長廊平地 (800,142)、hp 3 | ✅ → **mech** |
+| drako (w4r0) | 空中 `fly`（1011,116.7）、正弦飛行、hp 3 | ✅ → **dragon** |
+| wizzle (w4r1) | 塔內平台 (429,286)、hp 2 | ✅ → **mage** |
+| gravitron (w3r0) | 空中 (451,84)、`onGround=false` 正常浮空、hp 3 | 該次先吸到旁邊的 drako（3 隻同框）|
+| bigbloom (w3r0) | (531,134) 走動中（vx -0.44）、hp 4 | 該次距離不足未吸到 |
+| tiktok (w2r0) | (1295,144) 走動（vx 0.25）、hp 3 | 該次先吸到 waddledee |
+| mimi (w1r0) | (320,145) 站地、hp 2 | 該次先吸到 waddledee |
+| ronin / kagedee / boodee | 房間內確實存在（見 3a），但 QA 腳本的落點離牠們 >160px，未進觀察窗 | – |
+
+> 沒吸到的幾隻是 QA 腳本落點的問題（同框有別的敵人先被吸走），**不是放置或敵人的問題**；
+> 12 種敵人的「會攻擊 / 被吸入給對應能力」在 `test_weapons 94/94`、`test_magic 102/102`、`test_forms 139/139` 內都有逐項測試且全過。
+> 25 個房間全部 `missing sprites: []`、0 pageerror。
+
+---
+
+## R5-4. UI 驗收
+
+| 畫面 | 截圖 | 結果 |
+|---|---|---|
+| 能力圖鑑 1/3・2/3・3/3（全解鎖）| `ui_gallery_all_0/8/16.png` | ✅ 標題列「能力圖鑑 ／ 發現進度 20/20 ／ 17/20」、縮圖每頁 8 個、頁碼 3/3、5 列招式表 + 2 行說明都塞得下 |
+| 能力圖鑑（剪影 / 未發現）| `ui_gallery_lock_0/8/16.png`、`ui_gallery_lock_silhouette.png` | ✅ 全黑剪影、`？？？`、縮圖變「?」方塊、「吸入 ??? 就能獲得」；發現進度正確顯示 4/20 |
+| 競技場 1/3・2/3・3/3 | `ui_arena_0/9/18.png` | ⚠️ 分頁 / 縮圖 / 頁碼都對，但**說明第 3 行被面板下緣切一半**（gunner、dragon 都是）→ R5-P2-05 |
+| 暫停能力卡（giant 5 招 + 風味文字＝6 列）| `ui_pause_giant.png` | ✅ 6 列全部畫得下、不壓到選單 |
+| 暫停能力卡（mage 5 招）| `ui_pause_mage.png` | ⚠️ 5 招正常，但**標題下面留了一條空白帶**（magic 4 種沒有 `flavour`）→ R5-P2-07 |
+| 暫停能力卡（hammer，回歸）| `ui_pause_hammer.png` | ✅ 4 招 + 風味文字，與 Round 4 一致 |
+| HUD 4 字中文名 | `mv/mage_x_00.png`、`grid_gravity.png` | ✅「元素法師」12px 塞進 53px、`GRAVITY` 7 字元不溢出、圖示都有 |
+| 選關「能力 n/20」| `ui_select.png` | ✅ 右下「能力 20/20」，BEST / ★ 沒有被擠掉 |
+| 設定「特效強度」| `ui_settings.png` | ✅ 第 5 列「特效強度 高」，←→ 可切；實測 `KB.VFX.level` high/mid/low → burst 粒子 **20 / 14 / 8**、low 正確關閉 zoom 與 afterimage |
+
+---
+
+## R5-5. 全套測試與 playthrough
+
+| 指令 | 結果 |
+|---|---|
+| `tools/engine_test.py` | **118/118 PASS** |
+| `tools/enemy_test.py` | **393/393 PASS** |
+| `tools/boss_test.py` | **ALL PASS**（5 魔王 idle/intro/fight/phase2/mid 全綠，13s）|
+| `tools/test_weapons.py` | **94/94 PASS** |
+| `tools/test_magic.py` | **102/102 PASS** |
+| `tools/test_forms.py` | **139/139 PASS** |
+| `node tools/audio_check.js` | **全部通過**（27 首曲子、47 個新 sfx 的表都列得出來）|
+| `node tools/level_check.js` | **0 error / 1 warning**（既有的「拉拉拉預設出生點」）|
+| `node --check src/*.js src/art/*.js` | 全通過 |
+| `playthrough --level w1~w5 --ability sword --godmode` | **5/5 cleared、deaths 0、missing []**（4256 / 9781 / 6258 / 10221 / 11328 幀）|
+| `playthrough --level w1 --ability <12 種新能力> --godmode` | **11/12 cleared**：gunner 4446・ninja 4239・blade 5104・bow 5380・mage 5176・gravity 5851・clone 6607・giant 6986・dragon 5358・mech 11533・ghost 6845；**time ✗（30000 幀只走到 r0）** |
+
+## R5-6. 效能（`shots/agent_qa5/sp/perf_triple.png`）
+
+> 方法：在頁面內用 `performance.now()` 量 `__kb.step(1)`（含 update + render）×300 的牆鐘時間。
+
+| 情境 | 300 幀總時間 | 每幀平均 | 單幀最大 | 之後殘留 |
+|---|---|---|---|---|
+| 基準（無特效）| 86.5 ms | 0.29 ms | 5.3 ms | VFX 0 |
+| gunner 子彈時間 | 179.9 ms | 0.60 ms | 13.6 ms | VFX 0 |
+| mage 元素風暴 | 131.0 ms | 0.44 ms | 14.3 ms | VFX 0 |
+| clone 百裂分身 | 159.5 ms | 0.53 ms | 23.2 ms | VFX 0 |
+| **三個必殺連續觸發**（gunner→10 幀→mage→10 幀→clone）| **120.6 ms** | **0.40 ms** | 14.3 ms | 300 幀後 VFX 0、再 600 幀後仍 0、實體數回到 44 |
+
+結論：**16.7 ms/幀 的預算只用掉 2~4%**，三招疊在一起也沒有掉幀風險；沒有任何效果洩漏。
+
+---
+
+## R5-7. Round 5 問題清單（P0 × 0、P1 × 4、P2 × 10）
+
+| # | 嚴重度 | 位置 | 現象 | 重現指令 | 截圖 | 建議負責 |
+|---|---|---|---|---|---|---|
+| **R5-P1-01** | P1 | `src/abilities_magic.js` time | **time 是 12 種新能力裡唯一過不了 w1 的**：`--godmode` 跑滿 30000 幀只走到 r0。stuck 傾印＝`player={'x':1340.7,'y':100.6,'state':'float','onGround':False}`（門在 x=1456），現場堆著 **25 顆 `abilitystar`**（同一點 (1285,130)）＋ `magic_hist` / `magic_stop` ticker。上一輪的「加速衝出地圖」已修（見 R5-1 的 `time/haste2`），但**卡關還在**。 | `.venv/bin/python tools/playthrough.py --level w1 --ability time --godmode --maxframes 12000` | stuck 傾印（見 PROGRESS qa5）| **magic** |
+| **R5-P1-02** | P1 | `src/abilities_forms.js` ghost + `src/player.js` `clampToRoom` | **幽靈會沉出地圖並摔死**。`--ability ghost` 開場 `form.noclip` 就是 true（240 幀），此時**按住 ↓ 約 150 幀**：卡比穿過地板 → 沉到 y=183（房高 192）→ noclip 到期（noclip=false）→ 人在地形外 → 直接墜落 `state=dead`、y=285 → 重生時 **lives 3→2、ability=null**。文件寫 noclip「不會掉出地圖」，實際上 `clampToRoom()` 只夾住房間框，noclip 結束後沒有把人推回可站立的地方。 | `.venv/bin/python shots/agent_qa5/tshot.py` 不夠，用：goto `game{level:w1,room:0,ability:'ghost'}` → step 120 → `__kb.press({down:true})` → step 150（qa5 用 `sp5.py`，輸出見 PROGRESS）| `sp/ghost_sink_3.png`、`sp/ghost_sink_7.png`、`grid_ghost.png`（possess2 列，卡比在左下角）| **forms** |
+| **R5-P1-03** | P1 | `src/abilities.js` / `abilities_weapons.js` / `abilities_forms.js` / `abilities_magic.js` 的 `moves` 文案（或蓄力計時起點）| **10 個蓄力必殺的「按住 N 幀」全部標低**（見 R5-1a）：鐵鎚寫 40 → 實測 **70**；居合 / 機甲寫 50 → **70**；光束 / 電擊寫 45 → **50**；法師 / 重力 / 分身 / 龍化 / 槍手 60 → **66**。照著暫停卡按住 45 幀放開鐵鎚，**畫面上完全沒有反應**（`state` 全程 idle、hitbox 0、VFX 0），玩家只會以為招式壞掉。推測是蓄力計數從「攻擊動畫開始/結束」才起算，而不是按下那一幀。 | `.venv/bin/python shots/agent_qa5/mshot.py --only hammer`（`hammer/charge` 45 幀＝無反應、`hammer/charge2` 95 幀＝正常）；完整門檻表 `shots/agent_qa5/charge.json` | `grid_hammer.png`（charge 列全空 vs charge2 列有大迴旋）、`grid_blade.png`、`grid_mech.png` | **weapons**（blade/gunner/bow）＋ **forms**（mech/dragon）＋ **magic**（mage/gravity/clone）＋ **abilities**（hammer/beam/spark）|
+| **R5-P1-04** | P1 | `src/abilities_forms.js` ghost 附身 | **附身只維持 <8 幀就自動解除**（規格：300 幀或再按 ↓+X）。實測把 waddledee 放在 16px 處、按 1 幀 ↓+X：`possessed=waddledee`、`form.hidden=true` 成立，但 8 幀後就 `possessed=null`、`hidden=false`，卡比被丟到敵人位置。另外**附身要靠到 26px 內，但那個距離站著就會先吃接觸傷害**（40px 外按 ↓+X 只會跳「沒有目標」）——不先開隱身 / 穿牆幾乎用不出來。 | 見 `sp2.py`/`sp3.py`（PROGRESS 有輸出）；`shots/agent_qa5/mshot.py --only ghost` 的 `ghost/dx` 列 | `sp/ghost_poss2_0~5.png`、`sp/ghost_poss1f_*.png`、`grid_ghost.png` | **forms** |
+| **R5-P2-05** | P2 | `src/arena.js` 選能力面板 | **競技場說明第 3 行被面板下緣切掉一半**：gunner「…把彈幕鋪滿整個房間。」的「間。」、dragon「…張口就是一條火河。」的「一條火河。」都只剩上半截。20 個能力裡凡是說明降級成 12px 3 行的都會中。 | `.venv/bin/python shots/agent_qa3/qshot.py --scene arena --js "KB.scene.i=9" --steps 20 --out shots/agent_qa5/ui_arena_9.png` | `ui_arena_9.png`、`ui_arena_18.png` | **ui** |
+| **R5-P2-06** | P2 | `src/menu.js` 圖鑑 + `src/arena.js` 預覽框 | **龍化 / 機甲 / 幽靈的大預覽只畫普通粉紅卡比**（這三種是整體換精靈、沒有 `hat_*`），玩家在圖鑑裡完全看不出變身長怎樣；旁邊 24×16 的小圖示反而是對的。giant 因為有 `hat_giant` 所以正常。 | `.venv/bin/python shots/agent_qa3/qshot.py --scene title --js "KB.scene.menu=new KB.TitleMenu(KB.scene); KB.scene.menu.sub=new KB.AbilityGallery(); KB.scene.menu.sub.i=17" --steps 30 --out shots/agent_qa5/ui_gallery_form_17.png` | `z_form_preview.png`（龍化/機甲/幽靈三連拼圖）、`ui_gallery_form_17/18/19.png` | **ui**（預覽改吃 `kirby_dragon_idle` 等）＋ **forms**（或補 hat）|
+| **R5-P2-07** | P2 | `src/abilities_magic.js` | **magic 4 種（mage / time / gravity / clone）完全沒有 `flavour`**，暫停能力卡標題與分隔線之間留一條空白帶（weapons / forms 都有寫）。ui5 的介面需求第 3 點要求 `flavour` 給 2 行陣列。 | `.venv/bin/python shots/agent_qa3/qshot.py --scene game --level w1 --ability mage --script "step 40; tap start 2; step 20" --out shots/agent_qa5/ui_pause_mage.png` | `ui_pause_mage.png`（對照 `ui_pause_giant.png` / `ui_pause_hammer.png`）| **magic**（補文案）|
+| **R5-P2-08** | P2 | `src/abilities_weapons.js`（及其他必殺）＋ `src/vfx.js` `textPop` | **必殺技名用 `textPop`（世界座標）而不是 `VFX.banner`（畫面置中）**，靠近房間左右邊界時會被畫面切掉：gunner 的「BULLET TIME」實測缺了開頭的「BU」（卡比在 x=49、鏡頭已經夾在 0）。ninja「影分身斬」、bow「流星箭」、mage「元素風暴」也都貼著左緣。 | `.venv/bin/python shots/agent_qa5/mshot.py --only gunner` → `mv/gunner_ult_00.png` | `z_gunner_ult0.png`（放大圖，可見「ULLET TIME」）| **weapons / magic / forms**（改呼叫 `KB.VFX.banner`）或 **vfx**（`textPop` 夾邊）|
+| **R5-P2-09** | P2 | `src/vfx.js` `worldTint` / `tint` | **世界染色會把「WORLD n」開場橫幅一起染掉**：時停（灰藍）、慢動作（紫）、子彈時間（灰）、元素風暴（紅）時，開場橫幅整條變色甚至看不清字。`game.js` 的繪製順序是 `drawLevelBanner` → `VFX.postWorld`，所以世界層染色蓋在橫幅上。 | `.venv/bin/python shots/agent_qa5/mshot.py --only time` → `grid_time.png` 第 1、3 列 | `grid_time.png`、`grid_mage.png`（ult 列）、`grid_spark.png` | **vfx**（postWorld 染色改畫在橫幅之前／或排除橫幅區）|
+| **R5-P2-10** | P2 | `src/vfx.js` `transform` + `src/ui.js` `drawLevelBanner` | **開場 90 幀內取得能力 → 畫面上同時有「上下黑邊 + WORLD n 橫幅 + 變身橫幅」三層**。逐列掃描確認**沒有像素重疊**（WORLD 橫幅 y 25~78、變身橫幅 y 104~129），但上半畫面被佔滿、視覺很擠（forms agent 回報的「疊在一起」實際是這個）。 | `.venv/bin/python shots/agent_qa5/tshot.py --lead 8 --tag tfb` | **`tfb_giant.png`**、`z_banner_overlap.png`、`z_banner_overlap2.png` | **ui**（兩者互斥：橫幅播放中就延後變身橫幅）|
+| **R5-P2-11** | P2 | `src/abilities_forms.js` giant 的 `moves` 文案 | 「大口吸：範圍 ×2・可吞中魔王」在**圖鑑與暫停卡都被截成「大口吸：範圍 x2・可…」**（ui5 的招式名欄位約 10 字）。「可吞中魔王」正好是這招最重要的資訊。 | `ui_gallery_all_16.png`、`ui_pause_giant.png` | 同左 | **forms**（縮成「大口吸（可吞中魔王）」之類）|
+| **R5-P2-12** | P2 | `src/levels.js` | **忍者壁跳在 5 個世界幾乎沒有地方可用**：掃描全部 25 個房間找「連續 ≥5 格實心、側面 4 格淨空、旁邊有站得住的地板」的垂直牆面，**只找到 w3 r1 的 x=63 一處**。壁跳是 ninja 的 5 招之一，但玩家在主線裡幾乎不會遇到能用的牆。 | `sp5.py` 的全房間掃描（輸出見 PROGRESS）| `sp/ninja_wall_slide.png` | **levels**（w2 螺旋塔 / w5 城牆補幾面 5 格以上的直牆）|
+| **R5-P2-13** | P2 | `src/abilities_forms.js` giant | **巨大化被碰一下就結束**：`hurt(1)` → 立刻 `clearForm()` + 掉能力（hp 6→5、體型復原）。900 幀的限時與「最後 120 幀閃爍提示」在實戰裡很難走到（w1 r0 站著不動 240 幀就被 waddledee 撞掉）。mech 有 `armor 1 / hp 6`（實測 6 下才碎，第 6 下正確 `breakArmor`），giant / dragon / ghost 都是一下就沒。 | goto `game{level:w1,room:0,ability:'giant'}` → step 120 → `KB.player.hurt(1)` → step 40（`sp/giant_hurt.png`）| `sp/giant_hurt.png`、`grid_giant.png`（x 列第 5~6 格 HUD 變 NORMAL）| **forms**（要不要給 1~2 點裝甲，或受傷只縮小不掉能力）|
+| **R5-P2-14** | P2 | `src/vfx.js` `transform` / `banner` | **連續取得兩個能力時舊橫幅不會被換掉**：`giveAbility('fire')` → 18 幀後 `giveAbility('mech')`，畫面橫幅還是「火焰 / FIRE」而 HUD 已經是 MECH，要再等 10~20 幀才變成「機甲 / MECH」。台座密集處（w5 r4 武器庫 4 座並排）很容易踩到。 | `sp/double_get_a~c.png`（qa5 `special.py`）| `sp/double_get_b.png`（橫幅 FIRE / HUD MECH）| **vfx**（新的 transform 先清掉舊 banner）|
+
+### R5-7a. 觀察（不列入問題）
+
+- **石頭的落地衝擊**在本輪的拍攝視窗（跳 → 變石 → 30 幀）之前就結束了，沿用 vfx agent 的 `shots/agent_vfx/ab_stone_land.png` 佐證；石頭狀態跑滿 240 幀仍是 `state=stone` + 1 個常駐 hitbox **是正常的**（要再按一次 X 解除，`stone/off` 列已驗證）。
+- **`--ability <key>` 的截圖路徑不會播變身橫幅**（走 `opts.ability` 不經 `giveAbility`），只有真正吸入 / 台座 / `giveAbility()` 才有；做演出 QA 時要用 `tshot.py` 這種呼叫 `giveAbility` 的方式。
+- **hitbox debug 疊色**：`--hitbox` 時玩家框是半透明綠色，巨大化（28×30）會讓卡比看起來「整隻變綠」，**不是精靈破圖**（關掉 hitbox 後是正常粉紅，`z_giantprobe_0.png`）。
+- **gravity 的 ↑+X** 招式表寫「浮空 240 幀」，但畫面上的 textPop 寫「重力翻轉」，文案不一致（magic 已知把天花板行走降級成浮空）。
+- **圖鑑剪影**的輪廓看得出頭上有東西（帽子形狀），要完全不暴露的話得畫成純圓形剪影。
+- **bow 的流星箭**在第 5~6 張幾乎整個世界層變白（flash + worldTint 疊加），雖然是必殺演出，但比其他必殺亮很多，可以考慮把 alpha 調低一點。
+
+---
+
+## R5-8. 重現指令總表
+
+```bash
+cd "/home/ken150ken150/桌面/我的專案/遊戲開發/卡比之星"
+PY=.venv/bin/python
+
+# 20 能力 × 93 招連拍（每招 6 張 + 240 幀殘留檢查）
+$PY shots/agent_qa5/mshot.py                      # 全部（約 8 分鐘）
+$PY shots/agent_qa5/mshot.py --only hammer --only ghost
+$PY shots/agent_qa5/grid.py                       # 拼成 grid_<key>.png，用 Read 逐格看
+
+# 變身演出（--lead 8 = 和 WORLD n 橫幅同框）
+$PY shots/agent_qa5/tshot.py --lead 150 --tag tf
+$PY shots/agent_qa5/tshot.py --lead 8   --tag tfb
+$PY shots/agent_qa5/tgrid.py tfb sword gunner mage giant ghost
+
+# 關卡實戰（新敵人行為 + 吸入）
+$PY shots/agent_qa5/eshot.py
+
+# UI（沿用 qa3 的 qshot.py）
+$PY shots/agent_qa3/qshot.py --scene title --js "KB.scene.menu=new KB.TitleMenu(KB.scene); KB.scene.menu.sub=new KB.AbilityGallery(); KB.scene.menu.sub.i=16;" --steps 30 --out shots/agent_qa5/ui_gallery_all_16.png
+$PY shots/agent_qa3/qshot.py --scene title --prejs "KB.save.seen={fire:true,sword:true,gunner:true,giant:true};" --js "KB.UI.unlockAll=false; KB.DEBUG=false; KB.scene.menu=new KB.TitleMenu(KB.scene); KB.scene.menu.sub=new KB.AbilityGallery(); KB.scene.menu.sub.i=9;" --steps 30 --out shots/agent_qa5/ui_gallery_lock_silhouette.png
+$PY shots/agent_qa3/qshot.py --scene arena --js "KB.scene.i=9;" --steps 20 --out shots/agent_qa5/ui_arena_9.png
+$PY shots/agent_qa3/qshot.py --scene title --js "KB.scene.menu=new KB.TitleMenu(KB.scene); KB.scene.menu.sub=new KB.SettingsMenu(); KB.scene.menu.sub.sel=4;" --steps 20 --out shots/agent_qa5/ui_settings.png
+$PY shots/agent_qa3/qshot.py --scene game --level w1 --ability giant --script "step 40; tap start 2; step 20" --out shots/agent_qa5/ui_pause_giant.png
+$PY shots/agent_qa3/qshot.py --scene select --steps 40 --out shots/agent_qa5/ui_select.png
+
+# 全套測試 / playthrough / 效能
+for t in engine_test enemy_test boss_test test_weapons test_magic test_forms; do $PY tools/$t.py; done
+node tools/level_check.js ; node tools/audio_check.js
+for w in w1 w2 w3 w4 w5; do $PY tools/playthrough.py --level $w --ability sword --godmode --maxframes 45000; done
+for a in gunner ninja blade bow mage time gravity clone giant dragon mech ghost; do $PY tools/playthrough.py --level w1 --ability $a --godmode; done
+```
+
+### 截圖索引（`shots/agent_qa5/`）
+- `grid_<20 個能力>.png` —— 每招 6 幀總表（本輪主證據）
+- `mv/<key>_<move>_00..05.png` + `_post.png` —— 原始逐幀（93 招 × 7 張）
+- `tf_*.png` / `tfb_*.png` / `tf/` —— 變身演出（一般 / 與 WORLD 橫幅同框）
+- `lv/*.png` —— 5 世界新敵人實戰（觀察 + 吸入）
+- `ui_*.png` —— 圖鑑 ×7、競技場 ×3、暫停卡 ×3、選關、設定
+- `sp/*.png` —— 專項：`ghost_sink_*`、`ghost_poss*`、`giant_hurt`、`mech_armor2`、`double_get_*`、`perf_triple`、`ninja_wall_*`、`time_stars`
+- `z_*.png` —— 放大切圖（`z_gunner_ult0`＝被切掉的 BULLET TIME、`z_banner_overlap*`＝兩條橫幅的實際位置、`z_form_preview`＝三個變身的圖鑑預覽、`z_giantprobe_0`＝關掉 hitbox 後的巨大化）
+- `moves.json` / `charge.json` / `levels.json` —— 全部量測數據（每幀 state / VFX / hitbox / 蓄力門檻 / 敵人位置）
