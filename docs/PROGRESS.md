@@ -1170,7 +1170,78 @@ git 已初始化，基線 commit `c382e2a`。Playwright venv：`.venv/bin/python
 - 已知問題：`hat_time` 的懷錶在 16×16 帽子上偏小；`kirby_attack_mage_storm` 的元素環大半被身體擋住（實際演出靠 KB.VFX.circle，影響不大）。
 
 ## forms
-（agent 在此追加）
+
+擁有檔案：`src/abilities_forms.js`、`src/art/kirby_forms.js`、`src/enemies_forms.js`、`src/player.js`（僅變身鉤子）、`tools/test_forms.py`。
+
+### player.js 變身鉤子（其他 agent 要用變身請照這個介面）
+`p.form = null | { … }`，由能力的 `onGet` 呼叫 `p.setForm({...})` 建立、`p.clearForm()` 解除。欄位：
+
+| 欄位 | 作用 |
+|---|---|
+| `key` | 能力 key（純資訊，untransform 演出會用） |
+| `scale` | 體型倍率。繪製用 `g.spr` 的 `scaleX/scaleY`（錨點＝**底部中央**），帽子同步放大；碰撞框 `w=14*s / h=15*s（蹲下 9*s）/ stepH=8*s`，**保持 bottom 與 cx 不變** |
+| `noclip` | `Player.physics()` 改成「直接位移 + `clampToRoom()`」，完全不與磁磚碰撞、也不會掉出地圖；`onGround` 只有貼到房間底部才為 true |
+| `fly` | 忽略重力（由 `def.formUpdate` 自行控制 `p.vy`）；空中按跳**不會**變成漂浮 |
+| `armor` / `hp` | `p.hurt(amount)` 改扣 `form.hp -= max(1, amount - armor)`，**不扣 HP、不掉能力**；`form.hp ≤ 0` → `p.breakArmor()`（armor_break 音 + 解除變身 + `dropAbility(false)`） |
+| `alpha` | 繪製透明度（本體與帽子共用） |
+| `hidden` | 完全不畫本體（幽靈附身時用） |
+| `inhaleAll` | 吸入時忽略敵人的 `inhalable`（巨大化可直接吞中魔王） |
+| `spr(p, anim, opts)` | **整體替換精靈**：回傳精靈名稱（`KB.has()` 過濾），可順便改寫 `opts.frame / opts.fps / opts.t`；回傳 null＝維持原本卡比精靈 |
+| `draw(g, p)` | 本體之後的額外繪製 |
+
+其他新增的 player.js API / 行為：
+- `p.formScale`（getter，無變身時 1）、`p.sizeMul`（＝formScale，吸入範圍 / 判定倍率，預設 1）、`p.possessed`（幽靈附身的敵人）、`p.setForm(f)` / `p.clearForm()` / `p.breakArmor()` / `p.clampToRoom()`。
+- **每幀鉤子** `KB.ABILITIES[key].formUpdate(p)`：只要 `p.form` 存在就每幀呼叫（不論狀態，dead / door 除外）；**回傳 `true` 代表本幀由變身完全接管**（player.update 直接 return，幽靈附身用）。
+- `giveAbility(key)`：加了 `KB.save.seen[key] = true; KB.saveGame()`（只在第一次寫），以及 `KB.VFX.transform(this, key)`。
+  ⚠️ **`KB.VFX.transform` 只在 `def.transform === true` 時呼叫**：它會 hitstop 10 幀 + letterbox 70 幀，套在 Round 1 的 8 種能力上會改變取得節奏並打掉 `engine_test` 的既有時序（實測 118 → 117）。weapons / magic 若也要大演出，在自己的 def 上加 `transform: true` 即可。
+- `dropAbility()` / `die()`：會先 `clearForm()`（內含 `KB.VFX.untransform`）。
+- 能力被**外部直接指派**時（`game.js` 的 `opts.ability`、競技場選能力、`--ability` 截圖參數）不會經過 `giveAbility` → player.update 內新增「補呼叫一次 `onGet`」的保險（只對 `def.transform` 的能力生效，一般能力行為完全不變）。
+- `updateInhale` 的吸力範圍 / 嘴巴判定 / 拉力全部乘上 `p.sizeMul`。
+
+### 4 種能力招式表（`src/abilities_forms.js`）
+| key | 名稱 | 招式 |
+|---|---|---|
+| `giant` | 巨大化 GIANT | `X` 巨腳踩踏（躍起落地，兩側 shockwave + hit-stop）／`↓+X` 巨人衝撞（前衝 30 幀全身判定 dmg 6、`breakHard` 可破硬磚 X）／`空中 X` 屁股墜落（vy 8 直落 + 大衝擊環）／`↑+X 按住` 大口吸（範圍 ×2、`inhaleAll` 可直接吞中魔王）／**限時 900 幀**，最後 120 幀閃爍 + textPop「快變回去了」+ toast，時間到 `shrink()` 自動解除 |
+| `dragon` | 龍化 DRAGON | `按住跳` 飛行（vy −1.2 上升、放開緩降 0.6、每 12 幀 wing_flap + 翅膀動畫）／`X（可按住 90 幀）` 龍息（前方 20→56px 持續火焰）／`↓+X` 尾擊（前後雙向 slash）／`空中 X` 俯衝（斜下 40 幀 + 紅色 afterimage + 落地 shockwave）／`X 蓄滿 60 幀放開` **必殺 龍炎彈**（letterbox + zoom + 貫穿大火球 `proj_dragonball` dmg 10 + beam） |
+| `mech` | 機甲 MECH | 裝甲 `armor 1 / hp 6`／`X` 火箭拳（`RocketFist` 飛出 100px 再飛回，**來回各判定**，line 拖尾）／`↑+X` 追蹤飛彈 ×2（`Missile` 拋物線 14 幀後追最近敵人、煙粒子、命中爆 32×28 判定）／`空中 X` 噴射墜踩（jet 粒子 + 落地 shockwave）／`按住跳` 噴射跳（離地後最多 30 幀持續上升）／`X 蓄滿 50 幀放開` **必殺 全彈發射**（letterbox + 6 枚飛彈 + 強化火箭拳）／走路每 10 幀 mech_step + 微震 |
+| `ghost` | 幽靈 GHOST | `X` 穿牆開關（noclip 240 幀，開啟時 alpha 0.5、上下鍵飄浮；**一次最多穿 2 格厚**，`wallRun()` 判定 > 2 格就推回 + hardblock 音）／`↓+X` 附身（26px 內的敵人：卡比隱形跟著跑、方向鍵控制 vx、跳、`X` 觸發該敵人 `attack()`；再按 `↓+X` 或 300 幀後解除並讓牠爆散死亡）／`空中 X` 幽靈哀嚎（雙 ring + 76px 內敵人 `freezeT 60` + 80×68 dmg 2）／`↑+X` 隱身 180 幀（alpha 0.3，尾隨 0 傷害判定框在敵人之後清掉 `alert` / 壓住 `cool`）<br>※ 穿牆中 `p.onGround` 幾乎恆 false，所以招式優先序是 **↓ 附身 > ↑ 隱身 > 空中哀嚎 > X 穿牆開關**（否則穿牆時 X 會一直變哀嚎、關不掉） |
+
+四種 def 都有 `desc` + `flavour`（2 行）+ `moves`（5 列）+ `color` + `transform: true`。
+
+### 4 種新敵人（`src/enemies_forms.js`，已註冊進 `KB.ENEMIES`）
+| key | 名稱 | 給的能力 | 行為 |
+|---|---|---|---|
+| `bigbloom` | 巨大花 Bigbloom | `giant` | hp 4、慢走；察覺後張開花瓣噴「膨脹花粉」（40×22 判定 + 花粉粒子） |
+| `drako` | 小龍 Drako | `dragon` | hp 3、無重力正弦飛行（`solid=false`）；靠近後噴 `proj_drakofire` 小火球 |
+| `bolt` | 機器兵 Bolt | `mech` | hp 3、巡邏；察覺後蓄力 20 幀射 `proj_boltbeam` + `KB.VFX.line` 130px 雷射線 |
+| `boodee` | 幽靈迪 Boo Dee | `ghost` | hp 2、**穿牆**直線追玩家（`solid=false`）；72px 內張嘴撲擊；draw 用 alpha 0.78 |
+
+### 精靈（`src/art/kirby_forms.js`，程序式網格 + stamp）
+- `hat_giant`（巨大化沿用既有卡比精靈 ×2，只加角冠；攻擊幀用 `form.spr` 對應到 kirby_jump / kirby_run / kirby_crouch，不會出現 `kirby_attack_giant` 洋紅方塊）
+- `kirby_dragon_idle/walk/fly/attack`（28×24，蝠翼 + 金角 + 箭形尾）、`kirby_mech_idle/walk/jump/attack`（26×24，面罩 + 動力爐 + 噴射背包 + 鋼靴）、`kirby_ghost_idle/walk/attack`（24×22，波浪裙襬被單，繪製端 alpha 0.6）
+- 投射物：`proj_rocketfist` / `proj_missile` / `proj_dragonball`(2 幀) / `proj_drakofire` / `proj_boltbeam`
+- 敵人：`bigbloom_walk/attack`、`drako_fly/attack`、`bolt_walk/attack`、`boodee_float/attack`（各 2 幀）
+- UI：`ui_ability_<key>` 24×16 與 `ui_ability_<key>_mini` 8×8（`art/items_ui.js` 在本檔之前就跑完了迴圈，所以 4 個 key 的圖示在本檔自行產生）
+
+### 進度
+- [2026-09-12] 完成：player.js 變身鉤子（form/scale/noclip/fly/armor/sizeMul/formUpdate/spr/hidden）＋ `giveAbility` 的 VFX/存檔鉤子；驗證：`tools/engine_test.py` 118/118；下一步：4 能力實作
+- [2026-09-12] 完成：giant 巨大化（4 招 + 900 幀限時 + 最後 120 幀閃爍提示 + 吸入 ×2 吞中魔王 + 破硬磚）；驗證：`tools/test_forms.py --only giant` 全 PASS、`shots/agent_forms/mv_giant_land.png`（落地雙向衝擊波 + 擊殺）
+- [2026-09-12] 完成：dragon 龍化（飛行 + 龍息 + 尾擊 + 俯衝 + 必殺龍炎彈）；驗證：`--only dragon` 全 PASS、`shots/agent_forms/mv_dragon_breath_big.png`
+- [2026-09-12] 完成：mech 機甲（裝甲 6 + 火箭拳 + 追蹤飛彈 + 噴射墜踩 + 噴射跳 + 必殺全彈發射）；驗證：`--only mech` 全 PASS、`shots/agent_forms/mv_mech_fist.png`、`mv_mech_barrage.png`（letterbox + 6 枚飛彈）
+- [2026-09-12] 完成：ghost 幽靈（穿牆 2 格限制 + 附身 + 哀嚎 + 隱身）＋ 4 種敵人 + 全部精靈；驗證：`tools/test_forms.py` **139/139 PASS**、`shots/agent_forms/mv_ghost_wail.png`、`ghost_get.png`
+- [2026-09-12] 回歸：`engine_test.py` 118/118、`enemy_test.py` 393/393、`boss_test.py` ALL PASS、`playthrough.py --level w1 --ability sword --godmode` CLEAR、`node tools/level_check.js` 0 error、`tools/build.py` OK、`node --check` 全通過。
+
+### 跨檔需求（給總控 / 其他 agent）
+1. **levels5**：4 種新敵人（`bigbloom` / `drako` / `bolt` / `boodee`）尚未放進任何關卡，目前只能用 `--ability` 或 essence 台座取得。建議 `bigbloom` 放在有硬磚 X 的房間前（巨大化才破得開）、`boodee` 放暗房 / 有薄牆的房、`bolt` 放走廊直線、`drako` 放需要飛行的垂直房。
+2. **ui5**：`KB.ABILITY_KEYS` 已 push 四個 key；`ui_ability_<key>` / `_mini` 都有。暫停卡招式各 5 列（`UI.drawAbilityCard` 已支援 6 列）。HUD 的 `KB.ABILITY_NAMES/HUD` 也都填好了。變身名稱橫幅由 `KB.VFX.transform` 內的 `V.banner` 負責，目前會和關卡開場橫幅（WORLD n）疊在一起 → 建議 ui5 讓兩者互斥。
+3. **audio5**：本區用到的音效名稱＝`giant_grow / giant_roar / stomp / shrink / dragon_breath / dragon_dash / tail_whip / wing_flap / rocket_punch / missile / jet / mech_step / armor_break / ghost_phase / possess / unpossess / ghost_wail`，另外沿用既有的 `charge / charge_ready / hardblock / inhale / fire / beam / hurt`。目前未定義的名字只會 `console.warn`，不會中斷。
+4. **player-feel（僅供知悉）**：`P.inhaleFreeze` 的 2 幀 hit-stop 期間 `player.update` 不跑，吸到東西後立刻按 ↓ 會被吃掉（`tools/test_forms.py` 用空跑幾幀迴避）。非本輪問題，記錄備查。
+
+### 已知問題 / 未完成
+- 巨大化碰撞框 28×30：若在「淨高只有 2 格（32px）」的走廊變身，頭會嵌進天花板導致水平移動被擋住（不會卡死，縮小後恢復）。目前關卡沒有這種配置，但 levels5 放 `bigbloom` 時請避開矮走廊。
+- 龍化的緩降速度 0.6 px/frame 是規格值，走下平台時會非常飄；實際試玩若覺得拖沓，可把 `formUpdate` 裡的 `Math.min(0.6, ...)` 調大。
+- 幽靈隱身「敵人察覺不到」是靠尾隨判定框在敵人之後清 `alert` 實作的；若某個敵人是在隱身開始**之後**才生成（排在判定框後面），該幀的 alert 不會被清掉。一般關卡（敵人隨房間一起生成）不受影響。
+- 四種敵人尚未做 `tier` 分世界強度調整（沿用預設 tier 3 行為）。
 
 ## audio5
 

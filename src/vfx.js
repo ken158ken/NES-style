@@ -604,8 +604,8 @@
     // 注意：hitstop 期間 game.update 直接 return，KB.VFX.update 不會被呼叫，
     // 所以「白閃 / 黑邊 / 橫幅」延到 ctrl.t === 2（＝停格結束後的第 2 個更新幀）才放，
     // 停格那 10 幀看到的是「放射光線 + 白色剪影 + ring + 粒子」定格畫面。
-    V.hitstop(10);
-    V.shake(7);
+    if (o.hitstop !== false) V.hitstop(10);
+    V.shake(o.hitstop === false ? 4 : 7);
     V.zoom(1.18, 14);
     V.worldTint('#ffffff', 0.3, 26);
     V.ring(cx, cy, { r0: 4, r1: 52, frames: 22, color, width: 3 });

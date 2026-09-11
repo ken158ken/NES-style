@@ -35,6 +35,8 @@
       this.ridePath = null; this.rideIdx = 0; this.rideT = 0; this.rideVx = 0; this.rideVy = 0;
       this.rideArrive = null; this.rideStuck = 0; this.rideLastD = 1e9;
       this.climbTopT = 0; this.ladderAtkT = 0;
+      // Round 5（forms）：整體變身。詳見 setForm()
+      this.form = null; this.sizeMul = 1; this.possessed = null;
       this.name = 'kirby';
     }
 
@@ -52,7 +54,74 @@
       if (s === 'float') { this.floatAnimT = 0; }
     }
     setCrouchBox(on) {
-      const nb = on ? 9 : 15; const b = this.bottom; this.h = nb; this.bottom = b;
+      const nb = Math.round((on ? 9 : 15) * this.formScale); const b = this.bottom; this.h = nb; this.bottom = b;
+    }
+
+    // ---------- 整體變身（Round 5 forms）----------
+    // p.form = null | {
+    //   key      能力 key（純資訊）
+    //   scale    體型倍率：繪製用 g.spr 的 scaleX/scaleY（錨點＝底部中央），碰撞框 w/h/stepH 等比例（bottom 不變）
+    //   noclip   不與磁磚碰撞（physics 改為直接位移 + clamp 在房間內，不會掉出地圖）
+    //   fly      飛行：忽略重力（由 def.formUpdate 控制 vy），空中按跳不會變成漂浮
+    //   armor    裝甲減傷：hurt(amount) 改扣 form.hp（扣 max(1, amount-armor)），不扣 HP、不掉能力；form.hp 歸零 → breakArmor()
+    //   hp       裝甲值
+    //   alpha / hidden  繪製透明度 / 完全不畫本體（附身用）
+    //   inhaleAll 吸入時忽略敵人的 inhalable（巨大化可直接吞中魔王）
+    //   spr(p, anim, opts)  整體替換精靈：回傳精靈名稱（可順便改寫 opts.frame / opts.fps）
+    //   draw(g, p)          本體之後的額外繪製（翅膀 / 噴射火 / 幽靈殘影…）
+    // 每幀鉤子：KB.ABILITIES[key].formUpdate(p)，回傳 true 代表本幀由變身完全接管（附身）。
+    get formScale() { const f = this.form; return f && f.scale ? f.scale : 1; }
+    /** 設定 / 清除變身；碰撞框依 scale 等比例調整（保持 bottom 與 cx 不變） */
+    setForm(f) {
+      const cx = this.cx, b = this.bottom;
+      this.form = f || null;
+      const s = this.formScale;
+      const crouched = (this.state === 'crouch' || this.state === 'slide');
+      this.w = Math.round(14 * s); this.h = Math.round((crouched ? 9 : 15) * s); this.stepH = Math.round(8 * s);
+      this.cx = cx; this.bottom = b;
+      this.sizeMul = s;
+      if (!this.form) { this.solid = true; this.grav = P.grav; this.maxFall = P.maxFall; }
+      this.clampToRoom();
+      return this.form;
+    }
+    /** 解除變身（含 KB.VFX.untransform 演出） */
+    clearForm(quiet) {
+      if (!this.form) return;
+      const key = this.form.key;
+      this.possessed = null;
+      this.setForm(null);
+      if (!quiet) { try { if (KB.VFX && KB.VFX.untransform) KB.VFX.untransform(this, key); } catch (e) { } }
+    }
+    /** 裝甲被打光：armor_break → 解除變身並失去能力 */
+    breakArmor() {
+      KB.audio.sfx('armor_break');
+      KB.particles(this.cx, this.cy, ['#ffffff', '#c0c8d8', '#889098', '#ffe040'], 16, { spread: 3, life: 30 });
+      if (KB.game) { KB.game.shake = Math.max(KB.game.shake || 0, 7); }
+      this.clearForm();
+      this.dropAbility(false);
+    }
+    /** 夾在房間內（noclip / 變大時不掉出地圖） */
+    clampToRoom() {
+      const map = KB.game && KB.game.map; if (!map) return;
+      if (this.x < 0) { this.x = 0; if (this.vx < 0) this.vx = 0; }
+      if (this.x + this.w > map.pw) { this.x = map.pw - this.w; if (this.vx > 0) this.vx = 0; }
+      if (this.y < 0) { this.y = 0; if (this.vy < 0) this.vy = 0; }
+      if (this.y + this.h > map.ph) { this.y = map.ph - this.h; if (this.vy > 0) this.vy = 0; }
+    }
+    physics() {
+      const f = this.form;
+      if (f && f.noclip) {
+        // 穿牆模式：完全不與磁磚碰撞，只夾在房間內
+        this.hitWall = false; this.hitCeil = false; this.onSlope = false;
+        if (this.grav) this.vy = Math.min(this.vy + this.grav, this.maxFall !== undefined ? this.maxFall : KB.MAXFALL);
+        this.x += this.vx; this.y += this.vy;
+        const map = KB.game && KB.game.map;
+        this.clampToRoom();
+        this.onGround = !!(map && this.y + this.h >= map.ph - 0.5);
+        this.fellOut = false;
+        return;
+      }
+      super.physics();
     }
     get full() { return !!this.mouth; }
     get airborne() { return !this.onGround; }
@@ -87,6 +156,19 @@
       if (this.inWater !== this.wasInWater && this.state !== 'dead' && this.state !== 'door') {
         this.waterSplash(this.inWater);
         if (this.inWater) this.bubbleT = 0;
+      }
+
+      // ---- 變身能力補初始化：能力可能被外部直接指派（game.js 的 opts.ability / 競技場 / 除錯），
+      //      沒有經過 giveAbility → 這裡補呼叫一次 onGet，變身才會生效（一般能力不受影響）----
+      if (this.ability !== this._abilityKey) {
+        this._abilityKey = this.ability;
+        const nd = this.abilityDef;
+        if (nd && nd.transform && !this.form && nd.onGet) { try { nd.onGet(this); } catch (e) { } }
+      }
+      // ---- 變身鉤子（Round 5 forms）：每幀呼叫 def.formUpdate(p)；回傳 true = 本幀由變身接管 ----
+      if (this.form && this.state !== 'dead' && this.state !== 'door') {
+        const fd = this.abilityDef;
+        if (fd && fd.formUpdate && fd.formUpdate(this) === true) return;
       }
 
       switch (this.state) {
@@ -170,7 +252,7 @@
       // 跳躍（coyote time + jump buffer）
       if (this.jumpBufT > 0 && (this.onGround || this.coyoteT > 0)) {
         this.doJump();
-      } else if (inp.pressed('jump') && !this.onGround && !this.full && this.exhaleLockT <= 0 && !this.landingSoon()) {
+      } else if (inp.pressed('jump') && !this.onGround && !this.full && this.exhaleLockT <= 0 && !(this.form && this.form.fly) && !this.landingSoon()) {
         this.startFloat(); return;
       }
       if (this.jumpHold > 0) { this.jumpHold--; if (!inp.down('jump') && this.vy < P.jumpCut) { this.vy = P.jumpCut; this.jumpHold = 0; } }
@@ -308,10 +390,11 @@
       if (!inp.down('attack')) { this.setState(this.onGround ? 'idle' : 'fall'); return; }
       if (inp.pressed('jump') && this.onGround) { this.vy = P.jump; this.jumped = true; this.jumpHold = 10; this.onGround = false; KB.audio.sfx('jump'); }
       if (this.jumpHold > 0) { this.jumpHold--; if (!inp.down('jump') && this.vy < P.jumpCut) { this.vy = P.jumpCut; this.jumpHold = 0; } }
-      // 吸力範圍
-      const mx = this.cx + this.dir * 8, my = this.cy;
-      const rx = this.dir > 0 ? this.cx + 4 : this.cx - 4 - 52, ry = this.cy - 16, rw = 52, rh = 32;
-      const mouth = { x: this.dir > 0 ? this.cx + 2 : this.cx - 12, y: this.cy - 6, w: 10, h: 12 };
+      // 吸力範圍（p.sizeMul：變身體型倍率，巨大化為 2）
+      const M = this.sizeMul || 1, RW = 52 * M;
+      const mx = this.cx + this.dir * 8 * M, my = this.cy;
+      const rx = this.dir > 0 ? this.cx + 4 : this.cx - 4 - RW, ry = this.cy - 16 * M, rw = RW, rh = 32 * M;
+      const mouth = { x: this.dir > 0 ? this.cx + 2 : this.cx - 12 * M, y: this.cy - 6 * M, w: 10 * M, h: 12 * M };
       if (!this.inhaleFx || this.inhaleFx.dead) { this.inhaleFx = KB.fx('fx_inhale_wind', 0, 0, { loop: true, life: 99999, fps: 10 }); }
       this.inhaleFx.x = this.cx + this.dir * 30; this.inhaleFx.y = this.cy + 10; this.inhaleFx.flip = this.dir < 0;
       // 嘴前方持續有小粒子被吸進嘴巴（每 2 幀 1 顆，從 40px 外飛向嘴）
@@ -325,10 +408,12 @@
         if (e.dead || e === this) continue;
         if (!(e.type === 'enemy' || (e.type === 'proj' && e.inhalable) || e.type === 'item' && e.inhalable)) continue;
         if (!e.overlapsRect(rx, ry, rw, rh)) { if (e.inhaleSrc === this) { e.beingInhaled = false; e.inhaleSrc = null; } continue; }
-        if (!e.inhalable) { if (e.onInhaleAttempt) e.onInhaleAttempt(this); continue; }
+        // 巨大化（form.inhaleAll）：連平常吸不動的敵人 / 中魔王都能直接吞下
+        const big = !!(this.form && this.form.inhaleAll) && e.type === 'enemy';
+        if (!e.inhalable && !big) { if (e.onInhaleAttempt) e.onInhaleAttempt(this); continue; }
         if (e.freezeT > 0) continue;
         e.beingInhaled = true; e.inhaleSrc = this;
-        e.pullTo ? e.pullTo(mx, my, 2.4) : (e.x += (mx - e.cx) * 0.15, e.y += (my - e.cy) * 0.15);
+        e.pullTo ? e.pullTo(mx, my, 2.4 * M) : (e.x += (mx - e.cx) * 0.15, e.y += (my - e.cy) * 0.15);
         if (e.overlapsRect(mouth.x, mouth.y, mouth.w, mouth.h)) {
           e.beingInhaled = false; e.inhaleSrc = null;
           e.onInhaled(this);
@@ -374,11 +459,22 @@
       KB.audio.sfx('ability');
       KB.fx('fx_sparkle', this.cx, this.cy - 4); KB.particles(this.cx, this.cy, ['#fff', '#ffe040', '#ffb0d0'], 12, { spread: 2.5 });
       if (KB.game) { KB.game.abilityFlash = 60; }
+      // Round 5：變身演出（KB.VFX 由 vfx agent 提供，未載入時安靜跳過）＋ 圖鑑「已見過」紀錄
+      //   KB.VFX.transform 會 hitstop 10 幀 + letterbox 70 幀，只適合「整體變身」等級的能力，
+      //   因此以 def.transform 旗標開關（Round 1 的 8 種能力不設 → 取得節奏完全不變）。
+      const td = KB.ABILITIES[key];
+      // 總控：所有能力都播變身演出；只有整體變身（def.transform）才加 10 幀停格，避免影響取得節奏
+      try { if (KB.VFX && KB.VFX.transform) KB.VFX.transform(this, key, { hitstop: !!(td && td.transform) }); } catch (e) { } 
+      try {
+        KB.save.seen = KB.save.seen || {};
+        if (!KB.save.seen[key]) { KB.save.seen[key] = true; KB.saveGame(); }
+      } catch (e) { }
       const d = KB.ABILITIES[key]; if (d && d.onGet) d.onGet(this);
     }
     dropAbility(spawnStar) {
       const key = this.ability; if (!key) return;
       const d = KB.ABILITIES[key]; if (d && d.onLose) d.onLose(this);
+      if (this.form) this.clearForm();
       this.ability = null; this.abilityData = {};
       if (this.state === 'attack' || this.state === 'stone') this.setState(this.onGround ? 'idle' : 'fall');
       if (spawnStar && KB.ITEMS.abilitystar) KB.spawn(new KB.ITEMS.abilitystar(this.cx - 8, this.y - 8, key, -this.dir));
@@ -693,6 +789,26 @@
     hurt(amount, src) {
       if (this.dead || this.invuln > 0 || this.invincibleT > 0) return false;
       if (['dead', 'stone', 'door', 'dance', 'ride'].includes(this.state)) return false;
+      // 機甲裝甲（form.armor）：傷害改扣裝甲值，不扣 HP、不掉能力；裝甲歸零才解除變身
+      const fm = this.form;
+      if (fm && fm.armor > 0 && fm.hp > 0) {
+        fm.hp -= Math.max(1, amount - fm.armor);
+        KB.audio.sfx('hurt');
+        const from0 = src && src.cx !== undefined ? src.cx : this.cx - this.dir;
+        this.vx = (this.cx < from0 ? -1 : 1) * P.knockback * 0.6; this.vy = -1.6;
+        this.invuln = P.invulnFrames; this.hurtTimer = P.hurtFrames;
+        this.hurtFlashT = 2; this.jumpBufT = 0; this.coyoteT = 0;
+        this.mouth = null; this.stopInhale(); this.endSlide();
+        if (KB.game) {
+          KB.game.freezeT = Math.max(KB.game.freezeT || 0, P.hurtFreeze);
+          KB.game.shake = Math.max(KB.game.shake || 0, P.hurtShake);
+        }
+        KB.particles(this.cx, this.cy, ['#ffffff', '#c8d0e0', '#ffe040'], 8, { spread: 2.2, life: 20 });
+        KB.fx('fx_hit', this.cx, this.cy + 6);
+        if (fm.hp <= 0) this.breakArmor();
+        this.setState('hurt');
+        return true;
+      }
       this.hp -= amount;
       KB.audio.sfx('hurt');
       const from = src && src.cx !== undefined ? src.cx : this.cx - this.dir;
@@ -721,6 +837,7 @@
     die(fell) {
       if (this.state === 'dead') return;
       if (this.ability) { const d = KB.ABILITIES[this.ability]; if (d && d.onLose) d.onLose(this); }
+      if (this.form) this.clearForm();
       this.hp = 0; this.setState('dead'); this.deadT = 0; this.solid = false; this.vx = 0; this.vy = fell ? 0 : -3;
       this.mouth = null; this.ability = null; this.stopInhale();
       if (this.stoneBox) { this.stoneBox.dead = true; this.stoneBox = null; }
@@ -781,6 +898,11 @@
       else if (this.state === 'fall' && this.flipT > 0) opts.frame = Math.floor((22 - this.flipT) / 5.5) % 4;
       else if (this.state === 'attack') opts.t = this.stateT / 60;
       else opts.t = this.stateT / 60;
+      // 整體變身：完整替換精靈（form.spr 可順便改寫 opts.frame / opts.fps）
+      if (this.form && this.form.spr) {
+        const a2 = this.form.spr(this, anim, opts);
+        if (a2 && KB.has(a2)) anim = a2;
+      }
       if (this.invincibleT > 0) { const hues = ['#ffffff', '#ffe040', '#ff80c0', '#80e0ff']; if ((this.stateT >> 1) & 1) opts.tint = hues[(this.stateT >> 2) % 4]; }
       // 落地擠壓：gfx 支援 scaleX/scaleY（anchor=bottom，擠壓以腳底為基準）
       let squash = 0;
@@ -800,17 +922,23 @@
         if (KB.has(star)) g.spr(star, this.cx, this.bottom + 12 + bob, { t: this.t, flip: this.dir < 0, fps: 8 });
       }
       if (this.state === 'swim' && this.swimActT > 0) opts.frame = 1;
-      g.spr(anim, this.cx, this.bottom + bob, opts);
+      // 變身體型：以腳底中央為錨點放大（帽子同步放大），並套用變身透明度
+      const fsc = this.formScale;
+      if (fsc !== 1) { opts.scaleX = (opts.scaleX || 1) * fsc; opts.scaleY = (opts.scaleY || 1) * fsc; }
+      if (this.form && this.form.alpha !== undefined && opts.alpha === undefined) opts.alpha = this.form.alpha;
+      if (!(this.form && this.form.hidden)) g.spr(anim, this.cx, this.bottom + bob, opts);
       // 帽子
-      if (this.ability && this.state !== 'stone' && this.state !== 'door' && this.state !== 'dead') {
+      if (this.ability && this.state !== 'stone' && this.state !== 'door' && this.state !== 'dead' && !(this.form && this.form.hidden)) {
         const d = this.abilityDef; const hat = d && d.hat ? d.hat : 'hat_' + this.ability;
         if (KB.has(hat)) {
           const off = KB.HAT_OFFSET[this.state] || (this.full ? KB.HAT_OFFSET.full : KB.HAT_OFFSET.default);
           const ho = d && d.hatOffset && d.hatOffset[this.state] ? d.hatOffset[this.state] : null;
           const ox = ho ? ho[0] : off[0], oy = ho ? ho[1] : off[1];
-          if (oy < 90) g.spr(hat, this.cx + ox * this.dir, this.y + oy + bob + Math.round(squash * 18), { flip: this.dir < 0, t: this.t, tint: opts.tint });
+          if (oy < 90) g.spr(hat, this.cx + ox * this.dir * fsc, this.y + oy * fsc + bob + Math.round(squash * 18 * fsc),
+            { flip: this.dir < 0, t: this.t, tint: opts.tint, alpha: opts.alpha, scaleX: fsc !== 1 ? fsc : undefined, scaleY: fsc !== 1 ? fsc : undefined });
         }
       }
+      if (this.form && this.form.draw) { try { this.form.draw(g, this); } catch (e) { } }
       if (KB.DEBUG && KB.showHitbox) g.rect(this.x, this.y, this.w, this.h, 'rgba(0,255,0,0.3)');
     }
   }
