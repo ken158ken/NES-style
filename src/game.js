@@ -16,7 +16,10 @@
     constructor(levelId, opts) {
       opts = opts || {};
       this.levelId = levelId; this.opts = opts;
-      this.level = KB.LEVELS.find(l => l.id === levelId) || KB.LEVELS[0];
+      // KB.EXTRA_LEVELS：不在選關地圖上的附加關卡（例如競技場休息房，src/arena.js 註冊）
+      this.level = KB.LEVELS.find(l => l.id === levelId) || (KB.EXTRA_LEVELS && KB.EXTRA_LEVELS[levelId]) || KB.LEVELS[0];
+      this.arena = opts.arena || null;        // 競技場模式（src/arena.js）
+      this.kills = opts.kills || 0;           // 擊敗敵人數（結算用）
       this.lives = opts.lives !== undefined ? opts.lives : (KB.session ? KB.session.lives : KB.START_LIVES);
       this.score = opts.score !== undefined ? opts.score : (KB.session ? KB.session.score : 0);
       this.entities = []; this.parts = []; this.popups = [];
@@ -83,6 +86,8 @@
       return null;
     }
     useDoor(door) {
+      // 競技場：出口門＝進休息房 / 下一戰 / 結算（src/arena.js 的 KB.arenaExit）
+      if (door.exit && this.arena && KB.arenaExit) { KB.arenaExit(this); return; }
       if (door.exit) { this.levelClear(); return; }
       this.fadeTo(() => { const to = door.to; this.loadRoom(to.room, to.x, to.y); });
     }
@@ -95,6 +100,7 @@
     // ---------- 死亡 / 過關 ----------
     playerDied() {
       this.lives--;
+      if (this.lives < 0 && this.arena && KB.arenaFail) { KB.arenaFail(this); return; }   // 競技場只有 1 條命
       if (this.lives < 0) { KB.session.score = this.score; KB.setScene(KB.GameOverScene ? new KB.GameOverScene(this) : new GameScene(this.levelId, { lives: KB.START_LIVES })); return; }
       const cp = this.checkpoint;
       this.fade = 1; this.fadeDir = -1;
@@ -107,6 +113,14 @@
       this.clearT = 0; KB.audio.music('clear'); KB.audio.sfx('clear');
       this.player.startDance();
       KB.save.cleared[this.levelId] = true; KB.save.score = Math.max(KB.save.score || 0, this.score); KB.saveGame();
+    }
+    // 結算後的去向（KB.ResultScene 結束時呼叫；沒有結算畫面時 clearT 直接呼叫）
+    gotoNext() {
+      KB.session.lives = this.lives; KB.session.score = this.score;
+      const idx = KB.LEVELS.indexOf(this.level);
+      if (idx >= KB.LEVELS.length - 1 && KB.EndingScene) KB.setScene(new KB.EndingScene(this));
+      else if (KB.StageSelectScene) KB.setScene(new KB.StageSelectScene(idx + 1));
+      else KB.setScene(new GameScene(KB.LEVELS[Math.min(idx + 1, KB.LEVELS.length - 1)].id, { lives: this.lives, score: this.score }));
     }
     onBossDefeated() {
       // 魔王死亡：星星噴發、跳舞、下一關
@@ -143,6 +157,8 @@
         else this.updatePause();
         return;
       }
+      // 遊玩計時（不含淡入淡出 / 暫停 / hit-stop；結算與競技場計時用）
+      if (this.clearT < 0) this.timeAlive++;
       // 魔王登場
       if (this.bossIntroT > 0) {
         this.bossIntroT--;
@@ -162,10 +178,9 @@
         if (this.clearT % 12 === 0 && this.clearT < 120) KB.particles(this.player.cx + (Math.random() - 0.5) * 60, this.player.cy - 20 + (Math.random() - 0.5) * 40, ['#fff', '#ffe040', '#ffb0d0', '#80e0ff'], 4, { spread: 1.5, grav: 0.02, life: 40 });
         if (this.clearT === 220) {
           KB.session.lives = this.lives; KB.session.score = this.score;
-          const idx = KB.LEVELS.indexOf(this.level);
-          if (idx >= KB.LEVELS.length - 1 && KB.EndingScene) KB.setScene(new KB.EndingScene(this));
-          else if (KB.StageSelectScene) KB.setScene(new KB.StageSelectScene(idx + 1));
-          else KB.setScene(new GameScene(KB.LEVELS[Math.min(idx + 1, KB.LEVELS.length - 1)].id, { lives: this.lives, score: this.score }));
+          // 過關結算畫面（ui.js 的 KB.ResultScene）→ 結算結束後才進選關 / 結局
+          if (KB.ResultScene) { KB.setScene(new KB.ResultScene(this)); return; }
+          this.gotoNext();
         }
       }
       // 實體更新
@@ -178,6 +193,8 @@
         e.update(dt);
       }
       this.collisions();
+      // 擊敗數（結算用）：每個敵人只計一次
+      for (const e of this.entities) if (e.dead && e.type === 'enemy' && !e._killCounted) { e._killCounted = true; this.kills++; }
       // 移除死亡實體
       this.entities = this.entities.filter(e => !e.dead || e === p);
       this.map.update();
@@ -261,14 +278,73 @@
       if (this.boss && this.boss.dead && !this.bossDefeatT && this.bossDefeatT !== 0) { }
       if (this.boss && this.boss.dead && this.bossDefeatT === undefined) this.onBossDefeated();
     }
+    // 判定框 / 投射物覆蓋到的磁磚：* B 直接破、X 需重擊（否則「叮」）、I 火焰融化、F 火焰點燃
     breakBlocksIn(a) {
       const x0 = Math.floor(a.x / T), x1 = Math.floor((a.x + a.w - 1) / T), y0 = Math.floor(a.y / T), y1 = Math.floor((a.y + a.h - 1) / T);
-      let hit = false;
+      const fire = a.kind === 'fire';
+      let hit = false, clink = null;
       for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++) {
         const ch = this.map.get(tx, ty);
         if (ch === '*' || ch === 'B') { this.map.breakBlock(tx, ty); hit = true; }
+        else if (ch === 'X') {
+          if (KB.TileMap.hardBreakable(a)) { this.map.breakBlock(tx, ty); hit = true; }
+          else if (!clink) clink = [tx, ty];
+        } else if (ch === 'I') {
+          if (fire) this.map.meltIce(tx, ty);
+          else if (KB.TileMap.hardBreakable(a)) { this.map.breakBlock(tx, ty); hit = true; }
+          else if (!clink) clink = [tx, ty];
+        } else if (ch === 'F') {
+          if (fire) this.map.igniteFuse(tx, ty);
+        }
       }
+      if (clink && !hit) this.map.clink(clink[0], clink[1]);
       if (hit && a.type === 'proj' && !a.pierce) { a.dead = true; KB.fx(a.fxHit || 'fx_hit', a.cx, a.cy + 6); }
+    }
+    // ---------- 暗房遮罩 ----------
+    // 離屏畫布填黑 → destination-out 以徑向漸層挖出卡比周圍的光圈。
+    // 光圈半徑：預設 40px；abilities.js 在放電 / 噴火時設 KB.game.lightR / lightT（幀數），
+    // 招式結束後 lightT 線性遞減、半徑平滑縮回 40px。
+    drawDark(ctx, cam) {
+      let cv = this._darkCv;
+      if (!cv) {
+        cv = this._darkCv = KB.makeCanvas(KB.W, KB.VIEW_H);
+        this._darkCtx = cv.getContext('2d');
+      }
+      const x = this._darkCtx;
+      if (this.lightT > 0 && this._lightF !== this.frame) { this._lightF = this.frame; this.lightT--; }
+      if (!(this.lightT > 0)) { this.lightT = 0; }
+      const peak = this.lightR || 40;
+      const r = Math.max(24, 40 + (peak - 40) * Math.min(1, this.lightT / 180));
+      x.globalCompositeOperation = 'source-over';
+      x.clearRect(0, 0, KB.W, KB.VIEW_H);
+      x.fillStyle = this.room.darkColor || 'rgba(4,4,14,0.94)';
+      x.fillRect(0, 0, KB.W, KB.VIEW_H);
+      x.globalCompositeOperation = 'destination-out';
+      const hole = (px, py, rad, core) => {
+        if (px < -rad || px > KB.W + rad || py < -rad || py > KB.VIEW_H + rad) return;
+        const gr = x.createRadialGradient(px, py, 0, px, py, rad);
+        gr.addColorStop(0, 'rgba(0,0,0,1)');
+        gr.addColorStop(core, 'rgba(0,0,0,0.92)');
+        gr.addColorStop(1, 'rgba(0,0,0,0)');
+        x.fillStyle = gr;
+        x.beginPath(); x.arc(px, py, rad, 0, Math.PI * 2); x.fill();
+      };
+      const p = this.player;
+      if (p) hole(Math.round(p.cx - cam.x), Math.round(p.cy - cam.y), r, 0.55);
+      // 火把 / 燭台裝飾也發光（castle 的 r 火炬、dedede 的 t 火炬 / c 燭台）
+      const deco = this.map.deco;
+      if (deco) {
+        const TORCH = this.theme === 'dedede' ? 'tc' : 'r';
+        const tx0 = Math.max(0, Math.floor(cam.x / T) - 1), tx1 = Math.min(this.map.w - 1, Math.floor((cam.x + KB.W) / T) + 1);
+        const ty0 = Math.max(0, Math.floor(cam.y / T) - 1), ty1 = Math.min(this.map.h - 1, Math.floor((cam.y + KB.VIEW_H) / T) + 1);
+        const fl = 1 + Math.sin(this.t * 9) * 0.06 + Math.sin(this.t * 21) * 0.04;
+        for (let ty = ty0; ty <= ty1; ty++) for (let tx = tx0; tx <= tx1; tx++) {
+          if (TORCH.indexOf(deco[ty][tx]) < 0) continue;
+          hole(Math.round(tx * T + 8 - cam.x), Math.round(ty * T + 2 - cam.y), 34 * fl, 0.35);
+        }
+      }
+      x.globalCompositeOperation = 'source-over';
+      ctx.drawImage(cv, 0, 0);
     }
 
     // ---------- 鏡頭 ----------
@@ -321,8 +397,10 @@
       const list = this.entities.filter(e => !e.dead || e === this.player).sort((a, b) => a.z - b.z);
       for (const e of list) e.draw(g);
       // 粒子
-      for (const q of this.parts) { ctx.fillStyle = q.color; ctx.fillRect(Math.round(q.x - cam.x), Math.round(q.y - cam.y), q.size, q.size); }
       this.map.drawWater(ctx, cam, this.t);
+      for (const q of this.parts) { ctx.fillStyle = q.color; ctx.fillRect(Math.round(q.x - cam.x), Math.round(q.y - cam.y), q.size, q.size); }
+      // 暗房遮罩（room.dark）：卡比周圍以徑向漸層挖亮，火把也會透出小光暈
+      if (this.room && this.room.dark) this.drawDark(ctx, cam);
       // 分數彈出
       for (const pu of this.popups) KB.text(ctx, String(pu.n), pu.x - cam.x, pu.y - cam.y - 8, { color: '#fff', align: 'center', outline: '#203040' });
       // 魔王登場字幕
@@ -338,6 +416,8 @@
         (KB.UI && KB.UI.text ? KB.UI.text : KB.text)(ctx, '過關！', KB.W / 2, 60, { color: '#ffe040', align: 'center', size: 16, outline: '#603000' });
       }
       ctx.restore();
+      // 關卡開場橫幅（WORLD n + 關名，滑入 → 停 → 滑出，不阻擋操作）
+      if (KB.UI && KB.UI.drawLevelBanner) KB.UI.drawLevelBanner(ctx, this);
       // 遊戲內「?」提示（進新關卡 toast / 右上角常駐問號）
       if (KB.UI && KB.UI.drawGameHint) KB.UI.drawGameHint(ctx, this);
       // HUD
@@ -366,7 +446,8 @@
   KB.GameScene = GameScene;
 
   // ---------- 存檔 ----------
-  KB.save = { cleared: {}, score: 0 };
+  // best：各關最佳結算總分（ui.js ResultScene / 選關面板）；arena：競技場最佳時間（src/arena.js）
+  KB.save = { cleared: {}, score: 0, best: {}, arena: {} };
   try { const s = localStorage.getItem('kirbystar_save'); if (s) KB.save = Object.assign(KB.save, JSON.parse(s)); } catch (e) { }
   KB.saveGame = function () { try { localStorage.setItem('kirbystar_save', JSON.stringify(KB.save)); } catch (e) { } };
 })();

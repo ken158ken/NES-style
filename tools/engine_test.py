@@ -493,6 +493,145 @@ def main():
         check('HELP 格式不變（[鍵, 說明] 字串對）',
               pg.evaluate("()=>KB.input.HELP.every(r=>Array.isArray(r)&&r.length===2&&typeof r[0]==='string'&&typeof r[1]==='string')") is True)
 
+        # ================= Round 2 / player2 =================
+        def clear_parts(): pg.evaluate("()=>{KB.game.parts.length=0}")
+
+        # 33. 入水 / 出水水花粒子
+        goto(38, 9); step(3)
+        pg.evaluate("(o)=>__kb.press(o)", {'right': True})
+        entered = False; pin = 0
+        for i in range(120):
+            clear_parts(); step(1)
+            if jsv('KB.player.inWater'): entered = True; pin = parts(); break
+        release(1)
+        check('入水瞬間水花粒子（6 顆）', entered and pin >= 6, (entered, pin))
+        check('入水進入 swim 狀態', pl()['state'] == 'swim', pl()['state'])
+        shot('water_splash')
+        # 水中氣泡：每 20 幀 1 顆
+        clear_parts(); step(21)
+        check('水中嘴邊氣泡（每 20 幀 1 顆）', 1 <= parts() <= 3, parts())
+        # 出水小水花
+        exited = False; pout = 0
+        for i in range(60):
+            for k in range(6):
+                clear_parts()
+                pg.evaluate("(o)=>__kb.press(o)", {'right': True, 'jump': k == 0})
+                step(1)
+                if not jsv('KB.player.inWater'): exited = True; pout = parts(); break
+            if exited: break
+        release(1)
+        check('出水小水花', exited and pout >= 3, (exited, pout))
+
+        # 34. 水中吸入（範圍減半 26px）→ full → 吐星
+        goto(38, 9); step(2); press('right', 26)
+        check('水中(2)', pl()['state'] == 'swim', pl()['state'])
+        release(1)
+        spawn_enemy('waddledee', 44, 8)
+        # a) 距離 40px（陸上吸得到、水中吸不到）
+        pg.evaluate("()=>{const e=KB.game.entities.find(x=>x.type==='enemy');KB.player.x=e.x-40-14;KB.player.y=e.y;KB.player.dir=1;e.vx=0;e.speed=0;}")
+        pg.evaluate("(o)=>__kb.press(o)", {'attack': True})
+        far_pull = False
+        for i in range(20):
+            step(1)
+            if pg.evaluate("()=>{const e=KB.game.entities.find(x=>x.type==='enemy');return !!(e&&e.beingInhaled)}"): far_pull = True; break
+        release(1)
+        check('水中吸力範圍減半：40px 外吸不到', not far_pull, far_pull)
+        # b) 距離 20px：吸得到
+        pg.evaluate("()=>{const e=KB.game.entities.find(x=>x.type==='enemy');KB.player.x=e.x-20-14;KB.player.y=e.y;KB.player.dir=1;e.vx=0;e.speed=0;}")
+        pg.evaluate("(o)=>__kb.press(o)", {'attack': True})
+        got = False
+        for i in range(120):
+            step(1)
+            if pl()['mouth']: got = True; break
+        release(1)
+        q = pl()
+        check('水中吸入 → 含物（state 仍為 swim）', got and q['mouth'] is not None and q['state'] == 'swim', (got, q['state'], q['mouth']))
+        shot('water_inhale')
+        # c) 含物後吐星（先讓吸入的 hit-stop 2 幀過去）
+        step(8)
+        tap('attack', 1); step(3)
+        stars = [e for e in pg.evaluate("()=>__kb.entities()") if e['spr'] == 'proj_star']
+        check('水中含物可吐星', pl()['mouth'] is None and len(stars) >= 1, (pl()['mouth'], len(stars)))
+        release(1); step(20)
+
+        # 35. rideStar：沿路徑飛行、無敵、不可操作、抵達呼叫 onArrive
+        goto(2, 9); step(3)
+        st0 = pg.evaluate("""()=>{window.__arr=0;window.__arrX=null;
+          const ok=KB.player.rideStar([[100,140],[200,60],[300,140]],p=>{window.__arr++;window.__arrX=[p.cx,p.cy];});
+          return [ok,KB.player.state]}""")
+        check('rideStar 回傳 true 並進入 ride 狀態', st0[0] is True and st0[1] == 'ride', st0)
+        hurt_ret = pg.evaluate("()=>KB.player.hurt(2,{cx:0,cy:0})")
+        check('ride 中無敵（hurt 無效）', hurt_ret is False and pl()['hp'] == 6 and jsv('KB.player.invincible') is True, (hurt_ret, pl()['hp']))
+        clear_parts(); step(4)
+        check('ride 拖尾粒子', parts() >= 1, parts())
+        pg.evaluate("(o)=>__kb.press(o)", {'jump': True, 'left': True})
+        step(6)
+        check('ride 中不可操作（仍為 ride、不受重力）', pl()['state'] == 'ride' and abs(pl()['vy']) < 0.01, (pl()['state'], pl()['vy']))
+        release(1)
+        miny = 999; arrived = 0
+        for i in range(400):
+            step(1); miny = min(miny, pl()['y'])
+            if pg.evaluate("()=>window.__arr") > 0: arrived = i; break
+        arr = pg.evaluate("()=>window.__arr"); arrxy = pg.evaluate("()=>window.__arrX")
+        check('rideStar 經過中途高點 (200,60)', miny < 80, miny)
+        check('rideStar 抵達終點並呼叫 onArrive(player) 一次',
+              arr == 1 and arrxy is not None and abs(arrxy[0] - 300) < 6 and abs(arrxy[1] - 140) < 6, (arr, arrxy, arrived))
+        check('onArrive 未換場景 → 自動落地 fall', pl()['state'] in ('fall', 'idle'), pl()['state'])
+        shot('ride_star')
+        step(90)
+        check('騎星結束後回到地面', pl()['onGround'], (pl()['state'], pl()['y']))
+        # onArrive 換房時不強制落地（模擬 mechanics 的傳送星）
+        goto(2, 9); step(3)
+        pg.evaluate("()=>{KB.player.rideStar([[60,120]],p=>{KB.game.loadRoom(1,2,9);});}")
+        for i in range(200):
+            step(1)
+            if pl()['state'] != 'ride': break
+        check('rideStar onArrive 可換房', st()['game']['room'] == 1, (st()['game']['room'], pl()['state']))
+
+        # 36. 梯子：吐氣彈不離開梯子 + 爬到頂 / 底的過渡幀
+        goto(52, 9); step(2)
+        press('right', 8); release(1)
+        press('up', 20)
+        check('梯子上(2)', pl()['state'] == 'climb', pl()['state'])
+        e0 = st()['game']['ents']
+        tap('attack', 1); step(3)
+        puffs = [e for e in pg.evaluate("()=>__kb.entities()") if e['spr'] == 'proj_airpuff']
+        check('梯子上按攻擊吐氣彈（不離開梯子）', pl()['state'] == 'climb' and len(puffs) >= 1, (pl()['state'], len(puffs)))
+        shot('ladder_puff')
+        topT = 0
+        pg.evaluate("(o)=>__kb.press(o)", {'up': True})
+        for i in range(200):
+            step(1)
+            if pl()['state'] == 'idle': topT = jsv('KB.player.climbTopT'); break
+        release(1)
+        check('爬到頂有過渡幀 kirby_climb_top', topT > 0 and pg.evaluate("()=>KB.has('kirby_climb_top')") is True, topT)
+        check('kirby_swim_inhale / kirby_ride 精靈存在',
+              pg.evaluate("()=>KB.has('kirby_swim_inhale')&&KB.has('kirby_ride')") is True)
+
+        # 37. Extra 模式：maxHp 3；能力星壽命常數
+        r = pg.evaluate("()=>{KB.session=KB.session||{};KB.session.extra=true;const p=new KB.Player(0,0);KB.session.extra=false;return [p.maxHp,p.hp]}")
+        check('Extra 模式 maxHp / hp = 3', r == [3, 3], r)
+        r2 = pg.evaluate("()=>{const p=new KB.Player(0,0);return [p.maxHp,p.hp]}")
+        check('一般模式 maxHp / hp = 6', r2 == [6, 6], r2)
+        check('KB.PHYS.abilityStarLife = 600', jsv('KB.PHYS.abilityStarLife') == 600, jsv('KB.PHYS.abilityStarLife'))
+        check('KB.PHYS 新常數齊備',
+              jsv('KB.PHYS.waterInhaleRange') == 26 and jsv('KB.PHYS.rideSpeed') == 4 and jsv('KB.PHYS.bubbleEvery') == 20
+              and jsv('KB.PHYS.splashParts') == 6 and jsv('KB.PHYS.waterKnock') == 0.5 and jsv('KB.PHYS.extraMaxHp') == 3)
+        # SPEC 第 10 節既有手感常數未被更動
+        check('SPEC 既有常數未變（walk/run/jump/grav/swim）',
+              jsv('[KB.PHYS.walk,KB.PHYS.run,KB.PHYS.jump,KB.PHYS.grav,KB.PHYS.swimSpeed,KB.PHYS.swimUp]') == [1.3, 2.2, -4.4, 0.24, 1.0, -2.2])
+
+        # 38. 水中受傷擊退減半
+        goto(38, 9); step(2); press('right', 26); release(1)
+        check('水中(3)', pl()['state'] == 'swim', pl()['state'])
+        kw = pg.evaluate("""()=>{const p=KB.player;p.invuln=0;p.invincibleT=0;p.hurt(1,{cx:p.cx+40,cy:p.cy});return [p.vx,p.vy]}""")
+        check('水中受傷擊退減半（vx=-1.0, vy=-1.1）',
+              abs(abs(kw[0]) - 1.0) < 0.01 and abs(kw[1] + 1.1) < 0.01, kw)
+        goto(2, 9); step(4)
+        kl = pg.evaluate("""()=>{const p=KB.player;p.invuln=0;p.invincibleT=0;p.hurt(1,{cx:p.cx+40,cy:p.cy});return [p.vx,p.vy]}""")
+        check('陸上受傷擊退不變（vx=-2.0, vy=-2.2）',
+              abs(abs(kl[0]) - 2.0) < 0.01 and abs(kl[1] + 2.2) < 0.01, kl)
+
         b.close()
     print('---')
     fails = [r for r in results if not r[1]]

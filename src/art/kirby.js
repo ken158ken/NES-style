@@ -268,6 +268,22 @@
     backK({ arms: [[0, 2, 5], [15, 5, 5]], feet: [[1, 15], [11, 13]] }),
     backK({ arms: [[0, 5, 5], [15, 2, 5]], feet: [[1, 13], [11, 15]] }),
   ], { fps: 6 });
+  // 水中吸入 2 幀（24×20）：橫躺 + 大張嘴（嘴前方是吸力範圍）
+  S('kirby_swim_inhale', [
+    swimK({ mouth: mouthBig(7, 5), mouthAt: [10, 11], eyeAt: [[6, 4], [10, 4]], cheekAt: [[3, 10]],
+      feetBack: [[-4, 7], [-3, 11]], arms: [[14, 2, 5], [16, 1, 4], [-1, 9, 5]] }),
+    swimK({ mouth: mouthBig(9, 6), mouthAt: [10, 10], eyeAt: [[6, 3], [10, 3]], cheekAt: [[3, 10]],
+      feetBack: [[-3, 7], [-4, 11]], arms: [[15, 8, 5], [17, 10, 4], [-1, 9, 5]] }),
+  ], { fps: 8 });
+  // 爬梯上 / 下端過渡（1 幀，背影把身體撐上去）
+  S('kirby_climb_top', [backK({ dy: -1, arms: [[0, 1, 5], [15, 1, 5]], feet: [[2, 16], [10, 16]] })]);
+  // 騎傳送星 2 幀：坐姿（雙手舉高、雙腳往前伸、開心眼）；星星由 player.js 另外畫在下方
+  const rideK = o => kirby(Object.assign({
+    arms: [[15, 3, 5], [0, 5, 5]], eyes: EYE_HAPPY2, eyeAt: [[7, 6], [12, 6]],
+    mouth: MOUTH_O, mouthAt: [9, 12], cheekAt: [[4, 10], [15, 10]],
+    feet: [[12, 14], [7, 16]],
+  }, o));
+  S('kirby_ride', [rideK({}), rideK({ dy: -1 })], { fps: 6 });
   // 進門 2 幀：背影走進去
   S('kirby_door', [
     backK({ feet: [[0, 15], [12, 15]] }),

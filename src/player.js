@@ -3,14 +3,16 @@
   const P = KB.PHYS;
   KB.HAT_OFFSET = { default: [0, 0], crouch: [0, -1], slide: [2, 1], full: [0, -1], float: [0, -2],
     inhale: [0, -1], spit: [0, -1], swallow: [0, -1], exhale: [0, -1], dance: [0, -1],
-    swim: [2, 1], hurt: [0, 0], climb: [0, 0], attack: [0, 0],
+    swim: [2, 1], hurt: [0, 0], climb: [0, 0], attack: [0, 0], ride: [0, -2],
     stone: [0, 99], door: [0, 99], dead: [0, 99] };
 
   class Player extends KB.Entity {
     constructor(x, y) {
       super(x, y);
       this.type = 'player'; this.w = 14; this.h = 15; this.z = 3; this.stepH = 8;
-      this.hp = KB.MAX_HP; this.maxHp = KB.MAX_HP;
+      // Extra 模式（KB.session.extra）：最大 HP 3
+      this.maxHp = (KB.session && KB.session.extra) ? P.extraMaxHp : KB.MAX_HP;
+      this.hp = this.maxHp;
       this.state = 'idle'; this.stateT = 0;
       this.ability = null; this.mouth = null; this.abilityData = {};
       this.attackTimer = 0; this.attackLock = false; this.hurtTimer = 0; this.slideT = 0;
@@ -28,6 +30,11 @@
       this.coyoteT = 0; this.jumpBufT = 0; this.dustCd = 0; this.skidT = 0;
       this.exhaleLockT = 0; this.hurtFlashT = 0; this.dropT = 0; this.dropThrough = false;
       this.slideBounceT = 0; this.slideBox = null; this.landImpact = 0;
+      // Round 2：游泳 / 騎星 / 梯子
+      this.bubbleT = 0; this.swimInhaleT = 0; this.swimActT = 0;
+      this.ridePath = null; this.rideIdx = 0; this.rideT = 0; this.rideVx = 0; this.rideVy = 0;
+      this.rideArrive = null; this.rideStuck = 0; this.rideLastD = 1e9;
+      this.climbTopT = 0; this.ladderAtkT = 0;
       this.name = 'kirby';
     }
 
@@ -49,9 +56,9 @@
     }
     get full() { return !!this.mouth; }
     get airborne() { return !this.onGround; }
-    get canControl() { return this.ctl && !['dead', 'door', 'dance', 'hurt'].includes(this.state); }
+    get canControl() { return this.ctl && !['dead', 'door', 'dance', 'hurt', 'ride'].includes(this.state); }
     get abilityDef() { return this.ability ? KB.ABILITIES[this.ability] : null; }
-    get invincible() { return this.invincibleT > 0; }
+    get invincible() { return this.invincibleT > 0 || this.state === 'ride'; }
     isAttackState() { return this.state === 'attack'; }
 
     // ---------- 主更新 ----------
@@ -71,8 +78,16 @@
       if (this.dustCd > 0) this.dustCd--;
       if (this.skidT > 0) this.skidT--;
       if (this.dropT > 0) { this.dropT--; this.dropThrough = true; } else this.dropThrough = false;
+      if (this.climbTopT > 0) this.climbTopT--;
+      if (this.ladderAtkT > 0) this.ladderAtkT--;
+      if (this.swimActT > 0) this.swimActT--;
       this.wasInWater = this.inWater;
       this.inWater = map.inWater(this.cx, this.cy);
+      // 入水 / 出水水花
+      if (this.inWater !== this.wasInWater && this.state !== 'dead' && this.state !== 'door') {
+        this.waterSplash(this.inWater);
+        if (this.inWater) this.bubbleT = 0;
+      }
 
       switch (this.state) {
         case 'dead': this.updateDead(); return;
@@ -81,8 +96,9 @@
         case 'hurt': this.updateHurt(); return;
         case 'stone': this.updateStone(); return;
         case 'climb': this.updateClimb(); return;
+        case 'ride': this.updateRide(); return;
       }
-      if (this.inWater && !['swim'].includes(this.state) && !this.full && this.state !== 'attack') { this.setState('swim'); this.vy = Math.min(this.vy, 1); }
+      if (this.inWater && this.state !== 'swim' && this.state !== 'attack') { this.setState('swim'); this.vy = Math.min(this.vy, 1); }
       if (!this.inWater && this.state === 'swim') this.setState('fall');
       if (this.state === 'swim') { this.updateSwim(); return; }
 
@@ -453,6 +469,32 @@
     }
 
     // ---------- 游泳 ----------
+    /** 水面 y（從目前位置往上找水柱頂端）；不在水裡時回傳目前 cy */
+    waterTopY() {
+      const map = KB.game && KB.game.map; if (!map) return this.cy;
+      let ty = Math.floor(this.cy / 16);
+      if (!map.inWater(this.cx, ty * 16 + 8)) {
+        // 剛出水：往下找第一格水
+        for (let k = 0; k < 3 && !map.inWater(this.cx, (ty + 1) * 16 + 8); k++) ty++;
+        return (ty + 1) * 16;
+      }
+      for (let k = 0; k < 24 && ty > 0 && map.inWater(this.cx, (ty - 1) * 16 + 8); k++) ty--;
+      return ty * 16;
+    }
+    /** 入水 / 出水水花（藍白，往上噴）；enter=true 為入水 */
+    waterSplash(enter) {
+      const y = this.waterTopY();
+      const n = enter ? P.splashParts : Math.max(3, Math.round(P.splashParts / 2));
+      KB.particles(this.cx, y - 1, ['#ffffff', '#80d8ff', '#ffffff', '#c0f0ff'], n,
+        { spread: enter ? 1.7 : 1.2, grav: 0.16, life: 26, up: enter ? 2.2 : 1.4, size: 3, vx: this.vx * 0.3 });
+      KB.audio.sfx('splash');
+    }
+    /** 嘴邊氣泡（水中每 P.bubbleEvery 幀 1 顆） */
+    waterBubble() {
+      KB.particles(this.cx + this.dir * 7, this.cy - 2, ['#ffffff', '#e8ffff'], 1,
+        { spread: 0.25, grav: -0.04, life: 46, up: 0.4, size: 3 });
+      KB.audio.sfx('bubble');
+    }
     updateSwim() {
       const inp = KB.input;
       const dirIn = (inp.down('right') ? 1 : 0) - (inp.down('left') ? 1 : 0);
@@ -460,9 +502,27 @@
       this.vx = Math.max(-P.swimSpeed, Math.min(P.swimSpeed, this.vx));
       if (inp.pressed('jump')) { this.vy = P.swimUp; KB.audio.sfx('float'); KB.particles(this.cx, this.cy, '#c0f0ff', 3, { spread: 1, grav: -0.05, life: 15 }); }
       if (inp.down('down')) this.vy += 0.1;
-      if (inp.pressed('attack')) {
-        KB.audio.sfx('spit');
-        KB.shoot({ spr: 'proj_airpuff', x: this.cx + this.dir * 10, y: this.cy, vx: this.dir * 2.5, dmg: 1, owner: 'player', life: 24, w: 8, h: 8, dir: this.dir, solid: true, fxHit: 'fx_poof' });
+      // 嘴邊氣泡
+      this.bubbleT++;
+      if (this.bubbleT % P.bubbleEvery === 0) this.waterBubble();
+      // 攻擊鍵：含物＝吐星；無能力＝吸入（範圍減半）；有能力＝吐氣彈
+      if (this.full) {
+        this.swimInhaleT = 0;
+        if (inp.pressed('attack')) { this.spitWater(); }
+      } else if (this.ability) {
+        this.swimInhaleT = 0;
+        if (inp.pressed('attack')) {
+          KB.audio.sfx('spit');
+          KB.shoot({ spr: 'proj_airpuff', x: this.cx + this.dir * 10, y: this.cy, vx: this.dir * 2.5, dmg: 1, owner: 'player', life: 24, w: 8, h: 8, dir: this.dir, solid: true, fxHit: 'fx_poof' });
+        }
+      } else if (inp.down('attack')) {
+        if (this.swimInhaleT === 0) KB.audio.sfx('inhale');
+        this.swimInhaleT++;
+        this.waterInhale();
+        if (this.full) { this.physics(); return; }
+      } else {
+        if (this.swimInhaleT > 0) this.releaseInhaled();
+        this.swimInhaleT = 0;
       }
       if (inp.pressed('up') && this.onGround) { const d = KB.game.doorAt(this); if (d) { this.enterDoor(d); return; } }
       this.grav = P.swimGrav; this.maxFall = P.swimMaxFall;
@@ -471,23 +531,151 @@
       this.afterPhysics();
       if (!this.inWater) { if (this.vy < 0) this.vy = Math.max(this.vy, -3.2); this.setState('jump'); }
     }
+    /** 水中吸入：吸力範圍 P.waterInhaleRange（陸上一半），只吸 inhalable 的敵人 / 物件 */
+    waterInhale() {
+      const R = P.waterInhaleRange;
+      const mx = this.cx + this.dir * 8, my = this.cy;
+      const rx = this.dir > 0 ? this.cx + 4 : this.cx - 4 - R, ry = this.cy - 12, rw = R, rh = 26;
+      const mouth = { x: this.dir > 0 ? this.cx + 2 : this.cx - 12, y: this.cy - 6, w: 10, h: 12 };
+      // 吸力氣泡（往嘴巴飛）
+      if (this.swimInhaleT % 3 === 0) {
+        const px = this.cx + this.dir * R, py = this.cy + (Math.random() - 0.5) * 20;
+        KB.particles(px, py, ['#ffffff', '#c0f0ff'], 1,
+          { spread: 0.15, grav: 0, life: 16, up: 0, vx: -this.dir * 1.4, vy: (my - py) / 16 });
+      }
+      for (const e of KB.game.entities) {
+        if (e.dead || e === this) continue;
+        if (!(e.type === 'enemy' || e.type === 'proj' || e.type === 'item')) continue;
+        if (!e.overlapsRect(rx, ry, rw, rh)) { if (e.inhaleSrc === this) { e.beingInhaled = false; e.inhaleSrc = null; } continue; }
+        if (!e.inhalable) { if (e.onInhaleAttempt) e.onInhaleAttempt(this); continue; }
+        if (e.freezeT > 0) continue;
+        e.beingInhaled = true; e.inhaleSrc = this;
+        e.pullTo ? e.pullTo(mx, my, 1.8) : (e.x += (mx - e.cx) * 0.12, e.y += (my - e.cy) * 0.12);
+        if (e.overlapsRect(mouth.x, mouth.y, mouth.w, mouth.h)) {
+          e.beingInhaled = false; e.inhaleSrc = null;
+          e.onInhaled(this);
+          if (this.mouth) {
+            KB.audio.sfx('swallow'); KB.fx('fx_sparkle', this.cx, this.cy);
+            KB.particles(mx, my, ['#ffffff', '#c0f0ff', '#ffe040'], 5, { spread: 1.4, grav: -0.02, life: 20 });
+            if (KB.game) KB.game.freezeT = Math.max(KB.game.freezeT, P.inhaleFreeze);
+            this.swimInhaleT = 0; this.releaseInhaled();
+            return;
+          }
+        }
+      }
+    }
+    /** 水中吐星（含物時按攻擊） */
+    spitWater() {
+      this.mouth = null; this.swimActT = 10;
+      KB.audio.sfx('spit');
+      KB.shoot({ spr: 'proj_star', x: this.cx + this.dir * 10, y: this.cy, vx: this.dir * 3.2, dmg: 4, owner: 'player', life: 60, w: 12, h: 12, dir: this.dir, solid: true, fxHit: 'fx_hit', rotSpeed: 0.3 * this.dir, type: 'star' });
+      KB.particles(this.cx + this.dir * 8, this.cy, ['#c0f0ff', '#ffffff'], 3, { spread: 0.8, grav: -0.03, life: 24, up: 0.4 });
+    }
+
+    // ---------- 騎乘傳送星 ----------
+    /** 以中心座標定位（Entity 只有 cx 的 setter） */
+    setCenter(x, y) { this.x = x - this.w / 2; this.y = y - this.h / 2; }
+    /**
+     * 騎傳送星沿折線飛行（世界座標）。
+     * @param {Array<[number,number]>} path 路徑點（卡比中心會依序經過）
+     * @param {function(Player)} [onArrive] 抵達最後一點時呼叫；若沒有換場景 / 換房就自動落地
+     */
+    rideStar(path, onArrive) {
+      if (!Array.isArray(path) || !path.length) return false;
+      this.ridePath = path.map(pt => (Array.isArray(pt) ? { x: pt[0], y: pt[1] } : { x: pt.x, y: pt.y }));
+      this.rideIdx = 0; this.rideT = 0; this.rideStuck = 0; this.rideLastD = 1e9;
+      this.rideArrive = typeof onArrive === 'function' ? onArrive : null;
+      this.mouth = null; this.stopInhale(); this.endSlide();
+      if (this.stoneBox) { this.stoneBox.dead = true; this.stoneBox = null; }
+      this.setState('ride');
+      this.vx = 0; this.vy = 0; this.onGround = false; this.jumped = false;
+      this.running = false; this.jumpBufT = 0; this.coyoteT = 0;
+      const t0 = this.ridePath[0];
+      this.rideVx = 0; this.rideVy = 0;
+      const dx = t0.x - this.cx, dy = t0.y - this.cy, d = Math.hypot(dx, dy) || 1;
+      this.rideVx = dx / d * P.rideSpeed; this.rideVy = dy / d * P.rideSpeed;
+      this.dir = this.rideVx < 0 ? -1 : 1;
+      KB.audio.sfx('warp'); KB.fx('fx_sparkle', this.cx, this.cy);
+      return true;
+    }
+    updateRide() {
+      const path = this.ridePath;
+      if (!path || this.rideIdx >= path.length) { this.rideFinish(); return; }
+      this.rideT++;
+      if (this.rideT > 3000) { this.rideFinish(); return; }   // 安全閥
+      const spd = P.rideSpeed, last = this.rideIdx === path.length - 1;
+      const tgt = path[this.rideIdx];
+      let dx = tgt.x - this.cx, dy = tgt.y - this.cy, d = Math.hypot(dx, dy);
+      // 抵達判定（非最後一點放寬，讓轉角平滑）
+      const reach = last ? spd : spd * 1.5;
+      if (d > this.rideLastD + 0.01) this.rideStuck++; else this.rideStuck = 0;
+      this.rideLastD = d;
+      if (d <= reach || this.rideStuck > 20) {
+        if (last) { this.setCenter(tgt.x, tgt.y); this.rideIdx++; this.rideFinish(); return; }
+        this.rideIdx++; this.rideStuck = 0; this.rideLastD = 1e9;
+        const nx = path[this.rideIdx];
+        dx = nx.x - this.cx; dy = nx.y - this.cy; d = Math.hypot(dx, dy) || 1;
+      }
+      // 目標方向 → 以 lerp 平滑轉向，再正規化成固定速度
+      const wx = dx / (d || 1) * spd, wy = dy / (d || 1) * spd;
+      const k = P.rideTurn;
+      this.rideVx += (wx - this.rideVx) * k; this.rideVy += (wy - this.rideVy) * k;
+      const m = Math.hypot(this.rideVx, this.rideVy) || 1;
+      this.rideVx = this.rideVx / m * spd; this.rideVy = this.rideVy / m * spd;
+      this.setCenter(this.cx + this.rideVx, this.cy + this.rideVy);
+      this.vx = this.rideVx; this.vy = 0;
+      if (Math.abs(this.rideVx) > 0.4) this.dir = this.rideVx < 0 ? -1 : 1;
+      this.onGround = false;
+      // 黃白拖尾
+      if (this.rideT % P.rideTrailEvery === 0) {
+        KB.particles(this.cx - this.rideVx * 1.5, this.cy + 5, ['#ffe040', '#ffffff', '#fff8c0'], 1,
+          { spread: 0.35, grav: 0.01, life: 18, up: 0, size: 2 });
+      }
+    }
+    rideFinish() {
+      const cb = this.rideArrive; this.rideArrive = null;
+      this.ridePath = null;
+      const scn = KB.scene, room = KB.game ? KB.game.roomIdx : -1;
+      if (cb) { try { cb(this); } catch (e) { try { console.warn('[rideStar onArrive]', e); } catch (e2) { } } }
+      const samePlace = (KB.scene === scn) && (!KB.game || KB.game.roomIdx === room);
+      if (this.state === 'ride') {
+        this.setState('fall'); this.vx = 0; this.vy = 0; this.jumped = false;
+        if (samePlace) { KB.fx('fx_sparkle', this.cx, this.cy); KB.particles(this.cx, this.cy, ['#ffe040', '#ffffff'], 6, { spread: 1.6, grav: 0.04, life: 20 }); }
+      }
+    }
 
     // ---------- 梯子 ----------
     startClimb() { this.setState('climb'); this.vx = 0; this.vy = 0; this.cx = Math.floor(this.cx / 16) * 16 + 8; }
+    /** 爬到頂 / 底的過渡（1 個過渡幀 kirby_climb_top，共 P.climbTopFrames 幀） */
+    endClimbTop() {
+      this.bottom = Math.floor((this.bottom + 1) / 16) * 16;
+      this.setState('idle'); this.onGround = true; this.climbTopT = P.climbTopFrames;
+      this.footDust(2, 0);
+    }
+    /** 梯子上吐氣彈（不離開梯子） */
+    ladderPuff() {
+      this.ladderAtkT = P.ladderAtkCd;
+      KB.audio.sfx('exhale');
+      KB.shoot({ spr: 'proj_airpuff', x: this.cx + this.dir * 10, y: this.cy, vx: this.dir * 2.6, dmg: 1, owner: 'player', life: 22, w: 10, h: 10, dir: this.dir, solid: true, fxHit: 'fx_poof' });
+      KB.particles(this.cx + this.dir * 8, this.cy, ['#ffffff', '#dcf0ff'], 2, { spread: 0.6, grav: 0, life: 14, up: 0.1, vx: this.dir * 0.4 });
+    }
     updateClimb() {
       const inp = KB.input, map = KB.game.map;
       let dy = 0; if (inp.down('up')) dy = -P.climb; if (inp.down('down')) dy = P.climb;
       this.vy = 0; this.vx = 0; this.y += dy;
       this.climbing = dy !== 0; this.onGround = false;
+      // 梯子上按攻擊：吐氣彈（面向左右可用 ←/→ 切換，但不離開梯子）
+      if (inp.down('left')) this.dir = -1; else if (inp.down('right')) this.dir = 1;
+      if (inp.pressed('attack') && this.ladderAtkT <= 0) { this.ladderPuff(); }
       if (inp.pressed('jump')) { this.setState('fall'); this.vy = -2.5; this.jumped = false; return; }
       const midOn = map.onLadder(this.cx, this.cy), feetOn = map.onLadder(this.cx, this.bottom - 1), belowOn = map.onLadder(this.cx, this.bottom + 1);
       if (dy < 0 && !midOn && !feetOn) {
         // 爬到頂：站在梯子頂端（視為平台）
-        this.bottom = Math.floor((this.bottom + 1) / 16) * 16; this.setState('idle'); this.onGround = true; return;
+        this.endClimbTop(); return;
       }
       if (dy > 0) {
         if (!feetOn && !belowOn) { this.setState('fall'); return; }
-        if (!belowOn && KB.physics.groundBelow(map, this)) { this.bottom = Math.floor((this.bottom + 1) / 16) * 16; this.setState('idle'); this.onGround = true; return; }
+        if (!belowOn && KB.physics.groundBelow(map, this)) { this.endClimbTop(); return; }
       }
       if (dy === 0 && !midOn && !feetOn && !belowOn) this.setState('fall');
     }
@@ -504,12 +692,13 @@
     // ---------- 受傷 / 死亡 ----------
     hurt(amount, src) {
       if (this.dead || this.invuln > 0 || this.invincibleT > 0) return false;
-      if (['dead', 'stone', 'door', 'dance'].includes(this.state)) return false;
+      if (['dead', 'stone', 'door', 'dance', 'ride'].includes(this.state)) return false;
       this.hp -= amount;
       KB.audio.sfx('hurt');
       const from = src && src.cx !== undefined ? src.cx : this.cx - this.dir;
       const kdir = this.cx < from ? -1 : 1;
-      this.vx = kdir * P.knockback; this.vy = -2.2;
+      const km = this.inWater ? P.waterKnock : 1;   // 水中擊退減半
+      this.vx = kdir * P.knockback * km; this.vy = -2.2 * km;
       this.invuln = P.invulnFrames; this.hurtTimer = P.hurtFrames;
       this.mouth = null; this.stopInhale(); this.endSlide();
       // 受傷反饋：hit-stop + 畫面微震 + 閃白
@@ -567,7 +756,10 @@
         case 'crouch': return ['kirby_crouch', 1];
         case 'hurt': return ['kirby_hurt', 1];
         case 'dead': return ['kirby_dead', 8];
-        case 'swim': return ['kirby_swim', 4];
+        case 'swim':
+          if ((this.swimInhaleT > 0 || this.swimActT > 0) && KB.has('kirby_swim_inhale')) return ['kirby_swim_inhale', 8];
+          return ['kirby_swim', 4];
+        case 'ride': return [KB.has('kirby_ride') ? 'kirby_ride' : 'kirby_jump', 6];
         case 'climb': return ['kirby_climb', this.climbing ? 6 : 0];
         case 'door': return ['kirby_door', 6];
         case 'dance': return ['kirby_dance', 6];
@@ -581,6 +773,8 @@
       if (this.invuln > 0 && this.state !== 'dead' && (this.invuln & 2) && this.hurtFlashT <= 0) return; // 閃爍
       let [anim, fps] = this.currentAnim();
       const opts = { flip: this.dir < 0, fps };
+      // 爬梯上 / 下端的過渡幀
+      if (this.climbTopT > 0 && (this.state === 'idle' || this.state === 'walk') && KB.has('kirby_climb_top')) { anim = 'kirby_climb_top'; fps = 0; opts.fps = 0; opts.frame = 0; }
       if (this.state === 'idle') opts.frame = (this.stateT % 200) > 190 ? 1 : 0;
       else if (this.state === 'climb' && !this.climbing) opts.frame = 0;
       else if (this.state === 'float') opts.frame = Math.min(3, Math.floor(this.floatAnimT / 5)) ;
@@ -599,6 +793,13 @@
       if (this.hurtFlashT > 0) opts.tint = '#ffffff';
       let bob = 0;
       if (this.state === 'float') bob = Math.round(Math.sin(this.t * 6) * 1);
+      if (this.state === 'ride') {
+        bob = Math.round(Math.sin(this.t * 8) * 1);
+        // 傳送星畫在卡比腳下（沒有 item_warpstar 就退回 proj_star）
+        const star = KB.has('item_warpstar') ? 'item_warpstar' : 'proj_star';
+        if (KB.has(star)) g.spr(star, this.cx, this.bottom + 12 + bob, { t: this.t, flip: this.dir < 0, fps: 8 });
+      }
+      if (this.state === 'swim' && this.swimActT > 0) opts.frame = 1;
       g.spr(anim, this.cx, this.bottom + bob, opts);
       // 帽子
       if (this.ability && this.state !== 'stone' && this.state !== 'door' && this.state !== 'dead') {

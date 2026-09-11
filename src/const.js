@@ -30,6 +30,18 @@ window.KB = window.KB || {};
     hurtFreeze: 3,        // 受傷 hit-stop
     hurtShake: 4,         // 受傷震動
     inhaleFreeze: 2,      // 吸到東西 hit-stop
+    // ---- Round 2（player2）：游泳 / 騎星 / 梯子 / Extra ----
+    splashParts: 6,       // 入水水花粒子數（出水為一半）
+    bubbleEvery: 20,      // 水中每 n 幀從嘴邊冒 1 顆氣泡
+    waterInhaleRange: 26, // 水中吸力範圍（陸上 52 的一半）
+    waterKnock: 0.5,      // 水中受傷擊退倍率
+    rideSpeed: 4,         // 傳送星飛行速度（px/frame）
+    rideTurn: 0.25,       // 轉角方向平滑係數（lerp）
+    rideTrailEvery: 2,    // 拖尾粒子間隔幀
+    climbTopFrames: 6,    // 爬梯上下端的過渡幀數（kirby_climb_top）
+    ladderAtkCd: 14,      // 梯子上吐氣彈的冷卻幀數
+    abilityStarLife: 600, // 能力星存在幀數（Extra 模式 ×0.5）→ items.js 使用
+    extraMaxHp: 3,        // Extra 模式最大 HP
   };
   // 鏡頭手感（game.js updateCamera）
   KB.CAM = {
