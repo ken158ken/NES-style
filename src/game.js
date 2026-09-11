@@ -335,6 +335,8 @@
       };
       const p = this.player;
       if (p) hole(Math.round(p.cx - cam.x), Math.round(p.cy - cam.y), r, 0.55);
+      // 暗房中的敵人 / 魔王微光（entity.js 設定 e.glow）
+      for (const e of this.entities) { if (!e.dead && e.glow && e !== p && e.x + e.w > cam.x - 40 && e.x < cam.x + KB.W + 40) hole(Math.round(e.cx - cam.x), Math.round(e.cy - cam.y), e.glow * 1.8, 0.45); }
       // 火把 / 燭台裝飾也發光（castle 的 r 火炬、dedede 的 t 火炬 / c 燭台）
       const deco = this.map.deco;
       if (deco) {
