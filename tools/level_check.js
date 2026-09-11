@@ -14,11 +14,14 @@ const isSolid = ch => !!SOLID[ch];
 const isStand = ch => !!SOLID[ch] || !!SLOPE[ch] || ch === '=';
 
 // 實體分類（與 src/enemies.js 行為一致）
-const GROUND = new Set(['waddledee', 'waddledoo', 'hothead', 'sirkibble', 'sparky', 'rocky', 'chilly', 'bladeknight', 'bonkers', 'mrfrosty', 'poppybros', 'cappy', 'twizzy', 'kabu', 'glunk']);
+const GROUND = new Set(['waddledee', 'waddledoo', 'hothead', 'sirkibble', 'sparky', 'rocky', 'chilly', 'bladeknight', 'bonkers', 'mrfrosty', 'poppybros', 'cappy', 'twizzy', 'kabu', 'glunk', 'spikeball', 'snowly']);
 const WATER = new Set(['squishy', 'glunk']);
-const FLY = new Set(['brontoburt', 'scarfy', 'gordo', 'shotzo']);
-const ITEMS = new Set(['tomato', 'food', 'oneup', 'candy', 'pointstar']);
-const TALL = { bonkers: 2, mrfrosty: 2, bladeknight: 2 };   // 佔用的高度（格）
+const FLY = new Set(['brontoburt', 'scarfy', 'gordo', 'shotzo', 'dartwing']);
+const ITEMS = new Set(['tomato', 'food', 'oneup', 'candy', 'pointstar', 'bigstar']);
+// 機關類實體（不需要地面、也不算敵人密度）：大星星收集品 / 開關方塊 / 中魔王門鎖
+const GADGET = new Set(['bigstar', 'switchblock', 'gatekeeper']);
+const UNLOCKER = new Set(['switchblock', 'gatekeeper']);   // 可以解開 locked 門的實體
+const TALL = { bonkers: 2, mrfrosty: 2, bladeknight: 2, snowly: 2 };   // 佔用的高度（格）
 const WIDE = { bonkers: 2, mrfrosty: 2 };
 const BOSS = { whispywoods: { w: 3, h: 4, ground: true }, lololo: { w: 2, h: 2, ground: true }, kracko: { w: 4, h: 3, ground: false }, metaknight: { w: 2, h: 2, ground: true }, dedede: { w: 3, h: 4, ground: true } };
 const DECO = { green: 'tbfsgmrw', castle: 'pwrkacb', island: 'purghsb', cloud: 'csrbdm', dedede: 'pkwtscb' };
@@ -30,7 +33,24 @@ const warn = (s) => { warns++; console.log('  [warn] ' + s); };
 
 for (const lv of KB.LEVELS) {
   if (only.length && !only.includes(lv.id)) continue;
-  console.log(`== ${lv.id} ${lv.name} (${lv.rooms.length} rooms, boss=${lv.boss})`);
+  // 魔王房由 bossRoom 旗標決定（秘密房可以掛在 rooms 最後面，用 secret + noBoss 標記）
+  let bossIdx = lv.rooms.findIndex(r => r.bossRoom);
+  if (bossIdx < 0) bossIdx = lv.rooms.length - 1;
+  const nSecret = lv.rooms.filter(r => r.secret).length;
+  console.log(`== ${lv.id} ${lv.name} (${lv.rooms.length} rooms, boss=${lv.boss} @r${bossIdx}, secret=${nSecret})`);
+  // 收集品：每關剛好 3 顆大星星、a 為 0/1/2 不重複
+  const bigstars = [];
+  lv.rooms.forEach((room, ri) => (room.entities || []).forEach(e => { if (e.t === 'bigstar') bigstars.push({ ri, e }); }));
+  if (bigstars.length !== 3) err(`${lv.id}: bigstar 共 ${bigstars.length} 顆（必須剛好 3 顆）`);
+  const seenA = {};
+  for (const { ri, e } of bigstars) {
+    const a = e.a;
+    if (a !== 0 && a !== 1 && a !== 2) err(`${lv.id} r${ri}: bigstar (${e.x},${e.y}) 的 a=${a}，必須是 0/1/2`);
+    else if (seenA[a] !== undefined) err(`${lv.id}: bigstar a=${a} 重複（r${seenA[a]} 與 r${ri}）`);
+    else seenA[a] = ri;
+  }
+  if (bigstars.length === 3 && Object.keys(seenA).length === 3) console.log(`  (info) ${lv.id}: ★ a0=r${seenA[0]} a1=r${seenA[1]} a2=r${seenA[2]}`);
+  if (nSecret === 0) warn(`${lv.id}: 沒有秘密房（secret:true）`);
   lv.rooms.forEach((room, ri) => {
     const tag = `${lv.id} r${ri}(${room.name || ''})`;
     const rows = room.map || [];
@@ -76,14 +96,23 @@ for (const lv of KB.LEVELS) {
     if (!room.spawn) err(`${tag}: 沒有 spawn`); else checkPos('spawn', room.spawn[0], room.spawn[1], true);
     // doors
     const doors = room.doors || [];
-    const last = ri === lv.rooms.length - 1;
-    if (!last && !doors.length) err(`${tag}: 非最後一房卻沒有門`);
+    const last = ri === bossIdx;
+    if (!last && !doors.length) err(`${tag}: 非魔王房卻沒有門`);
+    // locked 門必須有解鎖實體（開關方塊 / 中魔王門鎖）在同一間房
+    const nLocked = doors.filter(d => d.locked).length;
+    const nUnlocker = (room.entities || []).filter(e => UNLOCKER.has(e.t)).length;
+    if (nLocked && !nUnlocker) err(`${tag}: 有 ${nLocked} 扇 locked 門，但房內沒有解鎖實體（${[...UNLOCKER].join(' / ')}）`);
+    if (!nLocked && nUnlocker) warn(`${tag}: 有解鎖實體但沒有 locked 門`);
+    if ((room.entities || []).some(e => e.t === 'gatekeeper') && !(room.entities || []).some(e => e.t === 'bonkers' || e.t === 'mrfrosty'))
+      err(`${tag}: 有 gatekeeper 但房內沒有中魔王（bonkers / mrfrosty），門會永遠打不開`);
     doors.forEach((d, di) => {
       checkPos(`door#${di}`, d.x, d.y, true);
       if (!d.to) { err(`${tag}: door#${di} 沒有 to`); return; }
       const tr = lv.rooms[d.to.room];
       if (!tr) { err(`${tag}: door#${di} 指向不存在的房 ${d.to.room}`); return; }
-      if (d.to.room <= ri) warn(`${tag}: door#${di} 指向前面的房 ${d.to.room}`);
+      if (d.to.room <= ri && !d.back && !room.secret) warn(`${tag}: door#${di} 指向前面的房 ${d.to.room}`);
+      if (d.secret && !tr.secret) err(`${tag}: door#${di} 標了 secret 但房 ${d.to.room} 不是秘密房`);
+      if (tr.secret && !d.secret && !d.back) warn(`${tag}: door#${di} 通往秘密房但沒有 secret:true`);
       const trows = tr.map, tw = trows[0].length, th = trows.length;
       const tget = (x, y) => (x < 0 || x >= tw) ? '#' : (y < 0 || y >= th) ? '.' : trows[y][x];
       if (d.to.x < 0 || d.to.x >= tw || d.to.y < 0 || d.to.y >= th) err(`${tag}: door#${di} 落點 (${d.to.x},${d.to.y}) 超出房 ${d.to.room}`);
@@ -91,18 +120,26 @@ for (const lv of KB.LEVELS) {
         if (isSolid(tget(d.to.x, d.to.y))) err(`${tag}: door#${di} 落點 (${d.to.x},${d.to.y}) 在實心格內`);
         if (!isStand(tget(d.to.x, d.to.y + 1))) err(`${tag}: door#${di} 落點 (${d.to.x},${d.to.y}) 下方不可站立`);
       }
-      const bossRoomTarget = !!tr.bossRoom || d.to.room === lv.rooms.length - 1;
+      const bossRoomTarget = !!tr.bossRoom;
       if (bossRoomTarget && !d.boss) warn(`${tag}: door#${di} 通往魔王房但沒有 boss:true`);
       if (!bossRoomTarget && d.boss) warn(`${tag}: door#${di} 標了 boss:true 但不是通往魔王房`);
     });
     // 魔王房
     if (last) {
-      if (!room.bossRoom) warn(`${tag}: 最後一房未標 bossRoom:true`);
+      if (!room.bossRoom) warn(`${tag}: 魔王房未標 bossRoom:true`);
       if (!room.exit) err(`${tag}: 魔王房沒有 exit`); else checkPos('exit', room.exit.x, room.exit.y, true);
       const B = BOSS[lv.boss] || { w: 2, h: 2, ground: true };
       if (!room.bossPos) err(`${tag}: 魔王房沒有 bossPos`);
       else {
         checkPos('bossPos', room.bossPos[0], room.bossPos[1], B.ground, B.h, B.w);
+        // 登場結束時玩家與魔王要同框（畫面寬 256px = 16 格）：進場落點與 bossPos 距離 ≤ 200px
+        const entries = [];
+        if (room.spawn) entries.push(['spawn', room.spawn[0], room.spawn[1]]);
+        lv.rooms.forEach((r2, i2) => (r2.doors || []).forEach((d2, di2) => { if (d2.to && d2.to.room === ri) entries.push([`r${i2} door#${di2} 落點`, d2.to.x, d2.to.y]); }));
+        for (const [what, ex] of entries) {
+          const dpx = Math.abs(ex - room.bossPos[0]) * 16;
+          if (dpx > 200) err(`${tag}: ${what} x=${ex} 與 bossPos x=${room.bossPos[0]} 相距 ${dpx}px > 200px，登場結束時無法同框`);
+        }
         if (lv.boss === 'lololo') {
           const px = room.bossPos[0] - 3, py = room.bossPos[1] - 4;
           if (px < 1 || isSolid(get(px, py))) warn(`${tag}: 拉拉拉預設出生點 (${px},${py}) 不可用，將改生成在洛洛洛右側地面`);
@@ -112,12 +149,20 @@ for (const lv of KB.LEVELS) {
           if (fy - room.bossPos[1] < 2) warn(`${tag}: 克拉寇距可站立面僅 ${fy - room.bossPos[1]} 格，建議 bossPos.y 更高`);
         }
       }
-    } else if (room.bossRoom) warn(`${tag}: 非最後一房卻標了 bossRoom`);
+    } else if (room.bossRoom) warn(`${tag}: 非魔王房卻標了 bossRoom`);
+    // 秘密房：必須 noBoss（否則掛在 rooms 最後面時 game.js 會再生一隻魔王）且要有回程門
+    if (room.secret) {
+      if (ri === lv.rooms.length - 1 && !room.noBoss) err(`${tag}: 秘密房排在最後一房，必須加 noBoss:true`);
+      if (!doors.some(d => d.back)) err(`${tag}: 秘密房沒有回程門（doors 需有一扇 back:true）`);
+      const from = [];
+      lv.rooms.forEach((r2, i2) => (r2.doors || []).forEach(d2 => { if (d2.to && d2.to.room === ri) from.push(i2); }));
+      if (!from.length) err(`${tag}: 秘密房沒有任何房間的門通往這裡`);
+    }
     // 實體
     const sp = room.spawn || [0, 0];
     (room.entities || []).forEach((e, ei) => {
       const what = `${e.t}#${ei}`;
-      const known = GROUND.has(e.t) || WATER.has(e.t) || FLY.has(e.t) || ITEMS.has(e.t);
+      const known = GROUND.has(e.t) || WATER.has(e.t) || FLY.has(e.t) || ITEMS.has(e.t) || GADGET.has(e.t);
       if (!known) { err(`${tag}: ${what} 未知的實體 key`); return; }
       if (!inMap(e.x, e.y)) { err(`${tag}: ${what} (${e.x},${e.y}) 超出地圖`); return; }
       const ch = get(e.x, e.y);
@@ -142,10 +187,12 @@ for (const lv of KB.LEVELS) {
         else if (isSolid(get(tx, ty))) warn(`${tag}: ${what} gordo 移動終點 (${tx},${ty}) 為實心 '${get(tx, ty)}'`);
       }
       if (e.drop && !ITEMS.has(e.drop)) err(`${tag}: ${what} drop '${e.drop}' 不是道具`);
-      if (!ITEMS.has(e.t) && e.t !== 'gordo' && Math.abs(e.x - sp[0]) <= 6 && Math.abs(e.y - sp[1]) <= 3) warn(`${tag}: ${what} (${e.x},${e.y}) 離 spawn (${sp[0]},${sp[1]}) 太近`);
+      if (!ITEMS.has(e.t) && !GADGET.has(e.t) && e.t !== 'gordo' && Math.abs(e.x - sp[0]) <= 6 && Math.abs(e.y - sp[1]) <= 3) warn(`${tag}: ${what} (${e.x},${e.y}) 離 spawn (${sp[0]},${sp[1]}) 太近`);
+      // 大星星：不可以放在會被地形擋住 / 撿不到的地方（水中可以）
+      if (e.t === 'bigstar' && ch === '^') err(`${tag}: ${what} (${e.x},${e.y}) 大星星放在尖刺上`);
     });
     // 敵人密度
-    const nEnemy = (room.entities || []).filter(e => !ITEMS.has(e.t)).length;
+    const nEnemy = (room.entities || []).filter(e => !ITEMS.has(e.t) && !GADGET.has(e.t)).length;
     const area = w * Math.max(1, h / 12);
     console.log(`  (info) ${tag}: 敵人 ${nEnemy} 隻 / 寬 ${w}（約每 ${nEnemy ? Math.round(area / nEnemy) : '-'} 格 1 隻）`);
     // deco

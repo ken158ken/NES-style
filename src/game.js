@@ -5,7 +5,7 @@
   class Door extends KB.Entity {
     constructor(d) {
       super(d.x * T, d.y * T); this.type = 'door'; this.w = 16; this.h = 16; this.solid = false; this.grav = 0; this.z = 0;
-      this.tx = d.x; this.ty = d.y; this.to = d.to; this.boss = !!d.boss; this.exit = !!d.exit; this.locked = !!d.locked;
+      this.tx = d.x; this.ty = d.y; this.to = d.to; this.boss = !!d.boss; this.exit = !!d.exit; this.locked = !!d.locked; this.secret = !!d.secret; this.back = !!d.back;
     }
     update(dt) { this.baseUpdate(dt); }
     draw(g) { g.spr(this.boss ? 'tile_door_boss' : 'tile_door', this.cx, this.bottom, { t: this.t }); }

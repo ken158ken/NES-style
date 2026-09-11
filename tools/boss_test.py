@@ -9,6 +9,9 @@
            （蘋果 / 箱子 / 雨滴 / 衝擊星 / 小兵）走近吐回去；反射動作：魔王跳到頭上就走開、貼地飛來的攻擊就跳過、
            魔王張嘴吸就往反方向走、沒武器被逼到牆角就往中央鑽。
   [inhale] （威斯比）走到 130px 內張嘴吸：蘋果能被吸入（mouth 有值），吐出的星星要能打傷威斯比。
+  [phase2] 把 boss.hp 打到 40% 後 step：phase 必須變成 2，且要出現該魔王的二階段新招（狀態名見 PHASE2_STATES）。
+  [mid]    「保持中距離的玩家」模擬：拿刀刃（迴旋刃射程約 53px）站在 ~40px 外、前後游走著打，魔王要打得死
+           （擋住「迴避招式太強 → 中距離玩家永遠打不完」這類問題，例如 QA P0-01 的魅塔騎士）。
 截圖以事件觸發（第一顆敵方投射物、卡比受傷、魔王受傷、魔王死亡、過關門、過關、吸入、吐出）存到 shots/boss_<key>_*.png。
 
 用法：
@@ -42,6 +45,22 @@ ROOMS = {
     'dedede': dict(theme='dedede', map=[E] * 10 + [G, G], spawn=[2, 9], bossPos=[12, 9]),
 }
 ORDER = ['whispywoods', 'lololo', 'kracko', 'metaknight', 'dedede']
+# mid（中距離玩家）不適用的魔王：克拉寇整場飄在離地 58px 的高空，
+# 「站在地上、與魔王保持固定水平距離」的玩家模型既打不到他（迴旋刃是水平飛的）、
+# 也躲不掉貼地橫掃（3.2px/f > 走路 1.3px/f），這是模型限制不是平衡問題；他的近身戰由 fight 測試覆蓋。
+MID_SKIP = {'kracko': '飛行魔王，中距離站樁模型不適用（由 fight / phase2 覆蓋）'}
+# 中距離玩家與魔王保持的距離（px，邊對邊）：迴旋刃從卡比邊緣再飛約 53px，
+# 迪迪迪掄鎚的判定框從他中心延伸到 +46px，所以要站遠一點才算「安全的中距離」。
+MID_GAP = {'dedede': 40}
+MID_GAP_DEFAULT = 30
+# 二階段新招：出現其中任一個狀態就算通過（lololo 的新招是「同時推箱 + 把箱子射出去」，以 rage 旗標判定）
+PHASE2_STATES = {
+    'whispywoods': ['storm'],
+    'lololo': ['__rage__'],
+    'kracko': ['storm'],
+    'metaknight': ['tornado', 'tricutter'],
+    'dedede': ['rampage', 'triplejump'],
+}
 
 # 瀏覽器端驅動：整個迴圈在頁面內跑（每幀 evaluate 太慢），回傳統計與事件截圖
 DRIVER_JS = r"""
@@ -113,24 +132,44 @@ window.__bt = (function () {
           const mw = KB.game.map.pw;
           const awayDir = (d) => { const cornered = (d < 0 && p.x < 10) || (d > 0 && p.x + p.w > mw - 10); return cornered ? -d : d; };
           const falling = t.solid && t.grav && !t.onGround && t.bottom < p.bottom - 2 && Math.abs(dx) < t.w / 2 + 24;
+          // 反射動作 1b：魔王本體正以高速朝自己衝過來（克拉寇貼地橫掃、迪迪迪跳撲）就往旁邊跑
+          // （這些魔王是直接改 x，vx 是 0，所以用上一幀的位置算實際速度）
+          const bvx = (window.__btLastBx !== undefined && window.__btLastBid === t.id) ? (t.x - window.__btLastBx) : 0;
+          window.__btLastBx = t.x; window.__btLastBid = t.id;
+          const charging = Math.abs(bvx) > 1.6 && (bvx > 0) === (dx < 0) && Math.abs(dx) < 120 && t.bottom > p.y - 8 && t.y < p.bottom + 8;
           // 反射動作 2：貼地朝自己飛來的敵方攻擊（震波 / 氣團 / 箱子）在 44px 內就跳過去
           let incoming = false;
           for (const e of enemyAttacks()) { const ex = e.cx - p.cx; if (Math.abs(ex) < 44 && e.vx && Math.sign(e.vx) === -Math.sign(ex) && e.bottom > p.y + 6) { incoming = true; break; } }
           if (incoming && p.onGround) { log.hops = (log.hops || 0) + 1; jump(true); }
+          // 反射動作 2b：威斯比竄根的預警（腳下噴土 26~36 幀）出現在自己身上就走開
+          let rootX = null;
+          if (t.roots) for (const rt of t.roots) if (rt.t < rt.warn && Math.abs(rt.x - p.cx) < 24) { rootX = rt.x; break; }
           // 反射動作 3：魔王張嘴吸的時候往反方向走（吸力比走路慢，走就掙脫得掉）
-          const sucking = t.state === 'inhale' && Math.abs(dx) < 120;
+          // 迪迪迪張嘴吸（inhale 與二階段的 rampage 都是同一個張嘴動畫 + 吸力 + 碰觸傷害）
+          const sucking = (t.state === 'inhale' || t.state === 'rampage') && Math.abs(dx) < 120;
           // 沒武器又被逼到牆角：往房間中央鑽出去，而且一路鑽到離魔王 70px 以外才停（不然會在牆邊來回抖）
           if (escaping && (Math.abs(dx) > 70 || p.ability)) escaping = 0;
           if (!p.ability && !escaping && (p.x < 10 || p.x + p.w > mw - 10) && Math.abs(dx) < 70) escaping = p.x < 10 ? 1 : -1;
           const star0 = !p.ability && !p.mouth ? abilityStar() : null;   // 劍掉了：撿回能力星優先於逃跑（否則星星 7 秒後就消失）
-          if (falling) { log.dodges = (log.dodges || 0) + 1; inp[awayDir(dx > 0 ? -1 : 1) > 0 ? 'right' : 'left'] = true; }
+          if (rootX !== null) { log.rootDodges = (log.rootDodges || 0) + 1; inp[awayDir(p.cx < rootX ? -1 : 1) > 0 ? 'right' : 'left'] = true; }
+          else if (falling || charging) { log.dodges = (log.dodges || 0) + 1; inp[awayDir(dx > 0 ? -1 : 1) > 0 ? 'right' : 'left'] = true; if (charging && p.onGround) jump(true); }
           else if (sucking && !star0) { log.flee = (log.flee || 0) + 1; inp[awayDir(dx > 0 ? -1 : 1) > 0 ? 'right' : 'left'] = true; }
           else if (escaping && !star0) { log.escapes = (log.escapes || 0) + 1; inp[escaping > 0 ? 'right' : 'left'] = true; }
           else if (p.ability) {
             // 有劍：貼近魔王、每 15 幀揮劍、每 90 幀跳（簡單玩家）
-            if (gap > (o.stopGap !== undefined ? o.stopGap : 8)) inp[dx > 0 ? 'right' : 'left'] = true;
+            const stopGap = o.stopGap !== undefined ? o.stopGap : 8;
+            if (gap > stopGap) inp[dx > 0 ? 'right' : 'left'] = true;
+            else if (o.strafe && gap < stopGap - 10) inp[awayDir(dx > 0 ? -1 : 1) > 0 ? 'right' : 'left'] = true;  // 魔王走過來就退開，維持中距離
+            else if (o.strafe) {
+              // 中距離玩家不會像木頭一樣站著：在目標距離附近前後小幅游走
+              // （威斯比的竄根 / 迪迪迪的走近撞人都是「站著不動才會中」，站樁模擬會被無限打）
+              const c = i % (o.strafe * 2);
+              inp[(c < o.strafe) === (dx > 0) ? 'left' : 'right'] = true;
+            }
             if ((i + ph * 7) % (o.attackEvery || 15) === 0) inp.attack = true;
             if ((i + ph * 31) % (o.jumpEvery || 90) === 0 && p.onGround) jump();
+            // 魔王飄在高處（克拉寇）：站在地上怎麼揮都打不到，要跳起來打
+            if (t.bottom < p.y - 10 && t.bottom > p.y - 70 && gap < 48 && p.onGround && (i + ph * 3) % 48 === 0) jump();
           } else if (p.mouth) {
             // 含著彈藥：走到魔王 100px 內；魔王在自己高度就吐，在上方就跳起來到頂點吐（否則等一下）
             const sameH = t.y < p.bottom + 8 && t.bottom > p.y - 12, above = t.bottom <= p.y - 12 && t.bottom > p.y - 70;
@@ -165,12 +204,15 @@ window.__bt = (function () {
             if (log.mouthAt < 0) { log.mouthAt = i; snap('mouth', 2); }
             const t = nearest(); const dx = t.cx - p.cx;
             if (Math.abs(dx) > (o.spitDist || 90)) inp[dx > 0 ? 'right' : 'left'] = true;
-            else if (spitT < 0) { inp.attack = true; spitT = i; log.spitAt = i; snap('spit', 4); }
+            else if (spitT < 0) { inp.attack = true; spitT = i; if (log.spitAt < 0) log.spitAt = i; log.spitTries = (log.spitTries || 0) + 1; snap('spit', 4); }
+            else if (i > spitT + 90 && log.spitHitAt < 0) { spitT = -1; }   // 吐出去沒打中（多半是半路撞到蘋果）→ 再吸一顆重來
           }
         }
         if (jumpHold > 0) { inp.jump = true; jumpHold--; }
         prevAttack = !!inp.attack;
         KB.input.setVirtual(inp, true); __kb.step(1); log.frames++;
+        // godmode：觀察二階段時不希望卡比死掉重載房間（重載會生出全新的、血量滿的魔王）
+        if (o.godmode && KB.player && KB.player.state !== 'dead') KB.player.hp = KB.player.maxHp;
         // ---- 統計 ----
         const atk = enemyAttacks();
         for (const e of atk) if (!seen.has(e.id)) { seen.add(e.id); log.attacksSpawned++; const k = e.kind || e.constructor.name; log.attackKinds[k] = (log.attackKinds[k] || 0) + 1; if (log.attacksSpawned === 1) snap('attack', 6); }
@@ -188,7 +230,7 @@ window.__bt = (function () {
         if (i === Math.floor(n / 2)) snap('mid', 0);
         for (const k of Object.keys(pending)) { if (pending[k]-- <= 0) { log.shots[k] = scaleShot(scale); delete pending[k]; } }
         if (o.stopOnClear && g.clearT >= 30) break;
-        if (o.stopOnMouth && spitT >= 0 && i > spitT + 80) break;
+        if (o.stopOnMouth && log.spitHitAt >= 0 && i > log.spitHitAt + 30) break;
       }
       KB.input.clearVirtual();
       for (const k of Object.keys(pending)) log.shots[k] = scaleShot(scale);
@@ -201,6 +243,20 @@ window.__bt = (function () {
       for (const e of ents) { const k = e.type + ':' + (e.name || e.constructor.name); counts[k] = (counts[k] || 0) + 1; }
       return { boss: b ? { cls: b.constructor.name, name: b.displayName, state: b.state, hp: b.hp, maxHp: b.maxHp, x: +b.x.toFixed(1), y: +b.y.toFixed(1), w: b.w, h: b.h, dead: b.dead, intro: !!b.introducing } : null,
         player: { x: +p.x.toFixed(1), y: +p.y.toFixed(1), hp: p.hp, state: p.state, ability: p.ability, mouth: p.mouth }, bossIntroT: g.bossIntroT, exitDoor: !!exitDoor(), counts, cam: g.cam };
+    },
+    // 把魔王打到 40% 血（真的呼叫 hurt，才會走到 maybePhase2）
+    hurtToHalf(ratio) {
+      const b = KB.game.boss; if (!b) return null;
+      b.introducing = false; b.invuln = 0;
+      b.hp = Math.max(2, Math.ceil(b.maxHp * (ratio || 0.4)) + 1);
+      if (b.selfHp !== undefined) b.selfHp = Math.max(2, b.selfHp);
+      b.hurt(1, { cx: KB.player.cx, cy: KB.player.cy });
+      return { hp: b.hp, phase: b.phase, rage: !!b.rage };
+    },
+    phaseInfo() {
+      const b = KB.game.boss; if (!b) return null;
+      const p = b.partner;
+      return { hp: b.hp, maxHp: b.maxHp, phase: b.phase, rage: !!b.rage, partnerPhase: p ? p.phase : null, partnerRage: p ? !!p.rage : null, state: b.state };
     },
     shot(s) { __kb.render(); return scaleShot(s || 3); },
   };
@@ -334,6 +390,48 @@ def run_boss(sess, key, a):
         print(f"[{key}] INHALE {'PASS' if inhale_ok else 'FAIL'}  (mouthAt={log['mouthAt']} spitAt={log['spitAt']} spitHitAt={log['spitHitAt']} errors={len(errs)})")
         for e in errs: print('   ', e)
 
+    # ---------- [phase2] 二階段：hp 打到 40% → phase===2 且新招出現 ----------
+    if not a.no_phase2:
+        sess.start(key, ability='sword', use_w1=use_w1, use_real=use_real, hitbox=a.hitbox)
+        before = sess.ev("(r)=>__bt.hurtToHalf(r)", 0.4)
+        log = sess.ev("([n,m,o])=>__bt.run(n,m,o)", [a.phase2_frames, 'idle', {'scale': a.scale, 'godmode': True}])
+        for k, v in log.pop('shots').items():
+            save_png(out.parent / f'{out.name}_phase2_{k}.png', v)
+        info = sess.ev("()=>__bt.phaseInfo()")
+        save_png(out.parent / f'{out.name}_phase2.png', sess.ev("(s)=>__bt.shot(s)", a.scale))
+        errs = sess.take_errors()
+        want = PHASE2_STATES.get(key, [])
+        seen_states = log['bossStates']
+        if want == ['__rage__']:
+            new_move = bool(info and info['rage'] and info['partnerRage'])
+        else:
+            new_move = any(w in seen_states for w in want)
+        phase_ok = bool(info and info['phase'] == 2) and new_move and not errs
+        res['phase2'] = phase_ok
+        print('phase2:', fmt({'trigger': before, 'info': info, 'states': seen_states, 'want': want, 'attacks': log['attacksSpawned']}))
+        print(f"[{key}] PHASE2 {'PASS' if phase_ok else 'FAIL'}  (phase={info['phase'] if info else None} newMove={new_move} errors={len(errs)})")
+        for e in errs: print('   ', e)
+
+    # ---------- [mid] 中距離玩家 ----------
+    if not a.no_mid and key in MID_SKIP:
+        print(f"[{key}] MID    SKIP  ({MID_SKIP[key]})")
+    elif not a.no_mid:
+        wins = 0
+        for r in range(a.mid_runs):
+            sess.start(key, ability=a.mid_ability, use_w1=use_w1, use_real=use_real, hitbox=a.hitbox, intro_frames=160 + r * 13, dx=r % 3)
+            midFrames = a.mid_frames if a.mid_frames else a.frames * 2
+            log = sess.ev("([n,m,o])=>__bt.run(n,m,o)", [midFrames, 'fight', {'scale': a.scale, 'stopOnClear': True, 'phase': r + 5, 'stopGap': (a.mid_gap or MID_GAP.get(key, MID_GAP_DEFAULT)), 'attackEvery': 12, 'strafe': a.mid_strafe}])
+            for k, v in log.pop('shots').items():
+                if r == 0: save_png(out.parent / f'{out.name}_mid_{k}.png', v)
+            errs = sess.take_errors()
+            ok = log['final']['bossDead'] and log['doorAt'] >= 0 and not errs
+            wins += ok
+            print(f"[{key}] MID#{r} {'PASS' if ok else 'FAIL'}  (dead={log['final']['bossDead']} deadAt={log['deadAt']} bossHp={log['final']['bossHp']} hits={log['bossHits']} died={log['playerDied']} minHp={log['minHp']} hurtBy={fmt(log['hurtBy'])} errors={len(errs)})")
+            for e in errs: print('   ', e)
+        mid_ok = wins == a.mid_runs
+        res['mid'] = mid_ok
+        print(f"[{key}] MID    {'PASS' if mid_ok else 'FAIL'}  ({wins}/{a.mid_runs} runs won)")
+
     missing = sess.ev("()=>__kb.missing()")
     if missing:
         print('missing sprites:', ', '.join(missing))
@@ -353,6 +451,14 @@ def main():
     ap.add_argument('--hitbox', action='store_true')
     ap.add_argument('--console', action='store_true')
     ap.add_argument('--events', type=int, default=0, help='印出 fight 的前 N 個事件（受傷 / 命中 / 死亡）')
+    ap.add_argument('--phase2-frames', type=int, default=900, help='二階段觀察幀數')
+    ap.add_argument('--mid-runs', type=int, default=1, help='中距離玩家樣本數')
+    ap.add_argument('--mid-gap', type=int, default=0, help='中距離玩家與魔王保持的距離（px）；0 = 用 MID_GAP 的每魔王預設值')
+    ap.add_argument('--mid-ability', default='cutter', help='中距離玩家使用的能力（預設刀刃，射程 46px）')
+    ap.add_argument('--mid-strafe', type=int, default=34, help='中距離玩家前後游走的半週期（幀）')
+    ap.add_argument('--mid-frames', type=int, default=0, help='中距離測試的最大幀數（0 = frames×2；中距離打法本來就比較慢）')
+    ap.add_argument('--no-phase2', action='store_true')
+    ap.add_argument('--no-mid', action='store_true')
     a = ap.parse_args()
     keys = ORDER if a.boss == 'all' else [k.strip() for k in a.boss.split(',')]
     results = {}

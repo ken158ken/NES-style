@@ -180,15 +180,26 @@
     p.cloud(20, 30, 10, 'w', 'W'); p.cloud(90, 40, 13, 'w', 'W'); p.cloud(160, 28, 9, 'w', 'W'); p.cloud(226, 42, 12, 'w', 'W'); p.cloud(128, 60, 11, 'w', 'W'); p.cloud(50, 62, 9, 'w', 'W'); p.cloud(200, 64, 10, 'w', 'W');
     p.rect(0, 58, 256, 6, 'w');
   });
+  // 雲海表面之下的小雲層（垂直房下半屏原本是整片純白，看起來像沒畫完）
+  const lDeep = strip('bg_cloud_deep', LP, 256, 40, p => {
+    p.cloud(24, 14, 7, 'W', 'c'); p.cloud(96, 22, 9, 'W', 'c'); p.cloud(166, 12, 6, 'W', 'c'); p.cloud(228, 26, 8, 'W', 'c');
+    p.cloud(60, 34, 6, 'W', 'c'); p.cloud(134, 36, 7, 'W', 'c'); p.cloud(200, 38, 5, 'W', 'c');
+  });
   const lStars = mkStars(28, 23, 256, 90);
   KB.BG.cloud = function (ctx, camX, camY, t) {
+    // 漸層永遠填滿整個畫面（camY 再大也不會露出底色）
     bands(ctx, 0, VH, ['#5c5cc0', '#7070cc', '#8484d8', '#9c9ce4', '#b0b0ec', '#c4c4f4', '#d8d8fc']);
     drawStars(ctx, lStars, t, camX * 0.05, '#ffffff', '#a8a8e0');
-    // 一道彩虹（每 640px 視差空間出現一次）
+    // 一道彩虹（每 640px 視差空間出現一次）；垂直房的 camY 很大，y 要夾住否則會整條飄出畫面只剩碎片
     const rx = wrapX(40, camX * 0.1, 640);
-    ctx.save(); ctx.globalAlpha = 0.6; ctx.drawImage(lRainbow, Math.round(rx > 400 ? rx - 640 : rx), Math.round(44 - camY * 0.1)); ctx.restore();
-    tileX(ctx, lFar, camX * 0.2 + t * 1.5, 40 - camY * 0.15);
-    const ny = 118 - camY * 0.35; tileX(ctx, lNear, camX * 0.5 + t * 3, ny); KB.rect(ctx, 0, ny + 64, W, VH - ny - 64 + 2, '#f8f8ff');
+    const ry = Math.max(-70, Math.min(VH - 24, Math.round(44 - camY * 0.1)));
+    ctx.save(); ctx.globalAlpha = 0.6; ctx.drawImage(lRainbow, Math.round(rx > 400 ? rx - 640 : rx), ry); ctx.restore();
+    tileX(ctx, lFar, camX * 0.2 + t * 1.5, Math.max(-72, Math.min(VH, 40 - camY * 0.15)));
+    // 雲海表面：往上視差移動，但夾在畫面下半（96 ~ VH-8），避免高塔房下半屏變成一整片空白
+    const ny = Math.max(96, Math.min(VH - 8, 118 - camY * 0.35));
+    tileX(ctx, lNear, camX * 0.5 + t * 3, ny);
+    KB.rect(ctx, 0, ny + 64, W, VH - ny - 64 + 2, '#f8f8ff');
+    tileX(ctx, lDeep, camX * 0.8 + t * 5, ny + 66, 0.5);
   };
 
   // ============================================================================

@@ -260,6 +260,48 @@
     'Y......Y',
   ]]);
 
+  // 大星星（收集品）16×16，2 幀閃爍：金色五角星 + 淡黃高光 + 右下暗面
+  const bigstar = [
+    '.......kk.......',
+    '......kaak......',
+    '......kaak......',
+    '.....kyaayk.....',
+    '.....kyaayk.....',
+    'kkkkkkyaaykkkkkk',
+    'kyyyyyyaayyyyyyk',
+    '.kyyyyaaaayyyyk.',
+    '..kyyyaaaayyyk..',
+    '...kyyaaaayyk...',
+    '...kyyyaayyyk...',
+    '..kyyyykkyyYYk..',
+    '..kyykk..kkYYk..',
+    '.kyyk......kYYk.',
+    '.kyk........kYk.',
+    '.kk..........kk.',
+  ];
+  S('item_bigstar', [bigstar, recolor(bigstar, { y: 'a', a: 'w', Y: 'y' })], { fps: 5 });
+
+  // 開關方塊 16×16，3 幀：0 石框 + 金星、1 金星發亮（閃爍）、2 被按下（星星凹陷變灰）
+  const swblock = [
+    'kkkkkkkkkkkkkkkk',
+    'kwwwwwwwwwwwwwwk',
+    'kwsssssssssssSdk',
+    'kws....yy....Sdk',
+    'kws...yyyy...Sdk',
+    'kwsyyyyyyyyyySdk',
+    'kws.yyyyyyyy.Sdk',
+    'kws..yyyyyy..Sdk',
+    'kws..yyyyyy..Sdk',
+    'kws.yyy..yyy.Sdk',
+    'kws.yy....yy.Sdk',
+    'kwsSSSSSSSSSSSdk',
+    'kwddddddddddddek',
+    'kwddddddddddddek',
+    'kdddddddddddddek',
+    'kkkkkkkkkkkkkkkk',
+  ];
+  S('item_switch', [swblock, recolor(swblock, { y: 'a', s: 'e' }), recolor(swblock, { y: 'S', w: 's', s: 'S', S: 'd' })], { fps: 4 });
+
   // 能力星 15×15，2 幀閃爍（中心留淡黃平面給迷你圖示）
   const astar = [
     '.......k.......',

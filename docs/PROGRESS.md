@@ -20,12 +20,19 @@ git 已初始化，基線 commit `c382e2a`。Playwright venv：`.venv/bin/python
 ### 本輪（Round 1）分工
 | agent | 任務 | 狀態 |
 |---|---|---|
-| ui-menu | 中文可讀性修復、暫停選單重製、標題選單、遊戲內說明（?）、能力說明卡 | 進行中 |
-| player-feel | coyote / buffer / 落地與起跑特效 / 吸入反饋 / 鏡頭改良 / 手把 / 測試 | 進行中 |
-| abilities-enemies | 8 能力各加 2~3 招、敵人行為深化、新敵人 3 種 | 進行中 |
-| levels-bosses | 每世界隱藏要素、秘密房、魔王二階段、收集品存檔 | 進行中 |
-| audio | 暫停降音、低血量、能力 jingle、boss 變奏、menu 音 | 進行中 |
-| research-qa | 卡比系列設計參考文件、全 5 世界 QA 報告 | 進行中 |
+| ui-menu | 中文可讀性修復、暫停選單重製、標題選單、遊戲內說明（?）、能力說明卡 | 完成 |
+| player-feel | coyote / buffer / 落地與起跑特效 / 吸入反饋 / 鏡頭改良 / 手把 / 測試 | 完成 |
+| abilities-enemies | 8 能力各加 2~3 招、敵人行為深化、新敵人 3 種 | 完成 |
+| levels-bosses | 每世界隱藏要素、秘密房、魔王二階段、收集品存檔 | 完成 |
+| audio | 暫停降音、低血量、能力 jingle、boss 變奏、menu 音 | 完成 |
+| research-qa | 卡比系列設計參考文件、全 5 世界 QA 報告 | 完成 |
+
+### Round 1 整合結果（總控，2026-09-11 19:40）
+- 全部 6 agent 完成。整合驗證：`node --check` 全過、`level_check` 0 error、`engine_test` 89/89、`enemy_test` 332/332、`boss_test` ALL PASS、`playthrough w1~w5 --godmode` 全部 cleared（4256 / 9386 / 5801 / 8718 / 8945 幀，deaths=0，無缺圖）。
+- 總控補做：input.js HELP 精簡（說明頁不再截斷）、player.js 移除座標式抖動（改 KB.inhaleWobble）、engine_test 抖動測試改檢查繪製偏移、game.js Door 補 `secret/back` 旗標、說明.md 更新、build 645KB。
+- git：`de68693`（ui/player/audio/docs）→ `5f1133f`（abilities/enemies）→ `1790501`（test）→ 本次 commit（levels/bosses/items/art + 收尾）。
+- 待使用者決定：DESIGN_REFERENCE 第 6 章的法律差異化（魔王 / 敵人 / 關卡名改原創名）。
+- 已知小問題：HUD 能力中文名 12px 密集字（鐵鎚）仍略糊 → Round 2 ui；設定頁「畫面縮放」需改 main.js → Round 2 ui。
 
 ---
 ## ui-menu
@@ -145,6 +152,101 @@ git 已初始化，基線 commit `c382e2a`。Playwright venv：`.venv/bin/python
 
 ## levels-bosses
 （agent 在此追加）
+
+- [2026-09-11 20:10] 完成：收集品系統。新增 `KB.ITEMS.bigstar`（`item_bigstar` 16×16 兩幀閃爍，畫在 art/items_ui.js，帶淡黃光暈）；
+  拾取 → 粒子 + `sfx('bigstar')` + toast「大星星 x/3」，寫入 `KB.save.stars[levelId] = [bool,bool,bool]`（依 `a` 參數 0/1/2）並 `KB.saveGame()`；
+  建構時查存檔，已拿過的直接 `dead=true`（不需要 game.js 鉤子）。5 世界各 3 顆。
+  驗證：`node tools/level_check.js`（新增「每關剛好 3 顆、a 為 0/1/2 不重複」檢查）；`shots/agent_lv/w1r0_star.png`、`w3r2_star.png`、`w5r0_alcove.png`。下一步：秘密房。
+- [2026-09-11 20:25] 完成：5 間秘密房（皆掛在該關 rooms 最後、標 `secret:true, noBoss:true, music:'secret'`，內含 ★3 + 1UP + 番茄）。
+  進入方式：w1 天空之門（漂浮）／ w2 開關方塊解鎖的地面門 ／ w3 水底門 ／ w4 雲海最高處的門 ／ w5 炸彈方塊牆後的門。
+  新增 `KB.ITEMS.switchblock`（被攻擊 → `KB.unlockDoors` 解鎖同房 locked 門）與 `KB.drawDoorLocks`（locked 門畫鎖鏈 + 掛鎖）。
+  驗證：`shots/agent_lv/w1r2_secretdoor.png`、`w1r4_secret.png`、`w2r3_switch.png`、`w2r3_lockeddoor.png`、`w3r1_waterdoor.png`、`w4r2_secretdoor.png`、`w5r1_bwall.png`。下一步：中魔王前奏。
+- [2026-09-11 20:40] 完成：中魔王前奏。`KB.ITEMS.gatekeeper` 實體：進房時把 `music('miniboss')` 切上去，房內還有活著的 MiniBoss 時出口門維持 `locked:true`（門上畫鎖鏈、玩家去開會 toast「門被鎖住了…」），
+  中魔王倒下就 `fx_sparkle` + `sfx('unlock')` + toast 解鎖並切回關卡曲。放在 w2 r2（Bonkers）、w3 r2（Mr. Frosty）、w5 r3（兩隻）。
+  level_check 新增「locked 門必須有解鎖實體」「有 gatekeeper 必須有中魔王」檢查。驗證：`shots/agent_lv/w2r2_gate.png`。下一步：魔王二階段。
+- [2026-09-11 21:05] 完成：5 魔王二階段（Boss 基底加 `phase` / `iv(n)` / `enterPhase2()`）。HP < 50% 觸發：`KB.game.shake=6`、`sfx('phase2')+sfx('boss_hurt')`、
+  `music('boss2')`（w5 為 `finalboss2`，SONGS 沒有時保持原曲不切）、toast、精靈疊一層會呼吸的紅色調（不是純剪影）＋怒氣粒子；所有招式間隔 ×0.7。
+  新招：威斯比『暴風』大蘋果三連 + 兩處竄根；洛洛洛&拉拉拉同步推箱 + 把箱子射出去；克拉寇『雷雨』灑雨 + 兩道鎖定閃電後接俯衝；
+  魅塔騎士『龍捲』貼地龍捲 + 『劍氣三連』三道不同高度的刀刃；迪迪迪『暴走』吸入拉人後跳躍震波三連。
+  驗證：`tools/boss_test.py --runs 3` → ALL PASS（含新增的 phase2 / mid 測試）；截圖 `shots/agent_lv/phase2_*.png`。下一步：關卡微調與工具。
+- [2026-09-11 21:20] 完成：QA P0-01 魅塔騎士迴避過強。`vanishCD`（消失後 180 幀內不能再消失）、`evadeLock`（受傷後 30 幀不能 vanish / backstep）、
+  新增 `recover` 狀態（vanish / backstep 結束後 40 幀硬直、無碰觸傷害，是玩家的攻擊窗）。
+  驗證：`playthrough.py --level w4 --ability sword --godmode --maxframes 30000` → cleared=True（frame 5676）；`boss_test.py --boss metaknight` fight 3/3、mid 1/1 PASS。
+- [2026-09-11 21:35] 完成：關卡微調。每世界新增一條上路分支（w1 r2 天空階梯→秘密門、w2 r2 x=20~45 高空平台、w3 r2 x=40~53 浮島階梯、w4 r3 x=20~49 雲階梯、w5 r1 x=40~69 高空平台），
+  沿途鋪點數星並補飛行敵人。放入 abilities-enemies 的新敵人：spikeball ×4（w2 r0/r2、w5 r0/r1）、dartwing ×4（w3 r0/r2、w4 r0/r2）、snowly ×4（w2 r1/r3、w4 r1/r3）。
+  另依 player-feel 回報把魔王房進場點拉近：w1 r3 spawn [16,9] / bossPos [27,9]（160px）、w2 r4 spawn [15,9] / bossPos [3,6]（192px），對應的 boss 門落點同步改。
+  驗證：`node tools/level_check.js` → 0 error；`shots/agent_lv/w1r3_bossframe.png`、`w2r4_bossframe.png`（登場後玩家與魔王同框）。
+- [2026-09-11 21:50] 完成：工具。level_check 改用 `bossRoom` 旗標判定魔王房（秘密房可掛在最後）、新增 bigstar 3 顆 / a 不重複、locked 門要有解鎖實體、
+  秘密房 noBoss + 回程門、魔王房進場點與 bossPos ≤200px（同框）等檢查。
+  playthrough.py：預設 `--maxframes 30000`；主路線忽略 secret 門（用 `to.room` 反查 `room.secret/noBoss`）；`door_near()` 改用遊戲自己的 `KB.game.doorAt`
+  （原本「距離 <10」比遊戲的 <8 寬鬆，w5 r2 出口會卡成「站在門口按上卻進不去」的無限迴圈）；`--godmode` 加上不會摔死 + 掉了的能力補回來；
+  遇到上鎖的門會先去打中魔王（有武器貼身砍／沒武器保持 100px 吸他丟的彈藥／被逼到牆角改用漂浮鑽過去）；掉能力會去撿能力星（有追星上限避免尖刺床死循環）；新增 `--collect`。
+  boss_test.py：新增 `[phase2]`（打到 40% 血 → phase===2 且該魔王的新招狀態出現，觀察期 godmode 避免卡比死掉重載房間）與
+  `[mid]`（中距離玩家：刀刃 + 依魔王保持 30~40px（`MID_GAP`）+ 前後游走）兩組測試；inhale 吐歪了會重來。
+- [2026-09-11 21:55] 完成：QA P1-03 cloud 背景垂直房。`KB.BG.cloud` 的彩虹 / 遠雲 / 雲海表面 y 全部加上夾值，雲海表面固定在畫面下半（96~VH-8），
+  並新增 `bg_cloud_deep` 小雲層鋪在雲海之下（原本 camY 大時下半屏是一整片純白）。驗證：`shots/agent_lv/w4r1_bg.png`。
+- [2026-09-11 22:10] 完成：機器人卡關修正（都在 tools/playthrough.py）。
+  (1) `door_near()` 改用遊戲自己的 `KB.game.doorAt`（原本「距離 <10」比遊戲的 <8 寬鬆 → w5 r2 出口「站門口按上進不去」的死循環）；
+  (2) 走到門附近先「對準」再按上（|dx| > 3 就一次走一幀），避免站偏；
+  (3) 門在上方時的漂浮改成「連續點跳」`frames % 8 < 2`（原本按住 20 幀只會拍一次翅膀 → w2 螺旋塔 / w5 王座階梯爬不上去）。
+- [2026-09-11 22:20] 完成：克拉寇二階段平衡。二階段循環原本是 `storm, swoop, lightning, low, storm, rain`（雷雨結束會接俯衝 → 等於連兩次俯衝），
+  普通玩家樣本 3 個裡會輸 1 個；改成 `storm, low, lightning, low, rain, swoop`（每招之間都留一次低空盤旋的攻擊窗），
+  `boss_test --boss kracko --runs 3` 連跑兩輪皆 3/3 PASS。
+- [2026-09-11 22:45] 完成：二階段平衡回歸修正（`boss_test` 的「普通玩家」樣本每一場都要贏）。
+  發現三處是我把「玩家的空檔 / 預警」也一起縮短造成的，全部改回不縮短：
+  迪迪迪的 `dizzy`（暈眩＝唯一攻擊窗）與掄鎚 16 幀預備動作、克拉寇閃電的 30 幀電火花預警；
+  另外拔掉迪迪迪 `rampage`（二階段吸入起手）的本體碰觸傷害，威斯比『暴風』的竄根由 3 處減為 2 處、循環裡只出現一次。
+  boss_test 也補上三個玩家反射動作：躲竄根預警（讀 `boss.roots` 的噴土期）、躲高速衝過來的魔王本體（用上一幀位置算速度）、
+  魔王張嘴吸（`inhale` 與 `rampage`）就往反方向走；中距離模型改成「魔王走近就退開」並依魔王設定距離（`MID_GAP`，迪迪迪 40px 以避開掄鎚）。
+  驗證：`tools/boss_test.py --runs 3` 連跑 5 次皆 ALL PASS。
+- [2026-09-11 22:55] 完成：最終驗證。
+  `node tools/level_check.js` → 0 error / 1 warning（既有的拉拉拉出生點提示）；
+  `tools/boss_test.py --runs 3` → ALL PASS（連續 5 次）；
+  `playthrough.py --level wN --ability sword --godmode` 五世界皆 cleared=True（最後一輪 w1 4256 / w2 8666 / w3 6005 / w4 8171 / w5 11465 幀，deaths=0、missing sprites 空）；
+  `playthrough.py --level w1 --collect` → cleared=True 且 `stars: {"w1":[false,true,false]}`（存檔寫入正常）；
+  `tools/build.py` → dist/卡比之星.html 644 KB。
+
+
+### 大星星 / 秘密房 位置一覽
+| 關 | ★ | 房（房號 名稱）| 磁磚座標 | 取得方式 |
+|---|---|---|---|---|
+| w1 | a0 | r0 起點草原 | (54, 2) | 池塘上方 row3 的 `===` 平台，要漂浮上去 |
+| w1 | a1 | r1 星星森林 | (35, 9) | 星星方塊牆（x=33 / x=41）後的密室，要打破方塊 |
+| w1 | a2 | r4 星星洞窟（秘密房）| (13, 4) | r2 上路階梯盡頭 (52,2) 的天空之門 |
+| w2 | a0 | r0 古堡玄關 | (60, 2) | 站 x=58~63 的拱窗平台往上漂 |
+| w2 | a1 | r1 螺旋塔 | (26, 11) | 星星方塊 x=24 後的塔內密室 |
+| w2 | a2 | r5 古堡寶物庫（秘密房）| (8, 3) | r3 閣樓 (40,4) 的開關方塊 → 解鎖地面 (52,9) 的門 |
+| w3 | a0 | r0 海濱沙灘 | (25, 10) | 第一座水池的池底（要潛到最下面一格）|
+| w3 | a1 | r2 浮島跳躍 | (51, 2) | 上路 x=40~53 階梯平台的最高處 |
+| w3 | a2 | r5 海底寶窟（秘密房）| (12, 3) | r1 長水道池底 (26,10) 的水中之門 |
+| w4 | a0 | r0 雲海入口 | (38, 2) | 站 x=36~40 的雲平台往上漂 |
+| w4 | a1 | r1 泡泡塔 | (26, 1) | 塔頂星星方塊 x=24 後的密室 |
+| w4 | a2 | r5 雲上寶庫（秘密房）| (11, 3) | r2 雲海最高處 (75,1) 的門 |
+| w5 | a0 | r0 城門 | (75, 3) | 打破 (73,5) 星星方塊後漂進天花板閣樓 |
+| w5 | a1 | r2 地下水牢 | (20, 10) | 第一座水牢的池底 |
+| w5 | a2 | r6 大王的私房金庫（秘密房）| (11, 3) | r1 x=73 炸彈方塊牆後的門 (70,9) |
+
+中魔王門鎖（`gatekeeper` + `locked` 門）：w2 r2 炸彈迴廊（Bonkers，出口 x=76）、w3 r2 浮島跳躍（Mr. Frosty，出口 x=93）、w5 r3 雙小魔王之間（兩隻，出口 x=60）。
+
+### 跨檔需求（給總控 / 其他 agent）
+- **game.js `Door`**：建議把 levels.js 門定義的 `secret` / `back` 旗標複製到 Door 實體上（目前只複製 `locked`）。
+  現在 playthrough.py 是用 `door.to.room` 反查 `level.rooms[r].secret` 繞過去的；ui / 除錯工具若要區分主線門與隱藏門會比較麻煩。
+- **ui-menu**：選關畫面請讀 `KB.save.stars[levelId]`（長度 3 的布林陣列，可能 undefined）顯示 ★ x/3。
+- **audio**：已使用 `music('boss2'/'finalboss2'/'miniboss'/'secret')` 與 `sfx('phase2'/'unlock'/'bigstar'/'oneup')`；
+  `KB.ITEMS.oneup` 原本呼叫的 `sfx('1up')` 已改成 `sfx('oneup')`。
+
+### 已知問題 / 未完成
+- `mid`（中距離玩家）測試對克拉寇是 SKIP，不是 PASS：克拉寇整場飄在離地 58px，
+  「站地上保持固定水平距離」的玩家模型既打不到他（迴旋刃水平飛）也躲不掉貼地橫掃（3.2px/f > 走路 1.3px/f）。
+  原因寫在 boss_test.py 的 `MID_SKIP`；他的近身平衡由 fight（3/3 PASS）與 phase2 覆蓋。
+  下一步建議：mid 模擬加上「魔王在高處就先漂浮到同高度再打」與「預警粒子出現就跳」的反射動作。
+- `boss_test.py --real --no-mid`（改用 levels.js 真實魔王房）時 whispywoods 的 `fight` 約 2/3 會過，不是穩定 3/3：
+  失敗的樣本都是「機器人走進樹裡吃到碰觸傷害 → 掉劍 → 撿不回來 → 沒武器打不完」。
+  注意威斯比 `solid:false`（玩家可以走進樹裡），這是原本就有的設定；預設（注入測試房）模式連跑 5 次都 ALL PASS。
+  下一步建議：boss_test 的策略加上「站在魔王碰撞框外緣就不要再往前走」與更積極的能力星回收。
+- `--real` 的 `mid` 對 whispywoods / dedede 仍可能 FAIL（中距離站樁模型在大房間走位空間不同），建議 `--real` 搭 `--no-mid` 使用。
+- `--collect` 只是順路撿（半徑內才追），不保證 9/15 顆全收；要驗證存檔請看指令輸出最後一行的 `stars:`。
+
 
 ## audio
 

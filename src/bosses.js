@@ -32,6 +32,14 @@
     return map.ph;
   }
   const mapW = () => (KB.game && KB.game.map ? KB.game.map.pw : 512);
+  // 二階段變奏曲（audio agent 提供 boss2 / finalboss2）；沒有這首時保持原曲不動，避免整首音樂被關掉
+  function phase2Music() {
+    try {
+      const key = (KB.game && KB.game.level && KB.game.level.id === 'w5') ? 'finalboss2' : 'boss2';
+      if (KB.audio && KB.audio.SONGS && !KB.audio.SONGS[key]) return;
+      if (KB.game && KB.game.playMusic) KB.game.playMusic(key); else KB.audio.music(key);
+    } catch (e) { }
+  }
   const solidAt = (px, y0, y1) => !!(KB.game && KB.physics.columnSolid(KB.game.map, px, y0, y1));
   const standable = ch => KB.TileMap.isGround(ch) || ch === '=';
 
@@ -86,6 +94,7 @@
     }
     draw(g) {
       if (!KB.has(this.spr)) g.rect(this.x, this.y, this.w, this.h, this.color);
+      if (this.scale && this.scale !== 1) { g.spr(this.spr, this.cx, this.bottom, { t: this.t, flip: this.flip, rot: this.rot, fps: this.fps, scaleX: this.scale, scaleY: this.scale }); return; }
       super.draw(g);
     }
   }
@@ -131,6 +140,8 @@
       this.hurtsPlayer = true; this.damage = 1; this.contactDamage = true; this.untouchable = false; this.hidden = false;
       this.turnAtEdge = false; this.turnAtWall = false; this.hurtT = 0; this.started = false; this.walkAnim = false;
       this.spr = ''; this.color = '#f000f0';
+      // 二階段：hp < 50% 時進入（變色 + 攻擊間隔 -30% + 新招）
+      this.phase = 1; this.rageColor = '#ff4020'; this.phase2Msg = '';
       this.spawnX = x; this.spawnY = y; this.bottom = y + T;   // (x,y) = 腳站的磁磚 → 底部貼齊格子底
       this.rngS = (1234567 + Math.floor(x * 7 + y * 13)) & 0x7fffffff;
       // game.loadRoom 會在載入時就把 room.exit 的過關門放進房間（玩家可直接跳過魔王）；
@@ -140,6 +151,22 @@
     setSize(w, h) { this.w = w; this.h = h; this.bottom = this.spawnY + T; }
     rng() { this.rngS = (Math.imul(this.rngS, 1103515245) + 12345) & 0x7fffffff; return this.rngS / 0x7fffffff; }
     setState(s) { this.state = s; this.stateT = 0; }
+    // 招式間隔：二階段縮短 30%
+    iv(n) { return this.phase === 2 ? Math.max(1, Math.round(n * 0.7)) : n; }
+    get half() { return this.maxHp * 0.5; }
+    maybePhase2() { if (this.phase === 1 && this.hp > 0 && this.hp < this.half) this.enterPhase2(); }
+    enterPhase2() {
+      if (this.phase >= 2) return;
+      this.phase = 2;
+      if (KB.game) KB.game.shake = Math.max(KB.game.shake || 0, 6);
+      KB.audio.sfx('phase2'); KB.audio.sfx('boss_hurt');
+      phase2Music();
+      KB.fx('fx_sparkle', this.cx, this.cy);
+      KB.particles(this.cx, this.cy, ['#ffffff', '#ff8040', this.rageColor], 22, { spread: 3.5, life: 40 });
+      if (KB.game) KB.game.toast(this.phase2Msg || (this.displayName + ' 認真了！'));
+      this.onPhase2();
+    }
+    onPhase2() { }
     get floorY() { return groundY(this.cx, this.bottom); }
     // 登場期間（game 只呼叫這個）：動畫計時、有物理的魔王落到地面
     introUpdate(dt) { this.t += dt; if (this.solid) { this.vx = 0; this.physics(); } }
@@ -162,6 +189,7 @@
       const hy = src && src.cy !== undefined ? clamp(src.cy, this.y, this.bottom) : this.cy;
       KB.fx('fx_hit', hx, hy + 6);
       if (this.hp <= 0) { this.hp = 0; this.die(src); return true; }
+      this.maybePhase2();
       this.onHurt(amount, src);
       return true;
     }
@@ -180,6 +208,12 @@
       opts = this.sprOpts(opts || {});
       if (!KB.has(spr)) g.rect(this.x, this.y, this.w, this.h, (this.flash > 0 && (this.flash & 2)) ? '#ffffff' : this.color);
       g.spr(spr, this.cx, this.bottom, opts);
+      // 二階段變色：同一張精靈疊一層會呼吸的色調（不是整片剪影，看得出原本的圖）
+      if (this.phase === 2 && !opts.tint) {
+        const a = 0.32 + 0.12 * Math.sin(this.t * 7);
+        g.spr(spr, this.cx, this.bottom, Object.assign({}, opts, { tint: this.rageColor, alpha: a }));
+        if ((Math.floor(this.t * 60) % 7) === 0) KB.particles(this.cx + (Math.random() - 0.5) * this.w, this.y + this.h * 0.3, this.rageColor, 1, { spread: 0.4, grav: -0.02, life: 16, up: 0.4 });
+      }
       if (KB.DEBUG && KB.showHitbox) g.rect(this.x, this.y, this.w, this.h, 'rgba(255,128,0,0.3)');
     }
     draw(g) { this.drawBody(g, this.spr); }
@@ -197,15 +231,36 @@
       this.solid = false; this.grav = 0; this.dir = -1; this.spr = 'whispy_idle';
       this.setSize(40, 96);
       this.cycle = 0; this.puffs = 0; this.apples = 0; this.rootX = 0; this.rootY = 0;
+      this.roots = []; this.rageColor = '#ff3020'; this.phase2Msg = '威斯比的樹根開始暴走！';
       this.setState('idle');
     }
     snap() { this.bottom = groundY(this.cx, this.bottom - 1); }
     introUpdate(dt) { this.t += dt; this.snap(); }
     onIntroEnd() { this.snap(); }
     nextAttack() {
-      const seq = ['blow', 'apple', 'root'];
+      // 二階段多一招「暴風」：大蘋果三連 + 地面三處竄根
+      // 二階段的循環裡「暴風」只放一次：放兩次的話貼著樹砍的玩家會一直掉能力（boss_test 的普通玩家樣本會輸）
+      const seq = this.phase === 2 ? ['blow', 'apple', 'storm', 'root'] : ['blow', 'apple', 'root'];
       this.cycle++; this.puffs = 0; this.apples = 0;
       this.setState(seq[(this.cycle - 1) % seq.length]);
+    }
+    onPhase2() { this.roots.length = 0; this.setState('storm'); }
+    // 竄根：先在 (x, 地面) 噴土預警 warn 幀，再冒出判定框
+    spawnRoot(x, warn, big) {
+      const rx = clamp(x, 8, this.x - 14), ry = groundY(rx, (this.player ? this.player.bottom : this.bottom) - 2);
+      this.roots.push({ x: rx, y: ry, t: 0, warn: warn, big: !!big });
+    }
+    updateRoots() {
+      for (const r of this.roots) {
+        r.t++;
+        if (r.t < r.warn) { if (r.t % 3 === 0) KB.particles(r.x + (this.rng() - 0.5) * 12, r.y, '#8a5a30', 1, { spread: 0.6, grav: 0.1, life: 14, up: 1.2 }); continue; }
+        if (r.t === r.warn) {
+          const w = r.big ? 16 : 12, h = r.big ? 30 : 22;
+          KB.hitbox({ x: r.x - w / 2, y: r.y - h, w: w, h: h, dmg: 1, owner: 'enemy', type: 'root', life: 24, pierce: true });
+          KB.particles(r.x, r.y, '#8a5a30', 10, { spread: 2 }); KB.audio.sfx('block');
+        }
+      }
+      this.roots = this.roots.filter(r => r.t < r.warn + 30);
     }
     // 氣團：第 1、3 顆貼地（站著會中，要跳過去），第 2 顆在跳躍高度（跳起來會中）
     blow() {
@@ -215,43 +270,51 @@
       KB.particles(mx, my, '#e8f8ff', 4, { spread: 1.2, vx: -1, grav: 0, life: 14, up: 0 });
     }
     // 蘋果在樹左側的地面上方隨機落下（不瞄準玩家）：是主要的可吸入彈藥
-    dropApple() {
+    dropApple(big) {
       const x = clamp(this.x - 16 - this.rng() * Math.min(200, this.x - 28), 12, this.x - 10);
       const y = Math.max(6, this.y - 12);
-      KB.spawn(new Ammo({ spr: 'proj_apple', x, y, vx: 0, vy: 0.5, grav: 0.16, maxFall: 3.2, dmg: 1, owner: 'enemy', life: 400, w: 12, h: 12, solid: true, dieOnGround: true, name: 'apple', score: 100, fxHit: 'fx_poof', type: 'apple', color: '#e83030' }));
+      const sz = big ? 16 : 12;
+      KB.spawn(new Ammo({ spr: 'proj_apple', x, y, vx: 0, vy: big ? 1.0 : 0.5, grav: big ? 0.22 : 0.16, maxFall: big ? 4 : 3.2, dmg: 1, owner: 'enemy', life: 400, w: sz, h: sz, solid: true, dieOnGround: true, name: 'apple', score: big ? 150 : 100, fxHit: 'fx_poof', type: 'apple', color: '#e83030', scale: big ? 1.35 : undefined }));
     }
     ai(dt) {
       const p = this.player; if (!p) return;
       if (this.hurtT > 0 && this.stateT % 4 === 0) KB.particles(this.x + 12, this.y + 34, '#80c0ff', 1, { spread: 0.3, grav: 0.2, life: 22, up: 0.4 }); // 流淚
+      this.updateRoots();
       switch (this.state) {
         case 'idle':
-          if (this.stateT > 50) this.nextAttack();
+          if (this.stateT > this.iv(50)) this.nextAttack();
           break;
         case 'blow':
-          if (this.stateT % 24 === 6 && this.puffs < 3) { this.puffs++; this.blow(); }
-          if (this.stateT > 84) this.setState('idle');
+          if (this.stateT % this.iv(24) === 6 && this.puffs < 3) { this.puffs++; this.blow(); }
+          if (this.stateT > this.iv(84)) this.setState('idle');
           break;
         case 'apple':
-          if (this.stateT % 30 === 10 && this.apples < 3) { this.apples++; this.dropApple(); }
-          if (this.stateT > 104) this.setState('idle');
+          if (this.stateT % this.iv(30) === 10 && this.apples < 3) { this.apples++; this.dropApple(); }
+          if (this.stateT > this.iv(104)) this.setState('idle');
           break;
         case 'root':   // 竄根：瞄準玩家腳下，36 幀泥土噴起預警後竄出（站著不動會被打到，走開就沒事）
-          if (this.stateT === 1) { this.rootX = clamp(p.cx, 8, this.x - 14); this.rootY = groundY(this.rootX, p.bottom - 2); }
-          if (this.stateT < 36 && this.stateT % 3 === 0) KB.particles(this.rootX + (this.rng() - 0.5) * 10, this.rootY, '#8a5a30', 1, { spread: 0.6, grav: 0.1, life: 14, up: 1.2 }); // 預警：泥土噴起
-          if (this.stateT === 36) {
-            KB.hitbox({ x: this.rootX - 6, y: this.rootY - 22, w: 12, h: 22, dmg: 1, owner: 'enemy', type: 'root', life: 24, pierce: true });
-            KB.particles(this.rootX, this.rootY, '#8a5a30', 8, { spread: 1.8 }); KB.audio.sfx('block');
-          }
-          if (this.stateT > 84) this.setState('idle');
+          if (this.stateT === 1) this.spawnRoot(p.cx, 36, false);
+          if (this.stateT > this.iv(84)) this.setState('idle');
+          break;
+        case 'storm':  // 【二階段新招】大蘋果三連 + 地面三處竄根（預警 26 幀，走位就躲得掉）
+          if (this.stateT === 1) { KB.audio.sfx('boss_hurt'); if (KB.game) KB.game.shake = Math.max(KB.game.shake || 0, 3); }
+          if (this.stateT % 14 === 4 && this.apples < 3) { this.apples++; this.dropApple(true); }
+          // 兩處竄根（預警 32 幀，比一階段的 36 稍快但還來得及走開）；三處會讓貼著樹砍的玩家幾乎躲不掉
+          // 兩處竄根（預警 32 幀，比一階段的 36 稍快但還來得及走開）；三處會讓貼著樹砍的玩家幾乎躲不掉
+          if (this.stateT === 6) this.spawnRoot(p.cx, 32, true);
+          if (this.stateT === 40) this.spawnRoot(p.cx - 40 + this.rng() * 80, 32, true);
+          if (this.stateT > 110) this.setState('idle');
           break;
       }
     }
     draw(g) {
       const spr = this.hurtT > 0 ? 'whispy_hurt' : (this.state === 'blow' ? 'whispy_blow' : 'whispy_idle');
       this.drawBody(g, spr);
-      if (this.state === 'root' && this.stateT >= 36 && this.stateT < 66) {
-        if (!KB.has('whispy_root')) g.rect(this.rootX - 6, this.rootY - 22, 12, 22, '#8a5a30');
-        g.spr('whispy_root', this.rootX, this.rootY, { t: this.t });
+      for (const r of this.roots) {
+        if (r.t < r.warn || r.t > r.warn + 30) continue;
+        const w = r.big ? 16 : 12, h = r.big ? 30 : 22;
+        if (!KB.has('whispy_root')) g.rect(r.x - w / 2, r.y - h, w, h, '#8a5a30');
+        else g.spr('whispy_root', r.x, r.y, { t: this.t, scaleY: r.big ? 1.3 : 1, scaleX: r.big ? 1.2 : 1 });
       }
     }
   }
@@ -266,6 +329,7 @@
       super(x, y);
       this.solid = true; this.grav = KB.GRAV; this.speed = 0.9; this.box = null; this.selfHp = this.maxSelfHp = 15;
       this.hopOnPush = false; this.ko = false; this.koT = 0; this.color = '#4060e0'; this.spr = 'lololo_walk';
+      this.rage = false; this.baseSpeed = 0.9; this.shoveT = 0;
       this.setSize(18, 22); this.dir = -1; this.setState('idle');
     }
     get leader() { return this; }
@@ -291,13 +355,20 @@
       this.solid = true; this.grav = KB.GRAV; this.vx = 0; this.vy = 0; this.x = this.spawnX; this.bottom = this.spawnY + T; this.invuln = 20;
       KB.fx('fx_poof', this.cx, this.cy); this.setState('idle');
     }
+    // 二階段：兩人同時開始推箱、速度 +35%，推到一半會把箱子直接射出去
+    goRage() {
+      if (this.rage) return;
+      this.rage = true; this.phase = 2; this.speed = this.baseSpeed * 1.35;
+      this.releaseBox(false); this.setState('idle'); this.stateT = 20;   // 兩人同時 → 同一拍生出箱子
+      KB.particles(this.cx, this.cy, ['#ffffff', this.color], 10, { spread: 2 });
+    }
     ai(dt) {
       if (this.ko) { if (--this.koT <= 0) this.comeBack(); return; }
       const map = KB.game.map;
       switch (this.state) {
         case 'idle':
           this.vx = 0;
-          if (this.stateT > 30) { this.spawnBox(); if (this.box) { this.setState('push'); if (this.hopOnPush) this.vy = -2.4; } }
+          if (this.stateT > this.iv(30)) { this.spawnBox(); if (this.box) { this.setState('push'); if (this.hopOnPush) this.vy = -2.4; } }
           break;
         case 'push': case 'walk': {
           if (this.box && (this.box.dead || this.box.beingInhaled || this.box.pusher !== this)) { if (!this.box.dead) this.box.pusher = null; this.box = null; this.setState('walk'); }
@@ -311,12 +382,18 @@
           }
           this.vx = this.dir * this.speed;
           if (this.box) { this.box.x = this.dir > 0 ? this.x + this.w : this.x - this.box.w; this.box.bottom = this.bottom; this.box.vx = this.vx; this.box.dir = this.dir; this.box.flip = this.dir < 0; }
+          // 【二階段新招】推到第 80 幀把箱子朝前方射出去（原本只會慢慢推）
+          if (this.rage && this.box && this.stateT >= 80 && this.stateT % 80 === 0) {
+            const b = this.box; this.releaseBox(true); if (b && !b.dead) { b.vx = this.dir * 3.6; b.friction = 0.99; }
+            KB.audio.sfx('spit'); KB.particles(this.cx + this.dir * 12, this.cy, '#ffffff', 6, { spread: 1.5 });
+            this.setState('idle'); break;
+          }
           if (this.stateT > 420) { this.releaseBox(false); this.dir *= -1; this.setState('idle'); }
           break;
         }
         case 'hurt':
           this.vx *= 0.85;
-          if (this.stateT > 14) this.setState('idle');
+          if (this.stateT > this.iv(14)) this.setState('idle');
           break;
       }
     }
@@ -331,7 +408,7 @@
       super(x, y);
       this.leaderRef = leader; this.displayName = '拉拉拉'; this.subtitle = 'LALALA'; this.name = 'lalala';
       this.hp = this.maxHp = 15; this.score = 0; this.spr = 'lalala_walk'; this.color = '#f070b0';
-      this.speed = 1.0; this.hopOnPush = true; this.dir = 1;
+      this.speed = this.baseSpeed = 1.0; this.hopOnPush = true; this.dir = 1; this.rageColor = '#ff3060';
     }
     get leader() { return this.leaderRef; }
     hurt(amount, src) { return this.leader ? this.leader.damageFrom(this, amount, src) : false; }
@@ -346,6 +423,7 @@
       super(x, y);
       this.displayName = '洛洛洛與拉拉拉'; this.subtitle = 'LOLOLO & LALALA'; this.name = 'lololo';
       this.hp = this.maxHp = 30; this.score = 6000; this.partner = null;
+      this.rageColor = '#ff3060'; this.phase2Msg = '洛洛洛與拉拉拉同時推箱！';
     }
     ensurePartner() {
       if (this.partner || !KB.game) return;
@@ -372,12 +450,14 @@
       this.hp = Math.max(0, this.hp - amount);
       KB.audio.sfx('boss_hurt'); KB.fx('fx_hit', who.cx, who.cy);
       if (this.hp <= 0) { if (who !== this) { this.x = who.x; this.y = who.y; } this.die(src); return true; }
+      this.maybePhase2();
       if (who.selfHp <= 0) { who.knockOut(); return true; }
       const from = src && src.cx !== undefined ? src.cx : who.cx + who.dir;
       who.releaseBox(false);
       who.vx = (who.cx < from ? -1 : 1) * 1.6; who.vy = -1.5; who.setState('hurt');
       return true;
     }
+    onPhase2() { this.goRage(); if (this.partner && !this.partner.dead) this.partner.goRage(); }
     onDeath() {
       this.releaseBox(false);
       if (this.partner && !this.partner.dead) { KB.fx('fx_poof', this.partner.cx, this.partner.cy); this.partner.releaseBox(false); this.partner.dead = true; }
@@ -396,8 +476,9 @@
       this.hp = this.maxHp = 40; this.score = 7000; this.color = '#f0f0ff';
       this.solid = false; this.grav = 0; this.spr = 'kracko_idle';
       this.setSize(56, 36);
-      this.baseY = this.y; this.hoverY = this.y; this.lowY = this.y; this.floor = this.bottom + 64; this.phase = 0; this.attackIdx = 0;
+      this.baseY = this.y; this.hoverY = this.y; this.lowY = this.y; this.floor = this.bottom + 64; this.wob = 0; this.attackIdx = 0;
       this.minion = null; this.minionT = 150; this.boltY = 0; this.sx = 0; this.sy = 0; this.tx = 0; this.ty = 0; this.sub = 0; this.subT = 0; this.swoopDir = -1;
+      this.boltX = 0; this.boltT = 0; this.rageColor = '#4060ff'; this.phase2Msg = '克拉寇捲起雷雨！';
       this.setState('idle');
     }
     // 巡航高度：底部離地 52px（卡比跳起來揮劍剛好打得到）；關卡若把他放得更低就用更低的那個。
@@ -413,7 +494,21 @@
       this.x += (tx - this.x) * k; this.y += (ty - this.y) * k;
     }
     // 循環：閃電 → 貼地橫掃（可打到）→ 灑雨（雨滴可吸入吐回）→ 低空盤旋（可打到）
-    chooseAttack() { const seq = ['lightning', 'swoop', 'rain', 'low']; this.setState(seq[this.attackIdx++ % seq.length]); }
+    chooseAttack() {
+      // 二階段多一招「雷雨」：灑雨 + 三道閃電，接著直接俯衝
+      // 二階段：多一招「雷雨」，但雷雨結束會直接接俯衝，所以循環裡只放一次，
+      // 而且每招之間都留一次低空盤旋（low = 給玩家打的窗口），否則普通玩家會被連段打死。
+      const seq = this.phase === 2 ? ['storm', 'low', 'lightning', 'low', 'rain', 'swoop'] : ['lightning', 'swoop', 'rain', 'low'];
+      this.setState(seq[this.attackIdx++ % seq.length]);
+    }
+    onPhase2() { this.attackIdx = 0; this.setState('storm'); }
+    // 垂直閃電：從 x 劈到地面
+    bolt(x) {
+      const fl = groundY(x, this.bottom);
+      this.boltX = x; this.boltY = fl; this.boltT = 20;
+      KB.hitbox({ x: x - 5, y: this.bottom, w: 10, h: Math.max(8, fl - this.bottom), dmg: 1, owner: 'enemy', type: 'lightning', life: 20, pierce: true });
+      KB.audio.sfx('spark'); if (KB.game) KB.game.shake = Math.max(KB.game.shake || 0, 3);
+    }
     drop() {
       KB.spawn(new Raindrop({ spr: 'raindrop', x: this.cx + (this.rng() * 2 - 1) * 44, y: this.bottom, vx: (this.rng() - 0.5) * 0.8, vy: 1, grav: 0.06, maxFall: 2.4, dmg: 1, owner: 'enemy', life: 240, w: 6, h: 8, solid: true, dieOnGround: true, name: 'raindrop', score: 30, fxHit: 'fx_poof', type: 'rain', color: '#80c0ff' }));
     }
@@ -428,25 +523,36 @@
     }
     ai(dt) {
       const p = this.player; if (!p) return;
-      this.phase += 0.02; this.calcHover();
+      this.wob += 0.02; this.calcHover();
+      if (this.boltT > 0) this.boltT--;
       this.contactDamage = this.state !== 'low';   // 低空盤旋是給玩家打的窗口：那時碰到雲不會受傷
       switch (this.state) {
         case 'idle':
-          this.hoverTo(p.cx - this.w / 2 + Math.sin(this.phase) * 72, this.hoverY + Math.sin(this.t * 3) * 5, 0.05);
-          if (this.stateT > 90) this.chooseAttack();
+          this.hoverTo(p.cx - this.w / 2 + Math.sin(this.wob) * 72, this.hoverY + Math.sin(this.t * 3) * 5, 0.05);
+          if (this.stateT > this.iv(90)) this.chooseAttack();
           break;
-        case 'lightning':   // 從目前位置垂直劈下（不追蹤玩家）：30 幀電火花預警，站在雲正下方才會被劈到
-          if (this.stateT < 30) {
+        case 'lightning': {  // 從目前位置垂直劈下（不追蹤玩家）：預警後劈，站在雲正下方才會被劈到
+          const warn = 30;   // 閃電的電火花預警不縮短（那是玩家唯一的反應時間）
+          if (this.stateT < warn) {
             this.hoverTo(this.x, this.hoverY, 0.08);
             if (this.stateT % 3 === 0) KB.particles(this.cx + (this.rng() - 0.5) * 30, this.bottom, '#ffff80', 1, { spread: 0.4, grav: 0, life: 8, up: 0 });
           }
-          if (this.stateT === 30) {
-            const fl = groundY(this.cx, this.bottom); this.boltY = fl;
-            KB.hitbox({ x: this.cx - 5, y: this.bottom, w: 10, h: Math.max(8, fl - this.bottom), dmg: 1, owner: 'enemy', type: 'lightning', life: 20, pierce: true });
-            KB.audio.sfx('spark'); KB.game.shake = 3;
-          }
-          if (this.stateT > 64) this.setState('idle');
+          if (this.stateT === warn) this.bolt(this.cx);
+          if (this.stateT > this.iv(64)) this.setState('idle');
           break;
+        }
+        case 'storm': {  // 【二階段新招】閃電雨：一邊灑雨一邊劈兩道閃電，結束接俯衝
+          // 雷位置在進招時就鎖定（不追蹤玩家）：站著不動才會被劈到，走開就躲得掉
+          if (this.stateT === 1) this.tx = clamp(p.cx, 40, mapW() - 40);
+          this.hoverTo(this.tx - this.w / 2 + Math.sin(this.wob * 2) * 24, this.hoverY, 0.04);
+          if (this.stateT % 12 === 0 && this.stateT < 80) this.drop();
+          for (const f of [32, 70]) {
+            if (this.stateT >= f - 26 && this.stateT < f && this.stateT % 3 === 0) KB.particles(this.cx + (this.rng() - 0.5) * 36, this.bottom, '#ffff80', 1, { spread: 0.4, grav: 0, life: 8, up: 0 });
+            if (this.stateT === f) this.bolt(this.cx);
+          }
+          if (this.stateT > 96) this.setState('swoop');
+          break;
+        }
         case 'swoop': {  // 貼地橫掃：先垂直降到地面上方，再朝玩家方向橫掃過整個房間，最後升回巡航高度
           if (this.stateT === 1) { this.sub = 0; this.subT = 0; this.sx = this.x; this.sy = this.y; this.ty = groundY(p.cx, p.bottom - 2) - this.h - 6; this.swoopDir = p.cx < this.cx ? -1 : 1; }
           if (this.sub === 0) {
@@ -467,11 +573,11 @@
         }
         case 'rain':
           this.hoverTo(p.cx - this.w / 2, this.hoverY, 0.03);
-          if (this.stateT % 9 === 0 && this.stateT < 50) this.drop();
-          if (this.stateT > 70) this.setState('idle');
+          if (this.stateT % this.iv(9) === 0 && this.stateT < 50) this.drop();
+          if (this.stateT > this.iv(70)) this.setState('idle');
           break;
         case 'low':   // 低空盤旋 130 幀：在玩家附近左右漂，讓玩家有揮劍的機會（雲的下緣冒電火花警示）
-          this.hoverTo(p.cx - this.w / 2 + Math.sin(this.phase * 3) * 40, this.lowY, 0.06);
+          this.hoverTo(p.cx - this.w / 2 + Math.sin(this.wob * 3) * 40, this.lowY, 0.06);
           if (this.stateT % 6 === 0) KB.particles(this.cx + (this.rng() - 0.5) * 40, this.bottom, '#ffff80', 1, { spread: 0.3, grav: 0, life: 8, up: 0.3 });
           if (this.stateT > 130) this.setState('idle');
           break;
@@ -479,12 +585,13 @@
       this.trySpawnMinion();
     }
     draw(g) {
-      if (this.state === 'lightning' && this.stateT >= 30 && this.stateT < 50) {
-        const bright = (this.stateT & 2) ? '#ffffa0' : '#ffffff';
-        if (!KB.has('proj_lightning')) g.rect(this.cx - 3, this.bottom, 6, this.boltY - this.bottom, bright);
-        else for (let y = this.bottom + 16; y <= this.boltY + 15; y += 16) g.spr('proj_lightning', this.cx, Math.min(y, this.boltY), { t: this.t, fps: 12 });
+      if (this.boltT > 0) {
+        const bright = (this.boltT & 2) ? '#ffffa0' : '#ffffff';
+        if (!KB.has('proj_lightning')) g.rect(this.boltX - 3, this.bottom, 6, this.boltY - this.bottom, bright);
+        else for (let y = this.bottom + 16; y <= this.boltY + 15; y += 16) g.spr('proj_lightning', this.boltX, Math.min(y, this.boltY), { t: this.t, fps: 12 });
       }
       const spr = this.hurtT > 0 ? 'kracko_hurt' : ((this.state === 'idle' || this.state === 'low') ? 'kracko_idle' : 'kracko_attack');
+      if (this.state === 'storm' && (Math.floor(this.t * 60) % 6) === 0) KB.particles(this.cx + (this.rng() - 0.5) * 50, this.bottom - 4, '#8090ff', 1, { spread: 0.5, grav: 0, life: 12, up: 0 });
       this.drawBody(g, spr, { flip: false });
     }
   }
@@ -500,6 +607,10 @@
       this.hp = this.maxHp = 45; this.score = 8000; this.color = '#3040a0';
       this.solid = true; this.grav = KB.GRAV; this.spr = 'metaknight_idle'; this.setSize(20, 26);
       this.swordStar = null; this.decisions = 0; this.dashBox = null; this.dir = -1; this.stunCD = 0;
+      // QA P0-01：迴避（vanish / backstep）不能無限連發，否則普通玩家永遠打不到他
+      this.vanishCD = 0;      // 消失後 180 幀內不能再消失
+      this.evadeLock = 0;     // 受傷後 30 幀內不能迴避
+      this.rageColor = '#8040ff'; this.phase2Msg = '魅塔騎士拔出了真劍！';
       this.setState('idle');
     }
     onIntroEnd() {
@@ -512,19 +623,27 @@
         if (KB.game) KB.game.toast('魅塔騎士丟出了一把劍！');
       } else this.setState('idle');
     }
+    get canVanish() { return this.vanishCD <= 0 && this.evadeLock <= 0; }
+    onPhase2() { this.vanishCD = Math.max(this.vanishCD, 90); this.setState('tornado'); }
     decide() {
       const p = this.player, dist = this.playerDist(), r = this.rng();
       this.decisions++;
-      if (this.decisions % 5 === 0 && r < 0.7) return this.setState('vanish');
+      const rage = this.phase === 2;
+      // 二階段新招：龍捲（貼地追過來）與劍氣三連
+      if (rage && this.decisions % 3 === 0) return this.setState(r < 0.5 ? 'tornado' : 'tricutter');
+      if (this.decisions % 5 === 0 && r < 0.7 && this.canVanish) return this.setState('vanish');
       if (p && p.cy < this.y - 24 && dist < 60) return this.setState('jump');
-      if (dist < 34) return this.setState(r < 0.6 ? 'slash' : 'backstep');
-      if (dist < 120) { if (r < 0.35) return this.setState('dash'); if (r < 0.6) return this.setState('cutter'); return this.setState('walk'); }
-      if (r < 0.5) return this.setState('walk'); if (r < 0.8) return this.setState('cutter'); return this.setState('vanish');
+      if (dist < 34) return this.setState(r < 0.6 ? 'slash' : (this.evadeLock > 0 ? 'slash' : 'backstep'));
+      if (dist < 120) { if (r < 0.35) return this.setState('dash'); if (r < 0.6) return this.setState(rage ? 'tricutter' : 'cutter'); return this.setState('walk'); }
+      if (r < 0.5) return this.setState('walk'); if (r < 0.8) return this.setState('cutter');
+      return this.setState(this.canVanish ? 'vanish' : 'walk');
     }
     ai(dt) {
       const p = this.player; if (!p) return;
       const dist = this.playerDist();
       if (this.stunCD > 0) this.stunCD--;
+      if (this.vanishCD > 0) this.vanishCD--;
+      if (this.evadeLock > 0) this.evadeLock--;
       // 這是一場劍鬥：只有招式（揮劍 / 劍氣 / 衝刺斬）會傷人，身體只在衝刺時有碰觸傷害，
       // 否則貼身互砍時光是走進他就掉劍，簡單玩家打不贏。
       this.contactDamage = this.state === 'dash';
@@ -540,22 +659,50 @@
         }
         case 'idle':
           this.vx *= 0.7; this.facePlayer();
-          if (this.stateT > 18) this.decide();
+          if (this.stateT > this.iv(18)) this.decide();
+          break;
+        case 'recover':   // QA P0-01：每次迴避後的 40 幀硬直（不反擊、也不會撞傷人，是玩家的攻擊窗）
+          this.vx *= 0.8; this.contactDamage = false;
+          if (this.stateT % 8 === 0) KB.particles(this.cx, this.y - 2, '#a080ff', 1, { spread: 0.4, grav: 0, life: 14, up: 0.5 });
+          if (this.stateT > 40) { this.facePlayer(); this.setState('idle'); }
           break;
         case 'walk':
-          this.facePlayer(); this.vx = this.dir * 1.3;
-          if (this.hitWall || dist < 26 || this.stateT > 70) this.setState('idle');
+          this.facePlayer(); this.vx = this.dir * (this.phase === 2 ? 1.7 : 1.3);
+          if (this.hitWall || dist < 26 || this.stateT > this.iv(70)) this.setState('idle');
           break;
         case 'slash':
           this.vx *= 0.8;
           if (this.stateT === 1) this.facePlayer();
           if (this.stateT === 8) { KB.hitbox({ x: 0, y: 0, w: 24, h: 24, dmg: 1, owner: 'enemy', type: 'sword', follow: this, ox: 2, oy: 0, life: 10, pierce: true }); KB.audio.sfx('sword'); }
-          if (this.stateT > 26) this.setState(this.rng() < 0.6 ? 'backstep' : 'idle');   // 砍完多半往後跳開，留出空檔
+          if (this.phase === 2 && this.stateT === 20) { KB.hitbox({ x: 0, y: 0, w: 26, h: 24, dmg: 1, owner: 'enemy', type: 'sword', follow: this, ox: 2, oy: 0, life: 10, pierce: true }); KB.audio.sfx('sword'); }
+          if (this.stateT > this.iv(26)) this.setState((this.rng() < 0.6 && this.evadeLock <= 0) ? 'backstep' : 'idle');   // 砍完多半往後跳開，留出空檔
           break;
-        case 'backstep':   // 往後跳開一小段
+        case 'backstep':   // 往後跳開一小段，落地後有硬直
           if (this.stateT === 1) { this.facePlayer(); this.vx = -this.dir * 2.0; this.vy = -3.0; }
-          if (this.stateT > 6 && this.onGround) { this.vx = 0; this.setState('idle'); }
-          if (this.stateT > 60) this.setState('idle');
+          if (this.stateT > 6 && this.onGround) { this.vx = 0; this.setState('recover'); }
+          if (this.stateT > 60) this.setState('recover');
+          break;
+        case 'tornado': {  // 【二階段新招】旋身放出貼地龍捲，沿地面追過去（可以跳過）
+          this.vx *= 0.7;
+          if (this.stateT === 1) { this.facePlayer(); KB.audio.sfx('slide'); }
+          if (this.stateT === 14) {
+            const gy = groundY(this.cx, this.bottom - 2);
+            KB.spawn(new Shockwave(this.cx + this.dir * 18, gy, this.dir, { speed: 2.2, life: 150, dmg: 1, color: '#b0a0ff' }));
+            KB.audio.sfx('cutter');
+          }
+          if (this.stateT % 4 === 0 && this.stateT < 16) KB.particles(this.cx, this.cy, '#c0b0ff', 2, { spread: 1.6, grav: 0, life: 16, up: 0 });
+          if (this.stateT > 40) this.setState('idle');
+          break;
+        }
+        case 'tricutter':   // 【二階段新招】劍氣三連（高 / 中 / 低三道）
+          this.vx *= 0.7;
+          if (this.stateT === 1) this.facePlayer();
+          for (let k = 0; k < 3; k++) if (this.stateT === 8 + k * 9) {
+            const oy = [-10, 0, 8][k];
+            KB.shoot({ spr: 'proj_cutter', x: this.cx + this.dir * 12, y: this.cy + oy, vx: this.dir * 3.4, dmg: 1, owner: 'enemy', life: 100, w: 12, h: 12, solid: false, pierce: false, rotSpeed: 0.4 * this.dir, type: 'cutter', dir: this.dir });
+            KB.audio.sfx('cutter');
+          }
+          if (this.stateT > 44) this.setState('idle');
           break;
         case 'dash':
           if (this.stateT === 1) {
@@ -574,15 +721,16 @@
           break;
         case 'cutter':
           this.vx *= 0.7;
-          if (this.stateT === 8) {
+          if (this.stateT === this.iv(8)) {
             this.facePlayer();
             KB.shoot({ spr: 'proj_cutter', x: this.cx + this.dir * 12, y: this.cy - 2, vx: this.dir * 3.2, dmg: 1, owner: 'enemy', life: 90, w: 12, h: 12, solid: false, pierce: false, rotSpeed: 0.4 * this.dir, type: 'cutter', dir: this.dir });
             KB.audio.sfx('cutter');
           }
-          if (this.stateT > 24) this.setState('idle');
+          if (this.stateT > this.iv(24)) this.setState('idle');
           break;
-        case 'vanish': {  // 披風消失 40 幀（無敵）→ 出現在玩家另一側
+        case 'vanish': {  // 披風消失 40 幀（無敵）→ 出現在玩家另一側 → 40 幀硬直
           if (this.stateT === 1) {
+            this.vanishCD = 180;
             this.hidden = true; this.untouchable = true; this.contactDamage = false; this.invuln = 40; this.vx = 0;
             KB.fx('fx_poof', this.cx, this.cy); KB.particles(this.cx, this.cy, ['#6040c0', '#a080ff'], 10, { spread: 2 });
           }
@@ -595,16 +743,17 @@
             KB.fx('fx_poof', this.cx, this.cy); KB.particles(this.cx, this.cy, ['#6040c0', '#a080ff'], 10, { spread: 2 }); KB.audio.sfx('door');
             void map;
           }
-          if (this.stateT > 52) this.setState(this.playerDist() < 40 ? 'slash' : 'idle');
+          if (this.stateT > 46) this.setState('recover');
           break;
         }
         case 'hurt':
           this.vx *= 0.85;
-          if (this.stateT > 14) this.setState('idle');
+          if (this.stateT > this.iv(14)) this.setState('idle');
           break;
       }
     }
     onHurt(amount, src) {
+      this.evadeLock = 30;   // QA P0-01：剛被打到就不准馬上消失 / 後跳
       if (this.state === 'vanish') return;
       const from = src && src.cx !== undefined ? src.cx : (this.player ? this.player.cx : this.cx);
       this.dir = from < this.cx ? -1 : 1;             // 面向攻擊者
@@ -620,8 +769,9 @@
       if (this.hidden) return;
       let spr = 'metaknight_idle', o = {};
       if (this.hurtT > 0 || this.state === 'hurt') spr = 'metaknight_hurt';
-      else if (this.state === 'slash') { spr = 'metaknight_attack'; o.frame = this.stateT < 8 ? 0 : this.stateT < 16 ? 1 : 2; }
+      else if (this.state === 'slash' || this.state === 'tricutter') { spr = 'metaknight_attack'; o.frame = this.stateT < 8 ? 0 : this.stateT < 16 ? 1 : 2; }
       else if (this.state === 'dash') spr = 'metaknight_dash';
+      else if (this.state === 'tornado') { spr = 'metaknight_attack'; o.frame = (this.stateT >> 2) % 3; }
       this.drawBody(g, spr, o);
     }
   }
@@ -637,10 +787,12 @@
       this.displayName = '迪迪迪大王'; this.subtitle = 'KING DEDEDE'; this.name = 'dedede';
       this.hp = this.maxHp = 60; this.score = 10000; this.color = '#d04040';
       this.solid = true; this.grav = KB.GRAV; this.maxFall = 6; this.spr = 'dedede_idle'; this.setSize(40, 52);
-      this.actions = 0; this.dizzyCD = 0; this.inhaleFx = null; this.dir = -1;
+      this.actions = 0; this.dizzyCD = 0; this.inhaleFx = null; this.dir = -1; this.jumps = 0;
+      this.rageColor = '#ff2020'; this.phase2Msg = '迪迪迪大王怒了！';
       this.setState('idle');
     }
-    get enraged() { return this.hp < this.maxHp * 0.5; }
+    get enraged() { return this.phase === 2; }
+    onPhase2() { this.stopInhaleFx(); this.setState('inhale'); }
     moveSpeed() { return this.enraged ? 1.3 : 0.85; }
     stopInhaleFx() { if (this.inhaleFx) { this.inhaleFx.dead = true; this.inhaleFx = null; } }
     // 衝擊星：落地 / 掄鎚時彈出的可吸入星星（Dream Land 的迪迪迪戰就是靠吸這個吐回去打他）
@@ -655,6 +807,8 @@
     }
     decide(dist) {
       this.actions++; const r = this.rng();
+      // 【二階段新招】吸入 → 跳躍震波三連
+      if (this.phase === 2 && this.actions % 4 === 0) return this.setState('rampage');
       if (this.actions % 5 === 0) return this.setState('superjump');
       if (dist < 52) return this.setState(r < 0.65 ? 'hammer' : 'inhale');
       if (dist < 130) { if (r < 0.4) return this.setState('walk'); if (r < 0.7) return this.setState('jump'); return this.setState('inhale'); }
@@ -668,11 +822,13 @@
       if (this.onGround && (this.state === 'idle' || this.state === 'walk' || this.state === 'inhale') && dist < this.w / 2 + 4 && this.stateT > 4) { this.stopInhaleFx(); this.setState('hop'); }
       // 身體只在「撞過來」的招式（跳躍砸地 / 吸入拉人）有碰觸傷害；站著、走路、掄鎚（有自己的判定框）、暈眩時貼身不會受傷，
       // 否則貼身互砍時光是被他走到就掉劍，簡單玩家打不贏最終魔王。
-      this.contactDamage = this.state === 'jump' || this.state === 'superjump' || (this.state === 'inhale' && this.stateT >= 16);
+      // rampage（二階段的吸入起手）只負責把玩家拉過來，本體不帶碰觸傷害：
+      // 拳擊台那種兩側有牆的窄場地，若「吸過來 + 碰到就受傷 + 接著三連跳」全開，普通玩家會被鎖死。
+      this.contactDamage = this.state === 'jump' || this.state === 'superjump' || this.state === 'triplejump' || (this.state === 'inhale' && this.stateT >= 16);
       switch (this.state) {
         case 'idle':
           this.vx *= 0.7; this.facePlayer();
-          if (this.stateT > (this.enraged ? 14 : 26)) this.decide(dist);
+          if (this.stateT > this.iv(this.enraged ? 20 : 26)) this.decide(dist);
           break;
         case 'hop':   // 往後小跳離開玩家；若背後是牆就跳過玩家頭頂到另一側
           if (this.stateT === 1) {
@@ -687,15 +843,42 @@
           if (this.stateT % 18 === 9) { KB.audio.sfx('land'); KB.particles(this.cx - this.dir * 10, this.bottom, '#c0a060', 2, { spread: 0.8, life: 12 }); }
           if (dist < 40 || this.hitWall || this.stateT > 90) this.setState('idle');
           break;
+        case 'rampage': {  // 【二階段新招】先吸一口氣把玩家拉近（40 幀），接著跳躍震波三連
+          this.vx = 0;
+          if (this.stateT === 1) { this.facePlayer(); KB.audio.sfx('inhale'); }
+          if (!this.inhaleFx || this.inhaleFx.dead) this.inhaleFx = KB.fx('fx_inhale_wind', 0, 0, { loop: true, life: 44, fps: 10 });
+          this.inhaleFx.x = this.cx + this.dir * 44; this.inhaleFx.y = this.cy + 14; this.inhaleFx.flip = this.dir < 0;
+          if (this.stateT >= 16 && p.overlapsRect(this.dir > 0 ? this.x + this.w : this.x - 88, this.y - 8, 88, this.h + 16) && !NO_PULL[p.state] && p.invincibleT <= 0) {
+            const pull = -this.dir * 1.1, nx = p.x + pull, edge = pull > 0 ? nx + p.w - 1 : nx;
+            if (!KB.physics.columnSolid(map, edge, p.y + 1, p.bottom - 1)) p.x = nx;
+          }
+          if (this.stateT >= 40) { this.stopInhaleFx(); this.setState('triplejump'); }
+          break;
+        }
+        case 'triplejump':   // 連跳三次，每次落地都放雙向震波 + 衝擊星（可吸入吐回）
+          // 每跳之間留 24 幀的落地硬直：拳擊台那種 14 格寬的窄場地若連續起跳，普通玩家沒有反應空間（會被震波夾死）
+          if (this.stateT === 1) { this.facePlayer(); this.jumps = 0; this.hangT = 0; this.vy = -5.2; this.vx = this.dir * 1.3; KB.audio.sfx('jump'); }
+          if (this.hangT > 0) {
+            this.vx *= 0.8;
+            if (--this.hangT === 0) { this.facePlayer(); this.vy = -5.2; this.vx = this.dir * clamp(Math.abs(this.playerDx()) / 60, 0.4, 1.4); KB.audio.sfx('jump'); this.stateT = 1; }
+            break;
+          }
+          if (this.stateT > 4 && this.onGround) {
+            this.land(2.6, 6);
+            if (++this.jumps >= 3) { this.vx = 0; this.setState('idle'); }
+            else this.hangT = 24;
+          }
+          if (this.stateT > 260) { this.vx = 0; this.setState('idle'); }
+          break;
         case 'hammer':
           this.vx *= 0.8;
           if (this.stateT === 1) this.facePlayer();
-          if (this.stateT === 16) {
+          if (this.stateT === 16) {   // 掄鎚的預備動作不縮短（16 幀是玩家的反應時間）
             KB.hitbox({ x: 0, y: 0, w: 40, h: 48, dmg: 2, owner: 'enemy', type: 'hammer', follow: this, ox: 6, oy: 4, life: 12, pierce: true });
             KB.audio.sfx('hammer'); KB.game.shake = 4; KB.particles(this.cx + this.dir * 30, this.bottom, '#c0a060', 6, { spread: 1.5 });
             this.impactStar(this.cx + this.dir * 34, this.bottom - 8, this.dir * 2.0, -3.2);
           }
-          if (this.stateT > 44) this.setState('idle');
+          if (this.stateT > this.iv(44)) this.setState('idle');
           break;
         case 'jump':   // 跳向玩家前方約 36px 落地（威脅是震波與衝擊星，不是直接壓人；站在原地會被震波掃到）
           if (this.stateT === 1) { this.facePlayer(); this.vy = -5.4; this.vx = this.dir * clamp((Math.abs(this.playerDx()) - 36) / 45, 0.3, 2.0); KB.audio.sfx('jump'); }
@@ -722,6 +905,7 @@
           break;
         }
         case 'dizzy':
+          // 暈眩是玩家的攻擊窗，二階段不縮短（縮短等於把最終魔王的唯一空檔拿掉）
           this.vx *= 0.88;
           if (this.stateT % 6 === 0) KB.particles(this.cx + (this.rng() - 0.5) * 24, this.y - 4, '#ffe040', 1, { spread: 0.3, grav: 0, life: 12, up: 0.3 });
           if (this.stateT > 24) this.setState('idle');
@@ -738,13 +922,14 @@
       else { this.vx = away * 1.2; this.setState('idle'); }
     }
     onDeath() { this.stopInhaleFx(); for (const e of KB.game.entities) if (e.kind === 'impactstar') e.dead = true; }
+    onHurtPhaseGuard() { }
     draw(g) {
       let spr = 'dedede_idle', o = {};
       switch (this.state) {
         case 'walk': spr = 'dedede_walk'; o.fps = this.enraged ? 10 : 7; break;
-        case 'jump': case 'superjump': case 'hop': spr = 'dedede_jump'; break;
+        case 'jump': case 'superjump': case 'hop': case 'triplejump': spr = 'dedede_jump'; break;
         case 'hammer': spr = 'dedede_hammer'; o.frame = this.stateT < 16 ? 0 : this.stateT < 30 ? 1 : 2; break;
-        case 'inhale': spr = 'dedede_inhale'; break;
+        case 'inhale': case 'rampage': spr = 'dedede_inhale'; break;
         case 'dizzy': spr = 'dedede_hurt'; break;
       }
       if (this.hurtT > 0 && this.state !== 'hammer') spr = 'dedede_hurt';
