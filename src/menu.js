@@ -454,6 +454,7 @@
   // 標題選單
   // ======================================================================
   const anyCleared = () => !!(KB.save && KB.save.cleared && Object.keys(KB.save.cleared).some(k => KB.save.cleared[k]));
+  const anyPlayed = () => !!(KB.save && KB.save.playCount && Object.keys(KB.save.playCount).length);
 
   class TitleMenu {
     constructor() {
@@ -463,6 +464,8 @@
       // Extra 模式：通關 W5 後解鎖（KB.session.extra，由 player2 的難度調整讀取）
       if (KB.DEBUG || (KB.save && KB.save.cleared && KB.save.cleared.w5)) this.items.push({ id: 'extra', label: 'Extra 模式' });
       this.items.push({ id: 'help', label: '操作說明' }, { id: 'gallery', label: '能力圖鑑' });
+      // Round 7（extra）：本機成績板（有任何通關 / 通關次數紀錄，或 ?debug=1 時顯示）
+      if (KB.RecordsScene && (KB.DEBUG || anyCleared() || anyPlayed())) this.items.push({ id: 'records', label: '成績板' });
       // 競技場：通關 W5（或 ?debug=1）後解鎖
       if (KB.ArenaScene && (KB.DEBUG || (KB.save && KB.save.cleared && KB.save.cleared.w5))) this.items.push({ id: 'arena', label: '競技場' });
       this.items.push({ id: 'settings', label: '設定' });
@@ -490,6 +493,7 @@
         else if (it.id === 'help') { this.page = 'help'; UI.openHelp(); }
         else if (it.id === 'gallery') this.sub = new AbilityGallery();
         else if (it.id === 'arena') { UI.leave(scene, () => KB.setScene(new KB.ArenaScene())); }
+        else if (it.id === 'records') { UI.leave(scene, () => KB.setScene(new KB.RecordsScene())); }
         else if (it.id === 'settings') this.sub = new SettingsMenu();
       }
     }

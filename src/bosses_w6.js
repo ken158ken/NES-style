@@ -515,16 +515,23 @@
       this.setState('split');
     }
     spawnClones() {
+      // 保險：如果上一批分身還在（例如被外部再次 setState('split')），先收掉再生新的，不會越積越多
+      for (const c of this.clones) if (c && !c.dead) c.dead = true;
       this.clones = [];
-      for (const s of [-1, 1]) {
-        const cx = clamp(this.cx + s * 46, 20, mapW() - 36);
+      // Round 7（extra）：Extra 模式的【新招】影分身 4 隻（一般 2 隻），內外兩圈各一對
+      const offs = KB.extraOn() ? [-86, -46, 46, 86] : [-46, 46];
+      for (const off of offs) {
+        const s = off < 0 ? -1 : 1;
+        const cx = clamp(this.cx + off, 20, mapW() - 36);
         const c = new ShadowClone(cx - 8, this.cy - 8);
         c.x = cx - 8; c.y = this.cy - 20; c.active = true; c.dir = -s;
         KB.spawn(c); this.clones.push(c);
         KB.fx('fx_poof', c.cx, c.cy + 6);
         KB.particles(c.cx, c.cy, ['#2c1a4a', '#a862f0'], 12, { spread: 2.2, grav: 0, life: 24 });
       }
-      this.guardT = 900;   // 影分身撐不過 900 幀（保證戰鬥一定會往前推進）
+      // 4 隻分身要多花時間清，撐的時間也拉長（900 → 1200 幀）
+      this.guardT = KB.extraOn() ? 1200 : 900;   // 影分身撐不過這麼多幀（保證戰鬥一定會往前推進）
+      if (KB.game && KB.extraOn()) KB.game.toast('暗影卡比分裂成四個！');
     }
     get clonesAlive() { return this.clones.filter(c => c && !c.dead).length; }
     dismissClones(msg) {

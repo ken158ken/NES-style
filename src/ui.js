@@ -14,8 +14,9 @@
     // nameW：能力名可用寬度（nameX 32 → 血條 hpX 84 之間留 2px），中文超過 3 字自動降 12px / 截斷
     hud: { iconX: 4, iconY: 200, nameX: 30, nameW: 53, rowA: 197, rowB: 207, hpX: 84, hpY: 197, hpGap: 9, right: 251, faceX: 217, faceY: 206, livesY: 210 },
     bossBar: { cx: 111, y: 208, w: 90, h: 10 },     // 置中於 HP 列正下方；ui_boss_bar 90×10（內框 2px）
-    // Round 6：第 6 點（W6 星之彼端，右上角）；KB.LEVELS 沒有 w6 時 StageSelectScene 會自動只取前 5 點
-    mapNodes: [[30, 142], [80, 100], [128, 134], [176, 84], [226, 118], [238, 56]],
+    // Round 6：第 6 點（W6 星之彼端，右上角）；Round 7：第 7 點（W7 夢幻迴廊，正上方天空）
+    // KB.LEVELS 沒有 w6 / w7 時 StageSelectScene 會自動只取前 5 / 6 點（向下相容）
+    mapNodes: [[30, 142], [80, 100], [128, 134], [176, 84], [226, 118], [238, 56], [128, 52]],
   };
   const C = { navy: '#101828', panel: '#182038', border: '#f0f0f8', yellow: '#ffe040', pink: '#ffb0d0', grey: '#98a8c0', dark: '#202838', cyan: '#80e0ff' };
   const pad7 = n => String(Math.max(0, Math.floor(n || 0))).padStart(7, '0');
@@ -125,6 +126,7 @@
     green: ['#58d048', '#289028', '#98f070'], castle: ['#9098b0', '#585878', '#c8ccd8'], island: ['#f0d880', '#c09848', '#fff4c0'],
     cloud: ['#a0c8f8', '#6888d8', '#e8f0ff'], dedede: ['#d84848', '#902020', '#f09090'], locked: ['#606870', '#383c48', '#808890'],
     space: ['#8878e8', '#4030a0', '#c8b8ff'],
+    dream: ['#f0a0e8', '#a050b0', '#ffe0ff'],
   };
   for (const k in NODE_COL) { const [g, G, h] = NODE_COL[k]; if (!KB.SPR['uifb_node_' + k]) KB.spriteRecolor('uifb_node', 'uifb_node_' + k, { '#58d048': g, '#289028': G, '#98f070': h }); }
   // 收集星：levels-bosses agent 會設定 KB.save.stars[levelId] = [bool, bool, bool]
@@ -132,6 +134,16 @@
   function starsOf(id) { const a = KB.save && KB.save.stars ? KB.save.stars[id] : null; return Array.isArray(a) ? a : []; }
   function starCount(id) { return starsOf(id).filter(Boolean).length; }
   UI.starCount = starCount;
+  // 全部關卡的大星星總數（W7 解鎖條件 / 成績板用）
+  UI.starTotal = function () {
+    if (KB.PROG && KB.PROG.starTotal) return KB.PROG.starTotal();
+    const st = (KB.save && KB.save.stars) || {}; let n = 0;
+    for (const k in st) if (Array.isArray(st[k])) n += st[k].filter(Boolean).length;
+    return n;
+  };
+  // Round 7：W7「夢幻迴廊」的解鎖條件 —— 通關 W6 且大星星合計 ≥ 15
+  UI.DREAM_STARS = 15;
+  UI.dreamOpen = function () { return clearedOf('w6') && UI.starTotal() >= UI.DREAM_STARS; };
   // 節點下方：★★☆ + 數字（回傳畫出的寬度）
   function drawStarRow(ctx, x, y, id, opts) {
     opts = opts || {};
@@ -509,8 +521,9 @@
     const out = [];
     // Round 6：第 6 點在右上角，可放的位置最少（上面是分數列、左邊是 W4 標籤、下面是 W5），
     // 照順序排到它時已經沒位子 → 有第 6 點時先排它，其餘仍照 W1→W5 的順序（5 個節點時順序完全不變）。
+    // Round 7：第 7 點在正上方天空（上面是標題列、左右都是禁區），同樣要優先排 —— 順序改成 [6, 5, 0..4]。
     const order = nodes.map((_, i) => i);
-    if (nodes.length >= 6) order.unshift(order.pop());
+    if (nodes.length >= 6) { const tail = order.splice(5, order.length - 5); order.unshift(...tail.reverse()); }
     const placed = {};
     for (const i of order) {
       const [x, y] = nodes[i], w = widths[i];
@@ -568,6 +581,25 @@
       }
     }
   }
+  // 夢幻迴廊（W7）：粉紫色的夢之門 —— 兩層呼吸中的光環 + 飄浮的心形星塵（節點畫在它上面）
+  function drawDreamIsle(ctx, sc, cx, cy) {
+    const f = sc.frame || 0, br = 1 + 0.12 * Math.sin(f / 24);
+    KB.circle(ctx, cx, cy, Math.round(26 * br), 'rgba(176,96,208,0.28)');
+    KB.circle(ctx, cx, cy, Math.round(19 * br), 'rgba(240,160,232,0.45)');
+    KB.circle(ctx, cx, cy, 13, '#f8d8ff');
+    for (let i = 0; i < 2; i++) {
+      const r = 15 + i * 6, a = -f * (0.035 + i * 0.014), col = i ? '#f0a0e8' : '#ffe0ff';
+      for (let k = 0; k < 10; k++) {
+        const th = a + k * (6.2832 / 10);
+        KB.rect(ctx, Math.round(cx + Math.cos(th) * r), Math.round(cy + Math.sin(th) * r * 0.5), 1, 1, col);
+      }
+    }
+    for (let i = 0; i < 5; i++) {
+      const th = f / 90 + i * 1.2566, rr = 24 + ((f / 3 + i * 17) % 12);
+      const px = Math.round(cx + Math.cos(th) * rr), py = Math.round(cy + Math.sin(th) * rr * 0.6);
+      KB.rect(ctx, px, py, 2, 2, ((f >> 3) + i) & 1 ? '#ffd8ff' : '#f0a0e8');
+    }
+  }
   class StageSelectScene {
     constructor(index) {
       this.t = 0; this.frame = 0; this.fade = 1; this.leaving = null;
@@ -582,9 +614,18 @@
     }
     level(i) { return KB.LEVELS[i] || null; }
     exists(i) { return !!KB.LEVELS[i]; }
-    unlocked(i) { if (UI.unlockAll || i === 0) return true; const prev = KB.LEVELS[i - 1]; return !!(prev && clearedOf(prev.id)); }
+    unlocked(i) {
+      if (UI.unlockAll || i === 0) return true;
+      // Round 7：W7「夢幻迴廊」＝ 通關 W6 且大星星合計 ≥ 15（不是單純的「前一關通關」）
+      const l = KB.LEVELS[i];
+      if (l && l.id === 'w7') return UI.dreamOpen();
+      const prev = KB.LEVELS[i - 1]; return !!(prev && clearedOf(prev.id));
+    }
     cleared(i) { const l = KB.LEVELS[i]; return !!(l && clearedOf(l.id)); }
     canEnter(i) { return this.exists(i) && this.unlocked(i); }
+    // Round 7：游標可以走到「下一個」尚未解鎖的節點（看得到鎖與解鎖條件），但按 Z 進不去。
+    // 只放行一步（前一個節點要能進），不會讓新玩家一路逛到最後一關。
+    canMove(i) { return this.exists(i) && (this.canEnter(i) || this.canEnter(i - 1)); }
     themeOf(i) { const l = this.level(i); return (l && l.theme) || KB.THEMES[i] || 'green'; }
     nameOf(i) { const l = this.level(i); return (l && l.name) || KB.THEME_NAMES[this.themeOf(i)] || ('WORLD ' + (i + 1)); }
     // 關名標籤：先試「W# + 關名」，排不下就退成只有關名（14px → 12px）；算一次就快取
@@ -617,7 +658,7 @@
       const dir = inp.pressed('right') ? 1 : inp.pressed('left') ? -1 : 0;
       if (dir) {
         const n = this.cur + dir; this.facing = dir;
-        if (n >= 0 && n < this.nodes.length && this.canEnter(n)) { this.target = n; this.moveT = 0; sfx('menu'); }
+        if (n >= 0 && n < this.nodes.length && this.canMove(n)) { this.target = n; this.moveT = 0; sfx('menu'); }
         else { this.bump = 10; this.bumpDir = dir; }
       }
       if (inp.pressed('jump') || inp.pressed('start')) {
@@ -655,6 +696,8 @@
       if (KB.BG && KB.BG.map) KB.BG.map(ctx, 0, 0, this.t); else drawMapBg(ctx, this);
       // Round 6：右上角的「星空島 + 傳送門」（只有 W6 存在時才畫；畫在任何背景之上，向下相容）
       if (nodes.length >= 6) drawSpaceIsle(ctx, this, nodes[5][0], nodes[5][1]);
+      // Round 7：正上方的「夢之門」（只有 W7 存在時才畫）
+      if (nodes.length >= 7) drawDreamIsle(ctx, this, nodes[6][0], nodes[6][1]);
       // 路徑（虛線）
       for (let i = 0; i < this.paths.length; i++) {
         const ok = this.canEnter(i + 1);
@@ -680,7 +723,14 @@
       drawKirby(ctx, 'ui_map_kirby', Math.round(kx + bx), Math.round(ky + 3 - hop), { t: this.t, flip: this.facing < 0 });
       // 上方：標題 / 生命 / 分數
       KB.text(ctx, 'STAGE SELECT', 8, 5, { color: '#fff', outline: C.dark, spacing: 1 });
-      KB.rect(ctx, 6, 14, TW('選擇關卡', { size: UI.MS }) + 4, 17, 'rgba(8,14,28,0.6)'); T(ctx, '選擇關卡', 8, 15, { color: C.yellow, size: UI.MS });
+      const selW = TW('選擇關卡', { size: UI.MS }) + 4;
+      KB.rect(ctx, 6, 14, selW, 17, 'rgba(8,14,28,0.6)'); T(ctx, '選擇關卡', 8, 15, { color: C.yellow, size: UI.MS });
+      // Round 7（extra）：Extra 模式時在標題旁掛一塊紅色「EXTRA」牌（緩慢呼吸，不遮到節點標籤）
+      if (KB.session && KB.session.extra) {
+        const ex = 10 + selW, ew = KB.textWidth('EXTRA') + 8;
+        KB.rect(ctx, ex, 14, ew, 17, '#3a0c14'); KB.rect(ctx, ex, 14, ew, 1, '#ff4040'); KB.rect(ctx, ex, 30, ew, 1, '#ff4040');
+        KB.text(ctx, 'EXTRA', ex + ew / 2, 19, { color: ((f >> 4) & 1) ? '#ff6060' : '#ff2020', align: 'center', outline: '#200008' });
+      }
       const ses = KB.session || { lives: KB.START_LIVES, score: 0 };
       sprAt(ctx, pick('ui_kirby_face', 'uifb_face'), 216, 3, 'tl');
       KB.text(ctx, 'x' + Math.max(0, ses.lives | 0), 250, 7, { color: '#fff', align: 'right', outline: C.dark });
@@ -691,14 +741,25 @@
       KB.text(ctx, 'W' + (i + 1), 16, 167, { color: C.yellow });
       T(ctx, this.nameOf(i), 38, 162, { color: '#fff', size: 16 });
       if (!this.exists(i)) T(ctx, '製作中…', 240, 164, { color: C.grey, align: 'right', size: UI.MS });
-      else if (!ok) { sprAt(ctx, pick('ui_lock', 'uifb_lock'), 188, 166, 'tl'); T(ctx, '未解鎖', 240, 164, { color: C.grey, align: 'right', size: UI.MS }); }
+      else if (!ok) {
+        // Round 7：W7 的鎖定提示是「集齊 15 顆大星星」（其餘關卡維持「未解鎖」）
+        const dream = !!(lv && lv.id === 'w7');
+        const msg = dream ? ('集齊 ' + UI.DREAM_STARS + ' 顆大星星') : '未解鎖';
+        const mw = TW(msg, { size: UI.MS });
+        sprAt(ctx, pick('ui_lock', 'uifb_lock'), Math.max(120, 236 - mw - 10), 166, 'tl');
+        T(ctx, msg, 240, 164, { color: dream ? C.pink : C.grey, align: 'right', size: UI.MS });
+      }
       else if (this.cleared(i)) { sprAt(ctx, 'uifb_flag', 196, 164, 'tl'); KB.text(ctx, 'CLEAR', 240, 167, { color: C.yellow, align: 'right' }); }
       else T(ctx, '出發！', 240, 164, { color: C.cyan, align: 'right', size: UI.MS });
       // 第 2 列：收集星（本關）／ 最佳分數 ／ 能力圖鑑發現進度
       // Round 5：右側要放「能力 n/20」（12px 約 69px），所以收集星的中文標籤拿掉，只留 ★★☆ x/3
       if (lv) drawStarRow(ctx, 16, 181, lv.id, { plate: false, left: true });   // ★★☆ 0/3 → x 16~61
-      // 最佳分數（結算畫面寫入 KB.save.best[levelId]）
-      if (lv) {
+      // 最佳分數（結算畫面寫入 KB.save.best[levelId]）；W7 未解鎖時改顯示大星星進度
+      if (lv && lv.id === 'w7' && !ok) {
+        const n = UI.starTotal();
+        KB.text(ctx, 'STAR', 68, 181, { color: '#98a8c0' });
+        KB.text(ctx, n + '/' + UI.DREAM_STARS, 158, 181, { color: n >= UI.DREAM_STARS ? C.yellow : C.pink, align: 'right' });
+      } else if (lv) {
         const best = (KB.save && KB.save.best && KB.save.best[lv.id]) | 0;
         KB.text(ctx, 'BEST', 68, 181, { color: '#98a8c0' });
         KB.text(ctx, pad7(best), 158, 181, { color: best > 0 ? C.yellow : '#5c6884', align: 'right' });
@@ -1102,8 +1163,18 @@
       this.t = 0; this.frame = 0; this.fade = 1; this.leaving = null;
       // fix6：打倒暗影卡比（W6「星之彼端」）之後走專屬結局文案 + 收集度總表
       const shadow = !!((KB.session && KB.session.shadowDefeated) || (KB.save && KB.save.cleared && KB.save.cleared.w6));
-      this.shadow = shadow;
-      this.lines = shadow ? [
+      // Round 7（extra）：通關 W7「夢幻迴廊」＝ 真結局（旗標 KB.session.trueEnd 由 world7 設，
+      // 沒設也會在 KB.save.cleared.w7 時成立；版面 / 文案在這裡）
+      const trueEnd = !!((KB.session && KB.session.trueEnd) || (KB.save && KB.save.cleared && KB.save.cleared.w7));
+      this.shadow = shadow; this.trueEnd = trueEnd;
+      this.lines = trueEnd ? [
+        { s: '夢的盡頭，你把自己找了回來', size: 16, color: '#ffd8f8', y: 8 },
+        { s: '夢幻迴廊的門緩緩闔上', size: 14, color: '#fff', y: 30 },
+        { s: '普普星的夜空，久違地安靜', size: 14, color: '#fff', y: 46 },
+        { s: '能力發現 ' + EndingScene.seenLine() + '　成就 ' + EndingScene.achLine(), size: 12, color: '#c8d8f0', y: 64 },
+        { s: '大星星 ' + EndingScene.starLine() + '　通關次數 ' + EndingScene.playLine(), size: 12, color: '#c8d8f0', y: 78 },
+        { s: 'FINAL SCORE ' + pad7(this.score), size: 8, color: '#fff', y: 92 },
+      ] : shadow ? [
         { s: '影子消散，星之彼端重新亮起', size: 16, color: C.yellow, y: 10 },
         { s: '追到最後才發現，那個影子', size: 14, color: '#fff', y: 32 },
         { s: '一直是你自己走過來的路', size: 14, color: '#fff', y: 48 },
@@ -1138,7 +1209,9 @@
     }
     draw(ctx) {
       const t = this.t, f = this.frame;
-      bands(ctx, 0, 150, ['#0c1430', '#141c48', '#1c2860', '#243878', '#2c4890']);
+      bands(ctx, 0, 150, this.trueEnd
+        ? ['#1a0c30', '#2c1450', '#48206c', '#68308c', '#8c48a8']
+        : ['#0c1430', '#141c48', '#1c2860', '#243878', '#2c4890']);
       drawStars(ctx, this.stars, t);
       // R6-P2-06：月亮原本在右上 (214,30)，會被結局標題（16px 中文幾乎佔滿整列）壓過去；
       // 移到左側偏下的空白帶（y 91~113：在最後一行文字與遠景山丘之間），兩種結局的文字都不會碰到。
@@ -1161,7 +1234,14 @@
         acc += l.s.length + this.gapUnits;
       }
       if (this.done) {
-        bigText(ctx, 'THE END', 128, 108, 2, { color: '#fff', outline: '#101830', align: 'center', spacing: 1 });
+        if (this.trueEnd) {
+          // 真結局：TRUE END（金 / 粉交替的呼吸色 + 上方一行 ALL CLEAR）
+          const col = ((f >> 4) & 1) ? '#ffe040' : '#ffb0e8';
+          KB.text(ctx, 'ALL CLEAR', 128, 98, { color: '#c8d8f0', align: 'center', outline: '#101830', spacing: 1 });
+          bigText(ctx, 'TRUE END', 128, 108, 2, { color: col, outline: '#301028', align: 'center', spacing: 1 });
+        } else {
+          bigText(ctx, 'THE END', 128, 108, 2, { color: '#fff', outline: '#101830', align: 'center', spacing: 1 });
+        }
         if ((f % 60) < 42) KB.text(ctx, 'PRESS START', 128, 200, { color: '#fff', align: 'center', outline: '#102018', spacing: 1 });
       }
       drawMuteToast(ctx); drawFade(ctx, this);
@@ -1176,6 +1256,12 @@
     const P = KB.PROG;
     if (!P || !P.achCount) return '0/20';
     return P.achCount() + '/' + P.achTotal();
+  };
+  // 真結局用：全部關卡的通關次數合計
+  EndingScene.playLine = function () {
+    const pc = (KB.save && KB.save.playCount) || {}; let n = 0;
+    for (const k in pc) n += pc[k] | 0;
+    return String(n);
   };
   EndingScene.starLine = function () {
     const levels = (KB.LEVELS || []).length || 6;

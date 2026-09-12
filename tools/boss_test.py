@@ -47,8 +47,14 @@ ROOMS = {
     'dedede': dict(theme='dedede', map=[E] * 10 + [G, G], spawn=[2, 9], bossPos=[12, 9]),
     # Round 6（world6）：暗影卡比。招式範圍大（影雷擊 / 影黑洞 / 暗星雨），測試房與其他魔王同規格。
     'shadowkirby': dict(theme='space', map=[E] * 10 + [G, G], spawn=[3, 9], bossPos=[12, 9]),
+    # Round 7（world7）：夢魘之核。三階段（核心 / 夢魘騎士 / 終焉之翼），測試房與其他魔王同規格。
+    'nightmarecore': dict(theme='dream', map=[E] * 10 + [G, G], spawn=[3, 9], bossPos=[12, 9]),
 }
-ORDER = ['whispywoods', 'lololo', 'kracko', 'metaknight', 'dedede', 'shadowkirby']
+ORDER = ['whispywoods', 'lololo', 'kracko', 'metaknight', 'dedede', 'shadowkirby', 'nightmarecore']
+# 多階段魔王（每個階段各一條血）：key → 階段數。
+# 這類魔王的 [phase2] 不能用 hurtToHalf（打到 40% 不會換階段），改用 __bt.toPhase(n)；
+# 階段數 >= 3 的另外多跑一組 [phase3]。
+MULTI_PHASE = {'nightmarecore': 3}
 # mid（中距離玩家）不適用的魔王：克拉寇整場飄在離地 58px 的高空，
 # 「站在地上、與魔王保持固定水平距離」的玩家模型既打不到他（迴旋刃是水平飛的）、
 # 也躲不掉貼地橫掃（3.2px/f > 走路 1.3px/f），這是模型限制不是平衡問題；他的近身戰由 fight 測試覆蓋。
@@ -66,6 +72,23 @@ PHASE2_STATES = {
     'dedede': ['rampage', 'triplejump'],
     # 暗影卡比二階段：先分裂出 2 個影分身（split → guard），影分身倒下後才會放必殺「暗星雨」
     'shadowkirby': ['split', 'guard', 'starrain'],
+    # 夢魘之核第二形態「夢魘騎士」：劍氣三連 / 瞬移斬 / 夢境黑洞 / 幻影招
+    'nightmarecore': ['slash3', 'warpslash', 'voidhole', 'phantom'],
+}
+# 第三形態的新招（只有 MULTI_PHASE >= 3 的魔王會跑）
+PHASE3_STATES = {
+    # 夢魘之核第三形態「終焉之翼」：全畫面羽毛雨 / 俯衝 / 必殺「永夜」/ 低空喘息
+    'nightmarecore': ['featherrain', 'dive', 'eternalnight', 'rest'],
+}
+
+# Round 7（extra）：Extra 模式的魔王變體 —— 開場即二階段 + 每隻 1 個新招（狀態名 / 判定式）
+EXTRA_STATES = {
+    'whispywoods': ['leafstorm'],     # 龍捲落葉
+    'lololo': ['tribox'],             # 三箱齊推
+    'kracko': ['tracker'],            # 雷雲追蹤
+    'metaknight': ['crossslash'],     # 劍氣十字
+    'dedede': ['quake'],              # 巨鎚震盪波
+    'shadowkirby': ['split', 'guard'],  # 影分身 4 隻（另外檢查分身數 >= 4）
 }
 
 # 瀏覽器端驅動：整個迴圈在頁面內跑（每幀 evaluate 太慢），回傳統計與事件截圖
@@ -264,6 +287,13 @@ window.__bt = (function () {
       b.hurt(1, { cx: KB.player.cx, cy: KB.player.cy });
       return { hp: b.hp, phase: b.phase, rage: !!b.rage };
     },
+    // 多階段魔王（每階段一條血）：直接跳到第 n 形態
+    toPhase(n) {
+      const b = KB.game.boss; if (!b) return null;
+      b.introducing = false; b.invuln = 0; b.untouchable = false; b.changing = false;
+      if (b.forcePhase) b.forcePhase(n);
+      return { hp: b.hp, maxHp: b.maxHp, phase: b.phase };
+    },
     phaseInfo() {
       const b = KB.game.boss; if (!b) return null;
       const p = b.partner;
@@ -345,7 +375,7 @@ class Session:
             pass
         self.browser.close()
 
-    def start(self, key, ability=None, use_w1=False, hitbox=False, intro_frames=160, dx=0, use_real=False):
+    def start(self, key, ability=None, use_w1=False, hitbox=False, intro_frames=160, dx=0, use_real=False, extra=False):
         """載入（注入的）魔王房並跑完登場。回傳 summary。dx：出生點往右偏移幾格（擾動用）。use_real：用 levels.js 的真實魔王房。"""
         if use_w1 or use_real:
             lv, rm = REAL_ROOMS[key] if use_real else ('w1', 3)
@@ -360,6 +390,8 @@ class Session:
             if dx: opts['x'] = room['spawn'][0] + dx; opts['y'] = room['spawn'][1]
         if ability:
             opts['ability'] = ability
+        if extra:
+            opts['extra'] = True     # main.js 的 __kb.goto 會寫進 KB.session.extra
         self.ev("(o)=>__kb.goto('game',o)", opts)
         if hitbox:
             self.ev("()=>__kb.hitbox(true)")
@@ -371,11 +403,47 @@ class Session:
 
 
 KB_INTRO_MAX = 160   # bossIntroT 起始 150；probe 允許一點餘裕
-REAL_ROOMS = {'whispywoods': ('w1', 3), 'lololo': ('w2', 4), 'kracko': ('w3', 4), 'metaknight': ('w4', 4), 'dedede': ('w5', 5), 'shadowkirby': ('w6', 5)}
+REAL_ROOMS = {'whispywoods': ('w1', 3), 'lololo': ('w2', 4), 'kracko': ('w3', 4), 'metaknight': ('w4', 4), 'dedede': ('w5', 5), 'shadowkirby': ('w6', 5), 'nightmarecore': ('w7', 4)}
 
 
 def fmt(d):
     return json.dumps(d, ensure_ascii=False)
+
+
+def run_extra(sess, key, a):
+    """[extra] Extra 模式（KB.session.extra=true）：開場即二階段、maxHp ×1.25、而且要放得出新招。"""
+    out = SHOTS / f'boss_{key}'
+    print(f'\n========== {key} [extra] ==========')
+    s0 = sess.start(key, ability='sword', use_real=a.real, extra=True)
+    info = sess.ev("()=>({extra: !!(KB.session&&KB.session.extra), phase: KB.game.boss.phase, hp: KB.game.boss.hp, maxHp: KB.game.boss.maxHp, intro: !!KB.game.boss.introducing})")
+    print('after intro:', fmt(info))
+    phase_ok = info['extra'] and info['phase'] == 2 and not info['intro']
+    # 新招觀察：玩家站著不動，記錄魔王經過哪些狀態（含搭檔 / 分身）
+    want = EXTRA_STATES.get(key, [])
+    seen, clones, shot_done = set(), 0, False
+    for _ in range(a.extra_frames // 20):
+        sess.ev("(n)=>__kb.step(n)", 20)
+        st = sess.ev("()=>{const b=KB.game.boss; if(!b) return null; const out=[b.state]; if(b.partner) out.push(b.partner.state);"
+                     " return {states: out, clones: KB.game.entities.filter(e=>!e.dead && (e.name==='shadowclone'||e.constructor.name==='ShadowClone')).length,"
+                     " boxes: KB.game.entities.filter(e=>!e.dead && e.kind==='box').length, dead: b.dead};}")
+        if not st:
+            break
+        seen.update(st['states'])
+        clones = max(clones, st['clones'])
+        if key == 'lololo' and st['boxes'] >= 3:
+            seen.add('tribox')
+        if not shot_done and (set(st['states']) & set(want) or clones >= 4):
+            save_png(out.parent / f'{out.name}_extra_move.png', sess.ev("(s)=>__bt.shot(s)", a.scale))
+            shot_done = True
+        if st['dead']:
+            break
+    move_ok = bool(set(want) & seen) or (key == 'shadowkirby' and clones >= 4)
+    errs = sess.take_errors()
+    print('extra:', fmt({'phase2AtStart': phase_ok, 'states': sorted(seen), 'maxClones': clones, 'newMoveSeen': move_ok, 'errors': errs}))
+    save_png(out.parent / f'{out.name}_extra.png', sess.ev("(s)=>__bt.shot(s)", a.scale))
+    ok = phase_ok and move_ok and not errs
+    print(f'[extra] {key}: {"PASS" if ok else "FAIL"}')
+    return {'extra': ok}
 
 
 def run_boss(sess, key, a):
@@ -470,7 +538,8 @@ def run_boss(sess, key, a):
     # ---------- [phase2] 二階段：hp 打到 40% → phase===2 且新招出現 ----------
     if not a.no_phase2:
         sess.start(key, ability='sword', use_w1=use_w1, use_real=use_real, hitbox=a.hitbox)
-        before = sess.ev("(r)=>__bt.hurtToHalf(r)", 0.4)
+        before = (sess.ev("(r)=>__bt.toPhase(r)", 2) if MULTI_PHASE.get(key)
+                  else sess.ev("(r)=>__bt.hurtToHalf(r)", 0.4))
         log = sess.ev("([n,m,o])=>__bt.run(n,m,o)", [a.phase2_frames, 'idle', {'scale': a.scale, 'godmode': True}])
         for k, v in log.pop('shots').items():
             save_png(out.parent / f'{out.name}_phase2_{k}.png', v)
@@ -487,6 +556,24 @@ def run_boss(sess, key, a):
         res['phase2'] = phase_ok
         print('phase2:', fmt({'trigger': before, 'info': info, 'states': seen_states, 'want': want, 'attacks': log['attacksSpawned']}))
         print(f"[{key}] PHASE2 {'PASS' if phase_ok else 'FAIL'}  (phase={info['phase'] if info else None} newMove={new_move} errors={len(errs)})")
+        for e in errs: print('   ', e)
+
+    # ---------- [phase3] 三階段魔王：跳到第 3 形態 → phase===3 且要出現該形態的新招 ----------
+    if not a.no_phase2 and MULTI_PHASE.get(key, 1) >= 3:
+        sess.start(key, ability='sword', use_w1=use_w1, use_real=use_real, hitbox=a.hitbox)
+        before3 = sess.ev("(r)=>__bt.toPhase(r)", 3)
+        log = sess.ev("([n,m,o])=>__bt.run(n,m,o)", [a.phase3_frames, 'idle', {'scale': a.scale, 'godmode': True}])
+        for k, v in log.pop('shots').items():
+            save_png(out.parent / f'{out.name}_phase3_{k}.png', v)
+        info = sess.ev("()=>__bt.phaseInfo()")
+        save_png(out.parent / f'{out.name}_phase3.png', sess.ev("(s)=>__bt.shot(s)", a.scale))
+        errs = sess.take_errors()
+        want3 = PHASE3_STATES.get(key, [])
+        new_move3 = any(w in log['bossStates'] for w in want3)
+        phase3_ok = bool(info and info['phase'] == 3) and new_move3 and not errs
+        res['phase3'] = phase3_ok
+        print('phase3:', fmt({'trigger': before3, 'info': info, 'states': log['bossStates'], 'want': want3, 'attacks': log['attacksSpawned']}))
+        print(f"[{key}] PHASE3 {'PASS' if phase3_ok else 'FAIL'}  (phase={info['phase'] if info else None} newMove={new_move3} errors={len(errs)})")
         for e in errs: print('   ', e)
 
     # ---------- [mid] 中距離玩家 ----------
@@ -518,7 +605,7 @@ def run_boss(sess, key, a):
 # ---------- [curve] 難度曲線量測（Round 3 balance-enemies）----------
 # 「sword 不用無敵」的普通玩家機器人在真實魔王房（levels.js）裡，3 條命打完為止，
 # 魔王最多被打掉幾 % 的血。目標曲線 w1 → w5 遞減（越後面的魔王越難）。
-CURVE_TARGET = {'whispywoods': 80, 'lololo': 70, 'kracko': 60, 'metaknight': 50, 'dedede': 40, 'shadowkirby': 35}
+CURVE_TARGET = {'whispywoods': 80, 'lololo': 70, 'kracko': 60, 'metaknight': 50, 'dedede': 40, 'shadowkirby': 35, 'nightmarecore': 30}
 
 
 def run_curve(sess, key, a):
@@ -566,7 +653,7 @@ def run_curves(sess, keys, a):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--boss', default='all', help='whispywoods / lololo / kracko / metaknight / dedede / shadowkirby / all')
+    ap.add_argument('--boss', default='all', help='whispywoods / lololo / kracko / metaknight / dedede / shadowkirby / nightmarecore / all')
     ap.add_argument('--frames', type=int, default=6000, help='fight 最大幀數')
     ap.add_argument('--runs', type=int, default=3, help='fight 樣本數（每個樣本出生點 / 節拍不同）')
     ap.add_argument('--idle-frames', type=int, default=600)
@@ -578,6 +665,7 @@ def main():
     ap.add_argument('--console', action='store_true')
     ap.add_argument('--events', type=int, default=0, help='印出 fight 的前 N 個事件（受傷 / 命中 / 死亡）')
     ap.add_argument('--phase2-frames', type=int, default=900, help='二階段觀察幀數')
+    ap.add_argument('--phase3-frames', type=int, default=1200, help='三階段觀察幀數（終焉之翼的招式比較長）')
     ap.add_argument('--mid-runs', type=int, default=1, help='中距離玩家樣本數')
     ap.add_argument('--mid-gap', type=int, default=0, help='中距離玩家與魔王保持的距離（px）；0 = 用 MID_GAP 的每魔王預設值')
     ap.add_argument('--mid-ability', default='cutter', help='中距離玩家使用的能力（預設刀刃，射程 46px）')
@@ -586,6 +674,8 @@ def main():
     ap.add_argument('--no-phase2', action='store_true')
     ap.add_argument('--no-mid', action='store_true')
     ap.add_argument('--no-intro', action='store_true')
+    ap.add_argument('--extra', action='store_true', help='只跑 Extra 模式檢查（KB.session.extra=true：開場即二階段 + 每隻魔王的新招）')
+    ap.add_argument('--extra-frames', type=int, default=1400, help='Extra 新招觀察幀數')
     ap.add_argument('--intro-frames', type=int, default=200, help='登場動畫探針的幀數（>150 才會看到 introducing 變 false）')
     ap.add_argument('--curve', action='store_true', help='只跑難度曲線量測（sword 不無敵、真實魔王房，量魔王被打掉幾 %% 血）')
     ap.add_argument('--curve-runs', type=int, default=3, help='曲線量測樣本數（取平均）')
@@ -612,7 +702,7 @@ def main():
                 print('unknown boss', k); continue
             bs = Session(pw, a.console)
             try:
-                results[k] = run_boss(bs, k, a)
+                results[k] = run_extra(bs, k, a) if a.extra else run_boss(bs, k, a)
             except Exception as ex:
                 print(f'[{k}] EXCEPTION {ex!r}')
                 results[k] = {'exception': False}

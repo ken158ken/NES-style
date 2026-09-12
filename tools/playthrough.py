@@ -166,6 +166,7 @@ def main():
     ap.add_argument('--room', type=int, default=0)
     ap.add_argument('--godmode', action='store_true', help='不會死（hp 固定 + 不會摔死）')
     ap.add_argument('--collect', action='store_true', help='順路去撿大星星（bigstar）')
+    ap.add_argument('--extra', action='store_true', help='Extra 模式（KB.session.extra=true：關卡疊加層 + 敵人強化 + HP 3）')
     ap.add_argument('--boss-gap', type=float, default=14, help='魔王戰保持的距離（魔王框外幾 px；劍的有效射程約 21px）')
     ap.add_argument('--boss-strafe', type=int, default=20, help='魔王戰前後游走的半週期（幀）')
     ap.add_argument('--boss-attack-every', type=int, default=15, help='魔王戰每幾幀揮一次')
@@ -180,7 +181,7 @@ def main():
         pg.goto(INDEX + '?debug=1&mute=1&norun=1')
         pg.wait_for_function('()=>window.__kb && KB.LEVELS')
         pg.evaluate(BOSS_MODEL_JS)
-        pg.evaluate("([l,r,ab])=>__kb.goto('game',{level:l,room:r,ability:ab,nofade:true})", [a.level, a.room, a.ability])
+        pg.evaluate("([l,r,ab,ex])=>__kb.goto('game',{level:l,room:r,ability:ab,nofade:true,extra:ex})", [a.level, a.room, a.ability, bool(a.extra)])
         pg.evaluate("()=>__kb.step(2)")
 
         def st(): return json.loads(pg.evaluate("()=>__kb.state()"))
@@ -221,6 +222,15 @@ def main():
         def ability_star_near():
             return pg.evaluate("""()=>{const p=KB.player;const s=KB.game.entities.find(e=>!e.dead&&e.name==='abilitystar');
               return s?{dx:s.cx-p.cx,dy:s.cy-p.cy}:null}""")
+        def dreamswitch_next():
+            # Round 7（w7 r2 夢境迷宮）：出口被「夢之開關」鎖住，要照順序按 4 顆。
+            # 回傳目前該按的那一顆（isNext）的相對位置；沒有就回 None。
+            return pg.evaluate("""()=>{const p=KB.player;
+              const sw=KB.game.entities.filter(e=>!e.dead&&e.name==='dreamswitch');
+              if(!sw.length)return null;
+              const n=sw.filter(e=>e.pressed).length;
+              const t=sw.find(e=>!e.pressed&&e.order===n)||sw.find(e=>!e.pressed);
+              return t?{dx:t.cx-p.cx,dy:t.cy-p.cy,left:sw.length-n}:null}""")
         def bigstar_near():
             return pg.evaluate("""()=>{const p=KB.player;const s=KB.game.entities.filter(e=>!e.dead&&e.name==='bigstar');
               if(!s.length)return null;s.sort((a,b)=>Math.abs(a.cx-p.cx)-Math.abs(b.cx-p.cx));const d=s[0];
@@ -230,14 +240,14 @@ def main():
         bossPhase = 0; bossMinHp = None; bossMaxHp = 0   # 魔王戰量測：整場（含死亡重來）魔王掉到的最低血量
         spikeJump = 0   # R4：看到前方尖刺後的連續跳躍幀數
         shots_taken = 0; roomFrames = 0; maxX = {}; starChase = 0; starBlock = 0; bsChase = 0; bsBlock = 0
-        essChase = 0; essBlock = 0; mbStuck = 0; mbLastX = None
+        essChase = 0; essBlock = 0; mbStuck = 0; mbLastX = None; swChase = 0; swBlock = 0
         while frames < a.maxframes:
             s = st(); g = s['game']; pl = s['player']
             if g is None or pl is None: break
             if s['scene'] != 'GameScene': print(f'scene changed to {s["scene"]} at frame {frames}'); shot('scene_' + s['scene']); break
             if g['room'] != lastRoom:
                 lastRoom = g['room']; rooms_seen.append(g['room']); roomFrames = 0; stuck = 0; last_x = None; dir_ = 1
-                essChase = 0; essBlock = 0; mbStuck = 0; mbLastX = None; spikeJump = 0
+                essChase = 0; essBlock = 0; mbStuck = 0; mbLastX = None; swChase = 0; swBlock = 0; spikeJump = 0
                 print(f'[room {g["room"]}] enter at frame {frames}, x={pl["x"]}, y={pl["y"]}, ents={g["ents"]}')
                 shot(f'room{g["room"]}_enter')
             if a.godmode:
@@ -292,6 +302,23 @@ def main():
                 if d and abs(d['dx']) < 10 and abs(d['dy']) < 6: press({'up': True}); step(3); press({}); step(40); frames += 43; continue
                 if d: press({'right' if d['dx'] > 0 else 'left': True, 'jump': (frames % 30) < 5 and d['dy'] < -20}); step(2); frames += 2; continue
                 step(10); frames += 10; continue
+            # 出口被鎖（夢之開關）：Round 7 的 w7 r2 —— 走到還沒按的那一顆，站定揮一下
+            if locked_doors():
+                sw = dreamswitch_next()
+                if sw:
+                    if swBlock > 0: swBlock -= 2
+                    if swBlock <= 0:
+                        swChase += 2
+                        if swChase > 2600: swChase = 0; swBlock = 600
+                        else:
+                            keys = {}
+                            if abs(sw['dx']) > 10: keys['right' if sw['dx'] > 0 else 'left'] = True
+                            # 開關多半在單向平台上 → 需要漂浮上去
+                            if sw['dy'] < -10 or (abs(sw['dx']) <= 10 and sw['dy'] < -4): keys['jump'] = (frames % 8) < 3
+                            if abs(sw['dx']) <= 14 and abs(sw['dy']) <= 14: keys['attack'] = (frames % 12) < 4
+                            if falling(pl): keys['jump'] = (frames % 4) < 2
+                            press(keys); step(2); frames += 2; continue
+                else: swChase = 0
             # 出口被鎖（中魔王門鎖）：先去把中魔王打倒
             if locked_doors() and not any_door_ahead():
                 # 空手時先去踩能力台座（中魔王要有武器才打得倒）

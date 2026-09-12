@@ -6,6 +6,9 @@
 const path = require('path');
 global.window = {}; global.KB = { LEVELS: [] };
 require(path.join(__dirname, '..', 'src', 'levels.js'));
+require(path.join(__dirname, '..', 'src', 'levels_w7.js'));   // Round 7：第七世界 w7 夢幻迴廊
+// Round 7（extra）：levels_extra.js 註冊 KB.NORMAL_LAYERS（任何難度都套用）與 KB.EXTRA_LAYERS（--extra 才套用）
+require(path.join(__dirname, '..', 'src', 'levels_extra.js'));
 
 // 機關磁磚（mechanics）：X 硬磚 / I 冰磚 / W 木箱 皆為實心；F 導火線可通行
 // Round 6（elements）：W 木箱＝實心（可站），火燒 40 幀消失 / 鎚・石頭類重擊砸得破
@@ -21,7 +24,9 @@ const ABILITY_FROM = {
   gunner: ['pistolo'], ninja: ['kagedee'], blade: ['ronin'], bow: ['archerwaddle'],
   mage: ['wizzle'], time: ['tiktok'], gravity: ['gravitron'], clone: ['mimi'],
   giant: ['bigbloom'], dragon: ['drako'], mech: ['bolt'], ghost: ['boodee', 'voidling'],
+  // Round 7（world7）：夢燈是一盞會走的火光 → 也算 fire 來源
 };
+ABILITY_FROM.fire.push('nightlight');
 // Round 5 新能力（用於「新能力敵人統計」）：能力 key → 敵人 key
 const R5_ABILITY = {
   gunner: 'pistolo', ninja: 'kagedee', blade: 'ronin', bow: 'archerwaddle',
@@ -35,7 +40,7 @@ const r5stat = {}, r5ess = {};
 for (const k of Object.keys(R5_ABILITY)) { r5stat[k] = {}; r5ess[k] = {}; }
 const ABILITY_KEYS = new Set(Object.keys(ABILITY_FROM));
 // 暗房的發光裝飾（game.js drawDark）
-const DARK_LIGHTS = { castle: 'r', dedede: 'tc', cloud: 's', space: 'r' };
+const DARK_LIGHTS = { castle: 'r', dedede: 'tc', cloud: 's', space: 'r', dream: 'r' };
 const isSolid = ch => !!SOLID[ch];
 const isStand = ch => !!SOLID[ch] || !!SLOPE[ch] || ch === '=';
 
@@ -44,30 +49,58 @@ const GROUND = new Set(['waddledee', 'waddledoo', 'hothead', 'sirkibble', 'spark
   // Round 5 新能力敵人（地面型）
   'pistolo', 'kagedee', 'ronin', 'archerwaddle', 'wizzle', 'tiktok', 'mimi', 'bigbloom', 'bolt',
   // Round 6 世界 6（world6）
-  'mirrordee']);
+  'mirrordee',
+  // Round 7 世界 7（world7）：食夢獸是地面型
+  'dreameater']);
 // 中魔王（可以解開 gatekeeper 的門鎖）
 const MINIBOSS = new Set(['bonkers', 'mrfrosty', 'rollarmor', 'mirrordee']);
 const WATER = new Set(['squishy', 'glunk']);
 const FLY = new Set(['brontoburt', 'scarfy', 'gordo', 'shotzo', 'dartwing',
+  // Round 7 world7：夢燈無重力飄浮
+  'nightlight',
   // Round 5 新能力敵人（浮空型，grav 0）
   'gravitron', 'drako', 'boodee',
   // Round 6 world6：starling / voidling 無重力；meteorite 帶重力但「從空中落下」，一樣不要求下方有地面
   'meteorite', 'starling', 'voidling']);
 const ITEMS = new Set(['tomato', 'food', 'oneup', 'candy', 'pointstar', 'bigstar']);
 // 機關類實體（不需要地面、也不算敵人密度）：大星星收集品 / 開關方塊 / 中魔王門鎖
-const GADGET = new Set(['bigstar', 'switchblock', 'gatekeeper', 'essence', 'warpstar']);
-const UNLOCKER = new Set(['switchblock', 'gatekeeper']);   // 可以解開 locked 門的實體
+const GADGET = new Set(['bigstar', 'switchblock', 'gatekeeper', 'essence', 'warpstar', 'dreamswitch']);
+const UNLOCKER = new Set(['switchblock', 'gatekeeper', 'dreamswitch']);   // 可以解開 locked 門的實體
 // 佔用的高度 / 寬度（格）。Round 6：mirrordee 22×26（2×2）、meteorite 14×14 / starling 14×14 / voidling 14×16（皆 1×1）
 const TALL = { bonkers: 2, mrfrosty: 2, bladeknight: 2, snowly: 2, rollarmor: 2, wizzle: 2, bolt: 2, bigbloom: 2, mirrordee: 2 };
 const WIDE = { bonkers: 2, mrfrosty: 2, rollarmor: 2, bigbloom: 2, mirrordee: 2 };
-const BOSS = { whispywoods: { w: 3, h: 4, ground: true }, lololo: { w: 2, h: 2, ground: true }, kracko: { w: 4, h: 3, ground: false }, metaknight: { w: 2, h: 2, ground: true }, dedede: { w: 3, h: 4, ground: true }, shadowkirby: { w: 2, h: 2, ground: true } };
-const DECO = { green: 'tbfsgmrw', castle: 'pwrkacb', island: 'purghsb', cloud: 'csrbdm', dedede: 'pkwtscb', space: 'cprsgm' };
+const BOSS = { whispywoods: { w: 3, h: 4, ground: true }, lololo: { w: 2, h: 2, ground: true }, kracko: { w: 4, h: 3, ground: false }, metaknight: { w: 2, h: 2, ground: true }, dedede: { w: 3, h: 4, ground: true }, shadowkirby: { w: 2, h: 2, ground: true },
+  // Round 7：夢魘之核（一階段 32×32 懸浮球體；碰撞框 28×28 = 2×2 格）
+  nightmarecore: { w: 2, h: 2, ground: true } };
+// Round 7（extra）：cloud 補 g 雲草 / f 雲花、dedede 補 v 地毯邊（皆為可燃植被，art/world.js 有圖）
+const DECO = { green: 'tbfsgmrw', castle: 'pwrkacb', island: 'purghsb', cloud: 'csrbdmgf', dedede: 'pkwtscbv', space: 'cprsgm', dream: 'cdrsmg' };
 // Round 6（world6）新敵人：key → [碰撞框 w, h, 說明]
 const W6_ENEMY = { meteorite: [14, 14, '隕石（滾落 / 落地爆炸，無能力）'], starling: [14, 14, '星靈（飄浮追蹤 + 星彈，beam）'], voidling: [14, 16, '虛空（短暫隱形，ghost）'], mirrordee: [22, 26, '鏡子瓦豆（中魔王，複製 1 招，cutter）'] };
 const w6stat = {};
 for (const k of Object.keys(W6_ENEMY)) w6stat[k] = {};
+// Round 7（world7）新敵人 / 新機關：key → [碰撞框 w, h, 說明]
+const W7_ENEMY = {
+  dreameater: [16, 16, '食夢獸（吞玩家投射物 / 能力星再吐回）'],
+  nightlight: [14, 18, '夢燈（暗房裡的移動光源，打倒後熄滅 5 秒，fire）'],
+  dreamswitch: [16, 16, '夢之開關（要照順序按，全部按完才解鎖 locked 門）'],
+};
+const w7stat = {};
+for (const k of Object.keys(W7_ENEMY)) w7stat[k] = {};
 
-const only = process.argv.slice(2);
+const argv = process.argv.slice(2);
+const EXTRA = argv.includes('--extra');
+const only = argv.filter(a => a[0] !== '-');
+// 一般層（w4 r0 / w5 r1 的可燃植被）永遠套用；Extra 疊加層只有 --extra 才套用。
+// 兩者都做在房間副本上，套完直接替換 lv.rooms（只影響這個檢查行程，不會寫回檔案）。
+if (KB.applyRoomLayers) {
+  for (const lv of KB.LEVELS) lv.rooms = lv.rooms.map((r, i) => KB.applyRoomLayers(lv.id, i, r, EXTRA));
+}
+if (EXTRA) {
+  const st = KB.extraLayerStats ? KB.extraLayerStats() : null;
+  console.log('== Extra 疊加層已套用（--extra）' + (st
+    ? `：${st.rooms} 房 / +${st.enemies} 敵人 / +${st.oneups} 隱藏 1UP / ${st.spikes} 格尖刺 / 移除 ${st.removed} 份補給`
+    : ''));
+}
 let errors = 0, warns = 0;
 const err = (s) => { errors++; console.log('  [ERR ] ' + s); };
 const warn = (s) => { warns++; console.log('  [warn] ' + s); };
@@ -273,6 +306,7 @@ for (const lv of KB.LEVELS) {
       // Round 5：新能力敵人 / 新能力台座統計
       if (R5_ENEMY[e.t]) r5stat[R5_ENEMY[e.t]][lv.id] = (r5stat[R5_ENEMY[e.t]][lv.id] || 0) + 1;
       if (W6_ENEMY[e.t]) w6stat[e.t][lv.id] = (w6stat[e.t][lv.id] || 0) + 1;
+      if (W7_ENEMY[e.t]) w7stat[e.t][lv.id] = (w7stat[e.t][lv.id] || 0) + 1;
       if (e.t === 'essence' && r5ess[e.a]) r5ess[e.a][lv.id] = (r5ess[e.a][lv.id] || 0) + 1;
       if (!inMap(e.x, e.y)) { err(`${tag}: ${what} (${e.x},${e.y}) 超出地圖`); return; }
       const ch = get(e.x, e.y);
@@ -339,6 +373,20 @@ for (const lv of KB.LEVELS) {
       console.log(`  (info) ${tag}: 補給 ${sup.length} 個 [${sup.map(e => `${e.t}(${e.x},${e.y})${tagOf(e) === 'ok' ? '' : ':' + tagOf(e)}`).join(' ')}]`);
       if (!reach.length) warn(`${tag}: 沒有任何「站得到」的番茄 / 食物（全在水底或空中），主線補給不足`);
     }
+    // ---- Round 7：夢之開關的順序必須是 0..n-1 且不重複（否則永遠按不完 → 出口鎖死）----
+    {
+      const sw = (room.entities || []).filter(e => e.t === 'dreamswitch');
+      if (sw.length) {
+        const seen = {};
+        for (const e of sw) {
+          const a = +e.a;
+          if (!Number.isInteger(a) || a < 0 || a >= sw.length) err(`${tag}: dreamswitch (${e.x},${e.y}) 的 a=${e.a} 必須是 0..${sw.length - 1}`);
+          else if (seen[a] !== undefined) err(`${tag}: dreamswitch a=${a} 重複`);
+          else seen[a] = 1;
+        }
+        console.log(`  (info) ${tag}: 夢之開關 ${sw.length} 個（順序 ${sw.map(e => e.a).join('→')}）`);
+      }
+    }
     // 敵人密度
     const nEnemy = (room.entities || []).filter(e => !ITEMS.has(e.t) && !GADGET.has(e.t)).length;
     const area = w * Math.max(1, h / 12);
@@ -371,7 +419,7 @@ for (const lv of KB.LEVELS) {
     console.log(`  ${(k + '(' + NAME[k] + ')').padEnd(16)}${R5_ABILITY[k].padEnd(14)}` +
       per.map(n => String(n).padEnd(4)).join('') + ` ${String(total).padEnd(4)} ${String(nWorld).padEnd(7)}` +
       (ess.length ? ess.join(',') : '-'));
-    if (!only.length) {
+    if (!only.length && !EXTRA) {   // Extra 疊加層本來就是「刻意加量」，密度規則不適用
       if (nWorld < 3) warn(`新能力 ${k}（${R5_ABILITY[k]}）只出現在 ${nWorld} 個世界（設計目標：3 個世界、每個世界 1~2 隻）`);
       for (const w of WORLDS) if ((r5stat[k][w] || 0) > 2) warn(`新能力 ${k} 在 ${w} 有 ${r5stat[k][w]} 隻（每個世界建議 1~2 隻）`);
     }
@@ -396,6 +444,23 @@ for (const lv of KB.LEVELS) {
     if (!only.length && total === 0) warn(`world6 新敵人 ${k} 沒有被放進任何關卡`);
   }
   console.log('  合計 ' + totalW6 + ' 隻');
+}
+
+// ---- Round 7：world7 新敵人 / 新機關統計 ----
+{
+  console.log('\n== Round 7 world7 新敵人 / 新機關（尺寸表 / 各世界隻數）');
+  const WORLDS = KB.LEVELS.map(l => l.id).filter(id => !only.length || only.includes(id));
+  console.log('  key           尺寸     ' + WORLDS.map(w => w.padEnd(4)).join('') + ' 合計  說明');
+  let total7 = 0;
+  for (const k of Object.keys(W7_ENEMY)) {
+    const [ew, eh, desc] = W7_ENEMY[k];
+    const per = WORLDS.map(w => w7stat[k][w] || 0);
+    const total = per.reduce((a, b) => a + b, 0);
+    total7 += total;
+    console.log(`  ${k.padEnd(14)}${(ew + '×' + eh).padEnd(9)}` + per.map(n => String(n).padEnd(4)).join('') + ` ${String(total).padEnd(5)} ${desc}`);
+    if (!only.length && total === 0) warn(`world7 新實體 ${k} 沒有被放進任何關卡`);
+  }
+  console.log('  合計 ' + total7 + ' 個');
 }
 
 console.log(`\n${errors} error(s), ${warns} warning(s)`);

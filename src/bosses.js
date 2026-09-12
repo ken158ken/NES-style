@@ -189,7 +189,14 @@
       this.baseUpdate(dt);
       this.stateT++; if (this.hurtT > 0) this.hurtT--;
       if (this.introducing) { this.introUpdate(dt); return; }
-      if (!this.started) { this.started = true; this.onIntroEnd(); }
+      if (!this.started) {
+        this.started = true; this.onIntroEnd();
+        // Round 7（extra）：Extra 模式「開場即二階段」—— 登場結束的那一幀直接進二階段
+        // （血量門檻仍是 KB.exPhase2()，只是提前把 rage 打開；Lalala 由洛洛洛統一帶，見 autoPhase2Off）
+        // half <= 0 代表這隻魔王用的是自己的階段系統（例如 bosses_w7 的夢魘之核把 maybePhase2 停掉了），
+        // 這時不要硬推基底的二階段，否則會跳過它自己的 applyPhase 記帳。
+        if (KB.extraOn() && this.phase === 1 && !this.dead && !this.autoPhase2Off && this.half > 0) this.enterPhase2();
+      }
       this.ai(dt);
       if (this.solid) this.physics();
       if (this.fellOut) { this.x = this.spawnX; this.bottom = this.spawnY + T; this.vy = 0; } // 安全：不讓魔王掉出地圖
@@ -306,7 +313,9 @@
     nextAttack() {
       // 二階段多一招「暴風」：大蘋果三連 + 地面三處竄根
       // 二階段的循環裡「暴風」只放一次：放兩次的話貼著樹砍的玩家會一直掉能力（boss_test 的普通玩家樣本會輸）
-      const seq = this.phase === 2 ? ['blow', 'apple', 'storm', 'root'] : ['blow', 'apple', 'root'];
+      // Extra：多一招「龍捲落葉」（三道貼地龍捲 + 滿天落葉）
+      const seq = KB.extraOn() ? ['blow', 'leafstorm', 'apple', 'storm', 'root']
+        : this.phase === 2 ? ['blow', 'apple', 'storm', 'root'] : ['blow', 'apple', 'root'];
       this.cycle++; this.puffs = 0; this.apples = 0;
       this.setState(seq[(this.cycle - 1) % seq.length]);
     }
@@ -342,6 +351,13 @@
       const sz = big ? 16 : 12;
       KB.spawn(new Ammo({ spr: 'proj_apple', x, y, vx: 0, vy: big ? 1.0 : 0.5, grav: big ? 0.22 : 0.16, maxFall: big ? 4 : 3.2, dmg: 1, owner: 'enemy', life: 400, w: sz, h: sz, solid: true, dieOnGround: true, name: 'apple', score: big ? 150 : 100, fxHit: 'fx_poof', type: 'apple', color: '#e83030', scale: big ? 1.35 : undefined }));
     }
+    // 【Extra 新招】龍捲落葉：從樹冠捲起的葉旋風，化成三道貼地龍捲往卡比滾過去
+    leafTornado() {
+      const gx = clamp(this.x - 10, 12, mapW() - 20);
+      KB.spawn(new Shockwave(gx, groundY(gx, this.bottom - 2), -1, { speed: 2.0, life: 220, dmg: 1, color: '#90e858' }));
+      KB.audio.sfx('wind');
+      KB.particles(gx, this.bottom - 8, ['#90e858', '#48c048', '#207820'], 10, { spread: 2.2, grav: 0.02, life: 40, up: 1.2 });
+    }
     ai(dt) {
       const p = this.player; if (!p) return;
       if (this.hurtT > 0 && this.stateT % 4 === 0) KB.particles(this.x + 12, this.y + 34, '#80c0ff', 1, { spread: 0.3, grav: 0.2, life: 22, up: 0.4 }); // 流淚
@@ -364,6 +380,14 @@
         case 'root':   // 竄根：瞄準玩家腳下，36 幀泥土噴起預警後竄出（站著不動會被打到，走開就沒事）
           if (this.stateT === 1) this.spawnRoot(p.cx, 36, false);
           if (this.stateT > this.iv(84)) this.setState('idle');
+          break;
+        case 'leafstorm':  // 【Extra 新招】龍捲落葉：整棵樹狂搖 → 三道貼地龍捲（間隔 26 幀）+ 滿天落葉
+          if (this.stateT === 1) { KB.audio.sfx('wind'); if (KB.game) KB.game.shake = Math.max(KB.game.shake || 0, 4); }
+          if (this.stateT < 80 && this.stateT % 2 === 0)
+            KB.particles(this.cx + (this.rng() - 0.5) * 44, this.y + 8 + this.rng() * 40, ['#90e858', '#48c048', '#207820'], 1,
+              { spread: 0.5, grav: 0.02, life: 90, up: -0.1, vx: -0.8 - this.rng() * 1.2, size: 2 });
+          if (this.stateT === 18 || this.stateT === 44 || this.stateT === 70) this.leafTornado();
+          if (this.stateT > 104) this.setState('idle');
           break;
         case 'storm':  // 【二階段新招】大蘋果三連 + 地面三處竄根（預警 26 幀，走位就躲得掉）
           if (this.stateT === 1) { KB.audio.sfx('boss_hurt'); if (KB.game) KB.game.shake = Math.max(KB.game.shake || 0, 3); }
@@ -398,7 +422,7 @@
       super(x, y);
       this.solid = true; this.grav = KB.GRAV; this.speed = 0.9; this.box = null; this.selfHp = this.maxSelfHp = 15;
       this.hopOnPush = false; this.ko = false; this.koT = 0; this.color = '#4060e0'; this.spr = 'lololo_walk';
-      this.rage = false; this.baseSpeed = 0.9; this.shoveT = 0;
+      this.rage = false; this.baseSpeed = 0.9; this.shoveT = 0; this.pushes = 0;
       this.introSide = 1;   // 登場從哪一側推箱進來（+1 右側 / -1 左側）
       this.setSize(18, 22); this.dir = -1; this.setState('idle');
     }
@@ -458,6 +482,22 @@
       this.solid = true; this.grav = KB.GRAV; this.vx = 0; this.vy = 0; this.x = this.spawnX; this.bottom = this.spawnY + T; this.invuln = 20;
       KB.fx('fx_poof', this.cx, this.cy); this.setState('idle');
     }
+    // 【Extra 新招】三箱齊推：一次生出三顆箱子疊在身前，20 幀後整排射出去
+    triBox() {
+      const dir = this.dir, bx = dir > 0 ? this.x + this.w + 8 : this.x - 8;
+      for (let i = 0; i < 3; i++) {
+        const b = new Ammo({
+          spr: 'proj_box', x: bx, y: this.bottom - 8 - i * 17, w: 16, h: 16, dmg: 1, owner: 'enemy', life: 600,
+          grav: KB.GRAV, solid: true, pierce: true, breakOnWall: true, restBreak: 90, name: 'box', score: 100,
+          fxHit: 'fx_blockbreak', type: 'box', color: '#c08040',
+        });
+        b.flip = dir < 0; b.vx = dir * (2.8 + i * 0.4); b.vy = -0.6 - i * 0.5; b.friction = 0.99;
+        KB.spawn(b);
+      }
+      KB.audio.sfx('spit'); KB.audio.sfx('block');
+      if (KB.game) KB.game.shake = Math.max(KB.game.shake || 0, 4);
+      KB.particles(bx, this.cy, ['#ffffff', '#c08040'], 10, { spread: 2 });
+    }
     // 二階段：兩人同時開始推箱、速度 +35%，推到一半會把箱子直接射出去
     goRage() {
       if (this.rage) return;
@@ -471,7 +511,18 @@
       switch (this.state) {
         case 'idle':
           this.vx = 0;
+          // Extra：每第 3 次出招改成「三箱齊推」（面向卡比）
+          if (this.stateT > this.iv(30) && KB.extraOn() && (++this.pushes % 3 === 0)) {
+            if (this.player) this.dir = this.player.cx < this.cx ? -1 : 1;
+            this.setState('tribox'); break;
+          }
           if (this.stateT > this.iv(30)) { this.spawnBox(); if (this.box) { this.setState('push'); if (this.hopOnPush) this.vy = -2.4; } }
+          break;
+        case 'tribox':   // 【Extra 新招】三箱齊推
+          this.vx = 0;
+          if (this.stateT === 1) { KB.audio.sfx('inhale'); KB.particles(this.cx, this.cy, '#ffffff', 6, { spread: 1.4 }); }
+          if (this.stateT === 20) this.triBox();
+          if (this.stateT > 56) this.setState('idle');
           break;
         case 'push': case 'walk': {
           if (this.box && (this.box.dead || this.box.beingInhaled || this.box.pusher !== this)) { if (!this.box.dead) this.box.pusher = null; this.box = null; this.setState('walk'); }
@@ -514,6 +565,7 @@
       this.hp = this.maxHp = 15; this.score = 0; this.spr = 'lalala_walk'; this.color = '#f070b0';
       this.speed = this.baseSpeed = 1.0; this.hopOnPush = true; this.dir = 1; this.rageColor = '#ff3060';
       this.introSide = -1;   // 拉拉拉從左側進場（洛洛洛從右側）
+      this.autoPhase2Off = true;   // Extra 開場二階段由洛洛洛統一帶（onPhase2 會一起 goRage），避免跳兩次提示
       this.weak = ['fire'];   // 同洛洛洛（Round 6 elements）
     }
     get leader() { return this.leaderRef; }
@@ -623,7 +675,9 @@
       // 二階段多一招「雷雨」：灑雨 + 三道閃電，接著直接俯衝
       // 二階段：多一招「雷雨」，但雷雨結束會直接接俯衝，所以循環裡只放一次，
       // 而且每招之間都留一次低空盤旋（low = 給玩家打的窗口），否則普通玩家會被連段打死。
-      const seq = this.phase === 2 ? ['storm', 'low', 'lightning', 'low', 'rain', 'swoop'] : ['lightning', 'swoop', 'rain', 'low'];
+      // Extra：多一招「雷雲追蹤」（每招之間一樣留 low 給玩家打）
+      const seq = KB.extraOn() ? ['tracker', 'low', 'storm', 'low', 'lightning', 'rain', 'swoop']
+        : this.phase === 2 ? ['storm', 'low', 'lightning', 'low', 'rain', 'swoop'] : ['lightning', 'swoop', 'rain', 'low'];
       this.setState(seq[this.attackIdx++ % seq.length]);
     }
     onPhase2() { this.attackIdx = 0; this.setState('storm'); }
@@ -683,6 +737,15 @@
           if (this.stateT > 116) this.setState('swoop');
           break;
         }
+        case 'tracker': {  // 【Extra 新招】雷雲追蹤：整朵雲黏著卡比的頭頂跑，每 46 幀劈一道雷（26 幀電火花預警）
+          this.hoverTo(p.cx - this.w / 2, this.hoverY, 0.085);
+          const CYC = 46, ph = this.stateT % CYC;
+          if (ph >= CYC - 26 && ph % 3 === 0)
+            KB.particles(this.cx + (this.rng() - 0.5) * 34, this.bottom, '#ffff80', 1, { spread: 0.4, grav: 0, life: 8, up: 0 });
+          if (ph === 0 && this.stateT > 0 && this.stateT <= CYC * 3) this.bolt(this.cx);
+          if (this.stateT > CYC * 3 + 24) this.setState('idle');
+          break;
+        }
         case 'swoop': {  // 貼地橫掃：先垂直降到地面上方，再朝玩家方向橫掃過整個房間，最後升回巡航高度
           if (this.stateT === 1) { this.sub = 0; this.subT = 0; this.sx = this.x; this.sy = this.y; this.ty = groundY(p.cx, p.bottom - 2) - this.h - 6; this.swoopDir = p.cx < this.cx ? -1 : 1; }
           if (this.sub === 0) {
@@ -726,6 +789,7 @@
         else for (let y = this.bottom + 16; y <= this.boltY + 15; y += 16) g.spr('proj_lightning', this.boltX, Math.min(y, this.boltY), { t: this.t, fps: 12 });
       }
       const spr = this.hurtT > 0 ? 'kracko_hurt' : ((this.state === 'idle' || this.state === 'low') ? 'kracko_idle' : 'kracko_attack');
+      if (this.state === 'tracker' && (Math.floor(this.t * 60) % 5) === 0) KB.particles(this.cx + (this.rng() - 0.5) * 54, this.bottom - 2, ['#8090ff', '#ffff80'], 1, { spread: 0.6, grav: 0, life: 14, up: 0 });
       if (this.state === 'storm' && (Math.floor(this.t * 60) % 6) === 0) KB.particles(this.cx + (this.rng() - 0.5) * 50, this.bottom - 4, '#8090ff', 1, { spread: 0.5, grav: 0, life: 12, up: 0 });
       this.drawBody(g, spr, this.introducing ? { flip: false, alpha: this.introAlpha } : { flip: false });
     }
@@ -800,6 +864,8 @@
       this.decisions++;
       const rage = this.phase === 2;
       // 二階段新招：龍捲（貼地追過來）與劍氣三連
+      // Extra 新招：劍氣十字（四方向劍氣，貼身也躲不掉，要拉開距離）
+      if (KB.extraOn() && this.decisions % 4 === 0) return this.setState('crossslash');
       if (rage && this.decisions % 3 === 0) return this.setState(r < 0.5 ? 'tornado' : 'tricutter');
       if (this.decisions % 5 === 0 && r < 0.7 && this.canVanish) return this.setState('vanish');
       if (p && p.cy < this.y - 24 && dist < 60) return this.setState('jump');
@@ -868,6 +934,24 @@
           }
           if (this.stateT % 4 === 0 && this.stateT < 16) KB.particles(this.cx, this.cy, '#c0b0ff', 2, { spread: 1.6, grav: 0, life: 16, up: 0 });
           if (this.stateT > 40) this.setState('idle');
+          break;
+        }
+        case 'crossslash': {  // 【Extra 新招】劍氣十字：原地旋劍，18 幀後朝上下左右射出四道劍氣
+          this.vx *= 0.7;
+          if (this.stateT === 1) { this.facePlayer(); KB.audio.sfx('slide'); }
+          if (this.stateT < 18 && this.stateT % 3 === 0)
+            KB.particles(this.cx, this.cy, ['#c0b0ff', '#ffffff'], 2, { spread: 1.8, grav: 0, life: 14, up: 0 });
+          if (this.stateT === 18) {
+            const V = 3.2;
+            for (const [vx, vy] of [[V, 0], [-V, 0], [0, -V], [0, V]])
+              KB.shoot({
+                spr: 'proj_cutter', x: this.cx, y: this.cy, vx, vy, dmg: 1, owner: 'enemy', life: 110,
+                w: 12, h: 12, solid: false, pierce: false, grav: 0, rotSpeed: 0.4, type: 'cutter', dir: vx < 0 ? -1 : 1,
+              });
+            KB.audio.sfx('cutter'); KB.audio.sfx('sword');
+            if (KB.game) KB.game.shake = Math.max(KB.game.shake || 0, 3);
+          }
+          if (this.stateT > 48) this.setState('idle');
           break;
         }
         case 'tricutter':   // 【二階段新招】劍氣三連（高 / 中 / 低三道）
@@ -947,6 +1031,7 @@
       let spr = 'metaknight_idle', o = {};
       if (this.hurtT > 0 || this.state === 'hurt') spr = 'metaknight_hurt';
       else if (this.state === 'slash' || this.state === 'tricutter') { spr = 'metaknight_attack'; o.frame = this.stateT < 8 ? 0 : this.stateT < 16 ? 1 : 2; }
+      else if (this.state === 'crossslash') { spr = 'metaknight_attack'; o.frame = (this.stateT >> 2) % 3; }
       else if (this.state === 'dash') spr = 'metaknight_dash';
       else if (this.state === 'tornado') { spr = 'metaknight_attack'; o.frame = (this.stateT >> 2) % 3; }
       this.drawBody(g, spr, o);
@@ -1039,6 +1124,8 @@
       // 張嘴吸不可以連續出：沒有武器的玩家會被「吸→碰觸傷害→再吸」鎖死（boss_test 的無劍樣本會卡到時間用完）
       const noInhale = this.lastAction === 'inhale' || this.lastAction === 'rampage';
       const act = s => { this.lastAction = s; return this.setState(s); };
+      // 【Extra 新招】巨鎚震盪波（高舉巨鎚砸地 → 兩段速度的震波各兩道 + 四顆衝擊星）
+      if (KB.extraOn() && this.actions % 3 === 0) return act('quake');
       // 【二階段新招】吸入 → 跳躍震波三連
       if (this.phase === 2 && this.actions % 4 === 0 && !noInhale) return act('rampage');
       if (this.actions % 5 === 0) return act('superjump');
@@ -1103,6 +1190,22 @@
             else this.hangT = DEDEDE_TRIPLE_GAP;   // Round 3：24 → 32 幀
           }
           if (this.stateT > 260) { this.vx = 0; this.setState('idle'); }
+          break;
+        case 'quake':   // 【Extra 新招】巨鎚震盪波：30 幀高舉預備 → 砸地放出快慢兩組震波（各左右一道）
+          this.vx *= 0.8;
+          if (this.stateT === 1) { this.facePlayer(); KB.audio.sfx('jump'); }
+          if (this.stateT < 30 && this.stateT % 5 === 0) KB.particles(this.cx, this.y - 6, '#ffe040', 1, { spread: 0.6, grav: 0, life: 14, up: 0.6 });
+          if (this.stateT === 30) {
+            KB.audio.sfx('hammer'); KB.game.shake = 12;
+            KB.particles(this.cx, this.bottom, ['#c0a060', '#f0e0c0', '#ffffff'], 16, { spread: 3, up: 1.6, life: 30 });
+            for (const sp of [2.0, 3.4]) {
+              KB.spawn(new Shockwave(this.x, this.bottom, -1, { speed: sp, life: 260 }));
+              KB.spawn(new Shockwave(this.x + this.w, this.bottom, 1, { speed: sp, life: 260 }));
+            }
+            this.impactStar(this.x - 4, this.bottom - 8, -2.6, -4.4); this.impactStar(this.x + this.w + 4, this.bottom - 8, 2.6, -4.4);
+            this.impactStar(this.x - 4, this.bottom - 8, -1.2, -5.2); this.impactStar(this.x + this.w + 4, this.bottom - 8, 1.2, -5.2);
+          }
+          if (this.stateT > 30 + DEDEDE_LAND_STUN) this.setState('idle');
           break;
         case 'hammer':
           this.vx *= 0.8;
@@ -1170,6 +1273,7 @@
         case 'jump': case 'superjump': case 'hop': case 'triplejump': spr = 'dedede_jump'; break;
         case 'land': spr = this.stateT < 8 ? 'dedede_jump' : 'dedede_idle'; break;   // 落地硬直：先保持落地姿勢再站直
         case 'hammer': spr = 'dedede_hammer'; o.frame = this.stateT < 16 ? 0 : this.stateT < 30 ? 1 : 2; break;
+        case 'quake': spr = 'dedede_hammer'; o.frame = this.stateT < 30 ? 0 : this.stateT < 44 ? 1 : 2; break;
         case 'inhale': case 'rampage': spr = 'dedede_inhale'; break;
         case 'dizzy': spr = 'dedede_hurt'; break;
       }

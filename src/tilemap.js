@@ -479,7 +479,9 @@
   TileMap.WOOD_T = 40;        // 木箱燒 40 幀後消失
   TileMap.ICE_T = 480;        // 水面結冰 8 秒
   // 各主題「會燒的裝飾字元」（green 草叢/花叢/灌木/蘑菇、island 海草、castle 蜘蛛網；雲 / 迪迪迪沒有植被）
-  TileMap.BURN_DECO = { green: 'gfbm', island: 'g', castle: 'b', cloud: '', dedede: '' };
+  // 可燃植被（依主題）：green 草/花/灌木/蘑菇、island 海草、castle 蜘蛛網、
+  // Round 7（extra）：cloud 雲草 'g' / 雲花 'f'、dedede 旗幟 'k' / 地毯邊 'v'（art/world.js 有對應的焦黑圖）
+  TileMap.BURN_DECO = { green: 'gfbm', island: 'g', castle: 'b', cloud: 'gf', dedede: 'kv' };
   KB.TileMap = TileMap;
 
   // 磁磚精靈以左上為錨點：drawSpr 預設錨點是 bottom，所以此處包一層

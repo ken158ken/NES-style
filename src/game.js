@@ -42,7 +42,11 @@
 
     // ---------- 房間 ----------
     loadRoom(idx, sx, sy, first) {
-      const room = this.level.rooms[idx]; this.room = room; this.roomIdx = idx;
+      // Round 7（extra）：關卡疊加層 —— 一般層永遠套用、Extra 疊加層只在 KB.session.extra 時套用。
+      // KB.applyRoomLayers（src/levels_extra.js）做的是「房間的副本」，KB.LEVELS 的原始資料不會被改到。
+      let room = this.level.rooms[idx];
+      if (KB.applyRoomLayers) room = KB.applyRoomLayers(this.levelId, idx, room);
+      this.room = room; this.roomIdx = idx;
       // 成就「找到 5 秘密房」：秘密房間第一次進入時記一筆（progression）
       if (room && room.secret && KB.PROG && KB.PROG.emit) KB.PROG.emit('secretRoom', { levelId: this.levelId, roomIdx: idx });
       this.map = new KB.TileMap(room.map, room.deco);
@@ -124,7 +128,15 @@
       if (this.clearT >= 0) return;
       this.clearT = 0; KB.audio.music('clear'); KB.audio.sfx('clear');
       this.player.startDance();
-      KB.save.cleared[this.levelId] = true; KB.save.score = Math.max(KB.save.score || 0, this.score); KB.saveGame();
+      KB.save.cleared[this.levelId] = true; KB.save.score = Math.max(KB.save.score || 0, this.score);
+      // Round 7（extra）：通關次數 / Extra 通關旗標（成績板 KB.RecordsScene 用）
+      KB.save.playCount = KB.save.playCount || {};
+      KB.save.playCount[this.levelId] = (KB.save.playCount[this.levelId] | 0) + 1;
+      KB.save.bestTime = KB.save.bestTime || {};
+      const bt = KB.save.bestTime[this.levelId] | 0, tm = this.timeAlive | 0;
+      if (tm > 0 && (!bt || tm < bt)) KB.save.bestTime[this.levelId] = tm;
+      if (KB.session && KB.session.extra) { KB.save.extraCleared = KB.save.extraCleared || {}; KB.save.extraCleared[this.levelId] = true; }
+      KB.saveGame();
       if (KB.PROG && KB.PROG.emit) KB.PROG.emit('levelClear', { levelId: this.levelId, game: this });
     }
     // 結算後的去向（KB.ResultScene 結束時呼叫；沒有結算畫面時 clearT 直接呼叫）
@@ -485,7 +497,7 @@
 
   // ---------- 存檔 ----------
   // best：各關最佳結算總分（ui.js ResultScene / 選關面板）；arena：競技場最佳時間（src/arena.js）
-  KB.save = { cleared: {}, score: 0, best: {}, arena: {} };
+  KB.save = { cleared: {}, score: 0, best: {}, arena: {}, playCount: {}, bestTime: {}, extraCleared: {} };
   try { const s = localStorage.getItem('kirbystar_save'); if (s) KB.save = Object.assign(KB.save, JSON.parse(s)); } catch (e) { }
   KB.saveGame = function () { try { localStorage.setItem('kirbystar_save', JSON.stringify(KB.save)); } catch (e) { } };
 })();

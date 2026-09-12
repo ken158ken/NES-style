@@ -4,8 +4,8 @@
 //   green : t 大樹(32×48)  b 灌木(24×14)  f 花叢(16×10)  s 路標(16×22)  g 草叢(16×8)  m 蘑菇(12×12)  r 岩石(20×12)  w 木柵欄(16×14)
 //   castle: p 石柱(16×48)  w 拱窗(16×24)  r 火炬(8×20, 2幀)  k 旗幟(16×32)  a 盔甲(16×28)  c 鎖鏈(8×32)  b 蜘蛛網(16×16)
 //   island: p 棕櫚樹(32×48) u 陽傘(24×32)  r 岩石(20×12)  g 海草(16×20, 2幀)  h 貝殼(10×8)  s 海星(12×10)  b 木桶(14×16)
-//   cloud : c 雲朵(32×16)  s 星星(12×12, 2幀)  r 彩虹(48×24)  b 泡泡(12×20, 2幀)  d 小雲(16×8)  m 月亮(16×16)
-//   dedede: p 金柱(16×48)  k 旗幟(16×32)  w 拱窗(16×24)  t 火炬(8×24, 2幀)  s 雕像(24×40)  c 燭台(16×24, 2幀)  b 寶箱(16×12)
+//   cloud : c 雲朵(32×16)  s 星星(12×12, 2幀)  r 彩虹(48×24)  b 泡泡(12×20, 2幀)  d 小雲(16×8)  m 月亮(16×16)  g 雲草(16×8, 可燃)  f 雲花(16×10, 可燃)
+//   dedede: p 金柱(16×48)  k 旗幟(16×32, 可燃)  w 拱窗(16×24)  t 火炬(8×24, 2幀)  s 雕像(24×40)  c 燭台(16×24, 2幀)  b 寶箱(16×12)  v 地毯邊(16×8, 可燃)
 // 磁磚（16×16）：tile_<theme>_{top,topL,topR,fill,left,right,bottom,platform,slopeL,slopeR}
 // 通用：tile_star(2) tile_bomb(2) tile_spike tile_water_top(2) tile_water tile_ladder tile_door(16×24) tile_door_boss(16×28, 2)
 // 預覽：KB.previewTheme('castle') —— 在遊戲中切換主題並塞入示範裝飾（tools/theme_shot.py 使用）；KB.DECO_CHARS[theme] 為各主題可用字元
@@ -17,7 +17,7 @@
   PAL.green = Object.assign(PAL.green, { m: '#b07040', h: '#e0a878', e: '#38a838', E: '#186818', q: '#e8b070', t: '#c88850', T: '#905828', n: '#f8f8f8', v: '#a060d0' });
   PAL.castle = Object.assign(PAL.castle, { m: '#8c8ca4', h: '#c8ccd8', n: '#5c5c78', t: '#a06030', T: '#603818', e: '#f8f8a0', c: '#d0d0e8' });
   PAL.island = Object.assign(PAL.island, { h: '#fff8d0', n: '#ecd890', m: '#c89858', e: '#986838', q: '#e8b878', p: '#f8a0c8', P: '#d878a8', o: '#f89040', O: '#c05818', l: '#98f070', t: '#a06838', T: '#704820' });
-  PAL.cloud = Object.assign(PAL.cloud, { e: '#e4e8fa', h: '#ffffff', r: '#f86060', g: '#78d878', v: '#b080e0', l: '#f8f890', d: '#b8c4ee' });
+  PAL.cloud = Object.assign(PAL.cloud, { e: '#e4e8fa', h: '#ffffff', r: '#f86060', g: '#78d878', v: '#b080e0', l: '#f8f890', d: '#b8c4ee', G: '#40a860', S: '#606068' });
   PAL.dedede = Object.assign(PAL.dedede, { h: '#f8f0a0', e: '#f06060', m: '#6c6c7c', o: '#f89040', t: '#a06030', T: '#603818', g: '#60a060' });
   // 通用磁磚
   const PX = {
@@ -887,6 +887,50 @@
     // b 泡泡 12×20（2 幀）
     const bub = list => mk(12, 20, g => { for (const [cx, cy, r] of list) { ring(g, cx, cy, r, 'c'); px(g, cx - Math.floor(r / 2), cy - Math.floor(r / 2), 'h'); if (r > 2) px(g, cx - Math.floor(r / 2) + 1, cy - Math.floor(r / 2), 'h'); } });
     deco('deco_cloud_b', P, [bub([[6, 15, 4], [3, 6, 2], [9, 9, 2]]), bub([[6, 14, 4], [3, 4, 2], [9, 7, 2], [7, 2, 1]])], { fps: 2 });
+    // ---- Round 7（extra）：可燃植被 —— g 雲草 / f 雲花（TileMap.BURN_DECO.cloud = 'gf'）----
+    // g 雲草 16×8（長在雲上的草，帶白色雲絮高光）
+    deco('deco_cloud_g', P, [
+      '......h.........',
+      '..h...g....h....',
+      '..g..hg.h..g..h.',
+      '.hg..gg.g.hg..g.',
+      '.gg.hgg.gg.gg.gg',
+      'hggGgggggGggGggg',
+      'gGgGGgGgGGgGGgGg',
+      'GGGGGGGGGGGGGGGG',
+    ]);
+    // f 雲花 16×10（雲草上開的小花：粉 / 黃 / 紫各一朵）
+    deco('deco_cloud_f', P, mk(16, 10, g => {
+      for (let x = 0; x < 16; x++) { const hh = 2 + ((x * 7) % 3); rect(g, x, 10 - hh, 1, hh, (x % 3) ? 'g' : 'G'); if (hh === 4) px(g, x, 10 - hh, 'h'); }
+      for (const [x, y, c, e] of [[2, 3, 'p', 'l'], [8, 2, 'l', 'h'], [13, 4, 'v', 'h']]) {
+        rect(g, x, y + 3, 1, 3, 'G');
+        px(g, x - 1, y, c); px(g, x + 1, y, c); px(g, x, y - 1, c); px(g, x, y + 1, c); px(g, x, y, e);
+        px(g, x - 1, y - 1, c); px(g, x + 1, y + 1, c);
+      }
+    }));
+    // 焦黑（燒完 30 秒的外觀）
+    deco('deco_cloud_g_burnt', P, [
+      '................',
+      '..x.............',
+      '..x....x....x...',
+      '.xx..xxx.x.xx.x.',
+      '.xx.xxx.xx.xx.xx',
+      'xxxxxxxxxxxxxxxx',
+      'xSxxSSxxSSxSSxSx',
+      'SSSSSSSSSSSSSSSS',
+    ]);
+    deco('deco_cloud_f_burnt', P, [
+      '................',
+      '................',
+      '..x.........x...',
+      '..x....x....x...',
+      '.x.x..xxx..xx.x.',
+      'x.x.x.x.x.xx.x.x',
+      'xxxxxxxxxxxxxxxx',
+      'xxxSxxxxSxxxxSxx',
+      'SSxSSSxSSSxSSSSx',
+      'SSSSSSSSSSSSSSSS',
+    ]);
     // m 月亮 16×16
     deco('deco_cloud_m', P, mk(16, 16, g => {
       disc(g, 7, 8, 7, 'y'); disc(g, 10, 7, 6, '.');
@@ -973,6 +1017,54 @@
       '.sSkBBk.....kBBk',
       '.sSkkk.......kkk',
     ].concat(Array(10).fill('.sS.............')));
+    // ---- Round 7（extra）：可燃植被 —— k 旗幟（上面已註冊）/ v 地毯邊（TileMap.BURN_DECO.dedede = 'kv'）----
+    // v 地毯邊 16×8（鋪在紅地毯地面上的「藍底金邊長毯」＋上下兩排流蘇；
+    //   dedede 的地面磚頂本來就是紅地毯，所以這條用藍 / 金才看得出來，連著好幾格＝一長條）
+    deco('deco_dedede_v', P, [
+      '.y..y..y..y..y..',
+      'yyyyyyyyyyyyyyyy',
+      'YyYYyYYyYYyYYyYY',
+      'bbBbbbBbbbBbbbBb',
+      'bBbbhBbbbBhbbBbb',
+      'BBBBBBBBBBBBBBBB',
+      'yyyyyyyyyyyyyyyy',
+      'y..y..y..y..y..y',
+    ]);
+    deco('deco_dedede_v_burnt', P, [
+      '.x..x..x..x..x..',
+      'xxxxxxxxxxxxxxxx',
+      'SxSSxSSxSSxSSxSS',
+      'xxSxxxSxxxSxxxSx',
+      'xSxxxSxxxSxxxSxx',
+      'SSSSSSSSSSSSSSSS',
+      'xxxxxxxxxxxxxxxx',
+      'x..x..x..x..x..x',
+    ]);
+    // 旗幟燒掉後只剩焦黑的旗桿與破布（尺寸與 deco_dedede_k 相同：16×32）
+    deco('deco_dedede_k_burnt', P, [
+      '.kk.............',
+      'kxxk............',
+      '.kk.............',
+      '.SSkkkkkkkkkkkk.',
+      '.SSkxxxxxxxxxxxk',
+      '.SSkxxxxxxxxxxxk',
+      '.SSkxxSSxxxSSxxk',
+      '.SSkxxSSxSxSSxxk',
+      '.SSkxxSSSSSSSxxk',
+      '.SSkxxxxxxxxxxxk',
+      '.SSkxxxxxxxxxxxk',
+      '.SSkxxxxxxxxxxxk',
+      '.SSkxxxx...xxxxk',
+      '.SSkxxx.....xxxk',
+      '.SSkxx.......xxk',
+      '.SSkx.........xk',
+      '.SSkx.........xk',
+      '.SSkk.........kk',
+      '.SS.............',
+      '.SS.............',
+      '.SS.............',
+      '.SS.............',
+    ].concat(Array(10).fill('.SS.............')));
     // w 拱窗 16×24（金框、暗夜）
     deco('deco_dedede_w', P, [
       '.....kkkkkk.....',
@@ -1293,7 +1385,7 @@
   // ============================================================================
   // 預覽：切換目前房間的主題並塞入示範裝飾（tools/theme_shot.py 使用）
   // ============================================================================
-  KB.DECO_CHARS = { green: 'tbfsgmrw', castle: 'pwrkacb', island: 'purghsb', cloud: 'csrbdm', dedede: 'pkwtscb' };
+  KB.DECO_CHARS = { green: 'tbfsgmrw', castle: 'pwrkacb', island: 'purghsb', cloud: 'csrbdmgf', dedede: 'pkwtscbv' };
   KB.previewTheme = function (theme) {
     const gm = KB.game; if (!gm || !gm.map) return false;
     const chars = KB.DECO_CHARS[theme] || '';

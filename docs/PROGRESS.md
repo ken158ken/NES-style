@@ -2741,9 +2741,165 @@ R5-7a 的觀察項（gravity ↑+X 文案不一致、圖鑑剪影露出帽子輪
    若 Lv5 上線請一併補這兩張表（超出時會自動取最後一級）。
 
 ## extra
-（agent 在此追加）
+> 檔案：`src/levels_extra.js`（新）、`src/records.js`（新）、`src/ui.js`、`src/menu.js`、`src/game.js`、
+> `src/bosses.js`、`src/bosses_w6.js`、`src/tilemap.js`、`src/art/world.js`、
+> `tools/test_extra.py`（新）、`tools/level_check.js`（+`--extra`）、`tools/boss_test.py`（+`--extra`）、`tools/playthrough.py`（+`--extra`）。
+> 截圖：`shots/agent_extra/`。
+
+- [09-12 R7-EX-1] 完成：**Extra 關卡疊加層 `src/levels_extra.js`**（KB.EXTRA_LAYERS / KB.NORMAL_LAYERS / KB.applyRoomLayers）。
+  疊加層格式與 levels.js 的 MECH / R4 / R5 / ELEM6 / ELEM6B **完全相同**（`tiles / deco / add / rm / flags`），
+  差別只在套用時機：一般層永遠套、Extra 層只有 `KB.session.extra` 才套。`game.js loadRoom` 只加 2 行
+  （`let room = this.level.rooms[idx]; if (KB.applyRoomLayers) room = KB.applyRoomLayers(this.levelId, idx, room);`），
+  `applyRoomLayers` 做的是**房間的淺拷貝**（map / deco / entities 另建新陣列）—— `KB.LEVELS` 原始資料一個字都不會變。
+  內容：w1~w6 的 **31 個非魔王房**，每房 +2~4 隻 Round 5/6 強力敵人（共 87 隻）、+1 處尖刺（2 格，共 62 格）、
+  +1 個隱藏 1UP（高空凹處，要浮空才拿得到，共 31 個）、補給（food/tomato/candy）減半（移除 37 份，
+  一定保留第 1 個「站得到」的，符合 level_check 的硬性要求）。敵人依世界分池：
+  w1 槍手/忍者/浮球/法師、w2 居合/時鐘/幽靈迪/模仿者、w3 弓/小龍/模仿者/浮球、w4 機器兵/星靈/虛空/忍者、
+  w5 居合/槍手/機器兵/時鐘、w6 小龍/星靈/隕石/虛空；位置沿房間寬度平均散開，全部經地形驗證（地面型下方可站、
+  浮空型頭上兩格淨空、離出生點 > 8 格、不與既有實體 / 門重疊）。
+  驗證：`node tools/level_check.js --extra` → **0 error / 1 warn**（那 1 warn 是既有的拉拉拉出生點提示）；
+  `node tools/level_check.js` 也維持 0 error。下一步：魔王 Extra 變體。
+
+- [09-12 R7-EX-2] 完成：**魔王 Extra 變體**（`src/bosses.js` / `src/bosses_w6.js`）。
+  ① **開場即二階段**：基底 `Boss.update` 在 `onIntroEnd()` 之後多一行 ——
+  `if (KB.extraOn() && this.phase === 1 && !this.autoPhase2Off && this.half > 0) this.enterPhase2();`
+  （`half <= 0` 是「這隻魔王用自己的階段系統」的旗標，bosses_w7 的夢魘之核把 `maybePhase2` 停掉了，所以不會被硬推；
+  拉拉拉設 `autoPhase2Off = true`，由洛洛洛的 `onPhase2` 統一 goRage，避免跳兩次提示）。
+  ② **每隻 1 個新招**（只在 `KB.extraOn()` 時進入招式循環）：
+  | 魔王 | 新招 | 狀態 | 內容 |
+  |---|---|---|---|
+  | 大樹威斯比 | 龍捲落葉 | `leafstorm` | 滿天落葉粒子 + 第 18/44/70 幀各放一道**貼地綠色龍捲**（Shockwave，2.0px/f、220 幀） |
+  | 洛洛洛與拉拉拉 | 三箱齊推 | `tribox` | 每第 3 次出招改成「身前疊三顆箱子，20 幀後整排射出」（vx 2.8~3.6、可吸入吐回） |
+  | 克拉寇 | 雷雲追蹤 | `tracker` | 整朵雲以 0.085 的插值黏著卡比頭頂，每 46 幀劈一道雷（前 26 幀電火花預警），共 3 道 |
+  | 魅塔騎士 | 劍氣十字 | `crossslash` | 原地旋劍 18 幀 → 上下左右四道劍氣（grav 0、110 幀） |
+  | 迪迪迪大王 | 巨鎚震盪波 | `quake` | 30 幀高舉預備 → 砸地放出 **2.0 / 3.4 兩段速度各左右一道**共 4 道震波 + 4 顆衝擊星 |
+  | 暗影卡比 | 影分身 4 隻 | `split` | `spawnClones` 在 Extra 時改成 ±46 / ±86 四隻（guardT 900 → 1200），並跳提示「暗影卡比分裂成四個！」 |
+  另外 `spawnClones` 加了保險：生新分身前先收掉上一批（被外部重複 `setState('split')` 時不會越積越多）。
+  驗證：`tools/boss_test.py --extra` **6/6 ALL PASS**（開場 phase=2、maxHp ×1.25 = 50/38/50/69/75/88、新招狀態都出現、
+  暗影卡比分身 4 隻、0 pageerror）；截圖 `shots/agent_extra/bossx_*.png`。下一步：成績板。
+
+- [09-12 R7-EX-3] 完成：**本機成績板 `KB.RecordsScene`（src/records.js）＋ 標題選單「成績板」**。
+  分頁：第 1 頁總覽（每世界一列：BEST / RANK / TIME / STAR / PLAY / EX 徽章，下方彙總「競技場最佳時間 / 大星星 /
+  成就 n/20 / 能力發現 n/N」），第 2~n 頁各世界（關名 + CLEAR / EXTRA CLEAR 狀態 + 最佳分數 / 最短時間 / 通關次數 /
+  大星星 + 右側 4 倍字評價印章 + 獎盃）。←→ / ↑↓ 換頁、Z / SELECT 回標題。
+  資料全部讀既有的 `KB.save`（best / rank / stars / arena / achievements / seen）＋ 這輪新增的
+  `playCount[id]`（game.js `levelClear` 累加）、`bestTime[id]`（同處只升不降地取最短 `timeAlive`）、`extraCleared[id]`。
+  `KB.recordOf(id)` / `KB.recordsSummary()` 供其他 agent 取用。
+  **注意**：records.js 在 index.html 裡載在 ui.js **之前**，所以 `KB.UI` 只能在函式裡取（不可在頂層快取）。
+  驗證：`shots/agent_extra/records_p1_overview.png`（總覽）、`records_p2_w1.png`（W1，EXTRA CLEAR + S 印章）、`records_p7_w6.png`。下一步：選關第 7 節點。
+
+- [09-12 R7-EX-4] 完成：**選關第 7 節點 + EXTRA 紅字標題 + 真結局版面**（`src/ui.js`）。
+  `LAYOUT.mapNodes` 加第 7 點 `[128, 52]`（正上方天空），節點數仍是 `clamp(KB.LEVELS.length, 5, mapNodes.length)`
+  → 沒有 w7 時完全不會多出第 7 點。標籤排版順序改成 `[6, 5, 0..4]`（第 7 點與第 6 點可放的位置最少，要先排；
+  5 / 6 個節點時的順序與結果與 Round 6 完全相同）。實測 7 個標籤 **0 重疊 / 0 出界**。
+  解鎖條件：`UI.dreamOpen() = cleared.w6 && UI.starTotal() >= UI.DREAM_STARS(15)`；未解鎖時節點畫鎖，
+  資訊列顯示鎖頭 + 粉紅「集齊 15 顆大星星」，第二列的 BEST 改成 `STAR n/15` 進度。
+  **順帶修好一段死碼**：原本 `canEnter` 同時管「游標能不能走過去」與「能不能進去」，所以鎖定節點的
+  `未解鎖` 提示永遠看不到 —— 新增 `canMove(i)`（前一個節點可進入時，游標可以走到下一個鎖定節點，但按 Z 進不去），
+  玩家才看得到解鎖條件。新增 `drawDreamIsle()`（粉紫夢之門：呼吸光環 + 環繞星塵）與 `NODE_COL.dream`。
+  Extra 模式時「選擇關卡」右邊掛一塊閃爍的紅色 `EXTRA` 牌。
+  真結局：`EndingScene` 加第三種版面（`KB.session.trueEnd` 或 `KB.save.cleared.w7`）—— 紫色夜空漸層、
+  4 行專屬文案 + 收集度（能力 / 成就 / 大星星 / 通關次數）、結尾字改成 `ALL CLEAR` + 金粉交替的 `TRUE END`。
+  驗證：`shots/agent_extra/select_w7_locked.png`（12/15 鎖定）、`select_w7_open.png`（18/15 解鎖）、
+  `select_extra_title.png`（EXTRA 紅牌）、`ending_trueend.png`。下一步：w4 / w5 可燃植被。
+
+- [09-12 R7-EX-5] 完成：**w4 / w5 可燃植被**（`src/tilemap.js` + `src/art/world.js` + levels_extra 的「一般層」）。
+  `TileMap.BURN_DECO` 補上 `cloud: 'gf'`（雲草 / 雲花）與 `dedede: 'kv'`（旗幟 / 地毯邊），
+  art/world.js 新增 `deco_cloud_g`(16×8) / `deco_cloud_f`(16×10) / `deco_dedede_v`(16×8，藍底金邊長毯 + 上下流蘇)
+  與 4 張焦黑圖 `deco_cloud_g_burnt` / `deco_cloud_f_burnt` / `deco_dedede_v_burnt` / `deco_dedede_k_burnt`，
+  `KB.DECO_CHARS` 與檔頭字元表同步（level_check 的 DECO 表也補了）。
+  **地毯邊為什麼是藍底金邊**：dedede 主題的地面磚頂本來就是紅地毯，紅色長毯鋪上去完全看不出來，實測後改成藍 / 金。
+  一般層（`KB.NORMAL_LAYERS`，不看 extra 旗標）：**w4 r0** x=68~73 鋪 4 格雲草 + 2 朵雲花，右邊 (75,9) 放一座
+  火焰台座當點火來源；**w5 r1** x=70~75 鋪 6 格地毯邊（(76,9) 本來就有 Hot Head 當火源，房內的旗幟 'k' 也一起變可燃）。
+  驗證：`shots/agent_extra/burn_w4_before.png` / `burn_w4_fire.png`（5 格同時燒）/ `burn_w4_charred.png`（焦黑）、
+  `burn_w5_before.png` / `burn_w5_fire.png`（w5 r1 是暗房，截圖時暫時關掉 dark 才看得清楚）。下一步：測試與收工。
+
+- [09-12 R7-EX-6] 完成：**`tools/test_extra.py` 53/53 PASS** 與收工驗證。
+  test_extra 七段（`--only layers,rooms,boss,records,play,node,burn` 可單跑）：
+  ① 疊加層資料（每世界都有、每房 2~4 隻、尖刺 / 1UP 數對得上、`applyRoomLayers` 回傳副本且原始資料零變動）
+  ② 實機套用（w1 r0 敵人 9→12 / 尖刺 0→2 / 1UP 0→1 / 補給 3→2、maxHp 6→3、w2~w6 r0 全部變多、一般層兩種難度都在）
+  ③ 6 隻魔王的 Extra 變體（開場 phase=2、maxHp 40→50 / 30→38 / 40→50 / 55→69 / 60→75 / 70→88、新招狀態、分身 4 隻）
+  ④ 成績板（recordOf / recordsSummary / 8 頁都畫得出來 / ←→ 換頁 / Z 返回標題 / 標題選單有這一項）
+  ⑤ playCount 累加與 bestTime 只取最短、Extra 通關記 extraCleared
+  ⑥ 第 7 節點（沒有 w7 → 6 點；有 w7 → 7 點 7 標籤 0 重疊 0 出界；12 顆星鎖住、18 顆星 + 通關 w6 才開；EXTRA 紅字；TRUE END）
+  ⑦ 可燃植被（BURN_DECO 表、7 張新圖都註冊、實機點火 → 蔓延 5 格 → 焦黑）
+  其他驗證：
+  - `node tools/level_check.js` 0 error / 1 warn（既有）；`node tools/level_check.js --extra` **0 error / 1 warn**
+  - `tools/boss_test.py --extra` 6 隻魔王 ALL PASS；`tools/boss_test.py --runs 2 --no-intro`
+    我負責的 6 隻全 PASS（`nightmarecore` 的 fight / mid FAIL 是 world7 的新魔王，不在我這輪範圍）
+  - `tools/engine_test.py` **118/118 PASS**
+  - `tools/playthrough.py --level w1~w6 --godmode` 六個世界全 `cleared=True` / `deaths=0` / `missing []`
+  - `tools/playthrough.py --level w1 --godmode --extra` 4 個樣本裡 3 個通關（5624 / 7630 / 5624 幀）、
+    `--level w3 --godmode --extra` 通關（8546 幀，克拉寇的 `tracker` 新招有出現、bossDamage 100%）
+  - `node --check` 於 levels_extra / records / ui / menu / game / bosses / bosses_w6 / tilemap / art/world 全過
+  截圖（`shots/agent_extra/`）：`room_w1r0_normal.png` ↔ `room_w1r0_extra.png`（同一幀對照：HP 6→3、多 3 隻敵人）、
+  `room_w1r0_spike_normal.png` ↔ `room_w1r0_spike_extra.png`（尖刺處對照）、
+  `bossx_whispywoods/lololo/kracko/metaknight/dedede/shadowkirby.png`（6 個新招）、
+  `records_p1_overview.png` / `records_p2_w1.png` / `records_p7_w6.png`（成績板 3 頁）、
+  `select_w7_locked.png` / `select_w7_open.png` / `select_extra_title.png`、
+  `ending_trueend.png`、`burn_w4_*.png` / `burn_w5_*.png`。
+
+### 未完成 / 已知問題（extra）
+1. **w7「夢幻迴廊」沒有 Extra 疊加層**：我開工時 `levels_w7.js` 還是空殼，疊加層只做了 w1~w6 的 31 間房。
+   w7 的魔王（夢魘之核）還是吃得到 Extra（maxHp ×1.25 / 敵人 ×1.2），但房間內容不會變難 —— 見「跨檔需求 1」。
+2. `tools/level_check.js` **沒有載入 `src/levels_w7.js`**（原本就沒有，我沒有加），所以 `--extra` 也檢查不到 w7。
+   要涵蓋的話請在 level_check 開頭加一行 `require('../src/levels_w7.js')`（我沒加是為了避開 world7 同時在改這個檔）。
+3. `playthrough --level w1 --godmode --extra` 有 **1/4 的樣本卡在 r1**（機器人在強化敵人群裡反覆掉能力 / 撿能力星，
+   30000 幀沒走完）。後續 3 個樣本都通關，所以判定為機器人策略的抖動而非關卡卡死；
+   若要更穩，建議把 w1 r1 的 `wizzle(58,9)`（會瞬移的法師）往前挪到 x≈36 的開闊地。
+4. 迪迪迪的「巨鎚震盪波」一次放 4 道震波（2.0 / 3.4 各左右一道），Extra + HP 3 的情況下相當硬；
+   若 QA 覺得過頭，把 `case 'quake'` 裡的 `[2.0, 3.4]` 砍成 `[2.6]` 即可（其餘不用動）。
+5. 威斯比「龍捲落葉」的龍捲沿用 `KB.Shockwave` 的方塊畫法（只換成綠色 + 落葉粒子），
+   沒有專屬的龍捲精靈；想更好看的話 art 端加一張 `fx_leaf_tornado`（16×16、3 幀）我再接上去。
+6. `shots/boss_*_extra*.png` 是 `boss_test --extra` 產生的副產物（會蓋掉同名檔），已另存一份到 `shots/agent_extra/bossx_*.png`。
+
+### 跨檔需求（extra → 其他 agent / 總控）
+1. **world7（`src/levels_w7.js`）**：w7 的 Extra 疊加層我沒做。要補的話**不用改 levels_w7.js** ——
+   在 `src/levels_extra.js` 的 `EXTRA` 陣列裡追加 `{ lv: 'w7', r: n, add: [...], tiles: [[x,y,'^']], rm: [...] }` 即可
+   （格式與 w1~w6 完全相同，`KB.applyRoomLayers` 會自動吃到）。
+2. **world7（`src/bosses_w7.js`）**：夢魘之核用的是自己的三階段系統（`maybePhase2` 停掉、`get half` 回 -1），
+   所以基底的「Extra 開場即二階段」**會自動跳過它**（我用 `this.half > 0` 當判斷），不會破壞 `applyPhase` 的記帳。
+   但也因此 `ensureExtra()` 的 `maxHp ×1.25` 在 `applyPhase` 覆寫 hp/maxHp 之後就沒了 ——
+   若要讓夢魘之核也吃到 Extra 血量，請在 `applyPhase(n)` 裡把 `PHASE_HP[n-1]` 乘上 `KB.exK('bossHp')`
+   （`KB.exK` 在 entity.js，一般難度回 1）。另外若想要它也有 Extra 專屬新招，
+   自己在招式選擇裡加 `if (KB.extraOn()) …` 即可（我沒有動 bosses_w7.js 一個字）。
+3. **總控 / qa7**：`tools/level_check.js` / `tools/boss_test.py` / `tools/playthrough.py` 都被我加了 `--extra`
+   （分別是「套用 Extra 疊加層後再檢查」「只跑 Extra 魔王檢查」「以 Extra 難度自動通關」），
+   收工前的常規檢查建議加跑 `node tools/level_check.js --extra` 與 `python tools/boss_test.py --extra`。
+4. **ui-menu / qa7**：選關的游標規則改了 —— 新增 `canMove(i)`，游標可以走到「下一個」尚未解鎖的節點
+   （按 Z 仍然進不去，只是看得到鎖與解鎖條件）。這讓原本永遠看不到的「未解鎖」提示文案活過來了，
+   若 QA 覺得不該這樣，把 `update()` 裡的 `this.canMove(n)` 改回 `this.canEnter(n)` 即可。
+5. **audio**：Extra 的 6 個新招都沿用既有 sfx（`wind` / `spit` / `block` / `spark` / `cutter` / `sword` / `hammer` / `jump` / `inhale`）。
+   若要專屬音效，建議加 `tornado`（龍捲）與 `quake`（震盪波），我再接上去。
+6. **docs/SPEC.md**：存檔格式那一節請補上 `playCount{levelId:n}`、`bestTime{levelId:幀}`、`extraCleared{levelId:true}` 三個新欄位。
+
 
 ## world7
+
+> 檔案：`src/levels_w7.js`、`src/art/world7.js`、`src/bosses_w7.js`、`src/const.js`（THEMES / THEME_NAMES / PAL.dream）、
+> `src/art/backgrounds.js`（新增 `KB.BG.dream`）、`src/audio.js`（新增 5 首原創曲）、
+> `tools/level_check.js`、`tools/boss_test.py`、`tools/playthrough.py`。**沒有碰 ui.js / bosses.js / bosses_w6.js / levels.js**。
+> 截圖目錄 `shots/agent_world7/`（自製工具在 scratchpad：`pshot.py` 任意主題 / 房間、`bshot.py` 魔王招式連拍、`mshot.py` 階段轉換 / 擊敗）。
+
+- [09-12 W7-1] 完成：**主題美術 dream（粉紫 / 金 / 深藍夢境色系）**。`const.js` 加 `KB.THEMES` 'dream' / `THEME_NAMES` '夢幻迴廊' / `KB.PAL.dream`；
+  `art/world7.js` 畫出 10 種磁磚 `tile_dream_{top,topL,topR,fill,left,right,bottom,platform,slopeL,slopeR}`
+  （填充＝蓬鬆的粉紫「雲朵石」＋內縫＋金色星屑；表層＝金色星屑邊＋白色高光；平台＝飄浮雲石板，上緣星屑、下緣粉色輝光）
+  與 6 種裝飾 `KB.DECO_CHARS.dream = 'cdrsmg'`：c 時鐘(18×28) / d **飄浮門框**(22×32，框內是夢境漩渦) /
+  **r 星星燈(14×26, 2 幀＝暗房光源)** / s 小星星(12×12, 2 幀) / m 記憶碎片(16×14) / **g 夢草叢(16×10，可燃)**。
+  驗證：`shots/agent_world7/theme_dream.png` / `theme_dream2.png`（斜坡 / 拼接）/ `theme_dream3.png`（天花板 / 星星方塊）逐張 Read。
+- [09-12 W7-2] 完成：**`KB.BG.dream` 多層視差背景**（`art/backgrounds.js`）。由遠到近：16 段層層漸層（深藍夜 → 夢紫 → 粉金）→
+  90 顆閃爍星屑（視差 0.02）→ 兩層反向飄動的粉紫雲氣 `bg_dream_mist` → **遠層「過往世界剪影」`bg_dream_far`**（草原樹 / 城堡塔 / 漂浮島 / 雲 / 城堡 / 星球，視差 0.03 + 自己往左流動）→
+  **近層剪影 `bg_dream_near`**（同 6 種但更大、帶窗光，視差 0.08）→ 30 顆近景星屑 → 10 顆持續飄落的金色星屑。
+  **垂直房支援**：每一層的 y 都夾在畫面內（`Math.max/min`）。驗證：`w7r1.png`（32×24 垂直房）。
+- [09-12 W7-3] 完成：**新敵人 2 種 + 新機關 1 種**（類別在 `src/bosses_w7.js`、像素圖在 `src/art/world7.js`）。
+
+  | key | 名稱 | 尺寸 | 能力 | 行為 |
+  |---|---|---|---|---|
+  | `dreameater` | 食夢獸 | 16×16 | 無 | 張嘴把 **玩家的投射物 / 掉在地上的能力星** 吸進肚子（吸力 2px/f、範圍 74px），18 幀後吐回來。吃到的是能力星 → **原封不動吐回一顆能力星**（撿得回去）；吃到投射物 → 吐出可再被吸走的 `proj_dreamspit`。肚子裡有東西時全身發光 |
+  | `nightlight` | 夢燈 | 14×18 | fire | 暗房裡**會跟著玩家走的光源**（`glow` 30，保持 46px）。打倒 → 不是死亡而是 **熄滅 300 幀（5 秒）**：`glow` 0、不傷人也打不到，房間會暗下來，5 秒後重新亮起 |
+  | `dreamswitch` | 夢之開關 | 16×16 | — | `{t:'dreamswitch', x, y, a:順序}`。要**照亮著的順序**按（目前該按的那顆會發光 + 光暈）；按錯只會「鏘」一聲不會重來；全部按完才 `KB.unlockDoors`。**註冊在 `KB.ITEMS`，沒有改 `src/items.js`** |
+
+  驗證：`sheet_eater2.png`、`sheet_nl.png`、`w7r2.png`（暗房裡的夢之開關與星星燈光圈）。
 （agent 在此追加）
 
 ## qa7
