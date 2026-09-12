@@ -125,6 +125,46 @@
     arms: [[12, 9, 4], [0, 9, 4]], feet: [[0, 12], [8, 12]],
   })]);
 
+  // ---------- 指令圖示（Round 7 helper2：8×8，錨點 center，畫在夥伴頭上與 HUD） ----------
+  // 跟隨＝綠色前進三角、待命＝藍色盾牌、突擊＝紅柄小劍；都有 1px 深色描邊，1× 畫面也看得出來。
+  const MPAL = {
+    k: '#101828',                      // 描邊
+    G: '#70e070', g: '#38a038',        // 跟隨（綠）
+    B: '#60c0ff', b: '#2878c0',        // 待命（藍）
+    R: '#ff6050', r: '#a02820',        // 突擊（紅）
+    w: '#ffffff', l: '#d0d8e8',        // 劍刃
+  };
+  KB.sprite('ui_helper_mode_follow', MPAL, [[
+    '.kk.....',
+    '.kGk....',
+    '.kGGk...',
+    '.kGGGk..',
+    '.kGGgk..',
+    '.kGgk...',
+    '.kgk....',
+    '.kk.....',
+  ]], { anchor: 'center' });
+  KB.sprite('ui_helper_mode_stay', MPAL, [[
+    '.kkkkkk.',
+    '.kBBBBk.',
+    '.kBBBBk.',
+    '.kBBbbk.',
+    '.kBbbbk.',
+    '..kbbk..',
+    '...kk...',
+    '........',
+  ]], { anchor: 'center' });
+  KB.sprite('ui_helper_mode_assault', MPAL, [[
+    '....k...',
+    '...kwk..',
+    '...kwk..',
+    '...kwk..',
+    '..kRRRk.',
+    '...klk..',
+    '...krk..',
+    '....k...',
+  ]], { anchor: 'center' });
+
   // ---------- HUD 小臉（8×8，錨點 center） ----------
   KB.sprite('ui_helper_face', PAL, [(function () {
     let f = blob(8, 8, [circ(0, 0, 8)]);

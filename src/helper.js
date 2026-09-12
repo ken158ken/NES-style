@@ -10,7 +10,17 @@
 //   KB.Helper.exists()      目前有沒有夥伴
 //   KB.Helper.get()         夥伴實體（沒有時 null）
 //   KB.Helper.tick(game)    每幀維護（換房重新跟上、SELECT 長按相容路徑）；同一幀重複呼叫只會生效一次
-//   KB.Helper.drawHUD(ctx)  HUD 右側的小夥伴臉 + 4 格 HP（progression agent 請在 KB.drawHUD 末端呼叫）
+//   KB.Helper.drawHUD(ctx)  HUD 右側的小夥伴臉 + HP（progression agent 請在 KB.drawHUD 末端呼叫）
+//
+// Round 7（helper2）新增：
+//   KB.Helper.list          夥伴陣列（最多 KB.Helper.MAX = 2；current === list[0]，舊介面照常可用）
+//   KB.Helper.all()/count() 目前活著的夥伴 / 數量；get(i) 取第 i 個（省略 i＝最舊的那個）
+//   KB.Helper.MODES/mode    指令模式 'follow'（跟隨）/ 'stay'（待命）/ 'assault'（突擊）
+//   KB.Helper.setMode(id) / cycleMode()   ↑＋SELECT 同時按下＝循環切換（tick 內自行偵測 KB.input）
+//   KB.Helper.canUnion() / union(p)       合體技：↓＋SELECT，兩夥伴衝到玩家兩側同時放必殺（CD 600）
+//   KB.Helper.unionCD       合體技剩餘冷卻幀數
+//   夥伴等級：HP / 攻擊間隔繼承 KB.PROG.level(能力)（Lv1 4/90、Lv2 5/90、Lv3 6/70、Lv4 7/55）；
+//             招式產生的判定框會帶上 abilityKey ⇒ game.js collisions 的 KB.PROG.scaleDmg 自動吃 dmgMul。
 //
 // 夥伴實體本身就是「假玩家介面」：type 'ally'、owner 'player'，並實作 abilities.js 需要的最小玩家介面
 //（cx/cy/dir/x/y/w/h/onGround/vx/vy/state/stateT/attackTimer/attackLock/attackFps/abilityData/abilityDef/
@@ -45,7 +55,37 @@
     holdSelect: 45,        // SELECT 長按門檻（與 mix 的鉤子同值）
     walk: 1.6, run: 2.4,   // 跟隨速度（卡比 walk 1.3 / run 2.2，夥伴要略快才追得上）
     hatScale: 0.78,        // 帽子縮小倍率（夥伴比卡比小一號）
+    // ---- Round 7（helper2）----
+    maxHelpers: 2,            // 最多同時 2 個夥伴
+    hpByLv: [4, 5, 6, 7],     // 夥伴 HP（KB.PROG.level(key) → Lv1~4）
+    cdByLv: [90, 90, 70, 55], // 夥伴攻擊間隔（同上）
+    stayLeash: 56,            // 待命：離崗位最遠 56px（打完會走回崗位）
+    assaultR: 200,            // 突擊：偵測半徑（不管離卡比多遠）
+    unionCD: 600,             // 合體技冷卻
+    unionDash: 18,            // 衝到玩家兩側的最長幀數
+    unionSide: 22,            // 合體技站位（玩家左右各 22px）
+    unionCast: 10,            // 蓄力加速幀數（蓄滿後放開＝必殺）
+    fade: 10,                 // 進門淡出 / 新房淡入幀數
   };
+
+  // ---------------------------------------------------------------------------
+  // 指令模式（↑＋SELECT 循環切換；對所有夥伴同時生效）
+  // ---------------------------------------------------------------------------
+  const MODES = [
+    { id: 'follow', name: '跟隨', hud: 'FOLLOW', icon: 'ui_helper_mode_follow', color: '#70e070' },
+    { id: 'stay', name: '待命', hud: 'STAY', icon: 'ui_helper_mode_stay', color: '#60c0ff' },
+    { id: 'assault', name: '突擊', hud: 'ASSAULT', icon: 'ui_helper_mode_assault', color: '#ff6050' },
+  ];
+  const MODE_BY_ID = {};
+  for (const m of MODES) MODE_BY_ID[m.id] = m;
+
+  /** 夥伴等級：繼承 KB.PROG.level(key) → { lv, hp, cd } */
+  function statsOf(key) {
+    let lv = 1;
+    try { if (KB.PROG && KB.PROG.level) lv = Math.max(1, KB.PROG.level(key) | 0); } catch (e) { lv = 1; }
+    const i = Math.max(0, Math.min(CFG.hpByLv.length - 1, lv - 1));
+    return { lv, hp: CFG.hpByLv[i], cd: CFG.cdByLv[i] };
+  }
 
   // ---------------------------------------------------------------------------
   // R6-P2-05：變身系能力（def.transform = true：giant / dragon / mech / ghost）的「簡化版」
@@ -87,16 +127,23 @@
   //  夥伴實體
   // =========================================================================
   class Helper extends KB.Entity {
-    constructor(p, key) {
+    constructor(p, key, slot) {
       super(p.x, p.y);
       this.type = 'ally'; this.owner = 'player'; this.name = 'helper'; this.z = 2;
       this.w = 12; this.h = 13; this.stepH = 6;
       this.solid = true; this.grav = P.grav; this.maxFall = P.maxFall;
-      this.hp = CFG.hp; this.maxHp = CFG.hp;
+      // Round 7：HP / 攻擊間隔繼承能力等級（KB.PROG.level）
+      const st = statsOf(key);
+      this.lv = st.lv; this.hp = st.hp; this.maxHp = st.hp; this.atkCDFrames = st.cd;
       this.inhalable = true; this.hurtsPlayer = false; this.damage = 0; this.score = 0;
       this.dir = p.dir || 1;
-      this.cx = p.cx - this.dir * 16; this.bottom = p.bottom;
+      this.slot = slot | 0;                              // 0＝最舊的夥伴（站得比較近）
+      this.cx = p.cx - this.dir * (16 + this.slot * 14); this.bottom = p.bottom;
       this.game = KB.game;
+      // 淡入淡出（換房／重生）與合體技
+      this.alpha = 1; this.alphaTo = 1;
+      this.unionT = 0; this.unionDir = 0; this.unionCast = 0;
+      this.anchorX = this.cx; this.anchorY = this.cy;    // 待命模式的崗位
 
       // ---- 假玩家介面（abilities.js 會讀 / 寫這些欄位）----
       this.ability = key; this.abilityData = {};
@@ -140,7 +187,7 @@
         this.killStone();
       }
       this.state = s; this.stateT = 0;
-      if (s !== 'attack') { this.attackLock = false; this.attackTimer = 0; this.simpleMove = null; }
+      if (s !== 'attack') { this.attackLock = false; this.attackTimer = 0; this.simpleMove = null; this.unionCast = 0; }
     }
     startAttack() {
       const d = this.abilityDef; if (!d) return;
@@ -162,7 +209,7 @@
         x: this.x, y: this.y, w: this.w + 4, h: this.h + 2, dmg: 6, owner: 'player', type: 'stone',
         follow: this, ox: -this.w / 2 - 2, oy: -1, life: 99999, rehit: 20, pierce: true, breakBlocks: true,
       });
-      if (this.stoneBox) this.stoneBox.fromHelper = true;
+      if (this.stoneBox) { this.stoneBox.fromHelper = true; this.stoneBox.abilityKey = this.ability; }
     }
     killStone() { if (this.stoneBox) { this.stoneBox.dead = true; this.stoneBox = null; } this.stoneMode = 0; }
 
@@ -177,7 +224,12 @@
         };
       }
       KB.input = this._stub;
-      KB.spawn = function (e) { if (e) { e.fromHelper = true; e.helperSrc = self; } return realSpawn(e); };
+      // abilityKey：game.js 的 collisions 會用它算 KB.PROG.scaleDmg（夥伴的傷害吃「夥伴能力」的等級加成，
+      // 而不是卡比手上那個能力——能力交給夥伴後卡比通常是沒有能力的）。
+      KB.spawn = function (e) {
+        if (e) { e.fromHelper = true; e.helperSrc = self; if (e.abilityKey === undefined) e.abilityKey = self.ability; }
+        return realSpawn(e);
+      };
       try { fn(); }
       catch (err) { if (KB.DEBUG) console.warn('[helper] ability error', err); }
       finally { KB.input = realInput; KB.spawn = realSpawn; }
@@ -191,7 +243,7 @@
       // R6-P2-05：變身系能力走簡化版
       const sp = this.simple;
       if (sp) {
-        this.atkCool = CFG.atkCD;
+        this.atkCool = this.atkCDFrames || CFG.atkCD;
         if (sp.own === 'stomp') { this.simpleStomp(); return this.state === 'attack'; }
         if (sp.fallback) { this.spitStar(); return this.state === 'attack'; }
         if (sp.next) this.abilityData.next = sp.next;    // pickMode 會優先吃 abilityData.next
@@ -199,7 +251,7 @@
       this.keys.attack = true;
       this.holdT = d.hold ? CFG.holdFrames : 0;
       this.startAttack();
-      this.atkCool = CFG.atkCD;
+      this.atkCool = this.atkCDFrames || CFG.atkCD;
       return this.state === 'attack';
     }
 
@@ -270,6 +322,7 @@
         if (--this.attackTimer <= 0) { this.killStone(); this.setState(this.onGround ? 'idle' : 'fall'); }
         return;
       }
+      if (this.unionCast > 0) this.stepUnionCast();     // 合體技：蓄力加速 → 放開＝必殺
       const held = this.holdT > 0;
       this.keys.attack = held;
       if (this.holdT > 0) this.holdT--;
@@ -283,6 +336,7 @@
     update(dt) {
       this.baseUpdate(dt);
       this.stateT++;
+      this.stepFade();
       const g = this.game = KB.game, p = g && g.player;
       if (!g || !p) return;
       if (this.atkCool > 0) this.atkCool--;
@@ -292,7 +346,8 @@
       this.beingInhaled = false;
       this.checkDamage();
       if (this.dead) return;
-      if (p.state === 'dead') { this.vanish(); return; }
+      // 卡比死亡：夥伴消失，但把能力記下來 → 重生時在重生點帶著同樣的能力回來（H.tick）
+      if (p.state === 'dead') { H.rememberRespawn(g, p); this.vanish(); return; }
       this.inWater = !!(g.map.inWater && g.map.inWater(this.cx, this.cy));
       if (this.state === 'hurt') {
         this.hurtTimer--; this.vx *= 0.88;
@@ -307,15 +362,25 @@
       this.afterPhysics(p);
     }
 
-    /** 跟隨 + 跳躍 / 漂浮 + 發現敵人就靠近並使用能力 */
+    /** 跟隨 / 待命 / 突擊 + 跳躍 / 漂浮 + 發現敵人就靠近並使用能力 */
     think(p) {
-      const g = this.game, map = g.map;
+      const g = this.game, map = g.map, mode = H.mode;
+      // 合體技：衝到玩家兩側（衝完就放必殺）
+      if (this.unionT > 0) { this.unionStep(p); return; }
       const dx = p.cx - this.cx, dy = p.cy - this.cy, adx = Math.abs(dx), dist = hypot(dx, dy);
-      // 掉隊 / 卡住 → 瞬移到卡比旁 + 煙
-      if (dist > CFG.teleportDist || this.stuckT > CFG.stuckFrames) { this.warpTo(p); return; }
+      // 掉隊 / 卡住 → 瞬移到卡比旁 + 煙（待命模式要留在崗位上，不瞬移）
+      if (mode !== 'stay' && (dist > CFG.teleportDist || this.stuckT > CFG.stuckFrames)) { this.warpTo(p); return; }
 
-      // ---- 目標：96px 內有敵人就先打，但不會離卡比太遠（leash 150px）----
-      const foe = (adx < CFG.leash) ? this.findFoe() : null;
+      // ---- 目標：先找敵人 ----
+      //   跟隨：96px 內，且自己離卡比不超過 leash 150px
+      //   待命：96px 內，且敵人離「崗位」不超過 96px（不會被引走）
+      //   突擊：200px 內，不管離卡比多遠
+      let foe = null;
+      if (mode === 'assault') foe = this.findFoe(CFG.assaultR);
+      else if (mode === 'stay') {
+        foe = this.findFoe(CFG.senseR);
+        if (foe && Math.abs(foe.cx - this.anchorX) > CFG.senseR) foe = null;
+      } else if (adx < CFG.leash) foe = this.findFoe(CFG.senseR);
       this.foe = foe;
       let mv = this.mv, tgt = p, fast = false;
       if (foe) {
@@ -327,10 +392,21 @@
           if (this.atkCool <= 0 && this.useAbility(foe)) return;
           mv = 0;
         } else mv = fdx > 0 ? 1 : -1;      // 還太遠 → 靠近敵人
+        // 待命：離崗位太遠就不再追（打完自己走回去）
+        if (mode === 'stay' && mv && Math.abs(this.cx + mv * 8 - this.anchorX) > CFG.stayLeash) { mv = 0; tgt = this; }
+        if (mode === 'assault') fast = afd > 72;
+      } else if (mode === 'stay') {
+        // 待命：回崗位站好（8px 內就不動）
+        const adx0 = this.cx - this.anchorX;
+        if (Math.abs(adx0) > 10) mv = adx0 > 0 ? -1 : 1;
+        else mv = 0;
+        tgt = { cx: this.anchorX, cy: this.anchorY };
       } else {
         // 跟隨（24~40px 之間維持原本的移動狀態，避免在邊界抖動）
-        if (adx > CFG.followFar) mv = dx > 0 ? 1 : -1;
-        else if (adx < CFG.followNear) mv = 0;
+        // 第 2 個夥伴（slot 1）跟得遠一點，兩人才不會疊在同一格上
+        const near = CFG.followNear + this.slot * 12, far = CFG.followFar + this.slot * 12;
+        if (adx > far) mv = dx > 0 ? 1 : -1;
+        else if (adx < near) mv = 0;
         fast = adx > 110 || dy < -40;
       }
       this.mv = mv;
@@ -383,9 +459,9 @@
       this.lastX = this.x;
     }
 
-    /** 96px 內最近的敵人 / 魔王 */
-    findFoe() {
-      const g = this.game; let best = null, bd = CFG.senseR;
+    /** 半徑內最近的敵人 / 魔王（預設 96px；突擊模式 200px） */
+    findFoe(r) {
+      const g = this.game; let best = null, bd = r || CFG.senseR;
       for (const e of g.entities) {
         if (e.dead || e === this) continue;
         if (e.type !== 'enemy' && e.type !== 'boss') continue;
@@ -443,7 +519,7 @@
         const st = KB.spawn(new KB.ITEMS.abilitystar(this.cx - 7, this.cy - 7, key, this.dir));
         if (st) { st.vx = 0; st.vy = -2.2; }
       }
-      if (H.current === this) H.current = null;
+      H.remove(this);
     }
 
     /** 消失（不留能力星）：吸回 / 卡比死亡 */
@@ -457,7 +533,7 @@
         KB.particles(this.cx, this.cy, ['#a8d8f8', '#ffffff'], 10, { spread: 2, grav: 0.02, life: 18 });
         KB.fx('fx_poof', this.cx, this.cy + 4);
       }
-      if (H.current === this) H.current = null;
+      H.remove(this);
     }
 
     // ---------- 被卡比吸入 ----------
@@ -468,7 +544,7 @@
     onInhaled(p) {
       this.dead = true;
       p.mouth = { ability: this.ability, name: 'helper', score: 0 };
-      if (H.current === this) H.current = null;
+      H.remove(this);
     }
     // player.js 的 updateInhale 只會拉 enemy / proj / item，type 'ally' 不在名單內
     //（player.js 不歸本 agent 管）→ 夥伴自己做吸力與入嘴判定，效果與敵人被吸入完全相同。
@@ -506,6 +582,95 @@
       if (!quiet) sfx('teleport', 'jump');
     }
 
+    // =======================================================================
+    //  Round 7（helper2）：淡入淡出 / 換房走門 / 合體技
+    // =======================================================================
+    /** alpha 往 alphaTo 收斂（換房淡出、新房淡入、重生） */
+    stepFade() {
+      if (this.alpha === this.alphaTo) return;
+      const s = 1 / Math.max(1, CFG.fade), d = this.alphaTo - this.alpha;
+      this.alpha += (d > 0 ? Math.min(s, d) : Math.max(-s, d));
+      if (Math.abs(this.alphaTo - this.alpha) < 0.01) this.alpha = this.alphaTo;
+    }
+
+    /**
+     * 換房：卡比進門的淡出期間（game.fadeDir > 0）游戲本體不更新實體，
+     * 所以由 KB.Helper.tick 每幀呼叫這裡：夥伴走向門口（＝卡比位置）並跟著畫面一起淡出。
+     */
+    doorStep(p) {
+      if (!p) return;
+      this.stateT++;
+      const dx = p.cx - this.cx;
+      if (Math.abs(dx) > 4) {
+        this.dir = dx < 0 ? -1 : 1;
+        this.x += Math.max(-2.6, Math.min(2.6, dx));
+        this.vx = this.dir * 1.6;                     // 只為了讓 currentAnim 走「走路」那格
+      } else { this.vx = 0; this.state = 'idle'; }
+      this.alphaTo = 0;
+      this.stepFade();
+      if (this.alpha <= 0.35 && !this._doorPoof) { this._doorPoof = true; KB.fx('fx_poof', this.cx, this.cy + 4); }
+    }
+
+    /** 在新房間（或重生點）現身：站到卡比身後 + 淡入 + 煙 */
+    enterRoom(p, idx) {
+      if (!p) return;
+      this.game = KB.game;
+      this.slot = idx === undefined ? this.slot : idx;
+      this.cx = p.cx - (p.dir || 1) * (16 + this.slot * 14); this.bottom = p.bottom;
+      this.vx = 0; this.vy = 0; this.stuckT = 0; this.floatT = 0; this.mv = 0; this.lastX = this.x;
+      this.onGround = p.onGround; this.dir = p.dir || 1;
+      this.anchorX = this.cx; this.anchorY = this.cy;
+      this.unionT = 0; this.unionCast = 0;
+      this._doorPoof = false;
+      this.clampToRoom();
+      this.alpha = 0; this.alphaTo = 1;
+      KB.particles(this.cx, this.cy, ['#d0d0d8', '#ffffff'], 8, { spread: 1.8, grav: -0.02, life: 18 });
+      KB.fx('fx_poof', this.cx, this.cy + 4);
+    }
+
+    /** 合體技：衝到玩家指定的一側 */
+    unionStep(p) {
+      this.unionT--;
+      const tx = p.cx + this.unionDir * CFG.unionSide, dx = tx - this.cx;
+      this.dir = -this.unionDir || 1;                 // 面向玩家外側（朝敵人）
+      this.vx = Math.max(-5, Math.min(5, dx * 0.45));
+      this.vy = Math.min(this.vy, 0.4);
+      if (Math.abs(this.cy - p.cy) > 10) this.y += (p.cy - this.cy) * 0.35;
+      this.mv = this.vx > 0 ? 1 : -1;
+      if (Math.abs(dx) < 6 || this.unionT <= 0) { this.unionT = 0; this.unionFire(); }
+    }
+
+    /** 合體技的必殺：把 abilityData 蓄滿 → 放開（重用各能力自己的蓄力必殺） */
+    unionFire() {
+      const d = this.abilityDef;
+      this.dir = this.unionDir >= 0 ? 1 : -1;
+      V('afterimage', this, { frames: 24, every: 2, color: (d && d.color) || '#a8d8f8', alpha: 0.45 });
+      KB.particles(this.cx, this.cy, [(d && d.color) || '#a8d8f8', '#ffffff'], 10, { spread: 2.2, life: 20 });
+      this.atkCool = 0;
+      // 合體衝擊（兩側各一道）：必殺以外的保底傷害，確保「合體技」永遠打得到東西
+      this.callDef(() => KB.hitbox({
+        x: this.unionDir >= 0 ? this.cx : this.cx - 44, y: this.y - 10, w: 44, h: this.h + 20,
+        dmg: 6, owner: 'player', type: 'union', life: 16, rehit: 0, pierce: true, knock: 3, breakBlocks: true,
+      }));
+      V('shockwave', this.cx, this.bottom, { dir: this.dir, speed: 3.6, w: 14, h: 18, frames: 22, color: (d && d.color) || '#ffe040' });
+      this.unionCast = CFG.unionCast;
+      if (!this.useAbility(this.findFoe(CFG.assaultR))) this.unionCast = 0;
+    }
+
+    /** 蓄力加速：每幀把各能力的蓄力欄位灌滿，unionCast 用完就「放開」→ 必殺 */
+    stepUnionCast() {
+      if (this.unionCast <= 0) return;
+      this.unionCast--;
+      const ad = this.abilityData;
+      this.stateT += 3;                               // 以 stateT 當門檻的能力（beam / ice…）
+      if (ad) {
+        if (typeof ad.charge === 'number') ad.charge += 8;
+        ad.charged = true; ad.ready = true; ad.full = true;
+      }
+      this.holdT = Math.max(this.holdT, 2);
+      if (this.unionCast <= 0) { this.holdT = 0; this.keys.attack = false; }   // 放開 → 觸發必殺
+    }
+
     /** 生成演出（VFX transform 風格：停格 + 光環 + 魔法陣 + 粒子 + 名稱） */
     summonFx() {
       const d = this.abilityDef, col = (d && d.color) || '#a8d8f8';
@@ -531,10 +696,13 @@
       return ['helper_idle', 2];
     }
     draw(g) {
+      if (this.alpha <= 0.02) return;                         // 換房淡出完畢
       if (this.invuln > 0 && (this.invuln & 2)) return;       // 受傷閃爍
       const [anim, fps] = this.currentAnim();
       const wob = this.beingInhaled ? (Math.floor(this.t * 60 / 4) % 2 ? 2 : -2) : 0;
+      const a = this.alpha < 1 ? this.alpha : undefined;
       const opts = { flip: this.dir < 0, fps, t: this.stateT / 60 };
+      if (a !== undefined) opts.alpha = a;
       if (this.state === 'idle') opts.frame = (this.stateT % 200) > 190 ? 1 : 0;
       const sm = this.scaleMul || 1;                                  // R6-P2-05：giant 夥伴放大 1.5 倍
       if (sm !== 1) { opts.scaleX = sm; opts.scaleY = sm; }
@@ -543,16 +711,30 @@
       const d = this.abilityDef, hat = (d && d.hat) || ('hat_' + this.ability);
       if (this.ability && KB.has(hat)) {
         const hs = CFG.hatScale * sm;
-        g.spr(hat, this.cx + wob, this.y + 1 - Math.round((sm - 1) * this.h), { flip: this.dir < 0, t: this.t, scaleX: hs, scaleY: hs });
+        const ho = { flip: this.dir < 0, t: this.t, scaleX: hs, scaleY: hs };
+        if (a !== undefined) ho.alpha = a;
+        g.spr(hat, this.cx + wob, this.y + 1 - Math.round((sm - 1) * this.h), ho);
       }
       this.drawHpBar(g, wob);
+      this.drawModeIcon(g, wob);
       if (KB.DEBUG && KB.showHitbox) g.rect(this.x, this.y, this.w, this.h, 'rgba(0,200,255,0.3)');
+    }
+    /** 頭上的指令小圖示（1 幀：跟隨綠三角 / 待命藍盾 / 突擊紅劍） */
+    drawModeIcon(g, wob) {
+      if (this.alpha < 0.6) return;
+      const m = MODE_BY_ID[H.mode] || MODES[0];
+      const hat = this.ability && KB.has((this.abilityDef && this.abilityDef.hat) || ('hat_' + this.ability));
+      const x = Math.round(this.cx + (wob || 0)), y = Math.round(this.y - (hat ? 20 : 14) - (this.slot ? 5 : 0));
+      if (KB.has(m.icon)) g.spr(m.icon, x, y, this.alpha < 1 ? { alpha: this.alpha } : {});
+      else { g.rect(x - 3, y - 3, 6, 6, '#101828'); g.rect(x - 2, y - 2, 4, 4, m.color); }
     }
     /** 頭上的 4 格小血條（HUD 版本見 KB.Helper.drawHUD） */
     drawHpBar(g, wob) {
+      if (this.alpha < 0.6) return;                          // 淡出 / 淡入中不畫小血條
       const n = this.maxHp, bw = 3, gap = 1, tw = n * bw + (n - 1) * gap;
       const hat = this.ability && KB.has((this.abilityDef && this.abilityDef.hat) || ('hat_' + this.ability));
-      const x0 = Math.round(this.cx + (wob || 0) - tw / 2), y0 = Math.round(this.y - (hat ? 13 : 7));
+      // 第 2 個夥伴的血條再往上 5px：兩人站在一起時兩條 4~7 格的血條才不會連成一條
+      const x0 = Math.round(this.cx + (wob || 0) - tw / 2), y0 = Math.round(this.y - (hat ? 13 : 7) - (this.slot ? 5 : 0));
       g.rect(x0 - 1, y0 - 1, tw + 2, 4, 'rgba(16,20,32,0.75)');
       for (let i = 0; i < n; i++) {
         g.rect(x0 + i * (bw + gap), y0, bw, 2, i < this.hp ? (this.hp <= 1 ? '#ff7070' : '#70e070') : '#404858');
@@ -604,25 +786,62 @@
   //  KB.Helper：對外 API
   // =========================================================================
   const H = KB.Helper = {
-    CFG, Entity: Helper, ReturnStar,
-    current: null,
-    exists() { return !!(H.current && !H.current.dead); },
-    get() { return H.exists() ? H.current : null; },
+    CFG, Entity: Helper, ReturnStar, MODES, MAX: CFG.maxHelpers,
+    list: [],                    // 夥伴（最舊的在前）；current === list[0]（舊介面相容）
+    mode: 'follow',              // 指令模式：follow / stay / assault
+    unionCD: 0,                  // 合體技冷卻（幀）
+    exists() { return H.all().length > 0; },
+    /** 目前活著的夥伴（順序＝生成順序，最舊在前） */
+    all() {
+      if (H.list.some(h => !h || h.dead)) H.list = H.list.filter(h => h && !h.dead);
+      return H.list;
+    },
+    count() { return H.all().length; },
+    /** get() 取最舊的夥伴；get(i) 取第 i 個 */
+    get(i) { const l = H.all(); return l[i || 0] || null; },
+    full() { return H.count() >= H.MAX; },
+    /** 從名單移除（die / vanish / 被吸入時呼叫） */
+    remove(h) {
+      const i = H.list.indexOf(h);
+      if (i >= 0) H.list.splice(i, 1);
+      H.list.forEach((e, n) => { e.slot = n; });
+    },
+
+    // ---------------------------------------------------------------- 指令
+    modeDef(id) { return MODE_BY_ID[id || H.mode] || MODES[0]; },
+    /** 切換指令（對所有夥伴同時生效）；quiet 為 true 時不跳 toast */
+    setMode(id, quiet) {
+      const m = MODE_BY_ID[id]; if (!m) return false;
+      H.mode = m.id;
+      for (const h of H.all()) {
+        h.anchorX = h.cx; h.anchorY = h.cy;      // 待命：以「切換當下的位置」為崗位
+        h.foe = null; h.mv = 0; h.stuckT = 0;
+        V('textPop', h.cx, h.y - 18, m.hud, { color: m.color, size: 8, frames: 30, rise: 8, outline: '#182038' });
+      }
+      const g = KB.game;
+      if (!quiet && g && g.toast) g.toast('夥伴指令：' + m.name);
+      if (!quiet) sfx('menu', 'jump');
+      return true;
+    },
+    cycleMode() {
+      const i = MODES.findIndex(m => m.id === H.mode);
+      return H.setMode(MODES[(i + 1 + MODES.length) % MODES.length].id);
+    },
 
     /**
      * 長按 SELECT 的入口。
-     *   沒有夥伴 + 有能力 → 生成夥伴（卡比失去能力但不掉能力星），回傳 true
-     *   已經有夥伴       → 吸回（夥伴變回能力星飛向卡比），回傳 true
-     *   其他             → false（player.js 這時可以照原本流程丟能力星）
+     *   還沒滿 2 人 + 卡比有能力 → 生成夥伴（卡比失去能力但不掉能力星），回傳 true
+     *   已經 2 人（或卡比沒能力而有夥伴）→ 吸回最舊的那個，回傳 true
+     *   其他                     → false（player.js 這時可以照原本流程丟能力星）
      */
     spawn(p) {
       p = p || KB.player;
       const g = KB.game;
       if (!p || !g || p.state === 'dead') return false;
       H._acted = g.frame;
-      if (H.exists()) return H.recall(p);
       const key = p.ability;
-      if (!key || !KB.ABILITIES[key]) return false;
+      // 已經滿員 → 吸回最舊的；沒能力可交出去也只能吸回
+      if (H.full() || !key || !KB.ABILITIES[key]) return H.exists() ? H.recall(p) : false;
       const def = KB.ABILITIES[key];
       // 卡比失去能力（不掉能力星）：與 player.dropAbility 相同的清理，只是不生成 abilitystar
       try { if (def.onLose) def.onLose(p); } catch (e) { }
@@ -630,18 +849,18 @@
       p.ability = null; p.abilityData = {};
       if (p.state === 'attack' || p.state === 'stone') p.setState(p.onGround ? 'idle' : 'fall');
       if (p.stoneBox) { p.stoneBox.dead = true; p.stoneBox = null; }
-      const h = new Helper(p, key);
-      KB.spawn(h); H.current = h;
+      const h = new Helper(p, key, H.count());
+      KB.spawn(h); H.list.push(h);
       h.summonFx();
       if (def.onGet) h.callDef(() => def.onGet(h));
-      if (g.toast) g.toast('夥伴登場！');
+      if (g.toast) g.toast(H.count() >= 2 ? '夥伴登場！（2 人）' : '夥伴登場！');
       return true;
     },
 
-    /** 吸回：夥伴變回能力星飛向卡比，卡比重新取得該能力 */
-    recall(p) {
+    /** 吸回：夥伴變回能力星飛向卡比，卡比重新取得該能力（預設吸回最舊的那個） */
+    recall(p, which) {
       p = p || KB.player;
-      const h = H.current, g = KB.game;
+      const h = which || H.get(), g = KB.game;
       if (!h || h.dead || !g || !p) return false;
       H._acted = g.frame;
       const key = h.ability, x = h.cx, y = h.cy;
@@ -652,9 +871,14 @@
       sfx('clone_summon', 'ability');
       return true;
     },
+    /** 全部吸回（能力依序飛回卡比；卡比手上有能力時多的會落地成能力星） */
+    recallAll(p) { let n = 0; for (const h of H.all().slice()) if (H.recall(p, h)) n++; return n; },
 
     /** 移除夥伴（不留能力星）：換關 / 卡比死亡 */
-    clear() { if (H.current) { H.current.vanish(false); } H.current = null; },
+    clear() {
+      for (const h of H.list.slice()) if (h) h.vanish(false);
+      H.list = []; H._respawn = null;
+    },
 
     /**
      * 每幀維護：換房後把夥伴帶到新房間、SELECT 長按的相容路徑。
@@ -662,20 +886,91 @@
      */
     tick(game) {
       game = game || KB.game;
-      if (!game) { H.current = null; return; }
+      if (!game) { H.list = []; return; }
       if (H._tickFrame === game.frame && H._tickGame === game) return;
       H._tickFrame = game.frame; H._tickGame = game;
-      const h = H.current;
-      if (h) {
-        if (h.dead || h.game !== game) H.current = null;
-        else if (game.entities.indexOf(h) < 0) {
-          // loadRoom 會把 entities 清空 → 夥伴跟著卡比進新房間
-          const p = game.player;
-          if (p && p.state !== 'dead') { game.entities.push(h); h.warpTo(p, true); }
-          else H.current = null;
-        }
+      if (H.unionCD > 0) H.unionCD--;
+      const p = game.player;
+      // ---- 換房：卡比進門的淡出期間（game 本體不更新實體）→ 夥伴自己走到門口 + 淡出 ----
+      if (game.fadeDir > 0) {
+        for (const h of H.all()) if (game.entities.indexOf(h) >= 0) h.doorStep(p);
+        return;
       }
+      for (const h of H.all().slice()) {
+        if (h.game !== game) { H.remove(h); continue; }
+        if (game.entities.indexOf(h) >= 0) continue;
+        // loadRoom 會把 entities 清空 → 夥伴跟著卡比進新房間（走完門後在這裡現身）
+        if (p && p.state !== 'dead') { game.entities.push(h); h.enterRoom(p, H.list.indexOf(h)); }
+        else H.remove(h);
+      }
+      H.checkRespawn(game);
       H.pollSelect(game);
+    },
+
+    // ------------------------------------------------- 卡比死亡 → 重生點帶著能力回來
+    /** 卡比死亡當下把夥伴的能力記下來（helper.update 呼叫，同一次死亡只記一次） */
+    rememberRespawn(game, p) {
+      if (H._respawn && H._respawn.player === p) return;
+      const keys = H.all().map(h => h.ability).filter(k => k);
+      if (!keys.length) return;
+      H._respawn = { keys, player: p, game };
+    },
+    /** 新的卡比出現（playerDied → loadRoom 會重建 Player）→ 在重生點重新生成夥伴 */
+    checkRespawn(game) {
+      const r = H._respawn;
+      if (!r || r.game !== game) return;
+      const p = game.player;
+      if (!p || p === r.player || p.state === 'dead') return;
+      H._respawn = null;
+      for (const key of r.keys) {
+        if (H.full() || !KB.ABILITIES[key]) break;
+        const h = new Helper(p, key, H.count());
+        KB.spawn(h); H.list.push(h);
+        const def = KB.ABILITIES[key];
+        if (def && def.onGet) h.callDef(() => def.onGet(h));
+        h.enterRoom(p, h.slot);
+      }
+      if (H.count() && game.toast) game.toast('夥伴歸隊！');
+      if (H.count()) sfx('clone_summon', 'ability');
+    },
+
+    // ------------------------------------------------------------------ 合體技
+    /** 兩個夥伴都在、都不在攻擊中、冷卻結束 → 可以放合體技 */
+    canUnion(p) {
+      p = p || KB.player;
+      const l = H.all();
+      if (!p || p.state === 'dead' || H.unionCD > 0 || l.length < H.MAX) return false;
+      return l.every(h => h.state !== 'attack' && h.state !== 'hurt' && !h.unionT && !h.beingInhaled && h.alpha >= 0.9);
+    },
+    /** 合體技：兩夥伴衝到玩家兩側 → 同時放各自能力的必殺 */
+    union(p) {
+      p = p || KB.player;
+      if (!H.canUnion(p)) return false;
+      const g = KB.game;
+      H.unionCD = CFG.unionCD;
+      H._acted = g ? g.frame : 0;
+      const l = H.all();
+      l.forEach((h, i) => {
+        h.unionDir = i === 0 ? -1 : 1;
+        h.unionT = CFG.unionDash;
+        h.setState(h.onGround ? 'idle' : 'fall');
+        h.atkCool = 0;
+      });
+      V('letterbox', 80); V('hitstop', 6); V('shake', 6); V('zoom', 1.12, 12);
+      V('flash', '#ffffff', 8, 0.5);
+      V('ring', p.cx, p.cy, { r0: 4, r1: 52, frames: 20, color: '#ffe040', width: 3 });
+      V('ring', p.cx, p.cy, { r0: 10, r1: 34, frames: 14, color: '#ffffff', width: 2 });
+      V('textPop', p.cx, p.cy - 26, '合體技!', { color: '#ffe040', size: 14, frames: 60, rise: 12, outline: '#182038' });
+      KB.particles(p.cx, p.cy, ['#ffe040', '#ffffff', '#a8d8f8'], 18, { spread: 3, life: 26 });
+      sfx('ultimate', 'clone_summon');
+      // 「合體技!」已經用 textPop 畫在玩家頭上（世界座標），不再發 toast，避免上下兩行同樣的字
+      return true;
+    },
+
+    /** 組合鍵吃掉這次 SELECT：否則 player.js 會在放開時把它當成「短按 → 丟掉能力」 */
+    eatSelect(p) {
+      if (p && p.selectHoldT !== undefined) { p.selectHoldT = 0; p.selectLock = true; }
+      H._sel = 0; H._star = null;
     },
 
     /**
@@ -687,8 +982,18 @@
      */
     pollSelect(game) {
       const p = game.player, inp = KB.input;
-      if (!p || !inp || game.paused || game.clearT >= 0 || p.state === 'dead') { H._sel = 0; H._star = null; return; }
-      if (!inp.down('select')) { H._sel = 0; H._star = null; return; }
+      if (!p || !inp || game.paused || game.clearT >= 0 || p.state === 'dead') {
+        H._sel = 0; H._star = null; H._cmdHeld = false; H._uniHeld = false; return;
+      }
+      // ---- Round 7：↑＋SELECT 切換指令 / ↓＋SELECT 合體技（player.js 不歸本 agent 管 → 自己讀 KB.input）----
+      // 組合鍵按下的當幀把 player.js 的 SELECT 計時歸零並上鎖，否則放開時會被當成「短按 → 丟掉能力」。
+      const sel = inp.down('select');
+      const cmd = sel && inp.down('up'), uni = sel && inp.down('down');
+      if (cmd && !H._cmdHeld) { H.cycleMode(); H.eatSelect(p); }
+      if (uni && !H._uniHeld) { if (H.union(p)) H.eatSelect(p); else if (H.count() >= H.MAX) H.eatSelect(p); }
+      H._cmdHeld = cmd; H._uniHeld = uni;
+      if (cmd || uni) { H._sel = 0; H._star = null; return; }
+      if (!sel) { H._sel = 0; H._star = null; return; }
       H._sel = (H._sel || 0) + 1;
       // player.js（mix）已經接上長按鉤子（p.selectHoldT）：
       //   卡比身上有能力 → 由 player.js 在放開時呼叫 spawn()，這裡完全不介入；
@@ -731,24 +1036,43 @@
      */
     drawHUD(ctx, game) {
       game = game || KB.game;
-      if (!ctx || !game || !H.exists() || H.current.game !== game) return;
-      const h = H.current;
-      const x = 158, y = 206;                       // 魔王血條（x66~156）右側、生命數（x217~251）左側
-      KB.rect(ctx, x - 2, y - 2, 52, 14, '#0e1220');
-      KB.rect(ctx, x - 2, y - 2, 52, 1, '#384058');
-      if (KB.has('ui_helper_face')) KB.drawSpr(ctx, 'ui_helper_face', x + 4, y + 5, {});
-      else KB.rect(ctx, x, y + 1, 8, 8, '#a8d8f8');
-      // 能力小圖示
-      const icon = 'ui_ability_' + h.ability + '_mini';
-      if (KB.has(icon)) KB.drawSpr(ctx, icon, x + 13, y + 5, {});
-      const n = h.maxHp, bw = 6, gap = 2, bx = x + 19;
-      for (let i = 0; i < n; i++) {
-        const px = bx + i * (bw + gap);
-        KB.rect(ctx, px, y + 2, bw, 6, '#202838');
-        KB.rect(ctx, px + 1, y + 3, bw - 2, 4, i < h.hp ? (h.hp <= 1 && ((game.frame >> 3) & 1) ? '#ffffff' : '#70e070') : '#485068');
+      if (!ctx || !game) return;
+      const list = H.all().filter(h => h.game === game);
+      if (!list.length) return;
+      // 魔王血條（x66~156）右側、生命數（x217~251）左側；分數列（y197~205）下方 → 每人 8px 一列
+      const x = 158, y0 = 205, rowH = 8, mode = H.modeDef();
+      KB.rect(ctx, x - 2, y0, 52, 2 + rowH * list.length + 1, '#0e1220');
+      KB.rect(ctx, x - 2, y0, 52, 1, '#384058');
+      list.forEach((h, i) => {
+        const y = y0 + 1 + i * rowH;
+        if (KB.has('ui_helper_face')) KB.drawSpr(ctx, 'ui_helper_face', x + 4, y + 4, {});
+        else KB.rect(ctx, x, y, 8, 8, '#a8d8f8');
+        // 能力小圖示
+        const icon = 'ui_ability_' + h.ability + '_mini';
+        if (KB.has(icon)) KB.drawSpr(ctx, icon, x + 13, y + 4, {});
+        // HP（依等級 4~7 格，寬度固定在面板內）
+        const n = Math.max(1, h.maxHp), bw = n >= 6 ? 3 : 4, gap = 1, bx = x + 19;
+        for (let k = 0; k < n; k++) {
+          const px = bx + k * (bw + gap);
+          KB.rect(ctx, px, y + 1, bw, 6, '#202838');
+          KB.rect(ctx, px, y + 2, bw, 4, k < h.hp ? (h.hp <= 1 && ((game.frame >> 3) & 1) ? '#ffffff' : '#70e070') : '#485068');
+        }
+      });
+      // 指令模式（兩人共用）：面板右緣一條色帶（圖示畫在夥伴頭上，HUD 這裡只留顏色，不跟 7 格 HP 搶空間）
+      KB.rect(ctx, x + 47, y0 + 2, 2, rowH * list.length - 2, mode.color);
+      // 合體技就緒（2 人 + CD 結束）：面板外框閃金色
+      if (list.length >= H.MAX && H.unionCD <= 0 && ((game.frame >> 3) & 1)) {
+        const hgt = 2 + rowH * list.length + 1;
+        KB.rect(ctx, x - 2, y0, 52, 1, '#ffe040'); KB.rect(ctx, x - 2, y0 + hgt - 1, 52, 1, '#ffe040');
       }
     },
   };
+
+  // 舊介面相容：H.current === 最舊的夥伴（Round 6 的程式碼 / 測試都讀這個欄位）
+  Object.defineProperty(H, 'current', {
+    get() { return H.get(); },
+    set(v) { if (!v) H.list = []; else if (H.list.indexOf(v) < 0) H.list = [v]; },
+  });
 
   // =========================================================================
   //  自動接線（在 game.js 正式加上 tick / drawHUD 呼叫之前的過渡作法）

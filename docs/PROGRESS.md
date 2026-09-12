@@ -2500,10 +2500,160 @@ R5-7a 的觀察項（gravity ↑+X 文案不一致、圖鑑剪影露出帽子輪
 （agent 在此追加）
 
 ## awaken
-（agent 在此追加）
+> 檔案：`src/awaken.js`（新）、`src/art/kirby_awaken.js`（新）、`src/progression.js`（Lv4）、`src/player.js`（只加覺醒觸發鉤子 + 覺醒外觀）、`tools/test_awaken.py`（新）。
+> 截圖：`shots/agent_awaken/`。未 commit、未跑 build（Round 7 其他 agent 仍在改）。
+
+### KB.AWAKEN API 一覽（其他 agent 照這個介面呼叫；`src/awaken.js`，載入順序 progression → **awaken** → ui）
+| 分類 | 呼叫 | 說明 |
+|---|---|---|
+| 量表 | `gauge` / `MAX`(100) / `pct()` / `ready()` | 0~100；`ready()` ＝ 已滿 |
+| | `add(n)` / `hit()` / `onHurt()` | 命中 +6（連擊每 +1 再 +2，連擊上限 10 → 最多 +26）／被打 −20 |
+| 等級 | `lv4(key?)` / `LV`(4) | 該能力是否已 Lv4（xp 15） |
+| 狀態 | `active()` / `activeT` / `DUR`(300) | 覺醒中？剩餘幀 |
+| | `start(p)` / `end(p)` / `cancel()` | 發動 / 結束（量表歸 0）/ 強制中止 |
+| 觸發 | `tryTrigger(p)` | player.js 每幀呼叫；**只有「跳+攻 3 幀內」且量表滿**才回 true（回 true 時 player 直接 return） |
+| 招式 | `moves[key] = {name, exec(p)}` / `moveFor(key)` / `baseKey(key)` / `exec(p, key)` | 20 招；混合能力自動退回主成分 A |
+| 繪製 | `drawGauge(ctx, game)` | progression.drawHUD 內呼叫；能力圖示下方 (4,218) 26×5 |
+| 雜項 | `tick(game)`（PROG.update 包裝自動呼叫）/ `reset()` / `after(frames, fn)` / `bigbox` / `storm` / `camRect` | |
+
+### 覺醒招表（20 招，名稱原創）
+| 能力 | 招名 | 段數 × 傷害 | 特色 |
+|---|---|---|---|
+| fire | 焚天龍炎 | 6×9 | 5 道地面火柱 + 橫貫畫面的龍焰 |
+| sword | 百斬星光劍 | 8×7 | 每段 3 道亂向斬 + 交叉劍氣，收尾全畫面白閃 |
+| beam | 銀河光柱 | 5×11 | 天而降的巨大光柱 + 6 向放射光束 + 魔法陣 |
+| cutter | 千刃迴旋 | 8×7 | 每段 6 把真迴旋刃（proj_cutter）旋出 |
+| spark | 雷帝降臨 | 6×9 | 每段 5 道落雷 + 電場 + 全畫面染藍 |
+| stone | 巨岩天墜 | 5×12 | 4 根落石柱 + 雙向地面衝擊波（含 hitstop 3） |
+| ice | 絕對零度 | 6×8（freeze） | 全畫面結冰 + 冰結判定（敵人凍結） |
+| hammer | 隕鎚天崩 | 4×15 | 巨鎚砸地 + 雙向 256px 衝擊波 + SMASH!/CRASH!! |
+| gunner | 死亡輪舞 | 6×6 | 子彈時間（slowMo 90）+ 每段 12 發環形彈幕 |
+| ninja | 千影分身 | 8×7 | 分身於畫面各處現身斬擊 + 手裡劍 |
+| blade | 無想一閃 | 3×8 + 一擊 26 | 收刀 20 幀後全畫面一閃（hitstop ×2） |
+| bow | 流星群 | 7×7 | 每段 4 支流星箭從天而降（proj_arrow_meteor） |
+| mage | 元素創世 | 6×10 | 六色魔法陣輪轉（火/冰/雷/風/闇/光） |
+| time | 永恆時停 | 10×5 | **時停 480 幀（8 秒）+ 期間所有累積傷害 ×3** |
+| gravity | 黑洞崩壞 | 8×7 + 終結 16 | 把全場敵人 / 敵彈吸向黑洞，最後一段崩塌 |
+| clone | 萬象分身 | 8×7 | 8 個分身左右交錯衝過畫面 |
+| giant | 天地崩裂 | 5×13 | 300px 雙向衝擊波 + 破壞方塊 + hitstop 4 |
+| dragon | 龍神咆哮 | 6×10 | 左右貫穿龍焰 + 天降火球 |
+| mech | 最終兵器 | 7×8 | 每段 4 發飛彈 + 隔段主砲光束 + 電弧 |
+| ghost | 靈魂收割 | 6×9 | 亂向靈魂斬，整招最多回復 2 格體力 |
+
+### 進度
+- [09-12 R7-AWK-1] 完成：**progression.js 第 4 級**。`MAXLV 3→4`、`XP_NEED [0,3,8,15]`、`DMG_MUL […,1.75]`、`PART_MUL […,2]`；
+  `drawLvStars` 改畫 1~4 顆，**第 4 顆是加了四方光芒 + 白色星心的金星（每 8 幀閃一次）**，覺醒中整排全金閃爍；
+  Lv4 的 LEVEL UP 橫幅改成「AWAKEN!」。**成就「登峰造極」改成看死 Lv3**（原本寫 `>= MAXLV`，不改會變成要 Lv4 才解鎖）。
+  驗證：`tools/test_awaken.py --only lv4` 13 項、`tools/test_progression.py` 68/68、`tools/test_charge.py` 19/19（holdMul 仍 Lv3↑ ×0.8）。
+- [09-12 R7-AWK-2] 完成：**覺醒量表 KB.AWAKEN.gauge（0~100）**。累積鉤子掛在 `KB.PROG.scaleDmg` 的包裝上
+  ——game.js 第一階段碰撞對每個成立的命中恰好呼叫一次 scaleDmg，是**不動 game.js 就能攔到「命中敵人」的唯一點**；
+  命中 +6、連擊每 +1 再 +2（連擊上限 10 → 單擊最多 +26）、受傷 −20（走 `KB.PROG.on('hurt')`）、**只有持有的能力是 Lv4 才累積**、覺醒中不再累積。
+  滿 100 → HUD 量表金／白閃爍 + 兩側小星 + `textPop`「覺醒 READY」+ `sfx('max')`。
+  HUD 量表畫在**能力圖示正下方 (4,218) 26×5**（Lv 星在圖示上方 y194~197、能力中文名從 x30 起，三者零重疊）；
+  覺醒中量表改顯示「剩餘覺醒時間」並整條金色脈動。驗證：`shots/agent_awaken/hud_gauge_0|55|full.png`、`hud_lv3_compare.png`、`crop_hud_gauge_*.png`。
+- [09-12 R7-AWK-3] 完成：**跳+攻觸發**。`KB.AWAKEN.tryTrigger(p)` 記住最後一次按下 jump / attack 的幀號，
+  「這一幀至少有一邊剛按下 且 兩邊間隔 ≤ 2 幀（＝3 幀內）」時才成立；**未 Lv4 / 量表沒滿一律回 false，跳與攻擊完全照舊**。
+  player.js 只加兩個鉤子（一般輸入流程與 `updateAttack` 各一行）＋ `startAwaken()` / `get awakening`；
+  發動時會清掉 `jumpBufT`（否則下一幀會補跳一次）並收掉正在出的招。
+  演出：`hitstop 8` + `letterbox 150` + `zoom 1.22` + 金色 `VFX.transform`（橫幅寫覺醒招名）+ `worldTint` + `aura` + `circle` + `sfx('transform'/'ultimate')`。
+  覺醒狀態 300 幀：無敵（`invincibleT`）、移動速度 ×1.2（`KB.physics.step` 補走 0.2 倍水平位移，**含地形碰撞**，不動 KB.PHYS）、
+  傷害 ×1.5（同樣包在 scaleDmg）、Lv 星全金、結束時量表歸 0 + 「覺醒終了」。
+  驗證：`tools/test_awaken.py --only trigger,state` 22 項（含「量表沒滿 → 仍是普通跳躍」「未 Lv4 → 普通跳 + 普通攻擊」「空中也能發動」）；
+  `shots/agent_awaken/awaken_seq_00..09.png` + `awaken_seq_end.png` 連拍。
+- [09-12 R7-AWK-4] 完成：**20 招覺醒招**（`KB.AWAKEN.moves`，表見上）。共用零件：`intro()`（letterbox + zoom + worldTint + flash）、
+  `storm()`（n 段全畫面判定 288×208 + 每段專屬特效 + shake/hitstop）、`bigbox()`、`camRect()`、`after()` 排程（hitstop 期間一起定格）。
+  全部**不破壞地形**（只有 hammer / giant 開 `breakBlocks`），投射物一律用既有精靈（proj_cutter / bullet / shuriken / arrow_meteor / drakofire / missile），
+  所以 MISSING SPRITES 仍為空。混合能力（含 mix2 新增的）由 `baseKey()` 退回主成分 A 的招。
+  驗證：`tools/test_awaken.py --only moves` 25 項（20 招各自打死 waddledee）、`shots/agent_awaken/move_<key>.png` 共 20 張。
+- [09-12 R7-AWK-5] 完成：**覺醒外觀**（`src/art/kirby_awaken.js`）。`fx_awaken_aura` 32×32 ×3 幀（火焰狀波紋金環 + 內側火星 + 四方光芒，anchor center）、
+  `hat_awaken_crown` 20×9 ×2 幀（三尖角冠冕 + 寶石閃爍，anchor bottom）。player.draw 覺醒中：光環畫在本體之前、冠冕畫在帽子上方 5px；
+  **金色閃爍與無敵糖刻意不同**——無敵糖是「每 2 幀整隻變單色剪影」，覺醒改成「原本的卡比 + 金色剪影半透明釉光（alpha 0.3~0.62 脈動）」，
+  所以覺醒 5 秒內表情一直看得見。驗證：`shots/agent_awaken/crop_kirby_awaken.png`（冠冕 + 光環 + 釉光）。
+- [09-12 R7-AWK-6] 收工驗證：`tools/test_awaken.py` **75/75 PASS**（Lv4 13 / 量表 12 / 觸發 10 / 狀態 12 / 20 招 25 / HUD 5，另含 MISSING SPRITES 與 console 監看）；
+  回歸 `engine_test 118/118`、`enemy_test 393/393`、`test_progression 68/68`、`test_charge 19/19`、`test_weapons 105/105`、`test_forms 153/153`、`test_helper 131/131`（helper2 擴充後的數字）、
+  `node --check` 全檔通過、`playthrough --level w1 --ability sword --godmode` **cleared 5835 幀 deaths=0 missing[]**（與 fix6b 完全相同 → 沒有行為漂移）。
+  `test_mix` 243/245，2 個 FAIL 是 **mix2 agent 正在加第二批混合**（`ABILITY_KEYS 44`、`MIX.table 24 組`）造成的既有斷言過時，與覺醒無關。
+
+### 未完成 / 已知問題（awaken）
+1. **沒有跑 `tools/build.py`、沒有 commit**（Round 7 其他 agent 仍在改 helper.js / ui.js / menu.js / abilities_mix2.js）。
+2. 量表的「命中」鉤子在 `KB.PROG.scaleDmg` 上，所以**夥伴（KB.Helper）打出的傷害也會替玩家充能**；
+   若要排除，需要在 hitbox 上帶 `fromHelper` 旗標傳進 scaleDmg（跨 game.js，本輪沒動）。
+3. 覺醒中的移動加成是「physics 之後再補走 0.2 倍水平位移」，**冰面滑行（KB.ELEM）會被多套一次摩擦插值**，
+   實測差異極小（1.2 倍位移仍成立），但若之後要嚴謹一點應該做在 player 的速度上限裡（那是 player-feel 的檔案）。
+4. 圖鑑（menu.js）的 Lv 條顏色仍是 `lv >= 3 ? 黃`，Lv4 會沿用 Lv3 的黃色條（星星已經正確變 4 顆）——menu.js 是 extra agent 的檔案，已在此註記。
+5. 覺醒招的總傷害約 42~80（未含 ×1.5），**對魔王偏強**；若要平衡建議調 `A.moves` 內各招的 `n × dmg`，判定與演出不用動。
+6. `KB.PROG.emit('awaken', {key})` 事件已經發出，但目前沒有對應成就（成就仍是 20 條）。
+
 
 ## helper2
-（agent 在此追加）
+> 檔案：`src/helper.js`、`src/art/helper.js`、`tools/test_helper.py`（**player.js / game.js / ui.js 一行都沒改**；
+> 輸入鉤子改成 `KB.Helper.tick` 內自己讀 `KB.input`）。截圖 `shots/agent_helper2/`。未 commit。
+
+### API 變更（Round 6 的介面全部相容）
+| 呼叫 | 說明 |
+|---|---|
+| `KB.Helper.list` / `all()` / `count()` / `full()` | 夥伴陣列（最舊在前，最多 `KB.Helper.MAX = 2`）／活著的夥伴／數量／是否滿員 |
+| `KB.Helper.get(i)` | 第 i 個夥伴（`get()`＝最舊的）；`KB.Helper.current` 改成 getter＝`list[0]`（舊程式碼照常可用） |
+| `KB.Helper.spawn(p)` | **未滿 2 人 + 卡比有能力 → 生成新夥伴**；滿員（或卡比沒能力而有夥伴）→ 吸回**最舊**的那個；都不成立才 false |
+| `KB.Helper.recall(p, which?)` | 預設吸回最舊的；`recallAll(p)` 全部吸回 |
+| `KB.Helper.MODES` / `mode` / `modeDef(id)` | 指令模式 `follow` 跟隨（預設）／`stay` 待命／`assault` 突擊 |
+| `KB.Helper.setMode(id, quiet?)` / `cycleMode()` | 切換指令（對兩個夥伴同時生效；會把當下位置設成待命崗位） |
+| `KB.Helper.canUnion(p)` / `union(p)` / `unionCD` | 合體技（兩人都在、都不在攻擊中、CD 0 才成立）／剩餘冷卻幀 |
+| `KB.Helper.rememberRespawn/checkRespawn` | 卡比死亡 → 記住能力，重生點自動歸隊（tick 內自動呼叫） |
+| `KB.Helper.CFG` 新增 | `maxHelpers 2 / hpByLv[4,5,6,7] / cdByLv[90,90,70,55] / stayLeash 56 / assaultR 200 / unionCD 600 / unionDash 18 / unionSide 22 / unionCast 10 / fade 10` |
+- 夥伴實體新增欄位：`slot`（0/1）、`lv`、`atkCDFrames`、`alpha`/`alphaTo`、`anchorX/anchorY`（崗位）、`unionT/unionDir/unionCast`。
+- 操作：**長按 SELECT** 生成／滿員吸回（player.js 既有鉤子）；**↑＋SELECT** 循環切換指令；**↓＋SELECT** 合體技。
+  組合鍵按下當幀會把 `p.selectHoldT` 歸零並 `p.selectLock = true`，所以不會被 player.js 當成「短按 → 丟掉能力」。
+
+### 進度
+- [09-12 R7-HELP2-1] 完成：**雙夥伴**（`KB.Helper.list`，最多 2）。`spawn()` 語意改成「未滿員就生新的、滿員吸回最舊的」，
+  `current` 變成指向 `list[0]` 的 getter（Round 6 的呼叫端與測試完全不用改）；第 2 個夥伴生成位置 `p.cx - dir*(16+slot*14)`，
+  跟隨距離 `followNear/Far + slot*12`（兩人不會疊在同一格）。**HUD 改成兩列**（x156~208、y205~222，每列 8px：
+  小臉 + 能力 mini 圖示 + 4~7 格 HP；HP ≥ 6 時格寬 3px 才塞得下），右緣一條指令顏色帶，兩人到齊且合體技就緒時面板上下框閃金色。
+  驗證：`tools/test_helper.py --only duo` 15/15；截圖 `shots/agent_helper2/duo_hud.png`（兩夥伴 + 兩列 HUD）。
+- [09-12 R7-HELP2-2] 完成：**指令系統**（↑＋SELECT 循環，toast「夥伴指令：跟隨／待命／突擊」+ 每人頭上 textPop 英文）。
+  跟隨＝原本的 AI；待命＝記住崗位、不跟卡比走、不瞬移，只打 96px 內且離崗位 96px 內的敵人（離崗 56px 就不再追，打完走回去）；
+  突擊＝主動追擊 200px 內的敵人、不受 leash 150px 限制、追擊時跑速 2.4。頭上 1 幀小圖示：
+  `ui_helper_mode_follow`（綠三角）／`_stay`（藍盾）／`_assault`（紅劍），第 2 個夥伴的圖示 / 血條再往上 5px 不會連成一條。
+  驗證：`--only cmd` 12/12（含「組合鍵不會誤丟能力」「待命不跟隨但仍殺 96px 內敵人」「突擊追 150px 外的敵人並殺掉」）；
+  截圖 `mode_follow.png` / `mode_stay.png` / `mode_assault.png`。
+- [09-12 R7-HELP2-3] 完成：**夥伴等級**（繼承 `KB.PROG.level(key)`）：Lv1 HP4/CD90、Lv2 HP5/CD90、Lv3 HP6/CD70、Lv4 HP7/CD55
+  （`CFG.hpByLv` / `cdByLv`，PROG 缺席時退回 Lv1）。**傷害加成本來沒吃到**：`game.js` 的 `KB.PROG.scaleDmg(a.dmg, a.abilityKey)`
+  讀的 `abilityKey` 從來沒有人設，夥伴的判定框會 fallback 去看「卡比手上的能力」（交出去之後通常是 null ⇒ 永遠 Lv1）。
+  修法：`callDef` 的 `KB.spawn` 包裝順手補上 `e.abilityKey = 夥伴自己的能力`（石化判定框也補），**game.js 一行都沒改**就吃到 dmgMul。
+  驗證：`--only level` 8/8（Lv1~Lv4 的 HP / 間隔、Lv3 在 180 幀內出招 ≥ 2 次、判定框 abilityKey 全是夥伴能力、dmgMul 1.5 → dmg 4 變 6）；
+  截圖 `lv3_helper.png`（`--shots` 時輸出到 `shots/agent_helper/`）。
+- [09-12 R7-HELP2-4] 完成：**合體技**（↓＋SELECT）：兩夥伴衝到玩家左右 22px（最多 18 幀）→ 各放一道 44×33 的合體衝擊（dmg 6、
+  owner 'player' + fromHelper）→ 接著用 `unionCast` 10 幀把 `abilityData.charge/charged/ready` 灌滿並加速 `stateT`、最後「放開」
+  觸發各自能力的蓄力必殺（重用 def，不改 abilities.js）。演出：letterbox 80 + hitstop 6 + zoom + flash + 雙光環 +
+  `textPop('合體技!', 14px)`（**不再發 toast**，否則畫面上下會出現兩行一樣的字）。CD 600 幀，就緒時 HUD 面板閃金框。
+  驗證：`--only union` 12/12（含「只有 1 人時 canUnion false」「CD 期間再按 false」「兩人分別站在卡比左右」「敵人被打死」）；
+  連拍 `union_0_before.png → union_1_call.png → union_2~6.png`（黑邊 + 合體技! + 兩側同時放招，逐格 Read 確認）。
+- [09-12 R7-HELP2-5] 完成：**能力回流 / 死亡重生 / 換房走門**。
+  ① 吸入・吸回照舊把能力交回卡比（`mouth` / `ReturnStar`），滿員時再長按 SELECT 會吸回最舊的那個；
+  ② 卡比死亡：`rememberRespawn` 先記下兩人的能力再消失，`checkRespawn` 偵測到 `game.player` 換成新物件就在重生點淡入歸隊（toast「夥伴歸隊！」）；
+  ③ 換房不再瞬移：`useDoor` 的淡出期間（`game.fadeDir > 0`，本體不更新實體）由 `tick` 呼叫 `doorStep()` 讓夥伴走向門口並淡出（`alpha` → 0 + poof），
+  新房間 `loadRoom` 後改用 `enterRoom()` 在卡比身後淡入（`alpha` 0 → 1，淡出／淡入各 10 幀；淡出中不畫血條與指令圖示）。
+  驗證：`--only respawn` 8/8；截圖 `door_fade.png` / `door_arrive.png` / `respawn.png`（`--shots`）。
+- [09-12 R7-HELP2-6] 收工驗證：`tools/test_helper.py` **131/131 PASS**（Round 6 的 76 項全部沿用未改 + 新增 55 項，11 個階段皆 0 pageerror、
+  MISSING SPRITES 空）；回歸 `tools/engine_test.py` **118/118**、`tools/test_progression.py` **68/68**；`node --check src/helper.js src/art/helper.js` 通過。
+
+### 已知問題 / 未完成（helper2）
+1. 合體技要求「兩人都不在攻擊中」，所以敵人就在旁邊、夥伴正在揮招時按 ↓＋SELECT 會失敗（只是沒反應，不扣 CD）。
+2. 沒有蓄力機制的能力（純單發招）在合體技時就只是「衝到兩側各放一次普通招 + 合體衝擊」，看起來比蓄力系弱。
+3. 待命模式的崗位是「切換當下的位置」，換房 / 重生後會改成新房間的落點（`enterRoom` 會重設 anchor）。
+4. 變身系（giant / dragon / mech / ghost）仍走 Round 6 的簡化招，合體技對它們＝簡化招 + 合體衝擊。
+5. 兩個夥伴的頭上血條在極度靠近時仍會左右相疊（已用「第 2 人往上 5px」錯開，沒有做水平避讓）。
+6. 沒有跑 `tools/build.py`（Round 7 其他 agent 還在改 src，dist/ 由總控收尾時重建）。
+
+### 跨檔需求（給總控 / 其他 agent）
+1. **player.js（awaken agent）**：本輪沒有動 player.js。`KB.Helper.tick` 會在偵測到 ↑/↓＋SELECT 的當幀把
+   `p.selectHoldT = 0`、`p.selectLock = true`（避免組合鍵被當成「短按 SELECT → 丟能力」）。
+   若之後重寫 SELECT 那段邏輯，請保留這兩個欄位名稱，或改成呼叫 `KB.Helper.eatSelect(p)`。
+2. **ui.js**：HUD 夥伴面板從 1 列（14px 高）變成最多 2 列（`x156~208`、`y205~222`）。
+   分數列（右對齊 251、y197~205）與魔王血條（x66~156、y208~218）都沒有被壓到，但若之後 HUD 重排請保留這塊空間。
+3. **progression / awaken**：`KB.PROG.MAXLV` 已經是 4，夥伴的 HP / 攻擊間隔表 `CFG.hpByLv` / `cdByLv` 有 4 級；
+   若 Lv5 上線請一併補這兩張表（超出時會自動取最後一級）。
 
 ## extra
 （agent 在此追加）

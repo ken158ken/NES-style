@@ -13,7 +13,15 @@
   6. 長按      沒有夥伴時長按 SELECT 45 幀 → 生成夥伴（player.js 的鉤子尚未接上時走 KB.Helper.pollSelect 相容路徑）
   7. 全程沒有 pageerror / console.error / 缺精靈
 
-用法：python tools/test_helper.py [--only spawn,follow,attack,damage,recall,select] [--shots] [-v]
+Round 7（helper2）追加：
+  8. 雙夥伴    最多 2 個（KB.Helper.list）；第 2 次長按生第 2 個、滿員再按吸回最舊的；HUD 兩列
+  9. 指令      ↑＋SELECT 循環 跟隨 / 待命 / 突擊（不會誤觸「短按丟能力」）；待命不跟隨但打 96px 內敵人；突擊追 200px
+ 10. 等級      夥伴 HP / 攻擊間隔繼承 KB.PROG.level（Lv3 → HP 6 / 間隔 70）；判定框帶 abilityKey → 吃 dmgMul
+ 11. 合體技    ↓＋SELECT：兩夥伴衝到玩家兩側同時放必殺、CD 600 幀
+ 12. 重生      卡比死亡 → 夥伴消失，重生點帶著同樣的能力回來
+
+用法：python tools/test_helper.py
+       [--only spawn,follow,attack,damage,recall,select,duo,cmd,level,union,respawn] [--shots] [-v]
 """
 import sys, pathlib, argparse, base64
 
@@ -30,6 +38,7 @@ except Exception:
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 INDEX = (ROOT / 'index.html').as_uri()
 SHOTS = ROOT / 'shots' / 'agent_helper'
+SHOTS7 = ROOT / 'shots' / 'agent_helper2'   # Round 7（helper2）的階段
 ATTACK_KEYS = ['sword', 'fire', 'gunner', 'mage']
 # R6-P2-05：變身系能力（def.transform）交給夥伴 → 簡化版招式
 TRANSFORM_KEYS = ['giant', 'dragon', 'mech', 'ghost']
@@ -115,6 +124,49 @@ def dummy(h, x, y=9, t='waddledee'):
     e = h.spawn(t, x, y, d=-1)
     h.ev("()=>{const e=__te; if(e){e.speed=0; e.vx=0; e.turnAtEdge=false; e.turnAtWall=false; e.active=true;}}")
     return e
+
+
+def shot7(h, name):
+    """Round 7 的階段截圖存到 shots/agent_helper2/"""
+    if not h.shots:
+        return
+    data = h.ev("()=>__t.shot()")
+    if not data:
+        return
+    SHOTS7.mkdir(parents=True, exist_ok=True)
+    (SHOTS7 / ('test_' + name + '.png')).write_bytes(base64.b64decode(data.split(',', 1)[1]))
+
+
+def hlist(h):
+    """所有夥伴（Round 7：最多 2 個）"""
+    return h.ev("""()=>KB.Helper.all().map(e=>({ability:e.ability, hp:e.hp, maxHp:e.maxHp, lv:e.lv|0,
+      cd:e.atkCDFrames|0, state:e.state, cx:+e.cx.toFixed(1), cy:+e.cy.toFixed(1),
+      inList: KB.game.entities.indexOf(e)>=0, anchorX:+e.anchorX.toFixed(1),
+      unionT:e.unionT|0, alpha:+e.alpha.toFixed(2), slot:e.slot|0}))""")
+
+
+def mode(h):
+    return h.ev("()=>KB.Helper.mode")
+
+
+def spawn_two(h, k1, k2):
+    """走正規流程生出兩個夥伴（卡比先拿 k1 交出去，再拿 k2 交出去）"""
+    h.ev("(k)=>{const p=KB.player; KB.Helper.clear(); p.ability=k; p.abilityData={};}", k1)
+    h.ev("()=>KB.Helper.spawn(KB.player)")
+    step(h, 2)
+    h.ev("(k)=>{const p=KB.player; p.ability=k; p.abilityData={};}", k2)
+    h.ev("()=>KB.Helper.spawn(KB.player)")
+    step(h, 2)
+    return hlist(h)
+
+
+def set_lv(h, key, lv):
+    """直接寫存檔的能力等級（KB.PROG.level 會取 max(xp 換算, abilityLv)）"""
+    h.ev("([k,lv])=>{const s=KB.PROG.save(); s.abilityLv[k]=lv; }", [key, lv])
+
+
+def clear_lv(h, key):
+    h.ev("(k)=>{const s=KB.PROG.save(); delete s.abilityLv[k]; delete s.abilityXp[k];}", key)
 
 
 def shot(h, name):
@@ -426,9 +478,301 @@ def phase_select(h):
     check(n + 'helper disappears when kirby dies', not hs(h)['exists'], hs(h))
 
 
+# ---------------------------------------------------------------------------
+# 7. 雙夥伴（Round 7 helper2）
+# ---------------------------------------------------------------------------
+def phase_duo(h):
+    n = 'duo: '
+    h.goto(3, 9, ability='sword')
+    l = spawn_two(h, 'sword', 'fire')
+    check(n + 'two helpers can exist at once', len(l) == 2, l)
+    check(n + 'each helper keeps its own ability', [e['ability'] for e in l] == ['sword', 'fire'], l)
+    check(n + 'both helpers are in game.entities', all(e['inList'] for e in l), l)
+    check(n + 'KB.Helper.count() === 2 and full()', h.ev("()=>[KB.Helper.count(), KB.Helper.full()]") == [2, True], True)
+    check(n + 'KB.Helper.current is still the oldest helper (back-compat)',
+          h.ev("()=>KB.Helper.current === KB.Helper.list[0] && KB.Helper.current.ability==='sword'"), True)
+    check(n + 'kirby gave both abilities away', ps(h)['ability'] is None and stars(h) == [], dict(p=ps(h), st=stars(h)))
+    step(h, 40)
+    l = hlist(h)
+    check(n + 'both helpers follow kirby (both within 90px)',
+          len(l) == 2 and all(abs(e['cx'] - ps(h)['cx']) < 90 for e in l), dict(l=l, p=ps(h)))
+    shot7(h, 'duo_follow')
+    # --- 滿員時再呼叫 spawn → 吸回最舊的那個 ---
+    h.ev("(k)=>{const p=KB.player; p.ability=k; p.abilityData={};}", 'ice')
+    r = h.ev("()=>KB.Helper.spawn(KB.player)")
+    step(h, 2)
+    l = hlist(h)
+    check(n + 'spawn() when full recalls the OLDEST helper', r is True and len(l) == 1 and l[0]['ability'] == 'fire',
+          dict(r=r, l=l))
+    check(n + 'the recalled ability flies back as a return star', ret_stars(h) == ['sword'], ret_stars(h))
+    check(n + 'kirby still holds the ability he was carrying', ps(h)['ability'] == 'ice', ps(h))
+    # --- 長按 SELECT：已有 1 夥伴 + 有能力 → 生第 2 個 ---
+    h.goto(3, 9, ability='sword')
+    h.ev("()=>KB.Helper.clear()")
+    press(h, 'select', 50); release(h); step(h, 6)
+    check(n + 'first SELECT hold spawns helper #1', h.ev("()=>KB.Helper.count()") == 1, hlist(h))
+    h.ev("(k)=>{const p=KB.player; p.ability=k; p.abilityData={};}", 'hammer')
+    press(h, 'select', 50); release(h); step(h, 6)
+    l = hlist(h)
+    check(n + 'second SELECT hold spawns helper #2 (while holding an ability)',
+          len(l) == 2 and [e['ability'] for e in l] == ['sword', 'hammer'], l)
+    # --- HUD：兩列小臉 + 血條（畫得出來且不丟例外）---
+    ok = h.ev("()=>{const c=document.createElement('canvas'); c.width=256; c.height=224;"
+              "const x=c.getContext('2d'); KB.Helper.drawHUD(x, KB.game); return true;}")
+    check(n + 'drawHUD renders two rows without errors', ok is True, ok)
+    shot7(h, 'duo_hud')
+    # --- 吸回全部 ---
+    h.ev("()=>{KB.player.ability=null; KB.Helper.recallAll(KB.player);}")
+    step(h, 4)
+    check(n + 'recallAll() empties the list', h.ev("()=>KB.Helper.count()") == 0, hlist(h))
+
+
+# ---------------------------------------------------------------------------
+# 8. 指令（↑＋SELECT 切換：跟隨 / 待命 / 突擊）
+# ---------------------------------------------------------------------------
+def phase_cmd(h):
+    n = 'cmd: '
+    h.goto(3, 9, ability='sword')
+    h.ev("()=>{KB.Helper.clear(); KB.Helper.setMode('follow', true);}")
+    spawn_two(h, 'sword', 'fire')
+    step(h, 10)
+    check(n + "default command is 'follow'", mode(h) == 'follow', mode(h))
+    # --- ↑＋SELECT 循環 ---
+    press(h, 'up,select', 3); release(h); step(h, 2)
+    m1 = mode(h)
+    press(h, 'up,select', 3); release(h); step(h, 2)
+    m2 = mode(h)
+    press(h, 'up,select', 3); release(h); step(h, 2)
+    m3 = mode(h)
+    check(n + 'UP+SELECT cycles follow -> stay -> assault -> follow',
+          [m1, m2, m3] == ['stay', 'assault', 'follow'], [m1, m2, m3])
+    check(n + 'the command combo applies to BOTH helpers', h.ev("()=>KB.Helper.count()") == 2, hlist(h))
+    # --- 組合鍵不會被 player.js 當成「短按 SELECT → 丟掉能力」---
+    h.goto(3, 9, ability='beam')
+    h.ev("()=>{KB.Helper.clear(); KB.Helper.setMode('follow', true);}")
+    press(h, 'up,select', 6); release(h); step(h, 10)
+    check(n + 'UP+SELECT never drops the ability kirby is holding',
+          ps(h)['ability'] == 'beam' and stars(h) == [], dict(p=ps(h), stars=stars(h)))
+    check(n + 'UP+SELECT still switched the command', mode(h) == 'stay', mode(h))
+
+    # --- 待命：不跟隨（原地站崗）---
+    n = 'stay: '
+    h.goto(3, 9, ability='sword'); spawn_helper(h, 'sword'); step(h, 20)
+    h.ev("()=>KB.Helper.setMode('stay')")
+    at0 = hlist(h)[0]['cx']
+    teleport_player(h, 12, 9)
+    step(h, 150)
+    l = hlist(h)
+    d = dist(h)
+    check(n + 'helper holds its post instead of following kirby',
+          len(l) == 1 and abs(l[0]['cx'] - at0) < 60 and d > 80, dict(l=l, at0=at0, dist=d))
+    shot7(h, 'stay_post')
+    # --- 待命：仍然會打 96px 內的敵人 ---
+    h.ev("()=>{const e=KB.Helper.get(); e.atkCool=0;}")
+    hx = h.ev("()=>KB.Helper.get().cx")
+    e = h.spawn('waddledee', 0, 9, d=-1)
+    h.ev("(x)=>{const e=__te,g=KB.Helper.get(); e.active=true; e.speed=0; e.vx=0; e.turnAtEdge=false; e.turnAtWall=false;"
+         " e.cx=g.cx+56; e.bottom=g.bottom;}", 0)
+    killed = False
+    for _ in range(24):
+        step(h, 10)
+        t = target(h)
+        if t is None or t['dead'] or t['hp'] < 2:
+            killed = True
+            break
+    l = hlist(h)
+    check(n + 'a helper on stand-by still kills an enemy within 96px', killed, dict(t=target(h), l=l))
+    check(n + 'and it stays near its post while doing so', len(l) == 1 and abs(l[0]['cx'] - hx) < 80,
+          dict(l=l, post=hx))
+
+    # --- 突擊：主動追擊 200px 內的敵人（不管離卡比多遠）---
+    n = 'assault: '
+    h.goto(3, 9, ability='sword'); spawn_helper(h, 'sword'); step(h, 20)
+    h.ev("()=>{KB.player.invuln=1e9;}")
+    h.ev("()=>KB.Helper.setMode('assault')")
+    h.ev("()=>{const e=KB.Helper.get(); e.atkCool=0;}")
+    hx = h.ev("()=>KB.Helper.get().cx")
+    h.spawn('waddledee', 12, 9, d=-1)
+    h.ev("()=>{const e=__te,g=KB.Helper.get(); e.active=true; e.speed=0; e.vx=0; e.turnAtEdge=false; e.turnAtWall=false;"
+         " e.cx=g.cx+150; e.bottom=g.bottom;}")
+    far0 = h.ev("()=>{const e=__te,g=KB.Helper.get(); return +Math.abs(e.cx-g.cx).toFixed(1);}")
+    killed = False
+    for _ in range(30):
+        step(h, 10)
+        t = target(h)
+        if t is None or t['dead'] or t['hp'] < 2:
+            killed = True
+            break
+    check(n + 'helper charges an enemy 150px away and kills it', killed and far0 > 96,
+          dict(t=target(h), far0=far0, l=hlist(h)))
+    check(n + 'helper really left kirby behind to do it', abs(h.ev("()=>KB.Helper.get()?KB.Helper.get().cx:0") - hx) > 60,
+          dict(now=h.ev("()=>KB.Helper.get()?KB.Helper.get().cx:0"), was=hx))
+    shot7(h, 'assault')
+    # --- 圖示精靈存在 ---
+    check('cmd: mode icon sprites registered',
+          h.ev("()=>KB.has('ui_helper_mode_follow')&&KB.has('ui_helper_mode_stay')&&KB.has('ui_helper_mode_assault')"), True)
+    h.ev("()=>KB.Helper.setMode('follow', true)")
+
+
+# ---------------------------------------------------------------------------
+# 9. 夥伴等級（繼承 KB.PROG.level）
+# ---------------------------------------------------------------------------
+def phase_level(h):
+    n = 'level: '
+    h.goto(3, 9, ability='sword')
+    clear_lv(h, 'sword')
+    h.ev("()=>KB.Helper.clear()")
+    spawn_helper(h, 'sword')
+    l = hlist(h)
+    check(n + 'Lv1 helper: hp 4 / attack cd 90', l and l[0]['maxHp'] == 4 and l[0]['cd'] == 90, l)
+    for lv, hp, cd in [(2, 5, 90), (3, 6, 70), (4, 7, 55)]:
+        if lv > h.ev("()=>KB.PROG.MAXLV|0"):
+            print('  (skip Lv%d: KB.PROG.MAXLV = %s)' % (lv, h.ev("()=>KB.PROG.MAXLV")))
+            continue
+        h.goto(3, 9, ability='sword')
+        set_lv(h, 'sword', lv)
+        h.ev("()=>KB.Helper.clear()")
+        spawn_helper(h, 'sword')
+        l = hlist(h)
+        check(n + 'Lv%d helper: hp %d / attack cd %d' % (lv, hp, cd),
+              bool(l) and l[0]['lv'] == lv and l[0]['maxHp'] == hp and l[0]['hp'] == hp and l[0]['cd'] == cd, l)
+    # --- Lv3 的攻擊間隔真的比較短（180 幀內至少 2 次）---
+    set_lv(h, 'sword', 3)
+    h.goto(3, 9, ability='sword')
+    h.ev("()=>{KB.player.invuln=1e9;}")
+    h.ev("()=>KB.Helper.clear()")
+    spawn_helper(h, 'sword')
+    h.ev("()=>{const e=KB.Helper.get(); e.atkCool=0;}")
+    dummy(h, 7)
+    h.ev("()=>{const e=__te; if(e){e.hp=999; e.maxHp=999;}}")
+    starts = h.ev("""()=>{const e=KB.Helper.get(); let n=0, last=null;
+      for(let i=0;i<180;i++){ __kb.step(1); if(e.state==='attack'&&last!=='attack') n++; last=e.state; }
+      return n;}""")
+    check(n + 'Lv3 helper attacks at least twice in 180 frames (cd 70)', starts >= 2, starts)
+    shot7(h, 'lv3_helper')
+    # --- 傷害加成：判定框帶著夥伴自己的 abilityKey（game.js 的 scaleDmg 才會吃 dmgMul）---
+    h.goto(3, 9, ability='sword')
+    install_recorder(h)
+    h.ev("()=>KB.Helper.clear()")
+    spawn_helper(h, 'sword')
+    keys = h.ev("""()=>{const e=KB.Helper.get(); window.__ak=[]; const os=KB.spawn;
+      KB.spawn=x=>{ if(x&&x.fromHelper) __ak.push(x.abilityKey||null); return os(x); };
+      e.atkCool=0; e.useAbility(null); for(let i=0;i<20;i++) __kb.step(1); KB.spawn=os; return __ak;}""")
+    check(n + "helper hitboxes carry abilityKey = the helper's own ability",
+          bool(keys) and all(k == 'sword' for k in keys), keys)
+    mul = h.ev("()=>[KB.PROG.dmgMul('sword'), KB.PROG.scaleDmg(4,'sword')]")
+    check(n + 'KB.PROG.dmgMul applies to that key (Lv3 = 1.5 -> dmg 4 becomes 6)', mul == [1.5, 6], mul)
+    clear_lv(h, 'sword')
+
+
+# ---------------------------------------------------------------------------
+# 10. 合體技（↓＋SELECT）
+# ---------------------------------------------------------------------------
+def phase_union(h):
+    n = 'union: '
+    h.goto(3, 9, ability='sword')
+    h.ev("()=>{KB.Helper.clear(); KB.Helper.unionCD=0; KB.Helper.setMode('follow', true); KB.player.invuln=1e9;}")
+    spawn_two(h, 'sword', 'fire')
+    step(h, 30)
+    check(n + 'union is ready with two helpers out', h.ev("()=>KB.Helper.canUnion(KB.player)") is True,
+          dict(cd=h.ev("()=>KB.Helper.unionCD"), l=hlist(h)))
+    check(n + 'union needs TWO helpers', h.ev("""()=>{const H=KB.Helper, save=H.list.slice();
+      H.list=[save[0]]; const r=H.canUnion(KB.player); H.list=save; return r;}""") is False, True)
+    install_recorder(h)
+    helper_boxes(h, reset=True)
+    r = h.ev("()=>KB.Helper.union(KB.player)")
+    check(n + 'DOWN+SELECT style union() returns true', r is True, r)
+    check(n + 'both helpers dash to the player sides', all(e['unionT'] > 0 for e in hlist(h)), hlist(h))
+    check(n + 'union puts the move on a 600 frame cooldown', h.ev("()=>KB.Helper.unionCD") >= 590,
+          h.ev("()=>KB.Helper.unionCD"))
+    check(n + 'union is refused while on cooldown', h.ev("()=>KB.Helper.union(KB.player)") is False, True)
+    # 敵人站在玩家旁邊 → 被合體技打死
+    h.spawn('waddledee', 0, 9, d=-1)
+    h.ev("()=>{const e=__te,p=KB.player; e.active=true; e.speed=0; e.vx=0; e.turnAtEdge=false; e.turnAtWall=false;"
+         " e.cx=p.cx+34; e.bottom=p.bottom;}")
+    killed = False
+    for i in range(12):
+        step(h, 6)
+        if i == 2:
+            shot7(h, 'union_dash')
+        t = target(h)
+        if t is None or t['dead'] or t['hp'] < 2:
+            killed = True
+            break
+    check(n + 'the union move kills an enemy next to the player', killed, dict(t=target(h), l=hlist(h)))
+    shot7(h, 'union_fire')
+    boxes = helper_boxes(h)
+    check(n + "union hitboxes are still owner 'player'",
+          bool(boxes) and set(b['owner'] for b in boxes) == {'player'}, boxes[:3])
+    sides = h.ev("""()=>{const p=KB.player, l=KB.Helper.all();
+      return l.map(e=>+(e.cx-p.cx).toFixed(1));}""")
+    check(n + 'the two helpers ended up on opposite sides of kirby',
+          len(sides) == 2 and min(sides) < 0 < max(sides), sides)
+    check(n + 'both helpers survive the union move', h.ev("()=>KB.Helper.count()") == 2, hlist(h))
+    # 冷卻歸零後可以再放
+    h.ev("()=>{KB.Helper.unionCD=0;}")
+    step(h, 40)
+    check(n + 'union can be used again once the cooldown is over',
+          h.ev("()=>KB.Helper.canUnion(KB.player)") is True, hlist(h))
+
+
+# ---------------------------------------------------------------------------
+# 11. 死亡重生（保留能力）／換房淡出
+# ---------------------------------------------------------------------------
+def phase_respawn(h):
+    n = 'respawn: '
+    h.goto(3, 9, ability='sword')
+    h.ev("()=>{KB.Helper.clear(); KB.game.lives=3;}")
+    spawn_two(h, 'sword', 'fire')
+    step(h, 20)
+    old = h.ev("()=>KB.game.player.id")
+    h.ev("()=>{KB.player.die();}")
+    step(h, 10)
+    check(n + 'helpers disappear while kirby is dying', h.ev("()=>KB.Helper.count()") == 0, hlist(h))
+    for _ in range(40):
+        step(h, 10)
+        if h.ev("()=>KB.game.player.id") != old and h.ev("()=>KB.game.player.state") != 'dead':
+            break
+    step(h, 20)
+    l = hlist(h)
+    check(n + 'helpers come back at the respawn point', len(l) == 2, l)
+    check(n + 'they keep their abilities', [e['ability'] for e in l] == ['sword', 'fire'], l)
+    check(n + 'they respawn next to the new kirby', all(abs(e['cx'] - ps(h)['cx']) < 80 for e in l),
+          dict(l=l, p=ps(h)))
+    shot7(h, 'respawn')
+    # --- 換房：走到門口 → 淡出 → 新房間淡入 ---
+    n = 'door: '
+    h.goto(3, 9, ability='sword')
+    h.ev("()=>{KB.Helper.clear();}")
+    spawn_two(h, 'sword', 'fire')
+    step(h, 20)
+    # 模擬 useDoor 的淡出（game.fadeDir > 0 期間本體不更新實體 → 夥伴由 KB.Helper.tick 自己走向門口）
+    h.ev("()=>{const g=KB.game,p=KB.player; for(const e of KB.Helper.all()){ e.cx=p.cx-70; e.bottom=p.bottom; }"
+         " g.fadeTo(()=>{ g.loadRoom(0, 20, 9); });}")
+    d0 = h.ev("()=>{const p=KB.player; return KB.Helper.all().map(e=>+Math.abs(e.cx-p.cx).toFixed(1));}")
+    step(h, 4)
+    mid = h.ev("()=>{const p=KB.player; return KB.Helper.all().map(e=>({d:+Math.abs(e.cx-p.cx).toFixed(1),a:+e.alpha.toFixed(2)}));}")
+    check(n + 'helpers walk toward the door and fade out during the transition',
+          bool(mid) and all(m['a'] < 1 for m in mid) and all(m['d'] < d0[i] for i, m in enumerate(mid)),
+          dict(d0=d0, mid=mid))
+    shot7(h, 'door_fade')
+    for _ in range(30):
+        step(h, 4)
+        if h.ev("()=>KB.game.fadeDir") <= 0 and h.ev("()=>KB.game.roomIdx") == 0:
+            break
+    step(h, 20)
+    l = hlist(h)
+    check(n + 'both helpers reappear in the new room', len(l) == 2 and all(e['inList'] for e in l), l)
+    check(n + 'they fade back in next to kirby', all(e['alpha'] > 0.4 for e in l) and dist(h) < 80,
+          dict(l=l, dist=dist(h)))
+    shot7(h, 'door_arrive')
+
+
 PHASES = {
     'spawn': phase_spawn, 'follow': phase_follow, 'attack': phase_attack,
     'damage': phase_damage, 'recall': phase_recall, 'select': phase_select,
+    'duo': phase_duo, 'cmd': phase_cmd, 'level': phase_level,
+    'union': phase_union, 'respawn': phase_respawn,
 }
 
 
