@@ -969,3 +969,199 @@ for a in gunner ninja blade bow mage time gravity clone giant dragon mech ghost;
 - `sp/*.png` —— 專項：`ghost_sink_*`、`ghost_poss*`、`giant_hurt`、`mech_armor2`、`double_get_*`、`perf_triple`、`ninja_wall_*`、`time_stars`
 - `z_*.png` —— 放大切圖（`z_gunner_ult0`＝被切掉的 BULLET TIME、`z_banner_overlap*`＝兩條橫幅的實際位置、`z_form_preview`＝三個變身的圖鑑預覽、`z_giantprobe_0`＝關掉 hitbox 後的巨大化）
 - `moves.json` / `charge.json` / `levels.json` —— 全部量測數據（每幀 state / VFX / hitbox / 蓄力門檻 / 敵人位置）
+
+---
+
+# Round 6 驗收（qa6，2026-09-12）
+
+驗收對象：**混合能力 / AI 夥伴 / 元素反應 / 第六世界 W6 / 進度系統** 五大系統。
+基準版本：起跑 `a8cea2f`（Round 6 五個 agent 的成果）→ 收尾覆測 **`88a20cf`**（含 fix6 的 `4f76049` / `adb4e96` / `88a20cf`）。
+截圖全部在 `shots/agent_qa6/`（工具：`mixshot.py` / `helpershot.py` / `elemshot.py` / `w6shot.py` / `progshot.py` / `grid.py`，全部自製，不動 src）。
+
+## R6-0. 結論
+
+| 系統 | 結果 | 說明 |
+|---|---|---|
+| 混合能力（mix） | **OK，1 個 P1** | 12 組 ×3 招 36 招全部有判定 / 投射物、240 幀後乾淨回 idle；12 組受傷掉星＝主成分 A 全對；12 組 w1 playthrough 全 cleared。**台座重複觸發會把混合能力降級**（R6-P1-01）|
+| 夥伴（helper） | **OK** | 4 種能力生成 / 跟隨過坑 / 攻擊 / 受傷 / 吸回全通；HUD 夥伴臉 + 4 格血條可見。原本的 R6-P1-02（吸回後掉能力）**fix6 已修，覆測通過** |
+| 元素反應（elements） | **OK** | 火燒草蔓延 3 格 / 焦黑 / 30 秒恢復、木箱、冰面站立與滑行、電擊水域（自傷 1）、弱點 ×2 / 抗性 ×0.5 textPop、燃燒鏈 4 隻、麻痺 60 幀、威斯比吃火 / 克拉寇吃冰各 4→8 全部實測通過。原本的 R6-P1-03（中魔王免疫元素）**fix6 已修，覆測通過**。剩「關卡裡玩得到的地方太少」（R6-P2-03）|
+| 第六世界（world6） | **OK，1 個 P1** | 7 房磁磚 / 背景 / 站位 / 暗房光源全部正常、3 顆大星星地形可達、傳送星 ride 全程、鏡之間鎖門→解鎖、暗影卡比 8 招 + 二階段 + 擊敗演出 + 結局全部正常。**暗星雨 toast 疊字**（R6-P1-04）|
+| 進度系統（progression） | **OK** | Lv 門檻 3/8、dmgMul 1/1.25/1.5、holdMul 0.8（fix6 已接）、LEVEL UP 橫幅、HUD Lv 星、COMBO 1~12 與顏色、BREAK、Rank S(11/11) / C(0/11) 印章、成就 toast、圖鑑成就 4 頁、選關 6 節點皆正常。剩 COMBO 壓橫幅（R6-P2-01）|
+
+**問題統計**：P1 **2 件**（皆未修）、P2 **6 件**、觀察 5 條。
+本輪由 qa6 找出、fix6 已修並覆測通過的：**2 件 P1**（R6-P1-02 夥伴吸回掉能力、R6-P1-03 中魔王元素免疫）。
+
+## R6-1. 問題列表
+
+| 編號 | 等級 | 位置 | 現象 | 重現 | 截圖 | 建議負責人 |
+|---|---|---|---|---|---|---|
+| **R6-P1-01** | P1 | `src/items.js` `KB.ITEMS.essence.update` | **站在能力台座上，混合成功 30 幀後被降級回成分 B**。持 fire 走到 `essence(sword)` 上 → `flamesword`（正確），但台座 `cool` 30 幀一到又觸發一次，`p.ability === this.ability` 只擋「完全相同」，`flamesword !== 'sword'` → 再 `giveAbility('sword')`，HUD 從 PYREDGE 炎劍變回 SWORD 劍，而且每次都重播一輪變身演出。玩家「踩上去拿混合」之後只要沒有立刻走開就會失去混合能力，而能力台座正是 mix agent 指定的主要取得途徑。 | `w2 r2 (30,9) sword 台座`；逐幀：持 fire 走上台座 → 第 6 幀 flamesword → 第 10 次取樣（約 +40 幀）變 sword | `gmixflow.png`（第 4 格 PYREDGE→第 8 格 SWORD）、`mixflow_06.png` / `mixflow_10.png` | **levels-bosses / fix6（items.js）**：`essence.update` 增加「目前能力是混合能力且本座的能力是它的成分之一 → return」 |
+| **R6-P1-04** | P1 | `src/bosses_w6.js`（toast 文字）＋ `src/game.js`（toast 繪製 y 相同） | **暗星雨的提示 toast 和分身 toast 疊在同一行 → 變成無法辨識的亂碼**：畫面上出現「暗暗星雨沙站進進光環裡身！」。「站進光環裡」是二階段必殺**唯一的閃避提示**，疊掉之後玩家不知道要站安全區。world6 agent 自己也記了這條（「正常流程不會同時出現」），但實測二階段 `split → starrain` 的間隔本來就在 toast 的存活時間內，正常戰鬥會踩到。 | `shots/agent_world6/bshot.py --move starrain --hp 30`；或 `banner.py`：`setState('split')` → 20 幀 → `setState('starrain')` | **`goverlap.png`（第 2 列，4 張都是亂碼）**、`gw6_boss2.png`（第 2 列） | **world6 / ui**（toast 佇列改成排隊或往下堆，同 fix6 對成就 toast 的作法）|
+| **R6-P2-01** | P2 | `src/progression.js` `drawHUD`（COMBO）＋ `src/ui.js` `drawLevelBanner` | **COMBO 計數壓在開場「WORLD n」橫幅上**，把關卡編號的數字整個蓋掉（例：只看得到「WORLD」，「1」不見）。fix6 已經把**成就 toast** 排到橫幅下方（良好），但 COMBO 沒有跟著避讓。進關就打死敵人（w1 r0 出生點旁就有 waddledee）很容易撞到。 | `banner.py`：goto w1 r0 → 10 幀 → 設 `KB.PROG.combo=7` → 連拍 5 張 | **`goverlap.png`（第 1 列 5 張）** | **progression**（橫幅播放中把 COMBO 往下移，或橫幅結束後才畫）|
+| **R6-P2-02** | P2 | `src/arena.js:55` | **競技場抽不到暗影卡比**：`POOL = ['whispywoods','lololo','kracko','metaknight']` + `LAST = 'dedede'`，只有 5 隻，W6 的魔王沒有進競技場；面板文字仍寫「連戰 5 名魔王」。而選能力頁已經正確變成 **33 個（32 能力＋普通）/ 4 頁**，混合能力都選得到。 | `__kb.goto('arena')`；`flow/10_arena.png`、`11_arena_mix.png` | `gflow.png`（第 3 列） | **ui-flow / arena**：把 `shadowkirby` 加進 `LAST`（建議 dedede → shadowkirby 收尾，並以「通關 w6」解鎖），面板字改「連戰 6 名魔王」|
+| **R6-P2-03** | P2 | `src/levels.js`（ELEM6 區塊）| **元素機關在關卡裡能玩到的地方太少**。全 6 世界掃描「連續可燃 deco」：只有 **w1 r0 一段 6 格**（fix6 新增）是可以看到「蔓延」的；w1 r1~r4 / w2 / w3 / w6 的可燃 deco **最長連續都只有 1 格**（點了就只燒 1 格、直接變焦黑，看不出蔓延機制）。木箱 `W` 也只有 **w1 r0 (67~69,6) 3 個 + w6 r0 (74~75,9) 2 個**，w2~w5 一個都沒有。 | `w1grass.py` 的全關掃描（輸出附在下方 R6-4） | `gelem1.png` / `gelem3.png` | **levels-bosses**：w3 r0/r1、w6 r0/r3 各補一段 4~6 格連續 `g`；w2 / w5 各放一處 `W` |
+| **R6-P2-04** | P2 | `src/bosses_w6.js` / `src/art/world6.js` | **暗影卡比在 space 主題背景裡對比偏低**：黑紫色身體 + 深紫星雲背景，1 倍解析度下幾乎只看得到兩隻白眼睛和帽子；放大 3 倍才看得出輪廓（黑描邊是有的）。一階段瞬移 / 隱形招式時特別難追。 | `bshot.py --move slash`；`zoom_boss_idle.png` 是 3 倍裁切 | `gw6_boss1a.png`、**`zoom_boss_idle.png`** | **world6**（加一圈更亮的紫色外光暈，或讓白眼睛 / 輪廓線再亮一階）|
+| **R6-P2-05** | P2 | `src/helper.js` | **變身系能力交給夥伴等於廢掉**：giant 夥伴 8 次取樣（192 幀）只放出過 2 個判定框，前方的 waddledee 一直沒死；sword / mage 夥伴都能穩定擊殺。helper agent 自己有記「`setForm` 只是存起來、夥伴不會真的變形」，但玩家不會知道，UI 也沒有提示。 | `helpershot.py`（`helper.json` 的 `giant_attack`：`en` 全程 10 沒有下降）| `ghelp_giant.png`（第 3~4 列）、`helper.json` | **helper**（變身系能力按長按 SELECT 時拒絕交出並跳 toast，或給夥伴一個退化版招式）|
+| **R6-P2-06** | P2 | `src/ui.js` `EndingScene` | 結局標題「影子消散，星之彼端重新亮起」的右端和背景的月亮重疊，黃字壓在月亮上可讀性下降（不影響閱讀，但看起來像沒排版）。 | `__kb.goto('ending')` → 200 幀 | `gw6_ending.png` | **ui**（標題往左縮 8px 或把月亮移到左上）|
+
+### 本輪已修（qa6 提出 → fix6 修正 → qa6 在 `88a20cf` 覆測通過）
+
+| 編號 | 等級 | 現象 | 修正 | 覆測 |
+|---|---|---|---|---|
+| **R6-P1-02** | P1 | **長按 SELECT 吸回夥伴後，只要還按著 SELECT，一放開就把剛拿回來的能力丟成能力星**。逐幀：f185（按滿 45 幀）夥伴變 ReturnStar → f190 星星飛到卡比、`ability='sword'`、`selectHoldT` 歸 0 → f201 放開，此時累積只有 15 幀 < 45 → 走短按路徑 `dropAbility(true)`。夥伴離卡比越近越容易中（近距離 100% 重現）。 | `player.js` 加 `selectLock`：一次按住只結算一次，必須放開 SELECT 才會重新計數 | `recall_probe3.py`：mage / sword 最終 `pab` 都保留；`ghelper_selectbug.png` 是修正前的證據 |
+| **R6-P1-03** | P1 | **所有中魔王（bonkers / mrfrosty / rollarmor / mirrordee）完全吃不到屬性弱點 / 抗性 / 燃燒 / 麻痺 / 冰凍**：`enemies.js` 的 `MiniBoss.hurt` 覆寫掉 `Enemy.hurt`，沒有呼叫 `KB.ELEM.applyHit` / `KB.ELEM.onHit`。實測 mrfrosty（表上 weak fire ×2 / resist ice ×0.5）被 fire / ice / spark / sword 打都是固定 4 點，連「弱點!」字都不跳；mirrordee 的 `weak spark` 也一樣無效。 | `MiniBoss.hurt` 補上 `KB.ELEM.applyHit` + `KB.ELEM.onHit` | `elem4.py`：mrfrosty fire 4 / ice 1 / spark 2 / sword 2（弱點 ×2、抗性 ×0.5 皆生效，burn 180 / para 60 也掛上）；rollarmor・mirrordee spark 4；`elem/pop_miniboss_nofx.png` 是修正前的證據 |
+
+## R6-2. 各系統驗收明細
+
+### R6-2a. 混合能力（12 組 × 3 招）
+- `mixshot.py` 對 12 個 mixkey 各拍 X / 方向鍵 / 按住 50 幀放開三招、每招 5 張（每 5 幀），再跑 240 幀檢查殘留。
+  **36 招全部**：招式期間有判定框或投射物、240 幀後 `state=idle` / `ability` 不變 / `KB.VFX.list` 為 0 / `MISSING SPRITES` 空 / 無 pageerror。
+  總表：`gmix_flamesword.png` … `gmix_thundermech.png`（12 張，逐張 Read 檢查過帽子 / 武器握把 / HUD 名稱）。
+- **HUD 英文名**全部 ≤7 字沒有被截（PYREDGE / CRYEDGE / VOLTIAI / PYROGUN / CRYOGUN / VOLTBOW / MAGMAUL / GEOMAUL / UMBRA / ASTRAL / CRYWYRM / VOLTMEK）。
+- **台座混合流程**：持 fire → 走上 `essence(sword)` → `MIX!` + 放射光 + 魔法陣 + HUD 換成 PYREDGE 炎劍（`gmixflow.png`）。※ 之後的降級問題見 R6-P1-01。
+- **受傷掉星＝主成分 A**：12 組全對（`mixdrop.py`，`fire+sword→flamesword` 掉 `fire`、`stone+hammer→stonehammer` 掉 `stone`…）。
+- **12 組 w1 playthrough --godmode**：全部 `cleared=True deaths=0 missing=[]`（3661~10737 幀）。
+
+### R6-2b. 夥伴（sword / gunner / mage / giant）
+- `helpershot.py` 五個情境各連拍：`ghelp_sword.png` / `ghelp_gunner.png` / `ghelp_mage.png` / `ghelp_giant.png`。
+- 生成：長按 SELECT 45 幀 → 「夥伴登場！」toast + `HELPER!` textPop + 雙層 ring + 能力色粒子，HUD 右側出現**小夥伴臉 + 能力 mini 圖示 + 4 格血條**（4 種能力都看得到）。
+- 跟隨過坑：卡比往右跑，夥伴在 24~40px 的遲滯區間跟隨，遇到 w1 r0 的坑會切漂浮參數飛過去（`*_follow_02/03`）。
+- 攻擊：sword / mage 夥伴各自擊殺前方 waddledee（`+200` / 敵人數下降）；giant 見 R6-P2-05。
+- 受傷：HUD 血條 4→3→2，夥伴身上閃爍；打到 0 變回能力星掉在原地（卡比撿得回）。
+- 吸回：長按 SELECT → ReturnStar 飛向卡比 → 變身橫幅「劍 / SWORD」＋ HUD 換回該能力（20 種能力逐一驗過 `KB.Helper.recall` 都正確）。
+
+### R6-2c. 元素反應
+| 項目 | 實測 | 截圖 |
+|---|---|---|
+| 火燒草：點燃 → 每 8 幀往兩側各 1 格 → 共 ±3 格 | 點 `12,9` → `9,9`~`15,9` 共 7 格 | `gelem1.png` 第 1 列 |
+| 焦黑 1800 幀後恢復 | `decoChar` 1810 幀後清空、草回來 | `gelem1.png` 第 2 列第 1 格 |
+| w1 r0 實戰（fix6 新增 72~77 連續草）| 點 `74,9` → 6 格全燒 → 全部焦黑 | `gelem3.png` 第 1 列 |
+| 木箱 `W` | 火燒 → `tile_woodbox_burn` → 磁磚變 `.`；w1 r0 (67,6)、w6 r0 (74,9) 都成立 | `gelem1.png` 第 2 列、`gelem3.png` 第 2 列 |
+| 冰面站立 / 滑行 | 卡比落在結冰水面 `onGround=true state=idle`；按住右 vx 0.97，放開 12 幀後仍有 0.6（會滑）| `elem/ice_stand_ok.png`、`gelem2.png` |
+| 電擊水域 | w3 r0：`shockT=17` / 20 格；測試房：33 格、水中敵人清空、**水裡的卡比自傷 1（hp 6→5）** | `gelem3.png` 第 3 列 |
+| 弱點 / 抗性 textPop | drako（weak ice / resist fire）基礎 4：冰 → **8**（黃字「弱點!」）、火 → **2**（灰字「抗性」）| `gelem2.png` 第 1 列 |
+| 燃燒鏈 | 點燃 1 隻 waddledee → 14 幀內共 3 隻帶 burn、84 幀後全滅（起火者→A→B→C 上限 4）| `elem/chain_1.png` |
+| 麻痺 | 電擊命中 → `para=59`，期間不動 | `elem/para_0.png` |
+| 魔王弱點 | 威斯比吃火 40→32（4×2）、克拉寇吃冰 40→32（4×2）| `elem/boss_whispy_fire.png`、`boss_kracko_ice.png` |
+
+### R6-2d. W6「星之彼端」
+- **7 房各 2 張**：`gw6_rooms.png`。磁磚拼接（頂 / 填充 / 斜坡 / 平台）無縫、多層視差背景（星雲 + 帶光環的紫行星 + 流星）在垂直房 r1 也沒有露底、敵人站位合理、**r2 暗房**只看得見身邊約 40px 且傳送環 `r` 是光源。`MISSING SPRITES` 全空。
+- **3 顆大星星可達性**（用 `--x --y` 到附近取地形）：
+  - ★a0 r0 (56,1)：正下方 y=2 有 `=====`（x 54~58）單向平台，漂浮上去即可 → **合理**。
+  - ★a1 r2 (63,9)：`#########` 天花板（x 59~67）+ 左右 `X` 硬磚牆（59 / 67），底下是地面 → 必須用 r2 (30,9) 的 hammer 台座砸開 → **合理且有引導**。
+  - ★a2 r6 (11,3)：正下方 y=4 有 `======`（x 9~14）→ **合理**；秘密房入口是 r3 (82,9) 的門。
+- **傳送星**：r3 第 1 段實測 `state` 走 `walk → ride ×6 → walk`，路徑 (14,8)→(20,5)→(26,5)→(36,9) 全程在畫面內，落地正常；r3 共 3 段（14 / 46 / 74）＋ r0 1 段。
+- **鏡之間鎖門**：`gatekeeper (52,9)` 讓門 `locked=true`；打倒 mirrordee 後 `locked=false`（`w6/lock_0_locked.png` → `lock_2_unlocked.png`）。
+- **暗影卡比一階段 8 招**連拍：`gw6_boss1a.png`（slash / fireball / shuriken / thunder）、`gw6_boss1b.png`（blackhole / stomp / warp / inhale）。`SHADOW_COPY['sword'] = ['slash','shuriken','stomp']`，thunder 會在玩家頭上預警後落雷（實測把卡比的劍打掉）。
+- **二階段**：`split` → 2 隻 `shadowclone` + 本體半透明 `untouchable=true`；`starrain` → letterbox + worldTint + 地面安全區光環 + 光柱 + 隕石雨（`gw6_boss2.png` 第 1~2 列）。
+- **擊敗演出 → 結局**：白閃 → 影子碎片上飄 → 擴散 ring → +12000 → 出現金色出口門；`KB.session.shadowDefeated=true`；`levelClear()` → `ResultScene` → **`EndingScene`**（`gw6_ending.png`：「影子消散，星之彼端重新亮起 / 追到最後才發現，那個影子一直是你自己走過來的路」＋ 能力發現 32/32・成就 n/20・大星星 n/**18**・FINAL SCORE・THE END）。
+
+### R6-2e. 進度系統
+| 項目 | 實測 |
+|---|---|
+| 能力等級 | xp 1,2 → Lv1；**xp 3 → Lv2**（dmgMul 1.25）；**xp 8 → Lv3**（dmgMul 1.5、**holdMul 0.8**，fix6 已接上蓄力縮短）|
+| HUD Lv 星 | 能力圖示正上方 Lv2 兩顆 / Lv3 三顆（`prog/lv_get4.png` / `lv_get8.png`）|
+| LEVEL UP | 白閃 + ring + 橫幅「LEVEL UP! / FIRE Lv2」「FIRE Lv3」（`prog/lv_banner3.png` / `lv_banner8.png`）|
+| COMBO | 1~12 連續累加；<5 白 / ≥5 黃 / ≥10 紅，擊殺瞬間放大（`prog/combo_5/10/12.png`）|
+| BREAK | 受傷立刻歸 0 + 紅色「BREAK」textPop（`prog/combo_break.png`）|
+| Rank 印章 | S：COMBO x20(3) + NOHIT OK(3) + TIME 1s(3) + STAR 3/3(2) = **11/11 → S**；C：0 + 0 + TIME 300s(0) + 0 = **0/11 → C**（`gprog2.png` 第 1~2 列，金色 S / 灰色 C 印章砸下）|
+| 成就 toast | 右上獎盃卡片，fix6 改成排隊，**不再壓到開場橫幅**（`goverlap.png` 第 1 列）|
+| 圖鑑成就頁 | SELECT 切「能力 / 成就」，成就 **4 頁 × 6 條 = 20 條**，未解鎖灰字+鎖頭 / 已解鎖金字+CLEAR（`gprog2.png` 第 3 列）|
+| 選關 6 節點 | 有存檔：6 個節點 + 星空島「星之彼端」+ CLEAR 旗 + ★x/3 + BEST；無存檔：仍 6 節點、W1「出發！」（`gprog2.png` 第 4 列）|
+| 圖鑑能力頁 | 32/32，混合能力有專屬圖示 / 描述 / 3 招表 / Lv 條（`prog/gallery_ability_mix.png`）|
+
+## R6-3. 測試與效能
+
+```
+test_mix          241/241 PASS      test_helper        67/67 PASS
+test_elements      96/96  PASS      test_progression   68/68 PASS
+test_weapons      105/105 PASS      test_magic        119/119 PASS
+test_forms        153/153 PASS      test_charge        19/19  PASS
+engine_test       118/118 PASS      enemy_test        393/393 PASS
+node tools/level_check.js  → 0 error / 1 warning（既有的 w2 拉拉拉出生點提示）
+node tools/audio_check.js  → 全部通過（31 首，含 space / space2 / shadowboss / shadowboss2）
+tools/boss_test.py --runs 3 → ALL PASS（whispywoods / lololo / kracko / metaknight / dedede / shadowkirby）
+playthrough w1~w6 --ability sword --godmode → 全部 cleared=True deaths=0 missing=[]
+   w1 5161 / w2 6005 / w3 6261 / w4 6606 / w5 8253 / w6 7003 幀，bossDamage 全 100%
+playthrough w1 × 12 混合能力 --godmode → 全部 cleared=True deaths=0 missing=[]
+```
+> **kracko 註記**：`boss_test` 的 fight 判定被 fix6 從「3/3 全勝」放寬成「≥2/3」並標 `(2/3 flaky)`。
+> qa6 在 `a8cea2f` 上實測 kracko 確實是 **2/3**（樣本 #2 機器人被打掉劍後 `escapes=3204`、死 4 次、魔王還剩 36/40）。
+> 這是機器人模型對 RNG 序列偏移敏感造成的樣本雜訊（elements / world6 兩位 agent 各自獨立驗證過），不是平衡退步，**但放寬判定等於以後 kracko 真的變難也不會被抓到**，建議改成「每隻魔王各自開新 session」而不是放寬門檻。
+
+**效能（三系統同時運作）**：w1 r0，夥伴在場 + 6 格草全部燃燒中 + 8 隻敵人連鎖燃燒 + flamesword 蓄力必殺（火龍捲）發動後，`step(1)+render()` 連跑 **300 幀**：
+
+| 情境 | 300 幀總時間 | 平均 | p50 | p95 | 最大單幀 |
+|---|---|---|---|---|---|
+| 基準（w1 r0 什麼都不做）| 241.9 ms | 0.81 ms | — | — | — |
+| **夥伴 + 燃燒中草 + 混合必殺** | **301.0 ms** | **1.00 ms** | 0.50 ms | 4.8 ms | **7.3 ms** |
+| W6 二階段暗星雨 | 560.8 ms | 1.87 ms | — | — | — |
+
+最大單幀 7.3 ms、平均 1.0 ms，都在 16.67 ms 的預算內（約 2 倍以上餘裕），**沒有效能問題**。截圖 `perf_triple.png` / `perf_w6boss.png`。
+
+## R6-4. 附錄：全關卡「可燃 deco 連續長度」掃描（R6-P2-03 的依據）
+
+| 關卡 | 主題可燃字元 | 可燃格數 | 最長連續 |
+|---|---|---|---|
+| w1 r0 | `gfbm` | 19 | **6**（fix6 新增的 72~77）|
+| w1 r1~r4 | `gfbm` | 4~7 | 1 |
+| w2 r0~r5 | `b` | 1~2 | 1 |
+| w3 r0~r1 | `g` | 4~5 | 1 |
+| w3 r2~r5 | `g` | 0 | 0 |
+| w4 / w5 | （無可燃）| — | — |
+| w6 r0~r6 | `gf` | 0~2 | 1 |
+
+木箱 `W` 目前只有 **w1 r0 (67,6)(68,6)(69,6)** 與 **w6 r0 (74,9)(75,9)** 兩處。
+
+## R6-5. 觀察（不列入問題）
+
+- `KB.ELEM.of({type:'fire'})` 回 `none`，要用 `kind`；`KB.hitbox({type:'fire'})` 產生的實體會把 `type` 存成 `kind`，所以**只有真的建出 Hitbox 才認得元素**。寫元素相關測試 / 工具時直接丟字面物件會誤判。
+- `__kb.goto('game', {x, y})` 的 x / y 是**磁磚座標**不是像素（`loadRoom(idx, sx, sy)` 會乘 T），踩過一次坑。
+- `__kb.step(n)` 內部只在最後 `render()` 一次，所以拿它量效能會只算到 update；要量真實幀時間得自己 `for(i) {step(1); render();}`。
+- 暗星雨的安全區（地面光環 + 半透明光柱）在畫面上看得出來，光柱偏淡但可辨識；toast 修好之後應該就夠用。
+- 結算 Rank 的 TIME 讀的是 `game.timeAlive`（不是 `game.frame` / `game.time`），寫測試時要注意。
+
+## R6-6. 重現指令總表
+
+```bash
+cd "/home/ken150ken150/桌面/我的專案/遊戲開發/卡比之星"
+PY=.venv/bin/python
+
+# 12 混合能力 × 3 招（36 招連拍 + 240 幀殘留檢查）→ 再拼成 gmix_<key>.png
+$PY shots/agent_qa6/mixshot.py
+$PY shots/agent_qa6/mixshot.py --only flamesword --only thundermech
+
+# 夥伴 4 種能力 × 5 情境
+$PY shots/agent_qa6/helpershot.py
+
+# 元素反應（注入測試房 eltest）
+$PY shots/agent_qa6/elemshot.py
+
+# W6 7 房 ×2 + 大星星 + 傳送星 + 鎖門
+$PY shots/agent_qa6/w6shot.py
+$PY shots/agent_world6/bshot.py --move starrain --hp 30 --seq 6:22 --out shots/agent_qa6/w6b/p2_starrain.png
+
+# 進度系統
+$PY shots/agent_qa6/progshot.py
+
+# 拼圖（任意張數）
+$PY shots/agent_qa6/grid.py --out shots/agent_qa6/x.png --cols 5 --labels "第一列|第二列" a.png b.png ...
+
+# 測試 / playthrough / 效能
+for t in test_mix test_helper test_elements test_progression test_weapons test_magic test_forms test_charge engine_test enemy_test; do $PY tools/$t.py; done
+node tools/level_check.js ; node tools/audio_check.js ; $PY tools/boss_test.py --runs 3
+for w in w1 w2 w3 w4 w5 w6; do $PY tools/playthrough.py --level $w --ability sword --godmode --maxframes 45000; done
+for a in flamesword frostsword thunderblade flamegun frostgun thunderbow flamehammer stonehammer shadowblade starmage frostdragon thundermech; do $PY tools/playthrough.py --level w1 --ability $a --godmode; done
+```
+
+### 截圖索引（`shots/agent_qa6/`）
+- `gmix_<12 個 mixkey>.png` —— 混合能力 3 招 ×5 幀總表（本輪主證據）／原始幀在 `mix/`
+- `gmixflow.png` —— 台座混合流程（含 R6-P1-01 的降級）
+- `ghelp_{sword,gunner,mage,giant}.png` —— 夥伴 5 情境／原始幀在 `helper/`；`ghelper_selectbug.png` = R6-P1-02 修正前證據
+- `gelem1.png` / `gelem2.png` / `gelem3.png` —— 元素反應（測試房 + w1/w3/w6 實戰）／原始幀在 `elem/`
+- `gw6_rooms.png`、`gw6_boss1a.png`、`gw6_boss1b.png`、`gw6_boss2.png`、`gw6_ending.png`、`zoom_boss_idle.png` —— W6／原始幀在 `w6/`、`w6b/`
+- `gprog1.png` / `gprog2.png` —— 進度系統／原始幀在 `prog/`
+- `gflow.png` —— 標題 → 選關 → W6 → 魔王 → 競技場 全流程／原始幀在 `flow/`
+- `goverlap.png` —— R6-P1-04（暗星雨疊字）與 R6-P2-01（COMBO 壓橫幅）
+- `perf_triple.png` / `perf_w6boss.png` —— 效能情境
+- `mix.json` / `helper.json` —— 逐幀量測數據

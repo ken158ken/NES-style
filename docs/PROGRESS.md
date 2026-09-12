@@ -2393,3 +2393,16 @@ R5-7a 的觀察項（gravity ↑+X 文案不一致、圖鑑剪影露出帽子輪
 4. `abilities_mix.js` 的蓄力門檻（50）**沒有**吃 `holdMul`（本輪只交辦四個檔）；混合能力目前一律是 Lv1 門檻。
 5. w1 r0 的木箱蓋子只擋得住「從上方掉進凹槽」，兩側的星星方塊本來就能被任何攻擊打破 —— 這是刻意的（軟阻擋，不會卡關），
    `playthrough w1` 仍是 5161 幀 / 0 死。
+- [09-12 11:40] 完成：W6 驗收（7 房 ×2 張、3 顆大星星地形可達性、傳送星 ride 全程、鏡之間 gatekeeper 鎖門→解鎖、暗影卡比 8 招連拍、二階段分身 / 暗星雨、擊敗演出、結局）。
+  發現：**R6-P1-04 暗星雨 toast 與分身 toast 疊在同一行 → 變成無法辨識的亂碼**（`gw6_boss2.png` 第 2 列）。
+  驗證：`shots/agent_qa6/gw6_rooms.png` / `gw6_boss1a.png` / `gw6_boss1b.png` / `gw6_boss2.png` / `gw6_ending.png`。
+- [09-12 11:55] 完成：進度系統驗收（Lv1→2→3 的 xp 3/8 門檻與 dmgMul 1/1.25/1.5、holdMul 0.8、LEVEL UP 橫幅、HUD Lv 星、COMBO 1~12 與顏色、受傷 BREAK、Rank S(11/11) 與 C(0/11)、成就 toast、圖鑑成就頁、選關 6 節點）。
+  回歸：fix6 已修好 **R6-P1-02（長按 SELECT 吸回後掉能力）** 與 **R6-P1-03（中魔王元素弱點）**，我在 HEAD 88a20cf 上覆測皆通過；
+  **R6-P1-01（站在能力台座上混合後 30 幀被降級成成分 B）仍存在**。
+- [09-12 12:30] 完成：全流程（標題 → 選關 W6 → W6 → 擊敗暗影卡比 → ResultScene → EndingScene）＋ 競技場檢視 ＋ 效能量測。
+  競技場 `arena.js:55` 仍是 `POOL 4 + LAST dedede` = 5 魔王，**抽不到暗影卡比**（選能力頁已正確變 33 個 / 4 頁）→ 建議見 R6-P2-02。
+  效能：夥伴 + 6 格燃燒草 + 8 隻連鎖燃燒 + 混合必殺，step(1)+render() ×300 = **301 ms（平均 1.00 / p95 4.8 / 最大 7.3 ms）**，遠低於 16.67 ms 預算。
+  驗證：`shots/agent_qa6/gflow.png`、`perf_triple.png`。
+- [09-12 12:45] 完成：**docs/QA_REPORT.md 追加「Round 6 驗收」章節**（結論表、P1×2 / P2×6 / 已修 P1×2 / 觀察 5 條、五系統明細、測試與效能、可燃 deco 全關掃描、重現指令總表、截圖索引）。
+  在 HEAD `88a20cf` 覆測：全部 test_* / engine / enemy / boss_test / level_check / audio_check 通過；playthrough w1~w6 與 12 混合能力全 cleared。
+  **仍未修**：R6-P1-01（能力台座把混合能力降級回成分 B，`src/items.js`）、R6-P1-04（暗星雨 toast 疊字，`src/bosses_w6.js` + game.js toast）。
