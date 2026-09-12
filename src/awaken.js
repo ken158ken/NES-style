@@ -398,19 +398,92 @@
   /** 覺醒招專用投射物：與 KB.shoot 相同，另外標上 awaken 旗標（對魔王 ×A.BOSS_MUL） */
   function ashoot(o) { const pr = KB.shoot(o); if (pr) pr.awaken = true; return pr; }
   A.shoot = ashoot;
-  /** 全畫面判定框（預設 288×208，以卡比為中心；不破壞地形） */
-  function bigbox(p, o) {
+  /**
+   * 追蹤魔王的覺醒投射（R8-P1-02）。
+   * 投射物型的招式（流星雨 / 環形彈幕）只打得到畫面內，房間比畫面寬時魔王收不到，
+   * 這裡補一發從卡比身上射出、每幀微轉向魔王的投射（不受地形阻擋、不會離畫面就消失）。
+   * 房內沒有魔王、或魔王本來就在畫面中央附近 → 不生成（一般房間的手感完全不變）。
+   */
+  function bossShot(q, spr, o) {
     o = o || {};
-    const w = o.w || 288, h = o.h || 208;
-    const cx = o.cx === undefined ? p.cx : o.cx, cy = o.cy === undefined ? p.cy : o.cy;
+    const R = camRect(), out = [];
+    for (const e of bosses()) {
+      if (Math.abs(e.cx - R.cx) < 100 && Math.abs(e.cy - R.cy) < 80) continue;   // 已經在畫面中段 → 一般判定打得到
+      const sp = o.speed || 7;
+      const dx = e.cx - q.cx, dy = e.cy - q.cy, d = Math.hypot(dx, dy) || 1;
+      const pr = ashoot({
+        spr: spr || 'proj_star', x: q.cx, y: q.cy, vx: dx / d * sp, vy: dy / d * sp,
+        dmg: o.dmg || 3, owner: 'player', life: o.life || 90, grav: 0, pierce: true, solid: false,
+        w: o.w || 12, h: o.h || 12, breakBlocks: false, type: o.type || 'awaken',
+        trail: o.trail || null, rotSpeed: o.rotSpeed || 0,
+      });
+      if (!pr) continue;
+      pr.offscreenKill = false;
+      const target = e, base = pr.update.bind(pr);
+      pr.update = function (dt) {
+        if (!target.dead) {          // 每幀把速度轉向魔王（純追蹤，速度大小不變）
+          const ax = target.cx - this.cx, ay = target.cy - this.cy, ad = Math.hypot(ax, ay) || 1;
+          this.vx += (ax / ad * sp - this.vx) * 0.35;
+          this.vy += (ay / ad * sp - this.vy) * 0.35;
+        }
+        base(dt);
+      };
+      out.push(pr);
+    }
+    return out;
+  }
+  A.bossShot = bossShot;
+  /**
+   * 房內活著的魔王（type === 'boss'，含多形態 / 分身）。
+   * R8-P1-02：房間比畫面寬時（例：w1 威斯比固定站在最右側），全畫面招的判定打不到魔王，
+   * bigbox / bossShot 用這份清單把判定延伸過去。
+   */
+  function bosses() {
+    const g = G(), out = [];
+    if (!g || !g.entities) return out;
+    for (let i = 0; i < g.entities.length; i++) {
+      const e = g.entities[i];
+      if (e && e.type === 'boss' && !e.dead && !(e.hp <= 0)) out.push(e);
+    }
+    return out;
+  }
+  A.bosses = bosses;
+  /** 覺醒招判定框（共用選項 → KB.hitbox），一律帶 awaken 旗標 */
+  function mkbox(x, y, w, h, o, follow) {
     const hb = KB.hitbox({
-      x: cx - w / 2, y: cy - h / 2, w, h,
+      x, y, w, h,
       dmg: o.dmg === undefined ? 10 : o.dmg,
       owner: 'player', type: o.type || 'awaken', life: o.life || 4,
       rehit: o.rehit || 0, pierce: true, knock: o.knock === undefined ? 2 : o.knock,
       breakBlocks: !!o.breakBlocks, freeze: !!o.freeze, onHit: o.onHit || null,
+      follow: follow || null, flipWithOwner: false, ox: follow ? -w / 2 : 0, oy: follow ? follow.h / 2 - h / 2 : 0,
     });
     if (hb) hb.awaken = true;      // R7-P1-01：對魔王的傷害另乘 A.BOSS_MUL（game.js collisions 讀這個旗標）
+    return hb;
+  }
+  /**
+   * 全畫面判定框（預設 288×208）。
+   * R8-P1-02：預設**以攝影機為中心**（288 > 畫面寬 256，畫面內的卡比一定包得住），
+   * 另外房內若有「不在框內」的魔王（房間比畫面寬、魔王站在畫面外），
+   * 再追加一個跟著那隻魔王走的判定框 —— 讓「全畫面招」名副其實。
+   * 指定 cx / cy 的定點招（爆破點、黑洞）維持原本行為，不追加。
+   */
+  function bigbox(p, o) {
+    o = o || {};
+    const w = o.w || 288, h = o.h || 208;
+    const R = camRect();
+    const atP = !!o.atPlayer || !G();
+    const cx = o.cx === undefined ? (atP ? p.cx : R.cx) : o.cx;
+    const cy = o.cy === undefined ? (atP ? p.cy : R.cy) : o.cy;
+    const hb = mkbox(cx - w / 2, cy - h / 2, w, h, o, null);
+    if (o.cx === undefined && o.cy === undefined && !o.noBoss) {
+      const l = cx - w / 2, r = cx + w / 2, t = cy - h / 2, b = cy + h / 2;
+      for (const e of bosses()) {
+        if (e.x + e.w > l && e.x < r && e.y + e.h > t && e.y < b) continue;    // 已經在框內
+        const bw = Math.max(64, e.w + 48), bh = Math.max(64, e.h + 48);
+        mkbox(e.cx - bw / 2, e.cy - bh / 2, bw, bh, o, e);
+      }
+    }
     return hb;
   }
   A.bigbox = bigbox;
@@ -914,6 +987,8 @@
       });
       if (o.streak) v('line', x - 26, R.y - 10, x, R.y + R.h * 0.62, { color: o.streak, width: 2, frames: 10 });
     }
+    // R8-P1-02：畫面外的魔王收不到天降投射 → 補一發會追過去的
+    bossShot(q, spr, { dmg: o.dmg || 3, type: o.type || 'awaken', w: o.w || 10, h: o.h || 10, trail: o.trail || null, rotSpeed: o.rotSpeed || 0 });
   }
   /** 環形彈幕 */
   function ringShot(q, spr, o) {
@@ -928,6 +1003,8 @@
         rotSpeed: o.rotSpeed || 0, trail: o.trail || null,
       });
     }
+    // R8-P1-02：環形彈幕以卡比為圓心，畫面外的魔王吃不到 → 補一發會追過去的
+    bossShot(q, spr, { dmg: o.dmg || 3, type: o.type || 'awaken', w: o.w || 10, h: o.h || 10, trail: o.trail || null, rotSpeed: o.rotSpeed || 0, speed: sp + 1.6 });
   }
   const MM = (key, name, exec) => { A.moves[key] = { key, name, exec, mix: true }; return A.moves[key]; };
 
@@ -1235,7 +1312,8 @@
           KB.fx('fx_ice', x, R.y + R.h - 30, { life: 16 });
         }
         v('circle', q.cx, q.cy, { r: 34 + i * 9, frames: 26, color: '#e8fbff', spin: 0.05, glyphs: 7 });
-        v('textPop', q.cx, q.y - 16, i === 4 ? 'GLACIER!!' : 'FREEZE!', { color: '#c0f0ff', size: 10, frames: 28, rise: 0.5, outline: '#14324a' });
+        // R8-P2-04：全畫面結冰的白底上淺色字讀不出來 → 亮字 + 2px 深藍黑外框（textPop outlineW）
+        v('textPop', q.cx, q.y - 16, i === 4 ? 'GLACIER!!' : 'FREEZE!', { color: '#eaf8ff', size: 10, frames: 28, rise: 0.5, outline: '#08203a', outlineW: 2 });
       },
     });
     finale(60, '冰河終焉', '#6fd0f8', { flash: '#e0f8ff', sfx: 'icewall', dmg: 8, type: 'ice', hitstop: 4 });

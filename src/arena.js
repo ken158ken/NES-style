@@ -243,10 +243,10 @@
       else fit(ctx, '休息室的番茄整場共用 3 顆', 128, 64, 230, { color: '#c8b8e0', align: 'center', size: ms });
       // Round 8：變體徽章（Extra 紅牌 / 全 7 魔王金牌）
       {
-        let bx = 12;
-        const badge = (txt, bg, fg) => { const bw = KB.textWidth(txt) + 6; KB.rect(ctx, bx, 30, bw, 11, bg); KB.text(ctx, txt, bx + 3, 32, { color: fg }); bx += bw + 4; };
-        if (this.opt.extra) badge('EXTRA', '#3a1020', '#ff6070');
-        if (this.opt.all7) badge('ALL 7', '#3a3010', '#ffe040');
+        const badge = (txt, bg, fg, x) => { const bw = KB.textWidth(txt) + 6; KB.rect(ctx, x, 30, bw, 11, bg); KB.text(ctx, txt, x + 3, 32, { color: fg }); return bw; };
+        // R8-P2-01：兩個徽章並排時右緣會壓到置中的副標「競技場」⇒ 同時存在就把 ALL 7 改畫在右上角
+        if (this.opt.extra) badge('EXTRA', '#3a1020', '#ff6070', 12);
+        if (this.opt.all7) badge('ALL 7', '#3a3010', '#ffe040', this.opt.extra ? 244 - (KB.textWidth('ALL 7') + 6) : 12);
       }
       // 選能力
       panel(ctx, 8, 88, 240, 76);
@@ -291,7 +291,8 @@
       const bt = bestTime(this.opt);
       KB.text(ctx, 'BEST ' + (bt ? mmss(bt) : '--:--'), 240, 194, { color: bt ? C.yellow : C.grey, align: 'right' });
       fit(ctx, this.pages > 1 ? '←→ ↑↓ 選能力　Z 開始' : '←→ 選能力　Z 開始', 10, 192, 148, { color: '#fff', size: ms });
-      fit(ctx, 'SELECT：返回標題', 128, 208, 244, { color: C.grey, align: 'center', size: ms });
+      // R8-P2-02：從挑戰選單進來的 Boss Rush，SELECT 其實是回挑戰選單（back()），提示要跟著改
+      fit(ctx, this.opt.from === 'challenge' ? 'SELECT：返回挑戰選單' : 'SELECT：返回標題', 128, 208, 244, { color: C.grey, align: 'center', size: ms });
       UI.drawMuteToast(ctx); UI.drawFade(ctx, this);
     }
   }

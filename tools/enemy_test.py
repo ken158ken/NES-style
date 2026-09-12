@@ -7,7 +7,8 @@
   4. 吸入：面向敵人按住 attack → mouth.ability 正確；scarfy 不可吸且變 angry；gordo / shotzo / 小魔王 不可吸；cappy 留下 cappy_bare
   5. 攻擊：卡比持劍 → hp 減少 / 死亡 / 加分；bonkers、mrfrosty hp 歸零後暈倒（inhalable、無害）再吸入得到 hammer / ice
   6. 全程監看 pageerror / console.error；--shots 另存截圖 shots/enemy_<key>.png（第一次出現投射物或判定框的瞬間）與 shots/enemy_<key>_end.png
-用法：python tools/enemy_test.py [--shots] [--only waddledee,gordo] [--hitbox] [-v]
+用法：python tools/enemy_test.py [--shots] [--only waddledee,gordo] [--hitbox] [-v] [--extra]
+      --extra：Extra 模式複驗（KB.session.extra=true），每種敵人生成 / 移動 + KB.EXTRA 規則
 """
 import sys, json, pathlib, base64, argparse
 from playwright.sync_api import sync_playwright
@@ -1047,11 +1048,41 @@ def phase_world(h):
         check(n + f'notice speed multiplier {lid} = {k}', abs(e['alertK'] - k) < 1e-6, dict(alertK=e['alertK']))
 
 
+# ---------------------------------------------------------------------------
+# Extra 模式複驗（R8-P2-07）：--extra 把每種敵人放進 KB.session.extra=true 再跑一次
+# ---------------------------------------------------------------------------
+# boss_test.py --extra / level_check.js --extra 都有這個旗標，enemy_test.py 以前沒有
+# （`--extra` 直接 argparse error exit 2）。這裡補上：檢查 Extra 開著時敵人照樣
+# 生成 / 移動 / 不掉出地圖，並確認全域倍率真的生效（細部規則仍由 phase_extra 驗）。
+def phase_extra_enemy(h, key):
+    cfg = SPAWN[key]
+    h.goto(cfg.get('px', 3), 9)
+    h.extra(True)
+    on = h.ev("()=>KB.extraOn()")
+    h.spawn(key, cfg['ex'], cfg['ey'], a=cfg.get('a'), b=cfg.get('b'))
+    S = h.run(120, 10)
+    e = S[-1]['e']
+    ok = on and not e['fellOut'] and not e['inSolid'] and not e['dead']
+    check(f'{key} [extra]: KB.session.extra 下正常生成（不掉出地圖 / 不卡進牆）', ok,
+          dict(extraOn=on, x=e['x'], y=e['y'], inSolid=e['inSolid'], fellOut=e['fellOut'], dead=e['dead']))
+    # 會走的敵人在 Extra 下速度要 ≥ 一般（KB.EXTRA.spd = 1.2）；不會動的（gordo / shotzo / kabu）跳過
+    vmax = max(abs(x['e']['vx']) for x in S)
+    h.goto(cfg.get('px', 3), 9)
+    h.extra(False)
+    h.spawn(key, cfg['ex'], cfg['ey'], a=cfg.get('a'), b=cfg.get('b'))
+    S0 = h.run(120, 10)
+    v0 = max(abs(x['e']['vx']) for x in S0)
+    if v0 > 0.3:
+        check(f'{key} [extra]: 移動速度不低於一般模式（{v0:.2f} → {vmax:.2f}）', vmax >= v0 - 0.02, dict(normal=v0, extra=vmax))
+
+
 def main():
     global VERBOSE
     ap = argparse.ArgumentParser()
     ap.add_argument('--shots', action='store_true'); ap.add_argument('--only', default='')
     ap.add_argument('--hitbox', action='store_true'); ap.add_argument('-v', action='store_true')
+    # R8-P2-07：與 boss_test.py --extra / level_check.js --extra 一致的旗標
+    ap.add_argument('--extra', action='store_true', help='Extra 模式複驗（KB.session.extra=true）：每種敵人生成 / 移動 + KB.EXTRA 規則')
     a = ap.parse_args(); VERBOSE = a.v
     keys = [k for k in a.only.split(',') if k] or ORDER
     run_abilities = (not a.only) or ('abilities' in keys)
@@ -1071,6 +1102,34 @@ def main():
         pg.evaluate(TEST_LEVEL)
         pg.evaluate(HOOK_JS)
         h = Harness(pg, a.shots, a.hitbox)
+        if a.extra:
+            # --extra：只跑 Extra 模式那一輪（每種敵人 + KB.EXTRA 規則），不重跑一般模式的全套
+            for key in keys:
+                print('-' * 8, key + ' [extra]')
+                n0 = len(logs)
+                try:
+                    phase_extra_enemy(h, key)
+                except Exception as ex:
+                    check(f'{key} [extra]: raised', False, repr(ex))
+                errs = [l for l in logs[n0:] if 'pageerror' in l or 'console.error' in l]
+                check(f'{key} [extra]: no page errors', not errs, errs[:3])
+            print('-' * 8, 'extra')
+            n0 = len(logs)
+            try:
+                phase_extra(h)
+            except Exception as ex:
+                check('extra: raised', False, repr(ex))
+            errs = [l for l in logs[n0:] if 'pageerror' in l or 'console.error' in l]
+            check('extra: no page errors', not errs, errs[:3])
+            missing = pg.evaluate("()=>__kb.missing()")
+            b.close()
+            print('---')
+            fails = [r for r in results if not r[1]]
+            print(f'{len(results) - len(fails)}/{len(results)} passed')
+            if fails:
+                print('FAILED:'); [print('  ' + f[0] + ('  ' + str(f[2]) if f[2] != '' else '')) for f in fails]
+            if missing: print('MISSING SPRITES:', ', '.join(missing))
+            sys.exit(1 if fails else 0)
         for key in keys:
             print('-' * 8, key)
             n0 = len(logs)

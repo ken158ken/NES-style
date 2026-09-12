@@ -3806,3 +3806,67 @@ sfx 5 個：`tick`（倒數最後 10 秒**每秒一下**，帶通 4.2k 機械滴
   `enemy_test.py` 不支援 `--extra`（R8-P2-07）。
 - [09-12 R8-QA8-8] 收工：`docs/QA_REPORT.md` 追加「Round 8 驗收」章節（R8-0 結論表 / R8-1 問題列表 P0×0 P1×2 P2×7 /
   R8-2a~f 各系統明細 / R8-3 測試 / R8-4 效能 / R8-5 重現指令 + 截圖索引）。src 全程唯讀、未 commit、未跑 build.py。
+
+## fix8
+
+Round 8 QA（qa8）問題修正 —— agent: fix8（2026-09-12）。負責 R8-P1-01 / R8-P1-02 / R8-P2-01~07，只動 src / tools，未 commit。
+
+- [09-12 fix8-1] 完成 **R8-P1-02 覺醒混合招對遠處魔王 0 傷害**（`src/awaken.js`）：
+  - `bigbox()` 的預設判定從「以卡比為中心」改成**以攝影機為中心**（288×208 > 畫面 256，畫面內的卡比一定包得住）；
+    另外新增 `A.bosses()`，房內若有 `type==='boss'` 且**不在框內**（房間比畫面寬、魔王站在畫面外），
+    就對那隻魔王**追加一個 `follow` 魔王的判定框**（大小 = 魔王 + 48，至少 64×64）。指定 `cx/cy` 的定點招（黑洞 / 爆破點）維持原行為。
+  - 新增 `A.bossShot()`：畫面外有魔王時，從卡比身上補一發**每幀轉向魔王**的追蹤投射（`offscreenKill=false`），
+    由 `rain()`（天降流星 / 落雷）與 `ringShot()`（環形彈幕）自動呼叫 —— 投射物型的招不再只打畫面內。
+  - 實測 w1 r3 威斯比（卡比 cx 264 / 威斯比 cx 452）：qa8 列的 10 招 0 傷害招（thunderblade / stonehammer / starmage /
+    thundermech / frosthammer / thundersword / thunderdragon / timebeam / gravityblade / hammermech）**全部 14/40 = 35%（＝BOSS_CAP 上限）**，
+    flamesword 由 6 → 16。驗證：`shots/agent_fix8/whispy_check.py|.json`、`shots/agent_fix8/awaken/awk_hammermech|frosthammer|thunderdragon.png`。
+  - `tools/test_awaken.py` 新增 **`farboss` 測試組**（`--only farboss`）：SIM 魔王放在 `x=400`（離攝影機中心 364px、完全在畫面外），
+    20 基本 + 24 混合招每招都要 ≥ 30%（上限仍 35%）。唯一例外 `time`（永恆時停）門檻 20% ——
+    時停中魔王無敵幀不會走，把魔王放在卡比旁邊（x=112）實測也是 25%，與距離無關（已寫進 `FAR_MIN_OVR` 註解）。
+    測試數 **189 → 237 PASS**。
+- [09-12 fix8-2] 完成 **R8-P1-01 設定頁配色預覽**（`src/menu.js`）：`SettingsMenu.draw` 的「卡比配色」列改成
+  名稱右對齊到 x202（讓出 24px）+ 右側 `skinPreview()` → `KB.SKINS.drawPreview(ctx, 219, y+14, null, {frame:0})`，
+  切配色下一幀就換色。驗證：`shots/agent_fix8/menu/settings_skin_pink|yellow|blue|galaxy.png`。
+- [09-12 fix8-3] 完成 **R8-P2-01 / R8-P2-02**（`src/arena.js`）：EXTRA 與 ALL 7 同時存在時，`ALL 7` 改畫在**右上角**
+  （右緣 x244），不再壓到置中的副標「競技場」；`from==='challenge'` 時底部提示改成「SELECT：返回挑戰選單」。
+  驗證：`shots/agent_fix8/ch/arena_all7.png`、`arena_extra_pick.png`、`arena_title.png`。
+- [09-12 fix8-4] 完成 **R8-P2-05**（`src/challenge.js`）：`CHALLENGE FAILED` 字距 −1（總寬 256 → 226、左右各 ~15px），
+  CLEAR 標題維持原樣。驗證：`shots/agent_fix8/ch/nohit_fail.png`、`tower_clear.png`。
+- [09-12 fix8-5] 完成 **R8-P2-03 能力圖示跟配色**（`src/skins.js`）：新增 `syncIcons()`，把所有 `ui_ability_*`
+  （含 `_mini`，共 88 張）原圖留底，依配色**只重著色卡比臉的粉色系**（p/P/l/c/m/b；腳色 r/R 不換，避免火焰 / 電擊圖示一起變色），
+  再蓋回 `KB.SPR[name]`（ui.js / menu.js / arena.js 都不用改）；`refresh()` / `set()` 會自動同步，回 pink 會還原原圖。
+  重著色版不進 `KB.SPR_ORDER`（精靈總表 / 缺圖檢查保持乾淨）。
+  驗證：`shots/agent_fix8/skins/game_galaxy.png`（HUD 左下 + 右下同色）、`pause_galaxy.png`、`gallery_galaxy.png`、`gallery_pink.png`、`sheet_ability.png`。
+- [09-12 fix8-6] 完成 **R8-P2-04 FREEZE! 描邊**（`src/vfx.js` + `src/awaken.js`）：`V.textPop` 新增 `outlineW`（1~3，預設 1，行為不變），
+  冰河終焉的 `FREEZE!` / `GLACIER!!` 改成亮字 `#eaf8ff` + **2px 深藍黑外框** `#08203a`。驗證：`shots/agent_fix8/awaken/awk_frosthammer.png`。
+- [09-12 fix8-7] 完成 **R8-P2-06 按鍵設定顯示**（`src/keyconfig.js`）：鍵盤欄超過 3 鍵時第 3 欄右側加黃色「+n」小標；
+  左右修飾鍵改用放得下的短名（`LShift` 35px / `RShift` 36px / `LCtrl` / `RAlt` / `數Ent`），不再被截成「Shi…」。
+  監聽對話框 / 衝突訊息仍用 input.js 的完整名稱。驗證：`shots/agent_fix8/saves/keyconfig.png`。
+- [09-12 fix8-8] 完成 **R8-P2-07**（`tools/enemy_test.py`）：新增 `--extra`（與 boss_test / level_check 一致）。
+  跑法 = 每種敵人在 `KB.session.extra=true` 下生成 120 幀（不掉出地圖 / 不卡牆 / 速度不低於一般模式）+ 既有的 `phase_extra`
+  規則組（×1.2 速度、×1.25 血量、60% 二階段）。`.venv/bin/python tools/enemy_test.py --extra` → **79/79 passed，exit 0**。
+- [09-12 fix8-9] 回歸（全綠，log 在 `shots/agent_fix8/tests/`）：engine **118/118**、test_awaken **237/237**（新增 farboss 48 項）、
+  test_skins **67/67**、test_challenge **93/93**、test_progression **101/101**、test_saves **67/67**、
+  enemy_test --extra **79/79**、boss_test --runs 3 **ALL PASS**、playthrough w1 --godmode（cleared=True / deaths=0 / bossDamage=100% / missing []）、
+  `node tools/level_check.js` 0 error、`tools/build.py` 重新打包 dist（1886 KB）。
+  截圖全部用 Read 實際看過；未 git commit。
+- 已知 / 留給後續：
+  - `time`（永恆時停）對任何魔王都只有 25%（時停中魔王無敵幀不遞減），不是距離問題，若要拉到 35% 需改招式節奏或無敵幀處理。
+  - `flamesword` 對威斯比 16/40 = 40%（超過 BOSS_CAP 35%）：威斯比的部位是另一個 entity id，各自吃一份上限；其他招沒有這個現象。
+
+---
+# Round 8 總結（總控，2026-09-12）— 挑戰與個人化完成
+最終驗證：`node --check` 全過、`level_check`（含 --extra）0 error、`audio_check` 全過（151 sfx / 40 music）、engine 118、enemy 393（--extra 79）、boss_test --runs 3 ALL PASS（含 --extra）、awaken 237、challenge 93、progression 101、saves 67、skins 67、mix 245、mix2 343、helper 131、elements 96、forms 153、magic 119、weapons 105、extra 53、charge 19；playthrough w1~w7 --godmode 全 cleared、挑戰塔 seed 1 / 7 到第 3 層；build 1886KB。
+
+## 成果
+- **成就 40 條**（Round 5~7 系統全覆蓋）+ 誤觸發修正（事件驅動 + 靜默補發）+ 成就頁 4 頁。
+- **24 混合能力專屬覺醒招**（對魔王 35% 上限、遠處魔王也打得到、專屬音效）。
+- **挑戰模式**：時間攻擊、無傷挑戰、10 層挑戰塔（種子 + 8 種修飾：疾走 / 一擊必殺 / 隨機能力 / 封印之口 / 鏡像 / 黑暗 / 倍化 / 時限）、每日挑戰、Boss Rush Extra / 全 7 魔王；成績板挑戰頁。
+- **3 存檔槽**（遷移 / 複製 / 刪除 / 遊玩時間）+ 存檔選擇畫面 + **按鍵重映射**（鍵盤 + 手把）。
+- **12 種卡比配色**（成就解鎖、精靈與 HUD / 能力圖示重著色、設定頁預覽）。
+- 音效 +52（混合 / 覺醒 / 挑戰）、setTempoMul；標題選單捲動、設定頁入口整合。
+
+## 已知問題 / 下一輪建議
+1. 永恆時停覺醒招對魔王只有 25%（時停中無敵幀不遞減）；炎劍對威斯比 40%（部位各吃一份上限）。
+2. 未做：挑戰模式的幽靈最佳線重播、成就獎勵除配色外的其他解鎖（例如標題背景 / 音樂盒）、音樂盒（已解鎖曲目試聽）、關卡編輯器。
+3. 紅白機專案已完成研究（../紅白機遊戲開發），提案 A 可重用本引擎：需要 tools/nes_lint.py（256×240 / 25 色 / 每線 8 精靈 / 5 聲道自律）與換皮流程。

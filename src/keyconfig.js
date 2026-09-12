@@ -20,6 +20,16 @@
   const ROW_Y = 40, ROW_H = 18, MAX_KEYS = 3;
   // 動作欄只有 54px（14px 中文 ≤ 4 字）：太長的名稱在列表用短名，對話框 / 訊息仍用完整名稱
   const SHORT_NAME = { attack: '攻擊' };
+  // R8-P2-06：鍵名框只有 39px，'Shift(右)' 會被 fit 截成「Shi…」讀不出左右 ⇒
+  // 列表改用完整放得下的短名（'LShift' 35px / 'RShift' 36px，不會被截字）。
+  // 監聽對話框 / 衝突訊息仍用 input.js 的完整名稱。
+  const SHORT_CODE = {
+    ShiftLeft: 'LShift', ShiftRight: 'RShift',
+    ControlLeft: 'LCtrl', ControlRight: 'RCtrl',
+    AltLeft: 'LAlt', AltRight: 'RAlt',
+    NumpadEnter: '數Ent',
+  };
+  const keyLabel = (inp, code) => SHORT_CODE[code] || inp.codeName(code);
   const KEY_X = [76, 121, 166], KEY_W = 43, GP_X = 211, GP_W = 39;   // 鍵名框放得下「空白鍵」(39px)、手把框放得下 L1/R1 (35px)
 
   class KeyConfigScene {
@@ -180,13 +190,20 @@
         const a = acts[i], y = ROW_Y + i * ROW_H, sel = this.sel === i;
         if (sel) { KB.rect(ctx, 6, y - 2, 244, ROW_H - 1, '#1e2a52'); UI.cursor(ctx, 8, y + 2, this.frame); }
         fit(ctx, SHORT_NAME[a] || NAME[a] || a, 20, y, 54, { color: sel ? C.yellow : '#fff', size: UI.MS });
-        const codes = (inp.BINDINGS[a] || []).slice(0, MAX_KEYS);
+        // R8-P2-06：預設「丟棄能力」綁 4 個鍵，但只畫得下 3 欄 ⇒ 第 3 欄右側補「+n」，
+        // 玩家才知道還有看不到的鍵（還原預設後不會以為鍵不見了）
+        const all = inp.BINDINGS[a] || [];
+        const codes = all.slice(0, MAX_KEYS), extra = Math.max(0, all.length - MAX_KEYS);
         for (let k = 0; k < MAX_KEYS; k++) {
           const x = KEY_X[k], on = !!codes[k];
           KB.rect(ctx, x, y - 1, KEY_W, 14, on ? (sel ? '#2c3c6c' : '#202a44') : '#161c2c');
           KB.rect(ctx, x, y - 1, KEY_W, 1, on ? '#5c7098' : '#2a3244');
-          if (on) fit(ctx, inp.codeName(codes[k]), x + KEY_W / 2, y, KEY_W - 4, { color: '#fff', size: UI.MS_SMALL, align: 'center' });
-          else KB.text(ctx, '-', x + KEY_W / 2, y + 2, { color: '#4c5674', align: 'center' });
+          if (on) {
+            const tag = (extra > 0 && k === MAX_KEYS - 1) ? '+' + extra : '';
+            const tw = tag ? KB.textWidth(tag, { size: UI.MS_SMALL }) + 2 : 0;
+            fit(ctx, keyLabel(inp, codes[k]), x + (KEY_W - tw) / 2, y, KEY_W - 4 - tw, { color: '#fff', size: UI.MS_SMALL, align: 'center' });
+            if (tag) T(ctx, tag, x + KEY_W - 2, y, { color: C.yellow, size: UI.MS_SMALL, align: 'right' });
+          } else KB.text(ctx, '-', x + KEY_W / 2, y + 2, { color: '#4c5674', align: 'center' });
         }
         const gp = (inp.buttonNames ? inp.buttonNames(a) : []).slice(0, 2).join('/');   // 最多顯示 2 顆（框寬 45px）
         KB.rect(ctx, GP_X, y - 1, GP_W, 14, gp ? (sel ? '#2c3c6c' : '#202a44') : '#161c2c');

@@ -5043,6 +5043,9 @@ window.KB = window.KB || {};
     o = o || {};
     const size = o.size || 8, rise = o.rise === undefined ? 14 : o.rise;
     const outline = o.outline === undefined ? '#201828' : o.outline;
+    // R8-P2-04：描邊粗細（預設 1px）。畫在全白 / 全亮底色上的字（冰河終焉的 FREEZE!）
+    // 用 2 讓深色外框夠厚，遠看也讀得出來。
+    const ow = Math.max(1, Math.min(3, o.outlineW || 1));
     return push({
       layer: 'w', life: o.frames || 40, x, y, text: String(text), color: o.color || '#ffffff',
       draw(ctx, cam) {
@@ -5068,6 +5071,12 @@ window.KB = window.KB || {};
         ctx.globalAlpha = clamp01(a);
         ctx.translate(px, py); ctx.scale(pop, pop);
         const T = (KB.UI && KB.UI.text) ? KB.UI.text : KB.text;
+        if (outline && ow > 1) {
+          for (let dy = -ow; dy <= ow; dy++) for (let dx = -ow; dx <= ow; dx++) {
+            if ((!dx && !dy) || dx * dx + dy * dy > ow * ow + 1) continue;
+            T(ctx, this.text, dx, dy, { color: outline, align: 'center', size });
+          }
+        }
         T(ctx, this.text, 0, 0, { color: this.color, align: 'center', size, outline: outline || undefined });
         ctx.restore();
       },
@@ -17343,7 +17352,7 @@ window.KB = window.KB || {};
 //   KB.SKINS.unlockCond(id)        → 解鎖條件文字
 //   KB.SKINS.spr(name)             → 配色版精靈名（非 kirby_ 或 pink 時原樣回傳）
 //   KB.SKINS.drawPreview(ctx,x,y,id) → 在螢幕座標畫該配色的 kirby_idle（錨點＝底部中央）
-//   KB.SKINS.refresh()             → 依存檔重新套用（HUD 臉同步）；set() 會自動呼叫
+//   KB.SKINS.refresh()             → 依存檔重新套用（HUD 臉 + 能力圖示同步）；set() 會自動呼叫
 (function () {
   'use strict';
 
@@ -17501,6 +17510,47 @@ window.KB = window.KB || {};
     if (!faceOrig) { if (!KB.SPR[FACE]) return; faceOrig = KB.SPR[FACE]; }
     const v = faceVariant(current());
     if (v) KB.SPR[FACE] = v;
+    syncIcons();
+  }
+
+  // ---------------------------------------------------------------- 能力圖示（R8-P2-03）
+  // HUD 左下 / 暫停能力卡 / 能力圖鑑清單畫的是 ui_ability_<key>（24×16，左半是卡比臉）與
+  // ui_ability_<key>_mini（8×8 純圖示）。過去這兩組不跟配色走 ——
+  // 換成「星河」時場上卡比與 HUD 右下的臉都是深紫，只有左下的能力圖示還是粉紅。
+  // 作法與 HUD 臉相同：原圖留一份，永遠從原圖重著色再蓋回 KB.SPR[name]（ui.js / menu.js 都不用改）。
+  // **只換卡比臉的粉色系**（p / P / l / c / m / b）；腳色 r / R 不換 ——
+  // 圖示裡沒有腳，但好幾個能力圖示（火焰 / 電擊 / 血滴）用的是同一組紅色，換了會連圖示本體一起變。
+  const FACE_KEYS = ['p', 'P', 'l', 'c', 'm', 'b'];
+  const FACE_MAP_CACHE = {};
+  function faceMapOf(id) {
+    if (FACE_MAP_CACHE[id]) return FACE_MAP_CACHE[id];
+    const d = BY_ID[id], m = {};
+    if (d) for (const k of FACE_KEYS) if (BASE[k] && d.col[k]) m[BASE[k]] = d.col[k];
+    return (FACE_MAP_CACHE[id] = m);
+  }
+  let iconOrig = null;                       // { 精靈名: 原始精靈 }（第一次呼叫時快照）
+  function syncIcons() {
+    if (!KB.SPR) return;
+    if (!iconOrig) {
+      iconOrig = {};
+      for (const n in KB.SPR) if (n.lastIndexOf('ui_ability_', 0) === 0 && n.indexOf('@') < 0) iconOrig[n] = KB.SPR[n];
+    }
+    const id = current(), map = faceMapOf(id);
+    for (const n in iconOrig) {
+      const base = iconOrig[n];
+      if (id === DEFAULT_ID) { KB.SPR[n] = base; continue; }
+      const key = n + '@' + id;
+      if (!KB.SPR[key]) {
+        const TMP = '__skin_icon_src';
+        KB.SPR[TMP] = base;                  // 直接塞（不進 SPR_ORDER）
+        KB.spriteRecolor(TMP, key, map);
+        delete KB.SPR[TMP];
+        // 重著色版只是快取，不要灌進精靈總表（sheet 場景 / 缺圖檢查看的是 SPR_ORDER）
+        const oi = KB.SPR_ORDER ? KB.SPR_ORDER.indexOf(key) : -1;
+        if (oi >= 0) KB.SPR_ORDER.splice(oi, 1);
+      }
+      KB.SPR[n] = KB.SPR[key] || base;
+    }
   }
 
   // ---------------------------------------------------------------- API
@@ -35670,19 +35720,92 @@ window.KB = window.KB || {};
   /** 覺醒招專用投射物：與 KB.shoot 相同，另外標上 awaken 旗標（對魔王 ×A.BOSS_MUL） */
   function ashoot(o) { const pr = KB.shoot(o); if (pr) pr.awaken = true; return pr; }
   A.shoot = ashoot;
-  /** 全畫面判定框（預設 288×208，以卡比為中心；不破壞地形） */
-  function bigbox(p, o) {
+  /**
+   * 追蹤魔王的覺醒投射（R8-P1-02）。
+   * 投射物型的招式（流星雨 / 環形彈幕）只打得到畫面內，房間比畫面寬時魔王收不到，
+   * 這裡補一發從卡比身上射出、每幀微轉向魔王的投射（不受地形阻擋、不會離畫面就消失）。
+   * 房內沒有魔王、或魔王本來就在畫面中央附近 → 不生成（一般房間的手感完全不變）。
+   */
+  function bossShot(q, spr, o) {
     o = o || {};
-    const w = o.w || 288, h = o.h || 208;
-    const cx = o.cx === undefined ? p.cx : o.cx, cy = o.cy === undefined ? p.cy : o.cy;
+    const R = camRect(), out = [];
+    for (const e of bosses()) {
+      if (Math.abs(e.cx - R.cx) < 100 && Math.abs(e.cy - R.cy) < 80) continue;   // 已經在畫面中段 → 一般判定打得到
+      const sp = o.speed || 7;
+      const dx = e.cx - q.cx, dy = e.cy - q.cy, d = Math.hypot(dx, dy) || 1;
+      const pr = ashoot({
+        spr: spr || 'proj_star', x: q.cx, y: q.cy, vx: dx / d * sp, vy: dy / d * sp,
+        dmg: o.dmg || 3, owner: 'player', life: o.life || 90, grav: 0, pierce: true, solid: false,
+        w: o.w || 12, h: o.h || 12, breakBlocks: false, type: o.type || 'awaken',
+        trail: o.trail || null, rotSpeed: o.rotSpeed || 0,
+      });
+      if (!pr) continue;
+      pr.offscreenKill = false;
+      const target = e, base = pr.update.bind(pr);
+      pr.update = function (dt) {
+        if (!target.dead) {          // 每幀把速度轉向魔王（純追蹤，速度大小不變）
+          const ax = target.cx - this.cx, ay = target.cy - this.cy, ad = Math.hypot(ax, ay) || 1;
+          this.vx += (ax / ad * sp - this.vx) * 0.35;
+          this.vy += (ay / ad * sp - this.vy) * 0.35;
+        }
+        base(dt);
+      };
+      out.push(pr);
+    }
+    return out;
+  }
+  A.bossShot = bossShot;
+  /**
+   * 房內活著的魔王（type === 'boss'，含多形態 / 分身）。
+   * R8-P1-02：房間比畫面寬時（例：w1 威斯比固定站在最右側），全畫面招的判定打不到魔王，
+   * bigbox / bossShot 用這份清單把判定延伸過去。
+   */
+  function bosses() {
+    const g = G(), out = [];
+    if (!g || !g.entities) return out;
+    for (let i = 0; i < g.entities.length; i++) {
+      const e = g.entities[i];
+      if (e && e.type === 'boss' && !e.dead && !(e.hp <= 0)) out.push(e);
+    }
+    return out;
+  }
+  A.bosses = bosses;
+  /** 覺醒招判定框（共用選項 → KB.hitbox），一律帶 awaken 旗標 */
+  function mkbox(x, y, w, h, o, follow) {
     const hb = KB.hitbox({
-      x: cx - w / 2, y: cy - h / 2, w, h,
+      x, y, w, h,
       dmg: o.dmg === undefined ? 10 : o.dmg,
       owner: 'player', type: o.type || 'awaken', life: o.life || 4,
       rehit: o.rehit || 0, pierce: true, knock: o.knock === undefined ? 2 : o.knock,
       breakBlocks: !!o.breakBlocks, freeze: !!o.freeze, onHit: o.onHit || null,
+      follow: follow || null, flipWithOwner: false, ox: follow ? -w / 2 : 0, oy: follow ? follow.h / 2 - h / 2 : 0,
     });
     if (hb) hb.awaken = true;      // R7-P1-01：對魔王的傷害另乘 A.BOSS_MUL（game.js collisions 讀這個旗標）
+    return hb;
+  }
+  /**
+   * 全畫面判定框（預設 288×208）。
+   * R8-P1-02：預設**以攝影機為中心**（288 > 畫面寬 256，畫面內的卡比一定包得住），
+   * 另外房內若有「不在框內」的魔王（房間比畫面寬、魔王站在畫面外），
+   * 再追加一個跟著那隻魔王走的判定框 —— 讓「全畫面招」名副其實。
+   * 指定 cx / cy 的定點招（爆破點、黑洞）維持原本行為，不追加。
+   */
+  function bigbox(p, o) {
+    o = o || {};
+    const w = o.w || 288, h = o.h || 208;
+    const R = camRect();
+    const atP = !!o.atPlayer || !G();
+    const cx = o.cx === undefined ? (atP ? p.cx : R.cx) : o.cx;
+    const cy = o.cy === undefined ? (atP ? p.cy : R.cy) : o.cy;
+    const hb = mkbox(cx - w / 2, cy - h / 2, w, h, o, null);
+    if (o.cx === undefined && o.cy === undefined && !o.noBoss) {
+      const l = cx - w / 2, r = cx + w / 2, t = cy - h / 2, b = cy + h / 2;
+      for (const e of bosses()) {
+        if (e.x + e.w > l && e.x < r && e.y + e.h > t && e.y < b) continue;    // 已經在框內
+        const bw = Math.max(64, e.w + 48), bh = Math.max(64, e.h + 48);
+        mkbox(e.cx - bw / 2, e.cy - bh / 2, bw, bh, o, e);
+      }
+    }
     return hb;
   }
   A.bigbox = bigbox;
@@ -36186,6 +36309,8 @@ window.KB = window.KB || {};
       });
       if (o.streak) v('line', x - 26, R.y - 10, x, R.y + R.h * 0.62, { color: o.streak, width: 2, frames: 10 });
     }
+    // R8-P1-02：畫面外的魔王收不到天降投射 → 補一發會追過去的
+    bossShot(q, spr, { dmg: o.dmg || 3, type: o.type || 'awaken', w: o.w || 10, h: o.h || 10, trail: o.trail || null, rotSpeed: o.rotSpeed || 0 });
   }
   /** 環形彈幕 */
   function ringShot(q, spr, o) {
@@ -36200,6 +36325,8 @@ window.KB = window.KB || {};
         rotSpeed: o.rotSpeed || 0, trail: o.trail || null,
       });
     }
+    // R8-P1-02：環形彈幕以卡比為圓心，畫面外的魔王吃不到 → 補一發會追過去的
+    bossShot(q, spr, { dmg: o.dmg || 3, type: o.type || 'awaken', w: o.w || 10, h: o.h || 10, trail: o.trail || null, rotSpeed: o.rotSpeed || 0, speed: sp + 1.6 });
   }
   const MM = (key, name, exec) => { A.moves[key] = { key, name, exec, mix: true }; return A.moves[key]; };
 
@@ -36507,7 +36634,8 @@ window.KB = window.KB || {};
           KB.fx('fx_ice', x, R.y + R.h - 30, { life: 16 });
         }
         v('circle', q.cx, q.cy, { r: 34 + i * 9, frames: 26, color: '#e8fbff', spin: 0.05, glyphs: 7 });
-        v('textPop', q.cx, q.y - 16, i === 4 ? 'GLACIER!!' : 'FREEZE!', { color: '#c0f0ff', size: 10, frames: 28, rise: 0.5, outline: '#14324a' });
+        // R8-P2-04：全畫面結冰的白底上淺色字讀不出來 → 亮字 + 2px 深藍黑外框（textPop outlineW）
+        v('textPop', q.cx, q.y - 16, i === 4 ? 'GLACIER!!' : 'FREEZE!', { color: '#eaf8ff', size: 10, frames: 28, rise: 0.5, outline: '#08203a', outlineW: 2 });
       },
     });
     finale(60, '冰河終焉', '#6fd0f8', { flash: '#e0f8ff', sfx: 'icewall', dmg: 8, type: 'ice', hitstop: 4 });
@@ -37618,6 +37746,16 @@ window.KB = window.KB || {};
   const ROW_Y = 40, ROW_H = 18, MAX_KEYS = 3;
   // 動作欄只有 54px（14px 中文 ≤ 4 字）：太長的名稱在列表用短名，對話框 / 訊息仍用完整名稱
   const SHORT_NAME = { attack: '攻擊' };
+  // R8-P2-06：鍵名框只有 39px，'Shift(右)' 會被 fit 截成「Shi…」讀不出左右 ⇒
+  // 列表改用完整放得下的短名（'LShift' 35px / 'RShift' 36px，不會被截字）。
+  // 監聽對話框 / 衝突訊息仍用 input.js 的完整名稱。
+  const SHORT_CODE = {
+    ShiftLeft: 'LShift', ShiftRight: 'RShift',
+    ControlLeft: 'LCtrl', ControlRight: 'RCtrl',
+    AltLeft: 'LAlt', AltRight: 'RAlt',
+    NumpadEnter: '數Ent',
+  };
+  const keyLabel = (inp, code) => SHORT_CODE[code] || inp.codeName(code);
   const KEY_X = [76, 121, 166], KEY_W = 43, GP_X = 211, GP_W = 39;   // 鍵名框放得下「空白鍵」(39px)、手把框放得下 L1/R1 (35px)
 
   class KeyConfigScene {
@@ -37778,13 +37916,20 @@ window.KB = window.KB || {};
         const a = acts[i], y = ROW_Y + i * ROW_H, sel = this.sel === i;
         if (sel) { KB.rect(ctx, 6, y - 2, 244, ROW_H - 1, '#1e2a52'); UI.cursor(ctx, 8, y + 2, this.frame); }
         fit(ctx, SHORT_NAME[a] || NAME[a] || a, 20, y, 54, { color: sel ? C.yellow : '#fff', size: UI.MS });
-        const codes = (inp.BINDINGS[a] || []).slice(0, MAX_KEYS);
+        // R8-P2-06：預設「丟棄能力」綁 4 個鍵，但只畫得下 3 欄 ⇒ 第 3 欄右側補「+n」，
+        // 玩家才知道還有看不到的鍵（還原預設後不會以為鍵不見了）
+        const all = inp.BINDINGS[a] || [];
+        const codes = all.slice(0, MAX_KEYS), extra = Math.max(0, all.length - MAX_KEYS);
         for (let k = 0; k < MAX_KEYS; k++) {
           const x = KEY_X[k], on = !!codes[k];
           KB.rect(ctx, x, y - 1, KEY_W, 14, on ? (sel ? '#2c3c6c' : '#202a44') : '#161c2c');
           KB.rect(ctx, x, y - 1, KEY_W, 1, on ? '#5c7098' : '#2a3244');
-          if (on) fit(ctx, inp.codeName(codes[k]), x + KEY_W / 2, y, KEY_W - 4, { color: '#fff', size: UI.MS_SMALL, align: 'center' });
-          else KB.text(ctx, '-', x + KEY_W / 2, y + 2, { color: '#4c5674', align: 'center' });
+          if (on) {
+            const tag = (extra > 0 && k === MAX_KEYS - 1) ? '+' + extra : '';
+            const tw = tag ? KB.textWidth(tag, { size: UI.MS_SMALL }) + 2 : 0;
+            fit(ctx, keyLabel(inp, codes[k]), x + (KEY_W - tw) / 2, y, KEY_W - 4 - tw, { color: '#fff', size: UI.MS_SMALL, align: 'center' });
+            if (tag) T(ctx, tag, x + KEY_W - 2, y, { color: C.yellow, size: UI.MS_SMALL, align: 'right' });
+          } else KB.text(ctx, '-', x + KEY_W / 2, y + 2, { color: '#4c5674', align: 'center' });
         }
         const gp = (inp.buttonNames ? inp.buttonNames(a) : []).slice(0, 2).join('/');   // 最多顯示 2 顆（框寬 45px）
         KB.rect(ctx, GP_X, y - 1, GP_W, 14, gp ? (sel ? '#2c3c6c' : '#202a44') : '#161c2c');
@@ -39597,6 +39742,16 @@ window.KB = window.KB || {};
     cur = (cur && typeof cur === 'object') ? (cur.id || cur.key) : cur;
     return skinName(cur || l[0]);
   }
+  /**
+   * R8-P1-01：設定頁「卡比配色」的即時預覽。
+   * 畫目前（或指定）配色的 kirby_idle（KB.SKINS.drawPreview 的錨點＝底部中央），
+   * 切配色的下一幀就換色。KB.SKINS 沒載入時安靜跳過。
+   */
+  function skinPreview(ctx, x, y, id) {
+    const S = KB.SKINS;
+    if (!S || typeof S.drawPreview !== 'function') return false;
+    try { S.drawPreview(ctx, x, y, id || null, { frame: 0 }); return true; } catch (e) { return false; }
+  }
   function slider(ctx, x, y, level) {
     for (let i = 0; i < 10; i++) {
       const cx = x + i * 8, on = i < level;
@@ -39667,7 +39822,11 @@ window.KB = window.KB || {};
         fit(ctx, it.label, 48, y, 66, { color: sel ? C.yellow : '#fff', size: ms });
         if (it.vol) { slider(ctx, 122, y + 2, UI.volLevel(it.vol)); KB.text(ctx, String(UI.volLevel(it.vol)), 222, y + 3, { color: '#c8d8f0', align: 'right' }); }
         else if (it.arrow) fit(ctx, '設定 ›', 222, y, 76, { color: sel ? C.yellow : '#80e0a0', align: 'right', size: ms });
-        else if (it.skins) fit(ctx, skinCurName(), 222, y, 96, { color: '#80e0a0', align: 'right', size: ms });
+        else if (it.skins) {
+          // R8-P1-01：名稱靠左讓出 24px，右側畫該配色的卡比（切換時即時變色）
+          fit(ctx, skinCurName(), 202, y, 74, { color: '#80e0a0', align: 'right', size: ms });
+          skinPreview(ctx, 219, y + 14);
+        }
         else if (it.cycle) {
           let k = it.cycle.indexOf(it.str ? (st[it.id] || it.cycle[0]) : (st[it.id] | 0)); if (k < 0) k = 0;
           T(ctx, it.names[k], 222, y, { color: k === 0 ? '#c8d8f0' : '#80e0a0', align: 'right', size: ms });
@@ -40084,10 +40243,10 @@ window.KB = window.KB || {};
       else fit(ctx, '休息室的番茄整場共用 3 顆', 128, 64, 230, { color: '#c8b8e0', align: 'center', size: ms });
       // Round 8：變體徽章（Extra 紅牌 / 全 7 魔王金牌）
       {
-        let bx = 12;
-        const badge = (txt, bg, fg) => { const bw = KB.textWidth(txt) + 6; KB.rect(ctx, bx, 30, bw, 11, bg); KB.text(ctx, txt, bx + 3, 32, { color: fg }); bx += bw + 4; };
-        if (this.opt.extra) badge('EXTRA', '#3a1020', '#ff6070');
-        if (this.opt.all7) badge('ALL 7', '#3a3010', '#ffe040');
+        const badge = (txt, bg, fg, x) => { const bw = KB.textWidth(txt) + 6; KB.rect(ctx, x, 30, bw, 11, bg); KB.text(ctx, txt, x + 3, 32, { color: fg }); return bw; };
+        // R8-P2-01：兩個徽章並排時右緣會壓到置中的副標「競技場」⇒ 同時存在就把 ALL 7 改畫在右上角
+        if (this.opt.extra) badge('EXTRA', '#3a1020', '#ff6070', 12);
+        if (this.opt.all7) badge('ALL 7', '#3a3010', '#ffe040', this.opt.extra ? 244 - (KB.textWidth('ALL 7') + 6) : 12);
       }
       // 選能力
       panel(ctx, 8, 88, 240, 76);
@@ -40132,7 +40291,8 @@ window.KB = window.KB || {};
       const bt = bestTime(this.opt);
       KB.text(ctx, 'BEST ' + (bt ? mmss(bt) : '--:--'), 240, 194, { color: bt ? C.yellow : C.grey, align: 'right' });
       fit(ctx, this.pages > 1 ? '←→ ↑↓ 選能力　Z 開始' : '←→ 選能力　Z 開始', 10, 192, 148, { color: '#fff', size: ms });
-      fit(ctx, 'SELECT：返回標題', 128, 208, 244, { color: C.grey, align: 'center', size: ms });
+      // R8-P2-02：從挑戰選單進來的 Boss Rush，SELECT 其實是回挑戰選單（back()），提示要跟著改
+      fit(ctx, this.opt.from === 'challenge' ? 'SELECT：返回挑戰選單' : 'SELECT：返回標題', 128, 208, 244, { color: C.grey, align: 'center', size: ms });
       UI.drawMuteToast(ctx); UI.drawFade(ctx, this);
     }
   }
@@ -41029,7 +41189,9 @@ window.KB = window.KB || {};
       UI.bands(ctx, 0, H, r.ok ? ['#101838', '#182254', '#1e2c68', '#24347c'] : ['#000000', '#0a0a14', '#101018', '#16161e']);
       UI.drawStars(ctx, this.stars, this.t);
       const title = r.ok ? 'CHALLENGE CLEAR' : 'CHALLENGE FAILED';
-      UI.bigText(ctx, title, 128, 8, r.ok ? 2 : 2, { color: r.ok ? C.yellow : '#f04040', outline: r.ok ? '#603000' : '#400000', shadow: r.ok ? '#a06000' : '#901818', align: 'center', spacing: 0 });
+      // R8-P2-05：'CHALLENGE FAILED' 16 字 ×8px ×2 倍 = 剛好 256px（左右 0 邊界）⇒
+      // 失敗標題字距縮 1px（總寬 226、左右各 15px），和其他畫面的標題一樣有邊界
+      UI.bigText(ctx, title, 128, 8, 2, { color: r.ok ? C.yellow : '#f04040', outline: r.ok ? '#603000' : '#400000', shadow: r.ok ? '#a06000' : '#901818', align: 'center', spacing: r.ok ? 0 : -1 });
       const name = (CH.ITEMS.find(i => i.id === r.type) || { name: '挑戰' }).name;
       TX(ctx, r.ok ? name + '　達成！' : (FAIL_MSG[r.reason] || '挑戰失敗'), 128, 30, { color: r.ok ? '#fff' : '#ffa0a0', align: 'center', size: 16 });
       panel(ctx, 16, 54, 224, 100);

@@ -810,7 +810,9 @@
       UI.bands(ctx, 0, H, r.ok ? ['#101838', '#182254', '#1e2c68', '#24347c'] : ['#000000', '#0a0a14', '#101018', '#16161e']);
       UI.drawStars(ctx, this.stars, this.t);
       const title = r.ok ? 'CHALLENGE CLEAR' : 'CHALLENGE FAILED';
-      UI.bigText(ctx, title, 128, 8, r.ok ? 2 : 2, { color: r.ok ? C.yellow : '#f04040', outline: r.ok ? '#603000' : '#400000', shadow: r.ok ? '#a06000' : '#901818', align: 'center', spacing: 0 });
+      // R8-P2-05：'CHALLENGE FAILED' 16 字 ×8px ×2 倍 = 剛好 256px（左右 0 邊界）⇒
+      // 失敗標題字距縮 1px（總寬 226、左右各 15px），和其他畫面的標題一樣有邊界
+      UI.bigText(ctx, title, 128, 8, 2, { color: r.ok ? C.yellow : '#f04040', outline: r.ok ? '#603000' : '#400000', shadow: r.ok ? '#a06000' : '#901818', align: 'center', spacing: r.ok ? 0 : -1 });
       const name = (CH.ITEMS.find(i => i.id === r.type) || { name: '挑戰' }).name;
       TX(ctx, r.ok ? name + '　達成！' : (FAIL_MSG[r.reason] || '挑戰失敗'), 128, 30, { color: r.ok ? '#fff' : '#ffa0a0', align: 'center', size: 16 });
       panel(ctx, 16, 54, 224, 100);

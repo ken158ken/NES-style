@@ -16,7 +16,7 @@
 //   KB.SKINS.unlockCond(id)        → 解鎖條件文字
 //   KB.SKINS.spr(name)             → 配色版精靈名（非 kirby_ 或 pink 時原樣回傳）
 //   KB.SKINS.drawPreview(ctx,x,y,id) → 在螢幕座標畫該配色的 kirby_idle（錨點＝底部中央）
-//   KB.SKINS.refresh()             → 依存檔重新套用（HUD 臉同步）；set() 會自動呼叫
+//   KB.SKINS.refresh()             → 依存檔重新套用（HUD 臉 + 能力圖示同步）；set() 會自動呼叫
 (function () {
   'use strict';
 
@@ -174,6 +174,47 @@
     if (!faceOrig) { if (!KB.SPR[FACE]) return; faceOrig = KB.SPR[FACE]; }
     const v = faceVariant(current());
     if (v) KB.SPR[FACE] = v;
+    syncIcons();
+  }
+
+  // ---------------------------------------------------------------- 能力圖示（R8-P2-03）
+  // HUD 左下 / 暫停能力卡 / 能力圖鑑清單畫的是 ui_ability_<key>（24×16，左半是卡比臉）與
+  // ui_ability_<key>_mini（8×8 純圖示）。過去這兩組不跟配色走 ——
+  // 換成「星河」時場上卡比與 HUD 右下的臉都是深紫，只有左下的能力圖示還是粉紅。
+  // 作法與 HUD 臉相同：原圖留一份，永遠從原圖重著色再蓋回 KB.SPR[name]（ui.js / menu.js 都不用改）。
+  // **只換卡比臉的粉色系**（p / P / l / c / m / b）；腳色 r / R 不換 ——
+  // 圖示裡沒有腳，但好幾個能力圖示（火焰 / 電擊 / 血滴）用的是同一組紅色，換了會連圖示本體一起變。
+  const FACE_KEYS = ['p', 'P', 'l', 'c', 'm', 'b'];
+  const FACE_MAP_CACHE = {};
+  function faceMapOf(id) {
+    if (FACE_MAP_CACHE[id]) return FACE_MAP_CACHE[id];
+    const d = BY_ID[id], m = {};
+    if (d) for (const k of FACE_KEYS) if (BASE[k] && d.col[k]) m[BASE[k]] = d.col[k];
+    return (FACE_MAP_CACHE[id] = m);
+  }
+  let iconOrig = null;                       // { 精靈名: 原始精靈 }（第一次呼叫時快照）
+  function syncIcons() {
+    if (!KB.SPR) return;
+    if (!iconOrig) {
+      iconOrig = {};
+      for (const n in KB.SPR) if (n.lastIndexOf('ui_ability_', 0) === 0 && n.indexOf('@') < 0) iconOrig[n] = KB.SPR[n];
+    }
+    const id = current(), map = faceMapOf(id);
+    for (const n in iconOrig) {
+      const base = iconOrig[n];
+      if (id === DEFAULT_ID) { KB.SPR[n] = base; continue; }
+      const key = n + '@' + id;
+      if (!KB.SPR[key]) {
+        const TMP = '__skin_icon_src';
+        KB.SPR[TMP] = base;                  // 直接塞（不進 SPR_ORDER）
+        KB.spriteRecolor(TMP, key, map);
+        delete KB.SPR[TMP];
+        // 重著色版只是快取，不要灌進精靈總表（sheet 場景 / 缺圖檢查看的是 SPR_ORDER）
+        const oi = KB.SPR_ORDER ? KB.SPR_ORDER.indexOf(key) : -1;
+        if (oi >= 0) KB.SPR_ORDER.splice(oi, 1);
+      }
+      KB.SPR[n] = KB.SPR[key] || base;
+    }
   }
 
   // ---------------------------------------------------------------- API

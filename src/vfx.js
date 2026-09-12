@@ -513,6 +513,9 @@
     o = o || {};
     const size = o.size || 8, rise = o.rise === undefined ? 14 : o.rise;
     const outline = o.outline === undefined ? '#201828' : o.outline;
+    // R8-P2-04：描邊粗細（預設 1px）。畫在全白 / 全亮底色上的字（冰河終焉的 FREEZE!）
+    // 用 2 讓深色外框夠厚，遠看也讀得出來。
+    const ow = Math.max(1, Math.min(3, o.outlineW || 1));
     return push({
       layer: 'w', life: o.frames || 40, x, y, text: String(text), color: o.color || '#ffffff',
       draw(ctx, cam) {
@@ -538,6 +541,12 @@
         ctx.globalAlpha = clamp01(a);
         ctx.translate(px, py); ctx.scale(pop, pop);
         const T = (KB.UI && KB.UI.text) ? KB.UI.text : KB.text;
+        if (outline && ow > 1) {
+          for (let dy = -ow; dy <= ow; dy++) for (let dx = -ow; dx <= ow; dx++) {
+            if ((!dx && !dy) || dx * dx + dy * dy > ow * ow + 1) continue;
+            T(ctx, this.text, dx, dy, { color: outline, align: 'center', size });
+          }
+        }
         T(ctx, this.text, 0, 0, { color: this.color, align: 'center', size, outline: outline || undefined });
         ctx.restore();
       },

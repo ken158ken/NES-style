@@ -460,6 +460,16 @@
     cur = (cur && typeof cur === 'object') ? (cur.id || cur.key) : cur;
     return skinName(cur || l[0]);
   }
+  /**
+   * R8-P1-01：設定頁「卡比配色」的即時預覽。
+   * 畫目前（或指定）配色的 kirby_idle（KB.SKINS.drawPreview 的錨點＝底部中央），
+   * 切配色的下一幀就換色。KB.SKINS 沒載入時安靜跳過。
+   */
+  function skinPreview(ctx, x, y, id) {
+    const S = KB.SKINS;
+    if (!S || typeof S.drawPreview !== 'function') return false;
+    try { S.drawPreview(ctx, x, y, id || null, { frame: 0 }); return true; } catch (e) { return false; }
+  }
   function slider(ctx, x, y, level) {
     for (let i = 0; i < 10; i++) {
       const cx = x + i * 8, on = i < level;
@@ -530,7 +540,11 @@
         fit(ctx, it.label, 48, y, 66, { color: sel ? C.yellow : '#fff', size: ms });
         if (it.vol) { slider(ctx, 122, y + 2, UI.volLevel(it.vol)); KB.text(ctx, String(UI.volLevel(it.vol)), 222, y + 3, { color: '#c8d8f0', align: 'right' }); }
         else if (it.arrow) fit(ctx, '設定 ›', 222, y, 76, { color: sel ? C.yellow : '#80e0a0', align: 'right', size: ms });
-        else if (it.skins) fit(ctx, skinCurName(), 222, y, 96, { color: '#80e0a0', align: 'right', size: ms });
+        else if (it.skins) {
+          // R8-P1-01：名稱靠左讓出 24px，右側畫該配色的卡比（切換時即時變色）
+          fit(ctx, skinCurName(), 202, y, 74, { color: '#80e0a0', align: 'right', size: ms });
+          skinPreview(ctx, 219, y + 14);
+        }
         else if (it.cycle) {
           let k = it.cycle.indexOf(it.str ? (st[it.id] || it.cycle[0]) : (st[it.id] | 0)); if (k < 0) k = 0;
           T(ctx, it.names[k], 222, y, { color: k === 0 ? '#c8d8f0' : '#80e0a0', align: 'right', size: ms });

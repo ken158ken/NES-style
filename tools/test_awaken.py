@@ -12,10 +12,11 @@ Lv4 覺醒系統驗證（Round 7 / agent: awaken）—— src/awaken.js 的 KB.A
   5b. 覺醒招對魔王減傷（R7-P1-01）：20 招各打 60HP 魔王模擬體，單次覺醒總傷害 ≤ 40%
   5c. Round 8「awaken-mix」：24 種混合能力的**專屬**覺醒招 —— 各自命中致死、結束後回到正常狀態、
       對 60HP 魔王模擬體單次覺醒 ≤ 40%；baseKey 有專屬招用專屬、沒有才退回主成分
+  5d. R8-P1-02：魔王站在畫面外（房間比螢幕寬、SIM 魔王放在 x=400）時，20 基本 + 24 混合招每招仍 ≥ 30%
   6. HUD 量表：畫在能力圖示下方（y218），不與 Lv 星（y194~197）重疊
   7. 全程監看 pageerror / console.error；MISSING SPRITES 必須為空
 
-用法：python tools/test_awaken.py [-v] [--only lv4,gauge,trigger,state,moves,boss,mix,mixboss,hud] [--shots]
+用法：python tools/test_awaken.py [-v] [--only lv4,gauge,trigger,state,moves,boss,mix,mixboss,farboss,hud] [--shots]
 （--shots 會把 24 招混合覺醒招各存一張到 shots/agent_awakenmix/）
 （測試地圖與頁面輔助函式沿用 tools/enemy_test.py 的 Harness / HOOK_JS / TEST_LEVEL）
 """
@@ -357,6 +358,26 @@ SIM_BOSS = """(hp) => {
 }"""
 SIM_HP = """() => { const B = window.__simBoss; return B ? { hp: Math.max(0, B.hp), maxHp: B.maxHp, dead: !!B.dead } : null; }"""
 
+# R8-P1-02：把魔王模擬體放到「房間右側、畫面外」（卡比出生點 x=48，這裡放 x=400 → 差 352px），
+# 重現 w1 威斯比「固定站在比螢幕寬的房間最右側」的情況。
+SIM_BOSS_AT = """([hp, px]) => {
+  const g = KB.game; if (!g || !KB.Boss) return null;
+  for (const e of g.entities) if (e.type === 'boss' && !e.dead) e.dead = true;
+  const B = new KB.Boss(px, 144);
+  B.hp = hp; B.maxHp = hp; B.introducing = false; B.started = true;
+  B.displayName = 'SIM'; B.subtitle = 'SIM'; B.solid = false; B.grav = 0;
+  B.hurtsPlayer = false; B.contactDamage = false; B.hidden = true;
+  B.ai = function () { }; B.draw = function () { }; B.drawBody = function () { };
+  B.die = function () { this.dead = true; };
+  KB.spawn(B); window.__simBoss = B;
+  return { hp: B.hp, x: B.x, cx: B.cx, dx: +(B.cx - KB.player.cx).toFixed(1) };
+}"""
+FAR_X = 400              # 魔王站的世界座標（測試地圖寬 80 格 = 1280px，地面在 row 10）
+FAR_MIN = 0.30           # 一次覺醒至少要打掉 30%（上限仍是 BOSS_CAP 35%）
+# 例外：'time'（永恆時停）靠 8 秒時停期間累積傷害，時停中魔王的無敵幀不會走，
+# 所以能打進去的次數天生就少 —— 把魔王放在卡比旁邊（x=112）實測也是 25%，與距離無關。
+FAR_MIN_OVR = {'time': 0.20}
+
 BOSS_CAP = 0.40          # 一次覺醒最多只能打掉 40% 的血（設計目標 ≈ 35%）
 SIM_HP0 = 60
 
@@ -535,6 +556,58 @@ def phase_mixboss(h):
 
 
 # ---------------------------------------------------------------------------
+# 5d. R8-P1-02：魔王站在畫面外（房間比螢幕寬）時，覺醒招照樣打得到
+# ---------------------------------------------------------------------------
+# qa8 實測：w1 威斯比固定站在房間最右側，24 招混合覺醒招有 10 招打出 0 傷害
+# （判定是「以卡比為中心的 288×208 框」＋「從卡比身上生出來的投射物」，全部落在畫面左半）。
+# 這一組把 SIM 魔王放到 x=400（離卡比 350px 以上、完全在畫面外）重現，
+# 要求 20 基本招 + 24 混合招每一招都至少打掉 30%（上限仍是 BOSS_CAP 35%）。
+def _far_one(h, key):
+    h.goto(3, 9, ability=None, immune=True)
+    h.ev(RESET)
+    h.ev(GIVE, key)
+    h.ev(SET_LV, [key, 4])
+    h.ev("()=>{ KB.AWAKEN.reset(); KB.AWAKEN.add(100); }")
+    info = h.ev(SIM_BOSS_AT, [SIM_HP0, FAR_X])
+    h.ev("()=>{ KB.player.startAwaken(); }")
+    h.run(480, 40)
+    b = h.ev(SIM_HP)
+    lost = SIM_HP0 - b['hp'] if b else 0
+    return lost / SIM_HP0, info
+
+
+def phase_farboss(h):
+    print('-' * 8, '遠處魔王（畫面外 350px）也要吃到覺醒招（R8-P1-02）')
+    # 先確認測試情境真的「在畫面外」：魔王與攝影機中心差 > 半個畫面
+    h.goto(3, 9, ability=None, immune=True)
+    d = h.ev(SIM_BOSS_AT, [SIM_HP0, FAR_X])
+    off = h.ev("()=>{ const B = window.__simBoss, c = KB.game.cam; return { dx: +(B.cx - (c.x + KB.W / 2)).toFixed(1), onscreen: B.x < c.x + KB.W && B.x + B.w > c.x }; }")
+    check('SIM 魔王真的在畫面外（離攝影機中心 > 128px）', abs(off['dx']) > 128 and not off['onscreen'], off)
+    check('API：KB.AWAKEN.bosses / bossShot 存在',
+          h.ev("()=>typeof KB.AWAKEN.bosses === 'function' && typeof KB.AWAKEN.bossShot === 'function'"), '')
+    # bigbox 會替畫面外的魔王追加一個「跟著魔王」的判定框
+    bb = h.ev("""()=>{ const g = KB.game, n0 = g.entities.length;
+      KB.AWAKEN.bigbox(KB.player, { dmg: 1, life: 2 });
+      const boxes = g.entities.slice(n0).filter(e => e.type === 'hitbox');
+      const B = window.__simBoss;
+      const onBoss = boxes.filter(e => e.follow === B || (e.x < B.cx && e.x + e.w > B.cx)).length;
+      for (const e of g.entities.slice(n0)) e.dead = true;
+      return { n: boxes.length, onBoss }; }""")
+    check('bigbox 對畫面外的魔王追加判定框', bb['n'] >= 2 and bb['onBoss'] >= 1, bb)
+    worst = []
+    for key in BASIC20 + MIX24:
+        nm = h.ev("(k)=>KB.AWAKEN.moves[k].name", key)
+        pct, info = _far_one(h, key)
+        lo = FAR_MIN_OVR.get(key, FAR_MIN)
+        worst.append((pct, key))
+        check(f'{key} [{nm}]: 對 350px 外的魔王 ≥ {lo:.0%}（實測 {pct * SIM_HP0:.0f}/{SIM_HP0} = {pct:.0%}）',
+              lo <= pct <= BOSS_CAP, dict(pct=round(pct, 3), boss=info))
+    worst.sort()
+    print('   最低 5 名：' + ', '.join(f'{k} {p:.0%}' for p, k in worst[:5]))
+    check('44 招對遠處魔王沒有任何一招是 0 傷害', worst[0][0] > 0, worst[:3])
+
+
+# ---------------------------------------------------------------------------
 # 6. HUD 量表
 # ---------------------------------------------------------------------------
 def phase_hud(h):
@@ -576,7 +649,7 @@ def main():
         for name, fn in (('lv4', phase_lv4), ('gauge', phase_gauge), ('trigger', phase_trigger),
                          ('state', phase_state), ('moves', lambda hh: phase_moves(hh, a.shots)),
                          ('boss', phase_boss), ('mix', lambda hh: phase_mix(hh, a.shots)),
-                         ('mixboss', phase_mixboss), ('hud', phase_hud)):
+                         ('mixboss', phase_mixboss), ('farboss', phase_farboss), ('hud', phase_hud)):
             if only and name not in only: continue
             fn(h)
         miss = pg.evaluate("()=>[...KB.missing]")
