@@ -3208,10 +3208,197 @@ R5-7a 的觀察項（gravity ↑+X 文案不一致、圖鑑剪影露出帽子輪
 分工見 docs/TASKS.md Round 8。總控已預留 4 個新檔與 script 標籤（skins.js 在 art/world7 後、player 前；challenge.js 在 arena 後；saves.js、keyconfig.js 在 records 後）。
 
 ## ach2
-（agent 在此追加）
+> 檔案：`src/progression.js`、`src/menu.js`、`tools/test_progression.py`（只動這三個）。
+> 截圖：`shots/agent_ach2/`（每張都用 Read 實際看過）。**未 commit**、**未跑 build.py**（其他 agent 還在寫檔，dist 由總控收尾時重建）。
+
+### 給其他 agent 的介面期望（我照這個接線，介面不同請在自己的區段回報）
+| agent | 我預期的介面 | 我這邊的行為 |
+|---|---|---|
+| challenge | `KB.ChallengeScene`（無參數建構、自己回標題） | TitleMenu 出現「挑戰模式」→ `UI.leave(scene, () => KB.setScene(new KB.ChallengeScene()))`；**不存在就完全不顯示** |
+| saves-input | `KB.SaveSelectScene`（`opts` 可省略） | TitleMenu 出現「存檔槽」→ 同上 |
+| saves-input | `KB.KeyConfigMenu(opts?)` → `{update()→'back', draw(ctx)}`（已確認存在）；退而求其次 `new KB.KeyConfigScene({menu:true})` | 設定頁「按鍵設定 ›」→ 開子選單（我會先鋪一層暗底再交給它畫，因為它原本是整個場景） |
+| saves-input | **請在 `SAVES.load()/reload()` 的 `refresh()` 裡加一行 `KB.PROG.backfill && KB.PROG.backfill()`** | 換存檔槽後，該槽「早就達成」的成就才不會在下一次擊殺時突然跳卡片（我在 `beginLevel` 已經補了一次，但換槽當下就補更乾淨） |
+| skins | `KB.SKINS.list()`（已解鎖 id 陣列）/ `current()` / `set(id)` / `unlocked(id)` / `name(id)` | 設定頁「卡比配色」cycle；`list()` 已經只回已解鎖，我仍會再用 `unlocked()` 過濾一次（雙保險）。id 是字串或 `{id}` 物件都吃得下 |
+| awaken-mix | `KB.AWAKEN.activeT`（覺醒中 > 0）、`KB.AWAKEN.active()` | 成就「初次覺醒 / 覺醒十度」靠 `activeT` **0→正的上升緣**自動偵測；「覺醒斬王」在 `bossDefeated` 時看 `active()`。要更準可自己發 `KB.PROG.emit('awaken', {key})` |
+| helper2 | `KB.Helper.count()`、`KB.Helper.unionCD`（`union()` 時設成 600） | 「三人同行」看 `count() >= 2`、「合體技」看 `unionCD` 的上升緣；也接受 `emit('union')` |
+| helper2 | **夥伴擊殺**：夥伴招式產生的判定框已有 `fromHelper = true` → 我用 `KB.Enemy.prototype.die` 的 monkeypatch 記 `e._killSrc` 自動統計。合體技那一發 hitbox 若不是走 `callDef` 生成，請補 `hb.fromHelper = true` | 成就「夥伴突擊」（20 殺）；也接受 `emit('helperKill')` |
+| challenge / 總控（arena.js 現歸 challenge） | `KB.PROG.emit('arenaClear', {time, **beaten, total**})` | 「六王連霸」需要 `beaten`/`total`；沒傳時我會退而從 `KB.game.arena.order.length / beaten` 推 |
+| elements | （選配）`KB.PROG.emit('elemKill', {elem:'fire'/'ice'/'spark'/'wind'})` | 「元素全書」本來就會用 `KB.ELEM.of(e._killSrc)` 自動判，**不接也會過** |
+
+### 1) 「大王退治」誤觸發 —— 根因與修法
+**重現**（`tools/test_progression.py` 第 7 段，playwright 進 w5 room 5 → 跑完登場演出 → `boss.hp = 65%` → emit kill/hurt）。
+**根因**：`clear_w5`（還有 `arena_clear`）寫在 `checkPassive()` 裡，判斷式是 **`KB.save.cleared.w5`（存檔旗標）**，
+而 `checkPassive()` 是**每一次 `emit()` 都會跑**。所以只要存檔裡 `cleared.w5` 已經是 true
+（舊存檔／換存檔槽／同一個 session 之前已經打過一次 W5），成就就會在「**之後隨便哪一個事件**」才解鎖並跳卡片——
+在魔王房裡第一次擊殺雜兵時，畫面上就是「迪迪迪還剩 65% 血就跳出大王退治」（`shots/agent_fix7/awaken_boss_after.png`）。
+**不是** game.js 的 `bossDefeated` 發太早，也不是 `levelClear` 的問題（兩者時機都正確）。
+**修法**（`src/progression.js`）：
+1. 世界通關成就改成**事件驅動**：`emit('levelClear', {levelId})` 當下才 `unlock('clear_w5' / 'clear_w6' / 'clear_w7')`；
+   `arena_clear` 本來就有 `arenaClear` 事件；S 評價在 `saveRank()` 當下解鎖。
+2. 新增 **`P.unlock(id, {silent})` / `P.silent` / `P.backfill()`**：存檔裡「早就成立」的條件由 `backfill()`
+   **靜默補發**（寫存檔、不進 toast 佇列、不播音）。`backfill()` 在**載入時**與**每次 `beginLevel()`** 各跑一次。
+3. `checkPassive(deep)`：`deep` 只有 `backfill()` 會傳 true，那些「由存檔旗標回推」的成就只在 deep 時檢查。
+**順手修掉第二個誤觸發**：`seenCount()` 原本優先呼叫 `KB.UI.seenCount()`，而 `UI.isSeen()` 在 `?debug=1`（`UI.unlockAll`）時
+一律回 true → **任何 debug session 一開始就自動解鎖 `basic8` / `all20`**（實測：進 w5 魔王房 emit 一次 kill 就拿到 `all20`）。
+改成只讀 `KB.save.seen` 原始資料（`P.rawSeen()`）。
+另外新增「每 30 幀在 `P.update` 重算一次累積型成就」，讓收集類成就不用等下一個事件才跳卡片。
+
+### 2) 成就 40 條
+前 20 條 id 完全沒動（舊存檔相容），後 20 條是 Round 8 新增：
+
+| id | 名稱 | 條件 | 怎麼偵測 |
+|---|---|---|---|
+| `mix12` | 混合大師 | 做出 12 種混合能力 | `KB.save.prog.mixSeen` ∪ `KB.save.seen` ∩ `KB.MIX.isMix` |
+| `mix24` | 混合全通 | 做出 24 種混合能力 | 同上 |
+| `awaken_first` | 初次覺醒 | 第一次發動覺醒 | `KB.AWAKEN.activeT` 上升緣 / `emit('awaken')` |
+| `awaken10` | 覺醒十度 | 累計覺醒 10 次 | `prog.awakens` |
+| `awaken_boss` | 覺醒斬王 | 覺醒狀態下擊敗魔王 | `bossDefeated` 時 `KB.AWAKEN.active()` |
+| `lv4_any` | 極限突破 | 任一能力 Lv4 | `abilityXp ≥ 15` |
+| `lv4_five` | 五星俱全 | 5 種能力 Lv4 | 同上計數 |
+| `helper_two` | 三人同行 | 同時兩名夥伴 | `KB.Helper.count() ≥ 2` |
+| `union` | 合體技 | 發動夥伴合體技 | `KB.Helper.unionCD` 上升緣 / `emit('union')` |
+| `helper_kill20` | 夥伴突擊 | 夥伴累計 20 殺 | `e._killSrc.fromHelper` |
+| `elem_all` | 元素全書 | 火冰電風各擊敗 1 隻 | `KB.ELEM.of(e._killSrc)` |
+| `rank_s` | 華麗通關 | 任一世界 S 評價 | `saveRank()` |
+| `clear_w6` | 星海盡頭 | 通關 W6 | `levelClear` 事件 |
+| `clear_w7` | 真實結局 | 通關 W7（TRUE END） | `levelClear` 事件 |
+| `extra_all` | 異界霸者 | Extra 通關所有世界 | `KB.save.extraCleared` 覆蓋 `KB.LEVELS` |
+| `arena6` | 六王連霸 | 競技場 6 連戰全勝 | `arenaClear` 的 beaten/total（或 `KB.game.arena`） |
+| `stars21` | 星空滿天 | 21 顆大星星 | `KB.save.stars` |
+| `secret7` | 無所遁形 | 7 個秘密房 | `KB.save.secrets` |
+| `nohit_boss` | 完美討伐 | 無傷擊敗任一魔王 | `P.run.bossHurts`（魔王換人時歸零） |
+| `ach20` | 成就達人 | 解鎖 20 個成就（元成就） | `achCount()` |
+
+新的存檔欄位（都在 `KB.PROG.save()` 自動補齊，舊存檔相容）：
+`prog.mixSeen{key:1}`、`prog.awakens`、`prog.helperKills`、`prog.elemKills{fire/ice/spark/wind:1}`、`prog.arenaBeaten`。
+
+### 3) 成就頁（40 條 / 4 頁）
+`menu.js AbilityGallery` 成就分頁改版：**每頁 10 條 ×15px**（原本 6 條 ×28px）＝ 4 頁；
+每列＝獎盃 + 中文名 14px + 解鎖時間（`MM/DD HH:MM`，8×8 點陣字）+ `CLEAR`／鎖頭；
+游標那一列上下描金邊，**下方詳情條**畫該條的 hint 與 `UNLOCKED / LOCKED`；標題列「達成 n/40」。
+操作：`↑↓` 移動游標（越過頁邊自動翻頁）、`←→` 翻頁（游標跳到該頁第一條）、`SELECT` 切回能力分頁、`Z` 返回。
+成就 toast 的排隊機制（fix6 的一次 1 張 + 橫幅期間延後）完全沿用。
+
+### 4) 選單整合
+- **TitleMenu**：新增「挑戰模式」（`KB.ChallengeScene` 存在才有）、「存檔槽」（`KB.SaveSelectScene` 存在才有）。
+  順序＝繼續遊戲 / 新遊戲 / Extra 模式 / **挑戰模式** / 操作說明 / 能力圖鑑 / 成績板 / 競技場 / **存檔槽** / 設定。
+  **超過 7 項改捲動**：視窗固定 7 列（`TITLE_WINDOW`），`clampTop()` 讓游標永遠在視窗內，
+  右側畫 2px 位置條、上下畫閃爍小三角；**≤ 7 項時 `top` 恆為 0，版面與 Round 7 完全一樣**。
+- **SettingsMenu**：新增「卡比配色」（cycle `KB.SKINS`）與「按鍵設定 ›」（開 `KB.KeyConfigMenu()` 子選單）。
+  兩項都有 `need()` 存在條件，缺對應系統時整列不顯示（所以 5 / 6 / 7 項都跑得動）。
+  **版面改成依項目數計算**（7 項時行高 17px、面板自動置中長高），底部提示拆成兩行
+  「←→ 調整　Z 進入」「SELECT 返回　F 全螢幕」（原本一行會被 `fit()` 截成「SELECT …」）。
+  子選單畫之前先鋪 `rgba(6,10,20,0.94)` 暗底（KeyConfigMenu 原本是整個場景、自己不畫底）。
+
+### 進度
+- [09-12 R8-ACH2-1] 完成：**「大王退治」誤觸發根因定位 + 修正**（事件驅動 + `backfill()` 靜默補發），
+  順手修掉 `?debug=1` 讓 `basic8` / `all20` 自動解鎖的 `UI.seenCount` 陷阱。
+  驗證：`tools/test_progression.py` 第 7 段 6 項全 PASS（playwright 實機進 w5 魔王房打到 65%）。
+- [09-12 R8-ACH2-2] 完成：**成就 20 → 40 條**（含 Round 5~7 的混合 / 覺醒 / 夥伴 / 元素 / W6 / W7 / Extra / 競技場 / 評價 / 元成就），
+  新增 `KB.Enemy.prototype.die` 的 monkeypatch（記 `_killSrc`）讓「夥伴擊殺 / 元素擊殺」不用別人 emit 就統計得到。
+  驗證：**20 條新成就全部可觸發**（test 第 8 段）。
+- [09-12 R8-ACH2-3] 完成：**成就頁 4 頁版面**（每頁 10 條 + 解鎖時間 + 詳情條）。
+  驗證：`shots/agent_ach2/gallery_ach_p1~p4.png`、`gallery_ach_detail.png`。
+- [09-12 R8-ACH2-4] 完成：**選單整合**（挑戰模式 / 存檔槽 / 按鍵設定 / 卡比配色 + TitleMenu 捲動 + 設定頁動態版面）。
+  驗證：`shots/agent_ach2/title_menu.png`、`title_menu_scrolled.png`、`settings.png`、`settings_skin.png`、
+  `settings2_skincycle.png`（→ 切成「天空藍」）、`settings_keyconfig.png`。
+- [09-12 R8-ACH2-5] 收工驗證：`tools/test_progression.py` **101/101 PASS**（原 68 項 → 新增誤觸發回歸 6、新成就 10、
+  成就頁分頁 4、選單整合 9、定義完整性 5，並修掉 2 項因 saves-input / 40 條而過期的斷言）；`tools/engine_test.py` **118/118**；
+  `tools/test_extra.py` 53/53、`test_helper.py` 131/131、`test_awaken.py` 188/188、`test_saves.py` 67/67、`test_skins.py` 67/67；
+  `node tools/level_check.js` 0 error / 1 warn（既有）；`node --check` progression / menu 全過；
+  `playthrough.py --level w1 --ability sword --godmode` cleared 5835 幀 deaths=0 missing[]（與 fix7 完全相同）；
+  全程 0 console error / pageerror。
+
+### 未完成 / 已知問題（ach2）
+1. **沒有跑 `tools/build.py`**：同回合的 challenge / saves-input / skins / audio8 還在寫檔（`git status` 顯示 challenge.js 正在變動），
+   現在打包會把半成品內嵌進 dist → 由總控收尾時重建。
+2. `tools/test_challenge.py` 目前 91/93（「挑戰模式不寫一般通關旗標」「時限」兩項），是 challenge agent 正在寫的部分，與本次修改無關
+   （我沒動 challenge.js / arena.js / game.js）。
+3. 成就 toast 仍然只畫在遊戲 HUD 上：在結算 / 選關 / 標題 / 競技場結算解鎖的成就（`arena_clear`、`rank_s`、`arena6`）
+   只會直接記進存檔、不跳卡片（Round 6 就有的限制，需要動 ui.js / arena.js 才能補）。
+4. 「夥伴突擊 20 殺」依賴判定框上的 `fromHelper`；合體技那一發是直接 `new KB.Hitbox` 生的，若沒帶 `fromHelper` 就不計入（見上方介面期望表）。
+5. `KB.SAVES.load()` 目前不會呼叫 `KB.PROG.backfill()`；換存檔槽後要到下一次 `beginLevel()` 才補齊（不會誤跳卡片，只是成就頁晚一步更新）。
+6. 「六王連霸」在 arena.js 補傳 `beaten/total` 之前，靠 `KB.game.arena` 推——競技場結算時 `KB.game` 已經是上一場的 GameScene，
+   已在測試中驗證這條 fallback（`KB.game` 從不清空），但建議還是補傳參數。
 
 ## awaken-mix
-（agent 在此追加）
+> 擁有檔案：`src/awaken.js`、`src/art/kirby_awaken.js`、`tools/test_awaken.py`（**沒有動任何別人的檔案**）。
+> 截圖：`shots/agent_awakenmix/`（24 招各一張 + 3 張精靈總表，每張都用 Read 實際看過）。未 commit。
+
+### 24 招混合覺醒招（`KB.AWAKEN.moves`，名稱全部原創、與基本 20 招不重複）
+| mixkey | 成分 | 招名 | 段數 × 傷害 | 特色（兩個成分融合） |
+|---|---|---|---|---|
+| `flamesword` | fire+sword | 炎帝百斬 | 9×7 + 終結 8 | 亂向炎斬 ×3／段、每 3 段地面火劍氣 4 道、中段 8 道火波環射 |
+| `frostsword` | ice+sword | 永凍劍界 | 8×8（freeze）+ 8 | 畫面各處立冰劍 + 交叉斬 + 魔法陣，中段天降冰錐 |
+| `thunderblade` | spark+blade | 雷神一閃 | 4×8 + 一閃 24 | 收刀 22 幀 → 全畫面橫貫雷光一閃（hitstop 8）+ 6 道雷弧 |
+| `flamegun` | fire+gunner | 煉獄輪舞 | 7×6 + 收尾 3×9 + 8 | 子彈時間 60 + 每段 10 發火焰環彈 + 地面火海衝擊波 |
+| `frostgun` | ice+gunner | 絕零彈幕 | 8×6（freeze）+ 3×9 + 8 | 子彈時間 + 每段 12 發冰片環彈 + 全畫面結冰 |
+| `thunderbow` | spark+bow | 天雷千矢 | 8×7 + 8 | 天降雷矢 ×4／段 + 3 道落雷 + 電場 |
+| `flamehammer` | fire+hammer | 隕炎天崩 | 5×13 + 8 | 隕石落點光柱 + 雙向 256px 衝擊波 + 火球雨 + SMASH!／INFERNO!! |
+| `stonehammer` | stone+hammer | 大地終焉 | 5×13 + 8 | 4 根落石柱 + 280px 雙向衝擊波 + 滾石 |
+| `shadowblade` | cutter+ninja | 千影刃陣 | 9×7 + 8 | 影分身現身斬 + 6 把影刃環射 + 向心收束環 |
+| `starmage` | beam+mage | 銀河創世 | 7×10 + 8 | 六色魔法陣輪轉 + 天柱光束 + 6 向放射光 |
+| `frostdragon` | ice+dragon | 冰龍神咆哮 | 7×9（freeze）+ 8 | 左右貫穿冰息 + 天降冰彈 + 全畫面結冰收尾 |
+| `thundermech` | spark+mech | 雷神兵器 | 8×8 + 8 | 每段 4 發雷電飛彈 + 隔段主砲 + 電弧 + 齒輪 |
+| `flamebow` | fire+bow | 鳳凰流星 | 8×7 + 8 | 天降炎矢 ×4／段 + 鳳凰雙翼大弧 + 火星爆 |
+| `frosthammer` | ice+hammer | 冰河終焉 | 5×12（freeze）+ 8 | 272px 冰衝擊波 + 5 根冰柱 + FREEZE!／GLACIER!! |
+| `thundersword` | spark+sword | 雷帝百斬 | 9×7 + 8 | 亂向雷斬 ×3／段，每斬牽一道雷弧到卡比 |
+| `flameninja` | fire+ninja | 火遁・大焚天 | 9×7 + 8 | 分身煙遁斬 + 火遁手裡劍環射 + 收尾大火陣 |
+| `frostninja` | ice+ninja | 冰遁・絕零陣 | 9×7（freeze）+ 8 | 冰鏡分身 + 碎鏡冰片 + 冰手裡劍環射 |
+| `thundergun` | spark+gunner | 雷射死亡輪舞 | 7×7 + 3×9 + 8 | 子彈時間 + 6 道旋轉雷射 + 電擊彈環射 |
+| `stonegiant` | stone+giant | 山崩地裂 | 5×13 + 8 | 300px 雙向衝擊波 + 落石 ×4／段 + QUAKE!／COLLAPSE!! |
+| `flamedragon` | fire+dragon | 太陽龍神 | 7×9 + 8 | 頭上巨日 + 8 道放射光柱 + 左右貫穿龍焰 + 火雨 |
+| `thunderdragon` | spark+dragon | 雷雲龍神 | 7×9 + 8 | 5 道落雷柱 + 左右雷息 + 電場 |
+| `timebeam` | beam+time | 時空崩壞 | 9×7 + 解放 5×8 + 8 | **時停 150 幀 + 光柱**；時停解除瞬間 5 段光柱「一起落下」 |
+| `gravityblade` | cutter+gravity | 刃之黑洞 | 9×7 + 崩塌 14 | 吸走全場敵人／敵彈 + 4 把軌道刃向心收束 |
+| `hammermech` | hammer+mech | 軌道終焉鎚 | 5×13 + 8 | 軌道砲柱 + 264px 鎚擊衝擊波 + 飛彈齊射 + LOCK ON／ORBITAL!! |
+
+### 實作重點
+- **演出比基本覺醒更誇張**：共用 `intro2()`＝`letterbox 190~210` + `zoom 1.28~1.36` + **兩段 worldTint（成分 A 色 → 26 幀後成分 B 色）**
+  + flash + shake + hitstop + 魔法陣 + 光環 + `sigil()`；每招再至少疊 2 種以上 VFX（slash / beam / lightning / circle /
+  ring / shockwave / burst / afterimage / textPop）；一律 `finale()` 收招（白閃 + 大光環 + 招名 textPop + 追加判定）。
+  worldTint 的 alpha 刻意壓到 0.26 / 0.22（`A.start` 本身還有一層金色 0.35），疊起來才不會糊成一片單色看不見招式。
+- **判定一律帶 `awaken` 旗標**：全部走 `bigbox()`（全畫面判定框）與 `ashoot()`（本檔的投射物包裝，含新的 `rain()` / `ringShot()` 兩個共用零件），
+  所以 fix7 的魔王減傷（`BOSS_MUL 0.35`）與單次上限（`BOSS_CAP 0.35`）**24 招全部生效**，實測全部剛好收在 35%。
+- **`A.baseKey` 改成三段**：① 有專屬招 → 用專屬；② 沒有 → 退回主成分 A；③ 再退回成分 B。另加 `A.hasOwnMove(key)`。
+  新增 `A.MIX_ORDER`（24）與 `storm({delay})`（整段判定往後排，時停解放 / 子彈時間收尾齊射用）。
+- **音效（audio8 交件）**：`A.moveSfx(key)` 在 `A.exec` 內呼叫 —— 基本能力播 `awk_<key>`，
+  混合能力**疊加** `awk_<主成分 A>` + `mix_<mixkey>`；另外量表滿 `awk_ready`、發動 `awk_start`、結束 `awk_end`。
+- **新精靈（`src/art/kirby_awaken.js`）**：`kirby_awaken_cast` 24×24 ×2 幀（金色詠唱姿勢，雙手高舉 + 火花，anchor center，
+  用 `KB.fx` 以 alpha 0.82 疊在卡比身上）＋ `fx_awk_<mixkey>` 24×24 ×2 幀 **×24 張**（每招專屬「覺醒印記」＝
+  主成分圖騰鋪底 + 副成分圖騰疊上，17 種程序化圖騰 × 10 組元素色，自動描邊 + 白色火花）。MISSING SPRITES 仍為空。
+- **順手修掉一個既有小瑕疵**：`A.start` 會先收掉還飄在頭上的「覺醒 READY」textPop（原本會和招式中的
+  `SMASH!` / `時間停止` 疊成亂碼，截圖 `awk_flamehammer.png` 之前是「SMASHDY」）。
+
+### 進度
+- [09-12 R8-AWKMIX-1] 完成：前 6 招 **炎帝百斬 / 永凍劍界 / 雷神一閃 / 煉獄輪舞 / 絕零彈幕 / 天雷千矢**
+  + 共用零件 `intro2()` / `sigil()` / `finale()` / `rain()` / `ringShot()` / `storm({delay})` + `baseKey` 三段退回 + `A.hasOwnMove`。
+  驗證：`tools/test_awaken.py --only mix`；截圖 `shots/agent_awakenmix/awk_flamesword|frostsword|thunderblade|flamegun|frostgun|thunderbow.png`。
+- [09-12 R8-AWKMIX-2] 完成：第 7~12 招 **隕炎天崩 / 大地終焉 / 千影刃陣 / 銀河創世 / 冰龍神咆哮 / 雷神兵器**。
+  驗證：`--only mix,mixboss`；截圖 `awk_flamehammer|stonehammer|shadowblade|starmage|frostdragon|thundermech.png`。
+- [09-12 R8-AWKMIX-3] 完成：第 13~18 招 **鳳凰流星 / 冰河終焉 / 雷帝百斬 / 火遁・大焚天 / 冰遁・絕零陣 / 雷射死亡輪舞**
+  + 美術 `kirby_awaken_cast` 與 24 張 `fx_awk_<mixkey>`（`shots/agent_awakenmix/sheet_awk.png` / `sheet_awk2.png` / `sheet_cast.png`）。
+  驗證：`--only mix`；截圖 `awk_flamebow|frosthammer|thundersword|flameninja|frostninja|thundergun.png`。
+- [09-12 R8-AWKMIX-4] 完成：第 19~24 招 **山崩地裂 / 太陽龍神 / 雷雲龍神 / 時空崩壞 / 刃之黑洞 / 軌道終焉鎚**。
+  平衡微調：三把槍的子彈時間 110/120 → **60** 幀並補「收尾齊射 3×9」、時空崩壞的時停 200 → **150** 幀並補「解放 5×8」
+  ——原因是**時停 / 子彈時間期間魔王的無敵幀走得比較慢（或整個凍結），命中次數少到只剩 10~20%**；調整後 24 招一致落在 35%。
+  驗證：`--only mix,mixboss`；截圖 `awk_stonegiant|flamedragon|thunderdragon|timebeam|gravityblade|hammermech.png`。
+- [09-12 R8-AWKMIX-5] 完成：audio8 的音效接線（`A.moveSfx`：`awk_<basekey>` + `mix_<mixkey>` 疊加、`awk_ready` / `awk_start` / `awk_end`）。
+- [09-12 R8-AWKMIX-6] 收工驗證：`tools/test_awaken.py` **188/188 PASS**（原 109 項全數保留；新增 79 項＝
+  24 招各「打死 waddledee」+「結束回正常狀態」共 48、24 招「對 60HP 魔王模擬體單次覺醒 ≤ 40%」+ 總結 25、
+  MIX_ORDER / 專屬招 / 招名不重複 / baseKey 退回主成分 6；原本的「覺醒招共 20 招」改成「共 44 招（基本 20 + 混合 24）」）。
+  **24 招對魔王實測全部 21/60 = 35%**（正好收在 `BOSS_CAP`）。
+  回歸：`engine_test 118/118`、`test_progression 100/100`、`test_mix 245/245`、`test_mix2 343/343`、
+  `node --check src/*.js src/art/*.js` 全過、MISSING SPRITES 空、無 pageerror / console.error。
+
+### 已知問題 / 未完成（awaken-mix）
+1. 沒有跑 `tools/build.py`、沒有 commit（Round 8 其他 agent 仍在改 challenge / arena / menu / records）。
+2. 24 招對魔王**全部剛好打到上限 35%**（`BOSS_CAP`），彼此沒有差異化；若之後要讓「重鎚系對魔王更強、彈幕系更弱」，
+   需要的是給各招不同的 `BOSS_CAP`（目前是全域常數），判定與演出不用動。
+3. 時停（時空崩壞）與子彈時間（三把槍）期間，敵人的無敵幀會跟著變慢 → **對一般雜兵的實際 DPS 比帳面低**；
+   已用「解放 / 收尾齊射」補回來，但如果之後有人調 `game.js` 的 timeStop / slowMo 規則，這兩招要重新量一次。
+4. 截圖的取景幀寫在 `tools/test_awaken.py` 的 `SHOT_AT`（預設第 52 幀，4 招另外指定），
+   只是為了避開全畫面白閃，與遊戲行為無關。
 
 ## challenge
 （agent 在此追加）

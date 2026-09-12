@@ -96,10 +96,22 @@ def main():
         print('-' * 8, 'API')
         api = ev("()=>!!(KB.PROG && KB.PROG.level && KB.PROG.emit && KB.PROG.rankData && KB.PROG.ACH)")
         check('KB.PROG 已載入（level / emit / rankData / ACH）', api, api)
-        n_ach = ev("()=>KB.PROG.ACH.length")
-        check('成就共 20 條', n_ach == 20, n_ach)
-        ids = ev("()=>KB.PROG.ACH.map(a=>a.id)")
+        # ---- 成就定義完整性（Round 8 ach2：20 → 40 條）----
+        defs = ev("()=>KB.PROG.ACH.map(a=>({id:a.id, name:a.name, hint:a.hint}))")
+        check('成就共 40 條', len(defs) == 40, len(defs))
+        ids = [d['id'] for d in defs]
         check('成就 id 不重複', len(set(ids)) == len(ids), len(ids))
+        keep20 = ['first_ability', 'basic8', 'all20', 'lv3', 'combo10', 'nohit_world', 'clear_w5', 'arena_clear',
+                  'arena_fast', 'stars15', 'secret5', 'inhale_boss', 'possess', 'timestop5', 'mix_first', 'helper',
+                  'elec_water', 'burn10', 'hp1_boss', 'extra_clear']
+        check('Round 6 的 20 條 id 全部保留（舊存檔相容）', all(k in ids for k in keep20),
+              [k for k in keep20 if k not in ids])
+        bad_name = [d['id'] + ':' + str(d['name']) for d in defs if not d['name'] or len(d['name']) > 6]
+        check('每條名稱 ≤ 6 字且非空', not bad_name, bad_name)
+        bad_hint = [d['id'] + ':' + str(d['hint']) for d in defs if not d['hint'] or len(d['hint']) > 16]
+        check('每條描述 ≤ 16 字且非空', not bad_hint, bad_hint)
+        api8 = ev("()=>!!(KB.PROG.backfill && KB.PROG.achTimeStr && KB.PROG.mixCount && KB.PROG.autoDetect)")
+        check('新 API：backfill / achTimeStr / mixCount / autoDetect', api8, api8)
         patched = ev("()=>!!KB.Player.prototype.__progPatched")
         check('player.giveAbility / hurt 已 monkeypatch（未改 player.js）', patched, patched)
 
@@ -230,14 +242,16 @@ def main():
         dup = ev("()=>{ KB.PROG.toasts.length=0; KB.PROG.toastQ.length=0; const a = KB.PROG.unlock('helper'); const b = KB.PROG.unlock('helper'); return [a, b, KB.PROG.toastQ.length]; }")
         check('已解鎖的成就不會重複跳 toast', dup[1] is False and dup[2] <= 1, dup)
         # fix6：unlock 先進佇列，下一次 update 才放出來（橫幅演出期間會繼續等）
-        ts = ev("""()=>{ KB.PROG.reset(); KB.VFX.clear(); KB.game.abilityFlash = 0;
+        ts = ev("""()=>{ KB.PROG.reset(); KB.save.seen = {}; KB.save.cleared = {}; KB.save.stars = {}; KB.save.arena = {};
+          KB.save.extraCleared = {}; KB.VFX.clear(); KB.game.abilityFlash = 0;
           KB.PROG.toasts.length = 0; KB.PROG.toastQ.length = 0; KB.PROG.unlock('combo10');
           const q = KB.PROG.toastQ.length; KB.PROG.update(KB.game);
           const n = KB.PROG.toasts.length; for (let i=0;i<150;i++) KB.PROG.update(KB.game);
           return [q, n, KB.PROG.toasts.length]; }""")
         check('成就 toast 排隊 → 放出後 150 幀自動消失', ts == [1, 1, 0], ts)
         # fix6：變身橫幅期間延後、一次只顯示 1 張、位置在遊戲區右下（y 150~180）
-        dl = ev("""()=>{ KB.PROG.reset(); KB.VFX.clear(); KB.PROG.toasts.length=0; KB.PROG.toastQ.length=0;
+        dl = ev("""()=>{ KB.PROG.reset(); KB.save.seen = {}; KB.save.cleared = {}; KB.save.stars = {}; KB.save.arena = {};
+          KB.VFX.clear(); KB.PROG.toasts.length=0; KB.PROG.toastQ.length=0;
           KB.game.abilityFlash = 30;
           KB.PROG.unlock('combo10'); KB.PROG.unlock('lv3');
           for (let i=0;i<10;i++) KB.PROG.update(KB.game);
@@ -253,9 +267,11 @@ def main():
         check('成就 toast 畫在遊戲區右下（y 150~180）', 150 <= dl['y'] <= 180 - 26 + 4, dl['y'])
         # 存檔
         sv = ev("""()=>{ KB.PROG.reset(); KB.PROG.unlock('combo10');
-          const raw = JSON.parse(localStorage.getItem('kirbystar_save')||'{}');
-          return !!(raw.achievements && raw.achievements.combo10); }""")
-        check('成就寫進 localStorage 存檔', sv, sv)
+          // saves-input 上線後 KB.saveGame() 會寫進「目前的存檔槽」（kirbystar_save_N），舊版是 kirbystar_save
+          const keys = Object.keys(localStorage).filter(k => k.indexOf('kirbystar_save') === 0);
+          return keys.some(k => { try { const o = JSON.parse(localStorage.getItem(k) || '{}');
+            return !!(o.achievements && o.achievements.combo10); } catch (e) { return false; } }); }""")
+        check('成就寫進 localStorage 存檔（單一存檔或存檔槽）', sv, sv)
 
         # ------------------------------------------------------------------ 4. Style Rank
         print('-' * 8, 'Style Rank')
@@ -324,8 +340,226 @@ def main():
           const back = tap('jump');                // Z 離開
           tap('select'); const c = g.tab;          // → 回能力分頁
           return [a, b, p1, back, c, g.achPages, g.achList.length]; }""")
-        check('圖鑑 SELECT 切到成就分頁（%d 頁）' % gal[5], gal[0] == 0 and gal[1] == 1 and gal[6] == 20, gal)
+        check('圖鑑 SELECT 切到成就分頁（%d 頁）' % gal[5], gal[0] == 0 and gal[1] == 1 and gal[6] == 40, gal)
         check('成就分頁 ←→ 換頁、Z 返回、再按 SELECT 回能力分頁', gal[2] == 1 and gal[3] == 'back' and gal[4] == 0, gal)
+
+        # ------------------------------------------------------------------ 7. 成就誤觸發（大王退治）
+        print('-' * 8, '成就誤觸發回歸（Round 8 ach2）')
+        # 舊 bug：clear_w5 / arena_clear 寫在 checkPassive（每次 emit 都跑）→ 存檔裡 cleared.w5 已經是 true 時
+        #        會在「之後隨便哪一個事件」才解鎖並跳卡片 → shots/agent_fix7/awaken_boss_after.png
+        #        （迪迪迪還剩 65% 血就跳出「大王退治」）。
+        rep = ev("""()=>{ KB.PROG.reset(); KB.save.cleared = {}; KB.save.seen = {}; KB.save.arena = {};
+          __kb.release(); __kb.goto('game', {level:'w5', room:5, nofade:true});
+          KB.PROG.beginLevel(KB.game); __kb.step(3);
+          for (let i=0;i<200;i++) __kb.step(1);                       // 跑完魔王登場演出
+          const b = KB.game.boss; b.hp = Math.ceil(b.maxHp * 0.65);   // 打到剩 65%
+          for (let i=0;i<6;i++) KB.PROG.emit('kill', {score:100, cx:100, y:100});
+          KB.PROG.emit('hurt', {amount:1});
+          for (let i=0;i<40;i++) KB.PROG.update(KB.game);
+          return { hp: b.hp, max: b.maxHp, ach: Object.keys(KB.save.achievements),
+                   shown: KB.PROG.toasts.map(t=>t.id).concat(KB.PROG.toastQ.map(t=>t.id)) }; }""")
+        check('W5 魔王剩 65% 血：不會解鎖「大王退治」clear_w5',
+              'clear_w5' not in rep['ach'] and 'clear_w5' not in rep['shown'], rep)
+        check('（同時修掉）?debug=1 的 UI.seenCount 陷阱不會誤解鎖 basic8 / all20',
+              'all20' not in rep['ach'] and 'basic8' not in rep['ach'], rep['ach'])
+        check('魔王血量真的只剩 ~65%（重現條件成立）', rep['hp'] == round(rep['max'] * 0.65 + 0.4999), rep)
+        # 舊存檔（cleared.w5 已是 true）→ 進關卡時靜默補發，不會在魔王戰中途跳卡片
+        rep2 = ev("""()=>{ KB.PROG.reset(); KB.save.cleared = {w5: true}; KB.save.seen = {};
+          __kb.goto('game', {level:'w5', room:5, nofade:true});
+          KB.PROG.beginLevel(KB.game); __kb.step(3);
+          const silent = KB.PROG.has('clear_w5');
+          const q0 = KB.PROG.toasts.concat(KB.PROG.toastQ).map(t=>t.id);
+          for (let i=0;i<200;i++) __kb.step(1);
+          const b = KB.game.boss; b.hp = Math.ceil(b.maxHp * 0.65);
+          for (let i=0;i<6;i++) KB.PROG.emit('kill', {score:0});
+          for (let i=0;i<40;i++) KB.PROG.update(KB.game);
+          return { silent, q0, shown: KB.PROG.toasts.concat(KB.PROG.toastQ).map(t=>t.id) }; }""")
+        check('舊存檔已通關 W5 → beginLevel 靜默補發（有記錄、不跳卡片）',
+              rep2['silent'] and 'clear_w5' not in rep2['q0'] and 'clear_w5' not in rep2['shown'], rep2)
+        # 真的通關 W5 的當下才解鎖，而且會跳卡片
+        ok5 = ev("""()=>{ KB.PROG.reset(); KB.save.cleared = {}; KB.PROG.beginLevel(KB.game);
+          KB.PROG.toasts.length = 0; KB.PROG.toastQ.length = 0;
+          KB.save.cleared.w5 = true;                       // game.js levelClear 先寫旗標再 emit
+          KB.PROG.emit('levelClear', {levelId: 'w5'});
+          return { has: KB.PROG.has('clear_w5'), q: KB.PROG.toastQ.map(t=>t.id) }; }""")
+        check('真的通關 W5 的當下解鎖並跳卡片', ok5['has'] and 'clear_w5' in ok5['q'], ok5)
+        # backfill 本身不跳卡片、也不會重複解鎖
+        bf = ev("""()=>{ KB.PROG.reset(); KB.save.cleared = {w5:true, w6:true}; KB.save.arena = {cleared:true};
+          KB.PROG.toasts.length = 0; KB.PROG.toastQ.length = 0;
+          KB.PROG.backfill();
+          return { has: ['clear_w5','clear_w6','arena_clear'].map(i=>KB.PROG.has(i)),
+                   q: KB.PROG.toastQ.length + KB.PROG.toasts.length, silent: KB.PROG.silent }; }""")
+        check('backfill 一次補齊 clear_w5 / clear_w6 / arena_clear 且 0 卡片',
+              bf['has'] == [True, True, True] and bf['q'] == 0 and bf['silent'] == 0, bf)
+
+        # ------------------------------------------------------------------ 8. 新成就（Round 8 的 20 條）
+        print('-' * 8, '新成就觸發')
+        na = ev("""()=>{ KB.PROG.reset();
+          KB.save.cleared = {}; KB.save.seen = {}; KB.save.stars = {}; KB.save.arena = {}; KB.save.extraCleared = {};
+          KB.PROG.beginLevel(KB.game);
+          const H = KB.PROG.has.bind(KB.PROG), r = {};
+          // ① 覺醒：不靠 emit，自動偵測 KB.AWAKEN.activeT 由 0 變正
+          if (KB.AWAKEN) { KB.AWAKEN.activeT = 0; KB.PROG.update(KB.game); KB.AWAKEN.activeT = 60; KB.PROG.update(KB.game); KB.AWAKEN.activeT = 0; }
+          r.awaken_first = H('awaken_first');
+          for (let i=0;i<10;i++) KB.PROG.emit('awaken', {});
+          r.awaken10 = H('awaken10');
+          // ② 覺醒斬王 + 無傷討伐（bossHurts 0）
+          KB.PROG.run.bossHurts = 0;
+          KB.PROG.emit('bossDefeated', {hp: 5, awaken: true});
+          r.awaken_boss = H('awaken_boss'); r.nohit_boss = H('nohit_boss');
+          // ③ 魔王戰中被打到 → 拿不到「完美討伐」
+          KB.PROG.save().achievements.nohit_boss = 0; delete KB.PROG.save().achievements.nohit_boss;
+          KB.PROG.run.bossHurts = 2; KB.PROG.emit('bossDefeated', {hp: 5});
+          r.nohit_boss_blocked = !H('nohit_boss');
+          // ④ Lv4 / Lv4 ×5
+          KB.PROG.save().abilityXp = { sword:15, fire:15, ice:15, beam:15, cutter:15 };
+          KB.PROG.checkPassive(); r.lv4_any = H('lv4_any'); r.lv4_five = H('lv4_five');
+          // ⑤ 混合 12 / 24（從 KB.save.seen 推）
+          const mixKeys = Object.keys(KB.ABILITIES).filter(k => KB.MIX && KB.MIX.isMix && KB.MIX.isMix(k));
+          for (const k of mixKeys.slice(0, 12)) KB.save.seen[k] = true;
+          KB.PROG.checkPassive(); r.mix12 = H('mix12'); r.mix24_not_yet = !H('mix24');
+          for (const k of mixKeys) KB.save.seen[k] = true;
+          KB.PROG.checkPassive(); r.mix24 = H('mix24'); r.mixCount = KB.PROG.mixCount();
+          // ⑥ 夥伴：兩名（自動偵測 count()）、合體技（自動偵測 unionCD 由 0 變滿）
+          if (KB.Helper) {
+            const c0 = KB.Helper.count, cd0 = KB.Helper.unionCD;
+            KB.Helper.count = () => 2; KB.PROG.update(KB.game); KB.Helper.count = c0;
+            KB.Helper.unionCD = 0; KB.PROG.update(KB.game); KB.Helper.unionCD = 600; KB.PROG.update(KB.game);
+            KB.Helper.unionCD = cd0;
+          }
+          r.helper_two = H('helper_two'); r.union = H('union');
+          for (let i=0;i<20;i++) KB.PROG.emit('helperKill', {});
+          r.helper_kill20 = H('helper_kill20');
+          // ⑦ 元素全書
+          for (const el of ['fire','ice','spark','wind']) KB.PROG.emit('elemKill', {elem: el});
+          r.elem_all = H('elem_all');
+          // ⑧ W6 / W7 通關
+          KB.PROG.emit('levelClear', {levelId: 'w6'}); r.clear_w6 = H('clear_w6');
+          KB.PROG.emit('levelClear', {levelId: 'w7'}); r.clear_w7 = H('clear_w7');
+          // ⑨ S 評價
+          KB.PROG.saveRank('w1', 'S'); r.rank_s = H('rank_s');
+          // ⑩ 大星星 21 / 秘密房 7
+          KB.save.stars = {}; for (const l of KB.LEVELS) KB.save.stars[l.id] = [1,1,1];
+          KB.PROG.checkPassive(); r.stars21 = H('stars21');
+          for (const l of KB.LEVELS) KB.PROG.emit('secretRoom', {levelId: l.id, roomIdx: 9});
+          r.secret7 = H('secret7');
+          // ⑪ 競技場 6 連戰
+          KB.PROG.emit('arenaClear', {time: 60*200, beaten: 6, total: 6}); r.arena6 = H('arena6');
+          // ⑫ Extra 全通
+          for (const l of KB.LEVELS) KB.save.extraCleared[l.id] = true;
+          KB.PROG.checkPassive(); r.extra_all = H('extra_all');
+          // ⑬ 元成就
+          r.ach20 = H('ach20'); r.count = KB.PROG.achCount();
+          return r; }""")
+        NEW20 = ['awaken_first', 'awaken10', 'awaken_boss', 'nohit_boss', 'lv4_any', 'lv4_five', 'mix12', 'mix24',
+                 'helper_two', 'union', 'helper_kill20', 'elem_all', 'clear_w6', 'clear_w7', 'rank_s',
+                 'stars21', 'secret7', 'arena6', 'extra_all', 'ach20']
+        got_new = [k for k in NEW20 if na.get(k)]
+        check('新成就可被觸發 ≥ 8 條（實測 %d/20 條）' % len(got_new), len(got_new) >= 8, [k for k in NEW20 if not na.get(k)])
+        check('20 條新成就全部可觸發', len(got_new) == 20, [k for k in NEW20 if not na.get(k)])
+        check('覺醒自動偵測（KB.AWAKEN.activeT 0→正，不用 emit）', na.get('awaken_first'), na)
+        check('合體技 / 雙夥伴自動偵測（KB.Helper.unionCD / count）', na.get('union') and na.get('helper_two'), na)
+        check('混合能力計數 = 24（KB.MIX.isMix）', na.get('mixCount') == 24, na.get('mixCount'))
+        check('12 種混合時還拿不到「混合全通」', na.get('mix24_not_yet'), na)
+        check('魔王戰中被打到 → 拿不到「完美討伐」', na.get('nohit_boss_blocked'), na)
+        check('元成就「成就達人」＝其他 20 條達成', na.get('ach20') and na.get('count', 0) >= 21, na.get('count'))
+        # 競技場 6 連戰：arena.js 目前只傳 time → 退而從 KB.game.arena 推（KB.game 不會被清掉）
+        a6 = ev("""()=>{ KB.PROG.reset(); const old = KB.game.arena;
+          KB.game.arena = { beaten: 6, order: [1,2,3,4,5,6] };
+          KB.PROG.emit('arenaClear', {time: 60*200});
+          const r = [KB.PROG.has('arena6'), KB.PROG.count('arenaBeaten')];
+          KB.game.arena = old; return r; }""")
+        check('arenaClear 沒傳 beaten/total 時從 KB.game.arena 推出「六王連霸」', a6 == [True, 6], a6)
+        # 真的用火屬性打死敵人 → 元素全書的火（走 KB.Enemy.prototype.die 的 monkeypatch）
+        ek = ev("""()=>{ KB.PROG.reset(); __kb.goto('game', {level:'w1', room:0, nofade:true}); KB.PROG.beginLevel(KB.game); __kb.step(2);
+          const e = KB.game.entities.find(x => x.type === 'enemy'); if (!e) return null;
+          e.hurt(99, { kind: 'fireball', owner: 'player' });
+          __kb.step(2);
+          return { dead: !!e.dead, src: !!e._killSrc, elem: KB.PROG.save().prog.elemKills }; }""")
+        check('KB.Enemy.die monkeypatch 記下擊殺來源 → 元素擊殺自動統計',
+              ek and ek['dead'] and ek['src'] and (ek['elem'] or {}).get('fire') == 1, ek)
+
+        # ------------------------------------------------------------------ 9. 成就頁分頁（40 條 / 每頁 10）
+        print('-' * 8, '成就頁分頁')
+        ap = ev("""()=>{ const g = new KB.AbilityGallery(1);
+          const tap = k => { KB.input.setVirtual({[k]:true}, true); KB.input.update(); const r = g.update();
+                             KB.input.setVirtual({}, true); KB.input.update(); return r; };
+          const n = g.achList.length, pages = g.achPages;
+          tap('right'); const p1 = g.ap, i1 = g.ai;      // →：換頁，游標跟到該頁第一條
+          tap('down'); const i2 = g.ai;                   // ↓：移動游標
+          tap('left'); const p2 = g.ap;
+          // ↑ 越過頁首 → 自動翻到上一頁
+          g.ap = 1; g.ai = 10; tap('up'); const p3 = g.ap, i3 = g.ai;
+          return { n, pages, p1, i1, i2, p2, p3, i3 }; }""")
+        check('成就頁 40 條 / 4 頁（每頁 10 條）', ap['n'] == 40 and ap['pages'] == 4, ap)
+        check('←→ 翻頁、游標跟到該頁第一條', ap['p1'] == 1 and ap['i1'] == 10 and ap['p2'] == 0, ap)
+        check('↑↓ 移動游標、越過頁邊自動換頁', ap['i2'] == 11 and ap['p3'] == 0 and ap['i3'] == 9, ap)
+        drawn = ev("""()=>{ KB.PROG.reset(); const ids = KB.PROG.ACH.slice(0, 24).map(a=>a.id);
+          for (const id of ids) KB.save.achievements[id] = Date.now();
+          __kb.goto('title'); KB.scene.fade = 0; KB.scene.fadeDir = 0; __kb.step(2);
+          KB.scene.menu = new KB.TitleMenu(KB.scene); KB.scene.menu.sub = new KB.AbilityGallery(1);
+          const out = [];
+          for (let p = 0; p < 4; p++) { KB.scene.menu.sub.ap = p; KB.scene.menu.sub.ai = p * 10; __kb.step(1); __kb.render(); out.push(p); }
+          return { out: out.length, count: KB.PROG.achCount(), ts: KB.PROG.achTimeStr(ids[0]).length }; }""")
+        check('成就頁 4 頁都畫得出來（含解鎖時間字串）', drawn['out'] == 4 and drawn['ts'] == 11, drawn)
+
+        # ------------------------------------------------------------------ 10. 選單條件整合
+        print('-' * 8, '選單整合（挑戰 / 存檔槽 / 按鍵設定 / 配色）')
+        mn = ev("""()=>{ const C0 = KB.ChallengeScene, S0 = KB.SaveSelectScene;
+          KB.ChallengeScene = undefined; KB.SaveSelectScene = undefined;
+          const off = new KB.TitleMenu().items.map(i => i.id);
+          KB.ChallengeScene = function () { }; KB.SaveSelectScene = function () { };
+          const m = new KB.TitleMenu(); const on = m.items.map(i => i.id);
+          const win = m.win, n = m.items.length;
+          m.sel = n - 1; m.clampTop(); const topEnd = m.top;
+          m.sel = 0; m.clampTop(); const top0 = m.top;
+          KB.ChallengeScene = C0; KB.SaveSelectScene = S0;
+          return { off, on, win, n, topEnd, top0 }; }""")
+        check('沒有 KB.ChallengeScene / KB.SaveSelectScene 時不顯示入口',
+              'challenge' not in mn['off'] and 'saves' not in mn['off'], mn['off'])
+        check('有 KB.ChallengeScene → 標題選單出現「挑戰模式」', 'challenge' in mn['on'], mn['on'])
+        check('有 KB.SaveSelectScene → 標題選單出現「存檔槽」', 'saves' in mn['on'], mn['on'])
+        check('項目 > 7 時改成捲動（視窗 7 列，選到最後一項會捲到底）',
+              mn['n'] > 7 and mn['win'] == 7 and mn['topEnd'] == mn['n'] - 7 and mn['top0'] == 0, mn)
+        mn2 = ev("""()=>{ const S0 = KB.SKINS, K0 = KB.KeyConfigMenu, K1 = KB.KeyConfigScene;
+          KB.SKINS = undefined; KB.KeyConfigMenu = undefined; KB.KeyConfigScene = undefined;
+          const off = new KB.SettingsMenu().items.map(i => i.id);
+          KB.SKINS = { list: () => ['pink', 'blue'], current: () => 'pink', set: () => true,
+                       unlocked: () => true, name: id => (id === 'blue' ? '天空藍' : '櫻花粉') };
+          KB.KeyConfigMenu = function () { return { update: () => 'back', draw: () => { } }; };
+          const m = new KB.SettingsMenu(); const on = m.items.map(i => i.id);
+          // 卡比配色 cycle：→ 換成下一個已解鎖配色
+          let setTo = null; KB.SKINS.set = id => { setTo = id; return true; };
+          m.sel = on.indexOf('skin');
+          KB.input.setVirtual({ right: true }, true); KB.input.update(); m.update();
+          KB.input.setVirtual({}, true); KB.input.update();
+          // 按鍵設定 ›：Z 進入子選單
+          m.sel = on.indexOf('keyconfig');
+          KB.input.setVirtual({ jump: true }, true); KB.input.update(); m.update();
+          KB.input.setVirtual({}, true); KB.input.update();
+          const sub = !!m.sub;
+          m.update();                     // 子選單回傳 'back' → 關掉
+          const closed = !m.sub;
+          KB.SKINS = S0; KB.KeyConfigMenu = K0; KB.KeyConfigScene = K1;
+          return { off, on, setTo, sub, closed }; }""")
+        check('沒有 KB.SKINS / KB.KeyConfigMenu 時設定頁不顯示那兩項',
+              'skin' not in mn2['off'] and 'keyconfig' not in mn2['off'], mn2['off'])
+        check('有 KB.SKINS → 設定頁出現「卡比配色」，→ 會呼叫 KB.SKINS.set',
+              'skin' in mn2['on'] and mn2['setTo'] == 'blue', mn2)
+        check('有 KB.KeyConfigMenu → 設定頁出現「按鍵設定 ›」，Z 進入子選單並可返回',
+              'keyconfig' in mn2['on'] and mn2['sub'] and mn2['closed'], mn2)
+        skins_real = ev("""()=>{ if (!KB.SKINS || !KB.SKINS.list) return 'no-skins';
+          const m = new KB.SettingsMenu(); const ids = m.items.map(i => i.id);
+          return { has: ids.indexOf('skin') >= 0, list: KB.SKINS.list().length, name: KB.SKINS.name(KB.SKINS.current()) }; }""")
+        check('實機 KB.SKINS 也接得上（只列已解鎖）',
+              skins_real == 'no-skins' or (skins_real['has'] and skins_real['list'] >= 1 and skins_real['name']), skins_real)
+        draws = ev("""()=>{ __kb.goto('title'); KB.scene.fade = 0; KB.scene.fadeDir = 0; __kb.step(2);
+          const m = KB.scene.menu = new KB.TitleMenu(KB.scene); __kb.step(1); __kb.render();
+          m.sel = m.items.length - 1; m.clampTop(); __kb.step(1); __kb.render();
+          m.sub = new KB.SettingsMenu(); __kb.step(1); __kb.render();
+          return { n: m.items.length, set: m.sub.items.length }; }""")
+        check('標題選單（捲到底）與設定頁都畫得出來（%d / %d 項）' % (draws['n'], draws['set']),
+              draws['n'] >= 8 and draws['set'] >= 5, draws)
 
         check('全程無 console error / pageerror', not logs, logs[:3])
         b.close()

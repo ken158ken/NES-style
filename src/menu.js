@@ -226,14 +226,17 @@
   // ======================================================================
   // 能力圖鑑（Round 5：20 能力 → 縮圖列每頁 8 個、多頁；未發現的畫剪影）
   // ======================================================================
-  const ACH_PER_PAGE = 6;
+  // Round 8（ach2）：成就 40 條 → 每頁 10 條、4 頁。
+  // 版面：清單 10 列 ×15px（名稱 + CLEAR/鎖）＋ 下方詳情條（提示 + 解鎖時間）＋ 頁碼。
+  const ACH_PER_PAGE = 10;
+  const ACH_ROW_H = 15, ACH_TOP = 27;
   const GAL_PER_PAGE = 8;
   // 未發現的能力：名稱 / 說明 / 招式全部隱藏（連 hudName 首字都不露），只留剪影與「吸入 ??? 就能獲得」
   const UNKNOWN_CN = '？？？', UNKNOWN_EN = '???';
 
   class AbilityGallery {
     // Round 6：tab 0 = 能力圖鑑、tab 1 = 成就（SELECT 切換）
-    constructor(tab) { this.i = 0; this.t = 0; this.frame = 0; this.tab = tab | 0; this.ap = 0; UI.clearAbilityNew(); }
+    constructor(tab) { this.i = 0; this.t = 0; this.frame = 0; this.tab = tab | 0; this.ap = 0; this.ai = 0; UI.clearAbilityNew(); }
     get achList() { return (KB.PROG && KB.PROG.ACH) || []; }
     get achPages() { return Math.max(1, Math.ceil((this.achList.length || 1) / ACH_PER_PAGE)); }
     get keys() { return UI.abilityKeys(); }
@@ -246,9 +249,12 @@
       if (inp.pressed('select')) { this.tab = this.tab ? 0 : 1; sfx('menu'); return null; }
       if (inp.pressed('start') || inp.pressed('jump') || inp.pressed('attack')) { sfx('menu_back'); return 'back'; }
       if (this.tab === 1) {
-        const pg = this.achPages;
-        if (inp.pressed('right') || inp.pressed('down')) { this.ap = (this.ap + 1) % pg; sfx('menu'); }
-        if (inp.pressed('left') || inp.pressed('up')) { this.ap = (this.ap - 1 + pg) % pg; sfx('menu'); }
+        const pg = this.achPages, n = this.achList.length || 1;
+        // ←→ 翻頁；↑↓ 移動游標（跨頁時自動換頁）
+        if (inp.pressed('right')) { this.ap = (this.ap + 1) % pg; this.ai = Math.min(n - 1, this.ap * ACH_PER_PAGE); sfx('menu'); }
+        if (inp.pressed('left')) { this.ap = (this.ap - 1 + pg) % pg; this.ai = Math.min(n - 1, this.ap * ACH_PER_PAGE); sfx('menu'); }
+        if (inp.pressed('down')) { this.ai = (this.ai + 1) % n; this.ap = Math.floor(this.ai / ACH_PER_PAGE); sfx('menu'); }
+        if (inp.pressed('up')) { this.ai = (this.ai - 1 + n) % n; this.ap = Math.floor(this.ai / ACH_PER_PAGE); sfx('menu'); }
         return null;
       }
       const n = this.keys.length || 1;
@@ -266,28 +272,41 @@
       KB.rect(ctx, on === 0 ? 10 : 80, 21, on === 0 ? 60 : 32, 1, C.yellow);
       KB.text(ctx, 'SELECT', 116, 11, { color: '#5c6884' });     // ← 提示：SELECT 切換分頁
     }
-    // 成就分頁：每頁 7 條，未解鎖 = 灰字 + 提示
+    // 成就分頁（40 條 / 每頁 10 條）：清單只放名稱與狀態，游標那一條的提示與解鎖時間畫在下方詳情條
     drawAch(ctx) {
-      const list = this.achList, got = (KB.PROG && KB.PROG.achCount) ? KB.PROG.achCount() : 0;
+      const PG = KB.PROG, list = this.achList, total = list.length;
+      const got = (PG && PG.achCount) ? PG.achCount() : 0;
       KB.rect(ctx, 0, 0, W, H, 'rgba(0,0,0,0.72)');
       panel(ctx, 4, 4, 248, 210);
       this.drawTabs(ctx);
-      T(ctx, '達成 ' + got + '/' + list.length, 242, 8, { color: got >= list.length && list.length ? C.yellow : '#8fa0bc', size: UI.MS_SMALL, align: 'right' });
+      T(ctx, '達成 ' + got + '/' + total, 242, 8, { color: got >= total && total ? C.yellow : '#8fa0bc', size: UI.MS_SMALL, align: 'right' });
       KB.rect(ctx, 14, 23, 228, 1, '#405070');
-      if (!list.length) { fit(ctx, '成就系統尚未載入', 128, 100, 228, { color: C.grey, align: 'center', size: MS() }); return; }
-      // 每列 26px：上列名稱 14px（y..y+14）、下列提示 12px（y+14..y+26），剛好不互相壓到
+      if (!total) { fit(ctx, '成就系統尚未載入', 128, 100, 228, { color: C.grey, align: 'center', size: MS() }); return; }
+      if (this.ai >= total) this.ai = total - 1;
       const p0 = this.ap * ACH_PER_PAGE;
       for (let k = 0; k < ACH_PER_PAGE; k++) {
-        const a = list[p0 + k]; if (!a) break;
-        const y = 27 + k * 28, ok = !!(KB.PROG && KB.PROG.has && KB.PROG.has(a.id));
-        KB.rect(ctx, 12, y - 1, 232, 26, ok ? 'rgba(44,36,80,0.7)' : 'rgba(20,26,44,0.55)');
-        if (KB.PROG && KB.PROG.drawTrophy) KB.PROG.drawTrophy(ctx, 16, y + 8, ok ? C.yellow : '#3c465c');
-        fit(ctx, a.name, 30, y, 110, { color: ok ? C.yellow : '#6c7c98', size: MS() });
-        fit(ctx, a.hint, 30, y + 14, 196, { color: ok ? '#98a8c0' : '#5c6884', size: UI.MS_SMALL });
-        if (ok) KB.text(ctx, 'CLEAR', 240, y + 2, { color: '#80e0a0', align: 'right' });
-        else sprAt(ctx, 'uifb_lock', 234, y + 1, 'tl');
+        const idx = p0 + k, a = list[idx]; if (!a) break;
+        const y = ACH_TOP + k * ACH_ROW_H, ok = !!(PG && PG.has && PG.has(a.id)), sel = idx === this.ai;
+        KB.rect(ctx, 12, y - 1, 232, ACH_ROW_H - 1, sel ? 'rgba(72,60,120,0.85)' : (ok ? 'rgba(44,36,80,0.65)' : 'rgba(20,26,44,0.5)'));
+        if (sel) { KB.rect(ctx, 12, y - 1, 1, ACH_ROW_H - 1, C.yellow); KB.rect(ctx, 243, y - 1, 1, ACH_ROW_H - 1, C.yellow); }
+        if (PG && PG.drawTrophy) PG.drawTrophy(ctx, 16, y + 2, ok ? C.yellow : '#3c465c');
+        fit(ctx, a.name, 30, y, 96, { color: ok ? C.yellow : '#6c7c98', size: MS() });
+        if (ok) {
+          const ts = (PG && PG.achTimeStr) ? PG.achTimeStr(a.id) : '';
+          if (ts) KB.text(ctx, ts, 198, y + 3, { color: '#6c7c98', align: 'right' });
+          KB.text(ctx, 'CLEAR', 240, y + 3, { color: '#80e0a0', align: 'right' });
+        } else if (!sprAt(ctx, 'uifb_lock', 234, y + 1, 'tl')) KB.text(ctx, '-', 240, y + 3, { color: '#4c5670', align: 'right' });
       }
-      fit(ctx, '←→ 翻頁　SELECT 能力　Z 返回', 113, 199, 202, { color: C.grey, align: 'center', size: MS() });
+      // 詳情條：游標那一條的說明（未解鎖＝要做什麼；已解鎖＝條件 + 解鎖時間）
+      const cur = list[this.ai], okc = !!(cur && PG && PG.has && PG.has(cur.id));
+      const dy = ACH_TOP + ACH_PER_PAGE * ACH_ROW_H + 2;
+      KB.rect(ctx, 12, dy, 232, 1, '#405070');
+      if (cur) {
+        fit(ctx, cur.hint, 14, dy + 3, 168, { color: okc ? '#c8d8f0' : '#8fa0bc', size: UI.MS_SMALL });
+        const ts = okc && PG.achTimeStr ? PG.achTimeStr(cur.id) : '';
+        KB.text(ctx, okc ? (ts || 'UNLOCKED') : 'LOCKED', 242, dy + 5, { color: okc ? '#80e0a0' : '#5c6884', align: 'right' });
+      }
+      fit(ctx, '↑↓ 選擇　←→ 翻頁　Z 返回', 113, 199, 202, { color: C.grey, align: 'center', size: MS() });
       KB.text(ctx, (this.ap + 1) + '/' + this.achPages, 242, 202, { color: C.grey, align: 'right' });
     }
     draw(ctx) {
@@ -398,7 +417,49 @@
     { id: 'hints', label: '按鍵提示' },
     { id: 'scale', label: '畫面縮放', cycle: [0, 2, 3, 4], names: ['自動', '2x', '3x', '4x'] },
     { id: 'vfx', label: '特效強度', cycle: ['high', 'mid', 'low'], names: ['高', '中', '低'], str: true },
+    // ── Round 8（ach2 整合）：下面兩項在對應系統載入時才出現 ─────────────────────
+    // skins agent：KB.SKINS.list() / current() / set(id) / unlocked(id) / name(id)
+    { id: 'skin', label: '卡比配色', skins: true, need: () => !!(KB.SKINS && KB.SKINS.list) },
+    // saves-input agent：KB.KeyConfigMenu()（子選單版，update() 回傳 'back'）；只有 KeyConfigScene 時退而用 {menu:true}
+    {
+      id: 'keyconfig', label: '按鍵設定', arrow: true,
+      need: () => !!(KB.KeyConfigMenu || KB.KeyConfigScene),
+      sub: () => (KB.KeyConfigMenu ? KB.KeyConfigMenu() : (KB.KeyConfigScene ? new KB.KeyConfigScene({ menu: true }) : null)),
+    },
   ];
+  /** 目前實際要顯示的設定項（依存在條件過濾；每次開啟設定頁時重算） */
+  function setItems() { return SET_ITEMS.filter(it => !it.need || it.need()); }
+  // 卡比配色：只列已解鎖的
+  function skinList() {
+    const S = KB.SKINS; if (!S || !S.list) return [];
+    let l = [];
+    try { l = S.list() || []; } catch (e) { return []; }
+    l = l.map(x => (x && typeof x === 'object') ? (x.id || x.key || '') : x).filter(Boolean);
+    if (S.unlocked) l = l.filter(id => { try { return S.unlocked(id); } catch (e) { return true; } });
+    return l;
+  }
+  function skinName(id) {
+    const S = KB.SKINS;
+    try { if (S && S.name) return S.name(id) || String(id); } catch (e) { }
+    return String(id || '-');
+  }
+  function skinStep(d) {
+    const S = KB.SKINS, l = skinList(); if (!S || !l.length) return null;
+    let cur = null;
+    try { cur = S.current ? S.current() : null; } catch (e) { }
+    cur = (cur && typeof cur === 'object') ? (cur.id || cur.key) : cur;
+    let i = l.indexOf(cur); if (i < 0) i = 0;
+    const id = l[(i + d + l.length) % l.length];
+    try { if (S.set) S.set(id); } catch (e) { }
+    return id;
+  }
+  function skinCurName() {
+    const S = KB.SKINS, l = skinList(); if (!S || !l.length) return '-';
+    let cur = null;
+    try { cur = S.current ? S.current() : null; } catch (e) { }
+    cur = (cur && typeof cur === 'object') ? (cur.id || cur.key) : cur;
+    return skinName(cur || l[0]);
+  }
   function slider(ctx, x, y, level) {
     for (let i = 0; i < 10; i++) {
       const cx = x + i * 8, on = i < level;
@@ -407,14 +468,30 @@
     }
   }
   class SettingsMenu {
-    constructor() { this.sel = 0; this.frame = 0; }
+    constructor() { this.sel = 0; this.frame = 0; this.items = setItems(); this.sub = null; }
     update() {
       this.frame++;
-      const inp = KB.input, n = SET_ITEMS.length, it = SET_ITEMS[this.sel];
+      // 子選單（按鍵設定）：吃掉輸入直到它回傳 'back'
+      if (this.sub) {
+        let r = null;
+        try { r = this.sub.update(1); } catch (e) { r = 'back'; }
+        if (r === 'back') { this.sub = null; sfx('menu_back'); }
+        return null;
+      }
+      const items = this.items = this.items && this.items.length ? this.items : setItems();
+      const inp = KB.input, n = items.length, it = items[this.sel] || items[0];
       if (inp.pressed('down')) { this.sel = (this.sel + 1) % n; sfx('menu'); }
       if (inp.pressed('up')) { this.sel = (this.sel - 1 + n) % n; sfx('menu'); }
       const d = inp.pressed('right') ? 1 : inp.pressed('left') ? -1 : 0;
-      if (it.vol) {
+      if (it.sub) {
+        if (inp.pressed('jump') || inp.pressed('attack')) {
+          const sc = it.sub();
+          if (sc) { sfx('select'); this.sub = sc; if (sc.enter) { try { sc.enter(); } catch (e) { } } return null; }
+        }
+      } else if (it.skins) {
+        const step = d || (inp.pressed('jump') || inp.pressed('attack') ? 1 : 0);
+        if (step && skinStep(step)) sfx('menu');
+      } else if (it.vol) {
         if (d) { UI.volStep(it.vol, d); sfx('menu'); }
         if (inp.pressed('jump') || inp.pressed('attack')) { UI.toggleVol(it.vol); sfx('menu'); }
       } else if (it.cycle) {
@@ -434,24 +511,35 @@
     }
     draw(ctx) {
       const ms = MS();
+      // 子選單（按鍵設定）自己不畫底（它原本是整個場景），這裡先鋪一層暗底再交給它
+      if (this.sub) { KB.rect(ctx, 0, 0, W, H, 'rgba(6,10,20,0.94)'); try { this.sub.draw(ctx); return; } catch (e) { this.sub = null; } }
+      const items = this.items = this.items && this.items.length ? this.items : setItems();
+      const n = items.length;
+      // 版面隨項目數收斂（5 項＝原本的 y36 面板；7 項時整塊往上長，兩行提示仍在面板內）
+      const rowH = n >= 7 ? 17 : 18;
+      const h = 34 + 6 + n * rowH + 6 + 32, py = Math.max(14, Math.round((H - h) / 2));
       KB.rect(ctx, 0, 0, W, H, 'rgba(0,0,0,0.7)');
-      panel(ctx, 24, 36, 208, 158);
-      T(ctx, '設定', 128, 40, { color: C.yellow, align: 'center', size: 16 });
-      KB.rect(ctx, 34, 64, 188, 1, '#405070');
+      panel(ctx, 24, py, 208, h);
+      T(ctx, '設定', 128, py + 4, { color: C.yellow, align: 'center', size: 16 });
+      const divY = py + 28, y0 = divY + 6;
+      KB.rect(ctx, 34, divY, 188, 1, '#405070');
       const st = UI.settings();
-      for (let i = 0; i < SET_ITEMS.length; i++) {
-        const it = SET_ITEMS[i], y = 70 + i * 18, sel = this.sel === i;
+      for (let i = 0; i < n; i++) {
+        const it = items[i], y = y0 + i * rowH, sel = this.sel === i;
         if (sel) cursor(ctx, 34, y + 3, this.frame);
         fit(ctx, it.label, 48, y, 66, { color: sel ? C.yellow : '#fff', size: ms });
         if (it.vol) { slider(ctx, 122, y + 2, UI.volLevel(it.vol)); KB.text(ctx, String(UI.volLevel(it.vol)), 222, y + 3, { color: '#c8d8f0', align: 'right' }); }
+        else if (it.arrow) fit(ctx, '設定 ›', 222, y, 76, { color: sel ? C.yellow : '#80e0a0', align: 'right', size: ms });
+        else if (it.skins) fit(ctx, skinCurName(), 222, y, 96, { color: '#80e0a0', align: 'right', size: ms });
         else if (it.cycle) {
           let k = it.cycle.indexOf(it.str ? (st[it.id] || it.cycle[0]) : (st[it.id] | 0)); if (k < 0) k = 0;
           T(ctx, it.names[k], 222, y, { color: k === 0 ? '#c8d8f0' : '#80e0a0', align: 'right', size: ms });
         } else T(ctx, onOff(st[it.id]), 222, y, { color: st[it.id] ? '#80e0a0' : C.grey, align: 'right', size: ms });
       }
-      KB.rect(ctx, 34, 158, 188, 1, '#405070');
-      fit(ctx, '←→ 調整　SELECT 返回', 128, 162, 196, { color: C.grey, align: 'center', size: ms });
-      fit(ctx, 'F：全螢幕切換', 128, 177, 196, { color: C.grey, align: 'center', size: ms });
+      const fy = y0 + n * rowH + 4;
+      KB.rect(ctx, 34, fy, 188, 1, '#405070');
+      fit(ctx, '←→ 調整　Z 進入', 128, fy + 4, 196, { color: C.grey, align: 'center', size: ms });
+      fit(ctx, 'SELECT 返回　F 全螢幕', 128, fy + 19, 196, { color: C.grey, align: 'center', size: ms });
     }
   }
   KB.SettingsMenu = SettingsMenu;
@@ -462,6 +550,9 @@
   const anyCleared = () => !!(KB.save && KB.save.cleared && Object.keys(KB.save.cleared).some(k => KB.save.cleared[k]));
   const anyPlayed = () => !!(KB.save && KB.save.playCount && Object.keys(KB.save.playCount).length);
 
+  // Round 8（ach2）：標題選單最多同時顯示幾項；超過就捲動（上下各畫一個小箭頭）
+  const TITLE_WINDOW = 7;
+
   class TitleMenu {
     constructor() {
       this.items = [];
@@ -469,13 +560,26 @@
       this.items.push({ id: 'new', label: '新遊戲' });
       // Extra 模式：通關 W5 後解鎖（KB.session.extra，由 player2 的難度調整讀取）
       if (KB.DEBUG || (KB.save && KB.save.cleared && KB.save.cleared.w5)) this.items.push({ id: 'extra', label: 'Extra 模式' });
+      // Round 8（challenge agent）：挑戰模式 —— KB.ChallengeScene 存在才顯示
+      if (KB.ChallengeScene) this.items.push({ id: 'challenge', label: '挑戰模式' });
       this.items.push({ id: 'help', label: '操作說明' }, { id: 'gallery', label: '能力圖鑑' });
       // Round 7（extra）：本機成績板（有任何通關 / 通關次數紀錄，或 ?debug=1 時顯示）
       if (KB.RecordsScene && (KB.DEBUG || anyCleared() || anyPlayed())) this.items.push({ id: 'records', label: '成績板' });
       // 競技場：通關 W5（或 ?debug=1）後解鎖
       if (KB.ArenaScene && (KB.DEBUG || (KB.save && KB.save.cleared && KB.save.cleared.w5))) this.items.push({ id: 'arena', label: '競技場' });
+      // Round 8（saves-input agent）：存檔槽 —— KB.SaveSelectScene 存在才顯示
+      if (KB.SaveSelectScene) this.items.push({ id: 'saves', label: '存檔槽' });
       this.items.push({ id: 'settings', label: '設定' });
-      this.sel = 0; this.frame = 0; this.page = 'main'; this.sub = null;
+      this.sel = 0; this.top = 0; this.frame = 0; this.page = 'main'; this.sub = null;
+    }
+    /** 捲動視窗：項目 ≤ TITLE_WINDOW 時完全維持原本的版面（top 恆為 0） */
+    get win() { return Math.min(this.items.length, TITLE_WINDOW); }
+    clampTop() {
+      const n = this.items.length, w = this.win;
+      if (n <= w) { this.top = 0; return; }
+      if (this.sel < this.top) this.top = this.sel;
+      if (this.sel > this.top + w - 1) this.top = this.sel - w + 1;
+      this.top = Math.max(0, Math.min(n - w, this.top));
     }
     update(scene) {
       this.frame++;
@@ -489,6 +593,7 @@
       const n = this.items.length;
       if (inp.pressed('down')) { this.sel = (this.sel + 1) % n; sfx('menu'); }
       if (inp.pressed('up')) { this.sel = (this.sel - 1 + n) % n; sfx('menu'); }
+      this.clampTop();
       if (inp.pressed('select')) { scene.menu = null; sfx('menu_back'); return; }
       if (inp.pressed('jump') || inp.pressed('attack') || inp.pressed('start')) {
         const it = this.items[this.sel];
@@ -500,6 +605,8 @@
         else if (it.id === 'gallery') this.sub = new AbilityGallery();
         else if (it.id === 'arena') { UI.leave(scene, () => KB.setScene(new KB.ArenaScene())); }
         else if (it.id === 'records') { UI.leave(scene, () => KB.setScene(new KB.RecordsScene())); }
+        else if (it.id === 'challenge') { UI.leave(scene, () => KB.setScene(new KB.ChallengeScene())); }
+        else if (it.id === 'saves') { UI.leave(scene, () => KB.setScene(new KB.SaveSelectScene())); }
         else if (it.id === 'settings') this.sub = new SettingsMenu();
       }
     }
@@ -507,19 +614,30 @@
       if (this.page === 'help') { UI.drawHelp(ctx, { hint: 'Z / SELECT：返回選單' }); return; }
       if (this.sub) { this.sub.draw(ctx); return; }
       // R2-P2-16：面板固定從 logo 底下（y=64）開始、最多長到 y=182（不壓底部資訊列），行高依項目數收斂
-      const ms = MS(), n = this.items.length;
+      const ms = MS(), n = this.items.length, w = this.win;
       const y0 = (UI.TITLE_MENU_TOP || 64), bot = (UI.TITLE_MENU_BOTTOM || 182);
-      const rowH = Math.max(14, Math.min(19, Math.floor((bot - y0 - 12) / n))), h = 12 + n * rowH;
+      const rowH = Math.max(14, Math.min(19, Math.floor((bot - y0 - 12) / w))), h = 12 + w * rowH;
       panel(ctx, 112, y0, 136, h);
-      const gnew = UI.abilityNew();
-      for (let i = 0; i < n; i++) {
-        const y = y0 + 6 + i * rowH, sel = this.sel === i;
+      this.clampTop();
+      const gnew = UI.abilityNew(), top = this.top;
+      for (let k = 0; k < w; k++) {
+        const i = top + k; if (i >= n) break;
+        const y = y0 + 6 + k * rowH, sel = this.sel === i;
         if (sel) cursor(ctx, 124, y + 3, this.frame);
         T(ctx, this.items[i].label, 142, y, { color: sel ? C.yellow : '#fff', size: ms });
         // 能力圖鑑有新發現 → 右側閃爍 NEW!（打開圖鑑時清掉 KB.save.seenNew）
         if (gnew && this.items[i].id === 'gallery' && ((this.frame >> 4) & 1)) {
           KB.text(ctx, 'NEW!', 242, y + 4, { color: C.pink, align: 'right', outline: '#401828' });
         }
+      }
+      // 捲動指示（項目超過視窗時才畫）：上下各一個 5×3 的小三角 + 右側位置條
+      if (n > w) {
+        const blink = (this.frame >> 3) & 1;
+        if (top > 0 && blink) for (let r = 0; r < 3; r++) KB.rect(ctx, 178 - r, y0 + 1 + r, 1 + r * 2, 1, C.yellow);
+        if (top + w < n && blink) for (let r = 0; r < 3; r++) KB.rect(ctx, 176 + r, y0 + h - 4 + r, 5 - r * 2, 1, C.yellow);
+        const barH = Math.max(6, Math.round((h - 10) * w / n)), barY = y0 + 5 + Math.round((h - 10 - barH) * top / (n - w));
+        KB.rect(ctx, 244, y0 + 5, 2, h - 10, '#2a3450');
+        KB.rect(ctx, 244, barY, 2, barH, C.yellow);
       }
       fit(ctx, '↑↓ 選擇　Z 確認　SELECT 返回', 128, 204, 250, { color: '#7c8ca8', align: 'center', size: ms });
     }
