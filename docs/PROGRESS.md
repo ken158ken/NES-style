@@ -3384,9 +3384,9 @@ R5-7a 的觀察項（gravity ↑+X 文案不一致、圖鑑剪影露出帽子輪
   ——原因是**時停 / 子彈時間期間魔王的無敵幀走得比較慢（或整個凍結），命中次數少到只剩 10~20%**；調整後 24 招一致落在 35%。
   驗證：`--only mix,mixboss`；截圖 `awk_stonegiant|flamedragon|thunderdragon|timebeam|gravityblade|hammermech.png`。
 - [09-12 R8-AWKMIX-5] 完成：audio8 的音效接線（`A.moveSfx`：`awk_<basekey>` + `mix_<mixkey>` 疊加、`awk_ready` / `awk_start` / `awk_end`）。
-- [09-12 R8-AWKMIX-6] 收工驗證：`tools/test_awaken.py` **188/188 PASS**（原 109 項全數保留；新增 79 項＝
+- [09-12 R8-AWKMIX-6] 收工驗證：`tools/test_awaken.py` **189/189 PASS**（原 109 項全數保留；新增 80 項＝
   24 招各「打死 waddledee」+「結束回正常狀態」共 48、24 招「對 60HP 魔王模擬體單次覺醒 ≤ 40%」+ 總結 25、
-  MIX_ORDER / 專屬招 / 招名不重複 / baseKey 退回主成分 6；原本的「覺醒招共 20 招」改成「共 44 招（基本 20 + 混合 24）」）。
+  MIX_ORDER / 專屬招 / 招名不重複 / baseKey 退回主成分 6、新精靈（cast + 24 張印記）每招都會疊上 1；原本的「覺醒招共 20 招」改成「共 44 招（基本 20 + 混合 24）」）。
   **24 招對魔王實測全部 21/60 = 35%**（正好收在 `BOSS_CAP`）。
   回歸：`engine_test 118/118`、`test_progression 100/100`、`test_mix 245/245`、`test_mix2 343/343`、
   `node --check src/*.js src/art/*.js` 全過、MISSING SPRITES 空、無 pageerror / console.error。
@@ -3401,6 +3401,94 @@ R5-7a 的觀察項（gravity ↑+X 文案不一致、圖鑑剪影露出帽子輪
    只是為了避開全畫面白閃，與遊戲行為無關。
 
 ## challenge
+> 檔案：`src/challenge.js`（新，原為空殼）、`src/game.js`（7 個鉤子）、`src/records.js`（+「挑戰」頁）、
+> `src/arena.js`（Boss Rush 變體）、`tools/test_challenge.py`（新）、`tools/playthrough.py`（+`--challenge`）。
+> 截圖：`shots/agent_challenge/`（每張都用 Read 實際看過）。**未 commit**。
+
+### KB.CHALLENGE API（其他 agent 照這個介面呼叫）
+| 分類 | 呼叫 | 說明 |
+|---|---|---|
+| 入口 | `KB.ChallengeScene(sel?)` | 挑戰選單場景（`new` 後 `KB.setScene`）；SELECT 自己回標題。**ach2 的 TitleMenu 以「KB.ChallengeScene 存在」為條件掛入口** |
+| 開始 | `KB.CHALLENGE.startTime(levelId)` | 時間攻擊（無限命、計時 mm:ss.ff） |
+| | `KB.CHALLENGE.startNohit(levelId)` | 無傷挑戰（受傷即失敗） |
+| | `KB.CHALLENGE.startTower({seed?, floors?, floor?})` | 挑戰塔（預設 10 層；省略 seed ＝ 隨機種子） |
+| | `KB.CHALLENGE.startDaily({key?})` | 每日挑戰（seed = YYYYMMDD、3 層、每天一次） |
+| 資料 | `rng(seed)` → `function()->[0,1)` | mulberry32；**同 seed 一定同數列** |
+| | `towerPlan(seed, floors, o?)` / `dailyPlan(key?)` | 純函式，回傳每層 `{floor, lv, room, boss, name, mods[], ability, limit}` |
+| | `buildFloor(plan, floor)` | 深拷貝 + 修飾 → 生成動態關卡 `KB.EXTRA_LEVELS.tower` |
+| | `MODS` / `MOD_LIST` / `modName(k)` | 修飾條件表（8 種） |
+| | `dateKey(d?)` / `dateSeed(key)` | `'YYYYMMDD'` ↔ 數字種子 |
+| 紀錄 | `bestTime(id)` / `bestNohit(id)` / `bestNohitTime(id)` / `bestTower()` / `dailyRecord(key?)` / `dailyRecent(n)` | records.js 的「挑戰」頁就是讀這些 |
+| | `save()` | 回傳 `KB.save.challenge` 並補齊欄位（舊存檔相容） |
+| | `worlds()` | 可挑戰的世界（已通關者；`?debug=1` 全開） |
+| 鉤子 | `onRoom / onEnter / tick / exitDoor / onDeath / onClear / afterClear / drawHUD` | game.js 專用，`game.challenge` 為 null 時全部 no-op |
+| 事件 | `KB.PROG.emit('challengeClear', {type, ...})` | `type` = `time / nohit / tower / daily / arena`；另帶 `levelClear` 沒有的 `floor / floors / seed / date / variant / time / ok / best` |
+
+### 修飾條件表（挑戰塔 / 每日挑戰；每層 1~2 個，第 1 層固定 1 個）
+| id | 名稱 | 效果 | 套用時機 |
+|---|---|---|---|
+| `fast` | 疾走 | 敵人 `exK` ×1.3（走路 / 追擊共用；先設 `extraApplied` 擋掉 `Enemy.applyExtra` 覆寫） | 進房（實體） |
+| `onehp` | 一擊必殺 | `player.maxHp = 1`、`hp = 1` | 進房 + enter 末（opts.hp 之後再夾一次） |
+| `random` | 隨機能力 | 進場給一個由種子決定的能力 | `opts.ability` |
+| `noinhale` | 封印之口 | 不給能力，且吸入動作每幀被取消（跳 toast） | 進房 + 每幀 |
+| `mirror` | 鏡像 | 地圖 / 裝飾逐列反轉（`/` ↔ `\` 互換）、entity / spawn / exit / bossPos 的 x → w-1-x | 生成 |
+| `dark` | 黑暗 | `room.dark = true`（沿用 game.js 既有的暗房遮罩） | 生成 |
+| `double` | 倍化 | 強制套用該來源房的 **Extra 疊加層**（`KB.applyRoomLayers(lv, r, room, true)`）＋原有敵人再複製一份（x +2 格） | 生成 |
+| `timed` | 時限 | 90 秒內離開這一層（HUD 改成倒數；最後 10 秒每秒 `sfx('tick')`，歸零 `sfx('time_up')` → 失敗） | 每幀 |
+魔王層只會抽到 `fast / onehp / random / noinhale / timed`（沒有雜兵可倍化、鏡像會動到魔王出生點）。
+
+### 進度
+- [09-12 R8-CH-1] 完成：**`src/challenge.js` 骨架 + game.js 7 個鉤子**。
+  `KB.CHALLENGE`（決定性亂數 mulberry32 / 日期種子 / `KB.save.challenge` 自動補齊 / `mm:ss.ff`）與
+  game.js 的鉤子：`constructor`（`this.challenge`）、`loadRoom` 末 `onRoom`、`enter` 末 `onEnter`、
+  `update` 的 `tick`、`clearT===220` 的 `afterClear`、`useDoor` 的 `exitDoor`、`playerDied` 的 `onDeath`、
+  `levelClear` 的挑戰分支、`draw` 的 `drawHUD`。**全部以 `this.challenge` 為 null 時完全 no-op**，一般遊玩零影響。
+  驗證：`tools/test_challenge.py --only api`、`node --check src/game.js`。下一步：時間攻擊。
+- [09-12 R8-CH-2] 完成：**時間攻擊**。HUD 右側改成兩列（y197 模式 + 最佳、y208 `mm:ss.ff`），
+  死亡不扣命（`onDeath` 回 `'respawn'` 並把 `lives` 補回 9，時間繼續跑、記 `deaths`），
+  過關**跳過 ResultScene 的滾動計分**直接進 `KB.ChallengeResultScene`（時間 / 最佳 / 死亡數 + 重試 / 離開），
+  記 `KB.save.challenge.time[levelId]`（只留最短）。**挑戰模式不寫 `cleared` / `playCount` / `best`**（成績板才分得清）。
+  驗證：`shots/agent_challenge/time_hud.png`（`TIME` + `00:01.03`）、`time_result.png`。下一步：無傷挑戰。
+- [09-12 R8-CH-3] 完成：**無傷挑戰**。`tick` 每幀看 `KB.PROG.run.hurts`（`onEnter` 進場先歸零），
+  > 0 就 `sfx('nohit_fail')` + 失敗結算「被擊中！」+ 重試 / 離開；HUD 右上顯示 `CLEAN` / `HIT!`。
+  通關記 `nohit[levelId] = true` 與 `nohitTime[levelId]`（最短）。
+  驗證：`shots/agent_challenge/nohit_hud.png` / `nohit_fail.png`；測試含「真的走 `player.hurt`」那條路徑。下一步：挑戰塔。
+- [09-12 R8-CH-4] 完成：**挑戰塔 10 層**。`towerPlan(seed, floors)` 純函式產生每層計畫
+  （世界範圍 `worldRange(f, floors, n)` ＝ `hi = ceil(f*n/floors)`、`lo = hi-2`，依層數提升；
+  第 5 / 10 層抽魔王房、其餘抽 w1~w7 的非魔王非秘密房且同場不重複），
+  `buildFloor` 對房間做**深拷貝 + 修飾**後寫進 `KB.EXTRA_LEVELS.tower`（1 房 1 層；`level.boss` 跟著換）；
+  非魔王層把原本的門換成「出口門」（取最後一扇非秘密 / 非上鎖的門的座標），出口門 → `exitDoor` → 直接進下一層。
+  死亡 / 時限到 → 結算顯示到達層數；全破記 `bestFloor / bestTime / clears`。
+  音樂用 `music('tower')` 並隨層數 `KB.audio.setTempoMul(1.0→1.3)`，離開挑戰一律還原成 1。
+  驗證：`shots/agent_challenge/tower_f1.png`（鏡像層：卡比在右、敵人在左、橫幅「第 1 層 起點草原 / 鏡像」）、
+  `tower_f2.png`、`tower_f5.png`（魔王層 + 一擊必殺，HP 只有 1 格）、`tower_result.png`；
+  `tools/playthrough.py --challenge tower --seed 1 --godmode --until-floor 3` → `floors_seen=[1,2,3]`、3566 幀、deaths=0。下一步：每日挑戰。
+- [09-12 R8-CH-5] 完成：**每日挑戰**。`seed = YYYYMMDD`、3 層、修飾固定 `疾走 / 鏡像+黑暗 / 一擊必殺`（第 3 層是魔王）；
+  紀錄寫 `KB.save.challenge.daily[YYYYMMDD] = {floor, time, ok}`，**同一天的第二次不覆蓋第一次**，選單顯示「今日未挑戰」。
+  驗證：`shots/agent_challenge/daily_f1.png`（HUD `D 1/3` + `S60912`）、`daily_result.png`。下一步：Boss Rush Extra。
+- [09-12 R8-CH-6] 完成：**Boss Rush 變體（arena.js）**。`new KB.ArenaScene({extra, all7, from})`：
+  `extra` → `UI.newSession(0, 0, true)`（`KB.session.extra = true`，魔王開場即二階段 / 血量 ×1.25）、
+  `all7` → 前 6 名隨機 + 最後固定夢魘之核（共 7 名，`KB.LEVELS` 沒有 w7 時自動退回原本的 5/6 名）；
+  選能力畫面左上掛 `EXTRA` / `ALL 7` 徽章，BEST 讀各自的紀錄。
+  變體紀錄存 `KB.save.challenge.arena[variant]`（`normal / extra / all7 / extra_all7`），
+  **不會汙染原本的 `KB.save.arena.bestTime`**；`from:'challenge'` 時 SELECT / 結算返回挑戰選單。
+  另依 ach2 要求把 `emit('arenaClear')` 補上 `beaten / total / variant / extra / all7`。
+  驗證：`shots/agent_challenge/menu_arena.png`（4 種規則 + 各自 BEST）、`arena_extra_pick.png`、`arena_extra_boss.png`。下一步：成績板。
+- [09-12 R8-CH-7] 完成：**成績板「挑戰」頁（records.js）**。分頁數從 `1 + n` 變成 `1 + n + 1`（`KB.CHALLENGE` 不存在時維持原樣）。
+  版面：① 各世界一列（時間攻擊 `mm:ss.ff` / 無傷 `OK` 徽章 / 無傷最短）② 挑戰塔最高層 / 最佳時間 / 通關次數 + Boss Rush 已達成變體
+  ③ 每日最近 7 天（欄寬只有 28px 放不下 `MMDD` ⇒ 欄位只畫「日」、月份畫在左邊標籤下方；今天是黃字）。
+  驗證：`shots/agent_challenge/records_challenge.png`。下一步：測試與收工。
+- [09-12 R8-CH-8] 完成：**`tools/test_challenge.py` 93/93 PASS** 與收工驗證。
+  九段（`--only api,time,nohit,tower,mods,daily,arena,records,menu` 可單跑、`--shots` 順便存圖）：
+  ① API / rng 決定性 / `mm:ss.ff` / 存檔補齊 ② 時間攻擊（計時、死亡不扣命、直接結算、只留最短、不寫一般統計）
+  ③ 無傷（受傷即失敗含真的 `player.hurt`、通關紀錄）④ 塔（10 層、同 seed 同序列、不同 seed 不同、5/10 層魔王、
+  世界範圍遞增、出口門進下一層、死亡結算層數、全破紀錄）⑤ 8 種修飾條件（鏡像的寬高不變 / 逐列反轉含 `/`↔`\` /
+  出口門與出生點跟著鏡像 / **`KB.LEVELS` 原始資料零變動** / 實機站得住、1HP、暗房、`exK=1.3`、倍化、封印之口、90 秒時限）
+  ⑥ 每日（日期種子、3 層固定修飾、只能一次、不覆蓋、最近 7 天）⑦ Boss Rush 變體 ⑧ 成績板挑戰頁 ⑨ 選單與 `challengeClear` 事件。
+  其他驗證：`tools/engine_test.py` **118/118 PASS**；`tools/playthrough.py --level w1 --godmode` →
+  `LEVEL CLEAR at frame 5853, deaths=0, cleared=True, bossDamage=100%, missing []`；
+  `node tools/level_check.js` / `--extra` 皆 0 error / 1 warn（既有）；
+  `node --check` 於 challenge / game / arena / records 全過；全程 0 console error / pageerror。
 （agent 在此追加）
 
 ## saves-input

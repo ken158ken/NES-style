@@ -8,7 +8,8 @@
 //   狀態   active() / activeT / DUR（=300）/ start(p) / end(p) / cancel()
 //   觸發   tryTrigger(p)（player.js 每幀呼叫；只有「跳+攻 3 幀內」且量表滿才回 true）
 //          bufferInput(game)（game.js 在演出停格 freezeT > 0 時呼叫：把跳+攻排隊，停格結束自動發動）
-//   招式   moves[key] = { name, exec(p) } / moveFor(key) / baseKey(key)（混合能力→主成分 A）/ exec(p, key)
+//   招式   moves[key] = { name, exec(p) } / moveFor(key) / baseKey(key)（有專屬招用專屬，沒有才退主成分 A）/ exec(p, key)
+//          hasOwnMove(key)（是不是有自己的專屬覺醒招）/ MOVE_ORDER（基本 20）/ MIX_ORDER（混合 24）
 //   繪製   drawGauge(ctx, game)（progression.drawHUD 內呼叫，畫在能力圖示下方 x4 y218 26×5）
 //   平衡   BOSS_MUL / BOSS_CAP（覺醒招對魔王的減傷與單次覺醒傷害上限）/ scaleForTarget(dmg, atk, target)
 //   雜項   tick(game)（由 KB.PROG.update 包裝自動每幀呼叫）/ reset() / after(frames, fn)
@@ -20,7 +21,9 @@
 //      量表沒滿 / 能力不是 Lv4 → 完全不攔截，跳與攻擊照原本運作。
 //   3. 覺醒狀態 300 幀：全身金色、無敵（金色閃爍與吃到無敵糖的彩虹閃不同）、移動速度 ×1.2、
 //      所有招傷害 ×1.5（包進 KB.PROG.scaleDmg）、HUD Lv 星全金；結束時量表歸 0。
-//   4. 覺醒發動當下立刻放出該能力的「覺醒招」（20 種基本能力各 1 招；混合能力用主成分 A 的招）。
+//   4. 覺醒發動當下立刻放出該能力的「覺醒招」——20 種基本能力各 1 招、
+//      24 種混合能力（KB.MIX）各 1 招**專屬覺醒招**（Round 8「awaken-mix」，演出比基本覺醒更誇張）；
+//      沒有專屬招的能力才退回主成分 A 的招（A.baseKey）。
 (function () {
   'use strict';
   const KB = window.KB;
@@ -102,6 +105,7 @@
     const p = player();
     if (p) v('textPop', p.cx, p.y - 18, '覺醒 READY', { color: GOLD, size: 12, frames: 70, rise: 0.35, outline: '#3a2400' });
     if (p) v('ring', p.cx, p.cy, { r0: 6, r1: 34, frames: 16, color: GOLD, width: 2 });
+    sfx('awk_ready');            // Round 8 audio8：覺醒量表集滿
     sfx('max');
   };
   /** 命中敵人（由 KB.PROG.scaleDmg 的包裝呼叫）：+4，連擊每 +1 再 +1 */
@@ -200,6 +204,9 @@
     // 吃掉這一幀的輸入：跳躍緩衝要清掉（否則下一幀會補跳），攻擊狀態先收招
     p.jumpBufT = 0; p.jumpHold = 0;
     if (p.state === 'attack') { p.attackTimer = 0; p.setState(p.onGround ? 'idle' : 'fall'); }
+    // 頭上可能還飄著「覺醒 READY」（70 幀），會和招式名 / 招式中的 textPop 疊成亂碼 → 先收掉
+    // （與 R7-P2-05 的 bufferInput 同一招）
+    try { if (KB.VFX && KB.VFX.list) for (const e of KB.VFX.list) if (e && e.text === '覺醒 READY') e.dead = true; } catch (e) { }
     // ---- 演出（VFX.transform 風格，金色）----
     v('hitstop', 8);
     v('shake', 8);
@@ -211,6 +218,7 @@
     v('circle', p.cx, p.cy + 6, { r: 38, frames: 70, color: GOLD, spin: 0.09, glyphs: 12 });
     v('aura', p, { color: GOLD, r: 20, frames: A.DUR, pulse: 0.3 });
     v('burst', p.cx, p.cy, { n: 30, colors: [GOLD, GOLD_HI, GOLD_LO], speed: 3.4, life: 34, grav: -0.02, size: 3 });
+    sfx('awk_start');            // Round 8 audio8：覺醒發動
     sfx('transform'); sfx('ultimate');
     const pg = P(); if (pg && pg.emit) { try { pg.emit('awaken', { key }); } catch (e) { } }
     // ---- 立刻放出覺醒招 ----
@@ -228,6 +236,7 @@
       v('burst', p.cx, p.cy, { n: 14, colors: [GOLD, '#c0c8d8'], speed: 1.6, life: 26, grav: 0.05, size: 2 });
       v('textPop', p.cx, p.y - 12, '覺醒終了', { color: '#ffd0a0', size: 10, frames: 40, rise: 0.3, outline: '#3a2400' });
     }
+    sfx('awk_end');              // Round 8 audio8：覺醒終了
     sfx('untransform');
     return true;
   };
@@ -329,29 +338,58 @@
 
   // ================================================================ 覺醒招
   // 20 種基本能力各 1 招；每招 = letterbox + zoom + 全畫面多段判定 + 專屬特效。
-  // 混合能力（KB.MIX）用主成分 A 的覺醒招；變身系能力同樣有自己的招。
+  // 混合能力（KB.MIX）24 組另有自己的專屬招（見本檔後段「混合能力覺醒招」）；變身系能力同樣有自己的招。
   A.moves = {};
   const MOVE_ORDER = A.MOVE_ORDER = ['fire', 'sword', 'beam', 'cutter', 'spark', 'stone', 'ice', 'hammer',
     'gunner', 'ninja', 'blade', 'bow', 'mage', 'time', 'gravity', 'clone', 'giant', 'dragon', 'mech', 'ghost'];
 
-  /** 混合能力 → 主成分 A（其他情況原樣回傳） */
+  /**
+   * 覺醒招的查表 key。
+   * Round 8「awaken-mix」起 24 種混合能力各有**專屬覺醒招**，所以順序是：
+   *   ① 這個 key 自己有招（20 基本 + 24 混合）→ 直接用專屬招；
+   *   ② 沒有（例如之後新增的混合組合還沒寫專屬招）→ 退回主成分 A 的招；
+   *   ③ 主成分 A 也沒有 → 退回成分 B；都沒有就原樣回傳（moveFor 會回 null）。
+   */
   A.baseKey = function (key) {
     if (!key) return null;
-    if (A.moves[key]) return key;
+    if (A.moves[key]) return key;                    // ① 專屬招優先
     try {
       if (KB.MIX && KB.MIX.isMix && KB.MIX.isMix(key)) {
         const ps = KB.MIX.parts(key);
-        if (ps && ps[0] && A.moves[ps[0]]) return ps[0];
-        if (ps && ps[1] && A.moves[ps[1]]) return ps[1];
+        if (ps && ps[0] && A.moves[ps[0]]) return ps[0];   // ② 退回主成分 A
+        if (ps && ps[1] && A.moves[ps[1]]) return ps[1];   // ③ 再退回成分 B
       }
     } catch (e) { }
     return key;
   };
+  /** 這個能力用的是不是「自己的專屬覺醒招」（混合能力用來區分專屬 / 退回主成分） */
+  A.hasOwnMove = function (key) { return !!(key && A.moves[key]); };
   A.moveFor = function (key) { const k = A.baseKey(key || curKey()); return (k && A.moves[k]) || null; };
   A.moveName2 = function (key) { const m = A.moveFor(key); return m ? m.name : ''; };
+  /**
+   * 覺醒招專屬音（Round 8 audio8 交件的音效表）：
+   *   基本能力 → sfx('awk_<key>')（20 種）
+   *   混合能力 → sfx('awk_<主成分 A>') + sfx('mix_<mixkey>') **疊加**（24 種）
+   * 不存在的名字只會 warnOnce，不會壞；這裡仍先過濾一次，保持 console 乾淨。
+   */
+  A.moveSfx = function (key) {
+    key = key || curKey(); if (!key) return false;
+    let base = key;
+    try {
+      if (KB.MIX && KB.MIX.isMix && KB.MIX.isMix(key)) {
+        const ps = KB.MIX.parts(key);
+        if (ps && ps[0]) base = ps[0];
+      }
+    } catch (e) { }
+    if (MOVE_ORDER.indexOf(base) >= 0) sfx('awk_' + base);
+    if (base !== key && MIX_ORDER.indexOf(key) >= 0) sfx('mix_' + key);
+    return true;
+  };
   A.exec = function (p, key) {
     p = p || player(); if (!p) return false;
-    const m = A.moveFor(key || p.ability); if (!m) return false;
+    const k = key || p.ability;
+    const m = A.moveFor(k); if (!m) return false;
+    A.moveSfx(k);
     try { m.exec(p); } catch (e) { return false; }
     return true;
   };
@@ -398,9 +436,9 @@
    * 招式總傷害 = n × dmg（覺醒中還會再吃 ×1.5）。
    */
   function storm(p, o) {
-    const n = o.n || 4, gap = o.gap || 8;
+    const n = o.n || 4, gap = o.gap || 8, d0 = o.delay || 0;
     for (let i = 0; i < n; i++) {
-      A.after(1 + i * gap, pp => {
+      A.after(1 + d0 + i * gap, pp => {
         const q = pp || player(); if (!q || q.state === 'dead') return;
         bigbox(q, o);
         if (o.each) { try { o.each(q, i); } catch (e) { } }
@@ -526,7 +564,7 @@
 
   // ---------- 7. 冰凍：絕對零度 ----------
   M('ice', '絕對零度', p => {
-    intro(p, '#a0e8ff', { sfx: 'icewall', tint: 0.4, tintT: 70 });
+    intro(p, '#a0e8ff', { sfx: 'icewall', tint: 0.3, tintT: 70 });
     storm(p, {
       n: 6, gap: 8, dmg: 8, type: 'ice', sfx: 'ice', sfxEvery: 2, freeze: true,
       each(q, i) {
@@ -807,6 +845,658 @@
         v('aura', q, { color: '#b0a0ff', r: 18, frames: 20, pulse: 0.4 });
       },
     });
+  });
+
+  // ================================================================ 混合能力覺醒招（Round 8「awaken-mix」）
+  // 24 種混合能力各 1 招專屬覺醒招：把兩個成分的特色融合，演出比 20 招基本覺醒更誇張
+  //   ‧ 一律 intro2()：letterbox（更長）+ zoom（更大）+ worldTint（兩個成分色各一次）+ flash + shake
+  //   ‧ 一律至少 2 種以上 VFX 組合（slash / beam / lightning / circle / ring / shockwave / burst / afterimage / textPop…）
+  //   ‧ 判定一律走 bigbox()（帶 awaken 旗標）與 ashoot()（帶 awaken 旗標）→ 魔王減傷 BOSS_MUL / 上限 BOSS_CAP 全部生效
+  //   ‧ 開場疊上 art/kirby_awaken.js 的新精靈：kirby_awaken_cast（詠唱姿勢）+ fx_awk_<key>（每招專屬印記）
+  const MIX_ORDER = A.MIX_ORDER = [
+    'flamesword', 'frostsword', 'thunderblade', 'flamegun', 'frostgun', 'thunderbow',
+    'flamehammer', 'stonehammer', 'shadowblade', 'starmage', 'frostdragon', 'thundermech',
+    'flamebow', 'frosthammer', 'thundersword', 'flameninja', 'frostninja', 'thundergun',
+    'stonegiant', 'flamedragon', 'thunderdragon', 'timebeam', 'gravityblade', 'hammermech',
+  ];
+
+  /** 混合覺醒招開場：詠唱姿勢 + 該招專屬印記（兩張都是 art/kirby_awaken.js 的新精靈） */
+  function sigil(p, key, o) {
+    o = o || {};
+    try {
+      KB.fx('kirby_awaken_cast', p.cx, p.cy - 2, { life: o.cast || 28, alpha: 0.82, z: 7 });
+      KB.fx('fx_awk_' + key, p.cx, p.cy - (o.up === undefined ? 6 : o.up), { life: o.life || 34, alpha: 0.92, z: 7, fps: o.fps || 10 });
+    } catch (e) { }
+  }
+  /** 比 intro() 更誇張的開場：兩段 worldTint（成分 A 色 → 成分 B 色）+ 大 zoom + 長 letterbox */
+  function intro2(p, key, cA, cB, o) {
+    o = o || {};
+    v('letterbox', o.lb || 190);
+    v('zoom', o.zoom || 1.28, o.zoomT || 30);
+    // 兩段染色（成分 A 色 → 成分 B 色）；A.start 本身還有一層金色 worldTint(0.35)，
+    // 所以這裡刻意壓低 alpha，疊起來才不會糊成一片單色看不見招式
+    v('worldTint', cA, o.tint === undefined ? 0.26 : o.tint, o.tintT || 44);
+    A.after(o.tint2 || 26, () => v('worldTint', cB, 0.22, 44));
+    v('flash', o.flash || '#ffffff', 10, 0.72);
+    v('shake', o.shake || 8);
+    v('hitstop', o.hitstop === undefined ? 4 : o.hitstop);
+    v('circle', p.cx, p.cy, { r: 44, frames: 60, color: cB, spin: o.spin || 0.14, glyphs: 12 });
+    v('ring', p.cx, p.cy, { r0: 4, r1: 74, frames: 18, color: cA, width: 3 });
+    sigil(p, key, o);
+    if (o.sfx) sfx(o.sfx);
+    if (o.sfx2) A.after(10, () => sfx(o.sfx2));
+  }
+  /** 收招：名稱橫幅 + 白閃 + 光環（每招結尾都放，讓「更誇張」有一致的收束） */
+  function finale(delay, name, col, o) {
+    o = o || {};
+    A.after(delay, q => {
+      if (!q) return;
+      v('flash', o.flash || '#ffffff', 14, 0.82);
+      v('ring', q.cx, q.cy, { r0: 4, r1: o.r || 94, frames: 20, color: col, width: 3 });
+      v('textPop', q.cx, q.y - 20, name, { color: col, size: 12, frames: 48, rise: 0.4, outline: '#1a1024' });
+      v('shake', o.shake || 8);
+      if (o.hitstop) v('hitstop', o.hitstop);
+      if (o.dmg) bigbox(q, { dmg: o.dmg, type: o.type || 'awaken', life: 6, breakBlocks: !!o.breakBlocks });
+      if (o.sfx) sfx(o.sfx);
+    });
+  }
+  /** 天降投射物（流星 / 落雷 / 落石共用） */
+  function rain(q, spr, o) {
+    o = o || {};
+    const R = camRect(), n = o.n || 4;
+    for (let k = 0; k < n; k++) {
+      const x = o.x === undefined ? R.x + rnd(4, R.w - 4) : o.x;
+      ashoot({
+        spr, x, y: R.y - 8, vx: o.vx === undefined ? rnd(-1.2, 1.2) : o.vx, vy: o.vy || 7,
+        dmg: o.dmg || 3, owner: 'player', life: o.life || 80, grav: o.grav === undefined ? 0.1 : o.grav,
+        pierce: true, solid: false, w: o.w || 10, h: o.h || 10, breakBlocks: false,
+        type: o.type || 'awaken', trail: o.trail || null, rotSpeed: o.rotSpeed || 0,
+      });
+      if (o.streak) v('line', x - 26, R.y - 10, x, R.y + R.h * 0.62, { color: o.streak, width: 2, frames: 10 });
+    }
+  }
+  /** 環形彈幕 */
+  function ringShot(q, spr, o) {
+    o = o || {};
+    const n = o.n || 10, sp = o.speed || 5.4;
+    for (let k = 0; k < n; k++) {
+      const a = (k / n) * TAU + (o.off || 0);
+      ashoot({
+        spr, x: q.cx, y: q.cy, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+        dmg: o.dmg || 3, owner: 'player', life: o.life || 64, grav: 0, pierce: true, solid: false,
+        w: o.w || 10, h: o.h || 10, breakBlocks: false, type: o.type || 'awaken',
+        rotSpeed: o.rotSpeed || 0, trail: o.trail || null,
+      });
+    }
+  }
+  const MM = (key, name, exec) => { A.moves[key] = { key, name, exec, mix: true }; return A.moves[key]; };
+
+  // ---------- 1. 炎劍：炎帝百斬 ----------
+  MM('flamesword', '炎帝百斬', p => {
+    intro2(p, 'flamesword', '#ff5a20', '#ffd060', { sfx: 'fireball', sfx2: 'slash_big' });
+    storm(p, {
+      n: 9, gap: 5, dmg: 7, type: 'fire', sfx: 'sword', sfxEvery: 2,
+      each(q, i) {
+        const R = camRect();
+        for (let k = 0; k < 3; k++) {
+          const x = R.x + rnd(18, R.w - 18), y = R.y + rnd(24, R.h - 24);
+          v('slash', x, y, 36, rnd(-Math.PI, Math.PI), { color: k & 1 ? '#ffd060' : '#ff5a20', width: 4, frames: 12, arc: 2.3, flip: (i + k) & 1 });
+          v('burst', x, y, { n: 7, colors: ['#ffe040', '#ff8020', '#c03000'], speed: 2.6, life: 24, grav: -0.05, size: 2 });
+        }
+        // 每 3 段從地面竄起一排火劍氣
+        if (i % 3 === 0) for (let k = 0; k < 4; k++) {
+          const x = R.x + (k + 0.5) * (R.w / 4);
+          v('beam', x, R.y + R.h, -Math.PI / 2, R.h * 0.85, { width: 11, color: '#ff7020', frames: 13, taper: true });
+        }
+        v('afterimage', q, { frames: 10, color: '#ffb060', every: 1, alpha: 0.5 });
+        if (i === 4) ringShot(q, 'proj_mix_wave_fire', { n: 8, dmg: 3, speed: 5, w: 14, h: 14, type: 'fire' });
+      },
+    });
+    finale(50, '炎帝百斬', '#ff8030', { sfx: 'fire', dmg: 8, type: 'fire' });
+  });
+
+  // ---------- 2. 冰劍：永凍劍界 ----------
+  MM('frostsword', '永凍劍界', p => {
+    intro2(p, 'frostsword', '#78d8ff', '#ffffff', { sfx: 'icewall', sfx2: 'sword', tint: 0.3 });
+    storm(p, {
+      n: 8, gap: 6, dmg: 8, type: 'ice', sfx: 'ice', sfxEvery: 2, freeze: true,
+      each(q, i) {
+        const R = camRect();
+        // 畫面各處立起冰劍（beam）→ 交叉斬
+        for (let k = 0; k < 4; k++) {
+          const x = R.x + rnd(14, R.w - 14), y = R.y + rnd(30, R.h - 20);
+          v('beam', x, y + 40, -Math.PI / 2, 46, { width: 9, color: '#a8e8ff', frames: 14, taper: true });
+          KB.fx('fx_ice', x, y, { life: 16 });
+        }
+        v('slash', q.cx, q.cy, 44, i * 0.9, { color: '#ffffff', width: 4, frames: 12, arc: 2.8, flip: i & 1 });
+        v('circle', q.cx, q.cy, { r: 32 + i * 6, frames: 26, color: '#c0f0ff', spin: 0.06, glyphs: 6 });
+        if (i === 3) rain(q, 'proj_mix_spike_ice', { n: 5, dmg: 3, vy: 6, grav: 0.06, type: 'ice' });
+      },
+    });
+    finale(52, '永凍劍界', '#a8e8ff', { flash: '#e0f8ff', sfx: 'icewall', dmg: 8, type: 'ice' });
+  });
+
+  // ---------- 3. 雷刀：雷神一閃 ----------
+  MM('thunderblade', '雷神一閃', p => {
+    intro2(p, 'thunderblade', '#ffe040', '#ffffff', { sfx: 'iai', zoom: 1.32, lb: 200, hitstop: 8 });
+    // 收刀 22 幀 → 全畫面雷光一閃（單段重擊）
+    A.after(22, q => {
+      if (!q) return;
+      const R = camRect();
+      // 白閃刻意壓到 0.6 / 12 幀：0.95 會把一閃的劍氣與雷弧整個蓋成一片白（看不出招式）
+      v('flash', '#fffce0', 12, 0.6);
+      v('line', R.x, q.cy, R.x + R.w, q.cy, { color: '#ffb000', width: 7, frames: 20 });
+      v('beam', q.cx, q.cy, 1, 320, { width: 28, color: '#ffe040', frames: 20, taper: true });
+      v('beam', q.cx, q.cy, -1, 320, { width: 28, color: '#ffe040', frames: 20, taper: true });
+      for (let k = 0; k < 6; k++) v('lightning', q.cx, q.cy, R.x + rnd(0, R.w), R.y + rnd(0, R.h), { color: '#ffe040', frames: 12, jitter: 12, branches: 3 });
+      v('hitstop', 8); v('shake', 12); sfx('thunder');
+      bigbox(q, { dmg: 24, type: 'spark', life: 6 });
+    });
+    storm(p, {
+      n: 4, gap: 11, dmg: 8, type: 'spark', sfx: 'spark',
+      each(q, i) {
+        v('slash', q.cx, q.cy, 48, [-0.6, 0.7, -0.2, 0.4][i], { color: '#fffce0', width: 4, frames: 12, arc: 2.7, flip: i & 1 });
+        v('afterimage', q, { frames: 12, color: '#ffe040', every: 1, alpha: 0.6 });
+        KB.fx('fx_spark_field', q.cx, q.cy, { life: 12 });
+      },
+    });
+    finale(58, '雷神一閃', '#ffe040', { sfx: 'thunder' });
+  });
+
+  // ---------- 4. 火焰槍：煉獄輪舞 ----------
+  MM('flamegun', '煉獄輪舞', p => {
+    intro2(p, 'flamegun', '#ff8828', '#ffd070', { sfx: 'shotgun', sfx2: 'fire' });
+    if (G()) G().slowMoT = Math.max(G().slowMoT | 0, 60);        // 子彈時間（60 幀；拉長會讓魔王的無敵幀走太慢）
+    storm(p, {
+      n: 7, gap: 6, dmg: 6, type: 'fire', sfx: 'gun', sfxEvery: 2,
+      each(q, i) {
+        const R = camRect();
+        ringShot(q, 'proj_mix_orb_fire', { n: 10, off: i * 0.3, dmg: 3, speed: 5.6, type: 'fire', trail: ['#ffe040', '#ff5010'] });
+        KB.fx('fx_muzzle', q.cx, q.cy, { life: 8 });
+        v('ring', q.cx, q.cy, { r0: 4, r1: 58, frames: 12, color: '#ff8828', width: 2 });
+        // 地面火海
+        v('shockwave', q.cx, q.bottom, { w: 190, h: 14, dir: i & 1 ? 1 : -1, speed: 9, frames: 16, color: '#ff9030' });
+        v('burst', R.cx + rnd(-70, 70), R.y + R.h - 8, { n: 9, colors: ['#ffe040', '#ff8020', '#c03000'], speed: 3, life: 28, grav: -0.07, size: 2 });
+        v('afterimage', q, { frames: 10, color: '#ffb060', every: 2, alpha: 0.45 });
+      },
+    });
+    // 子彈時間結束後的收尾齊射（時間恢復正常速度，目標的無敵幀也回正常 → 這 3 段才吃得滿）
+    storm(p, {
+      n: 3, gap: 9, dmg: 9, type: 'fire', sfx: 'shotgun', delay: 64,
+      each(q, i) {
+        ringShot(q, 'proj_mix_orb_fire', { n: 8, off: i * 0.4, dmg: 3, speed: 6, type: 'fire', trail: ['#ffe040', '#ff5010'] });
+        v('beam', q.cx, q.cy, q.dir, 240, { width: 20, color: '#ff9030', frames: 14, taper: true });
+        v('burst', q.cx, q.cy, { n: 12, colors: ['#ffe040', '#ff8020'], speed: 3.2, life: 26, grav: -0.04, size: 2 });
+      },
+    });
+    finale(96, '煉獄輪舞', '#ff8828', { sfx: 'fireball', dmg: 8, type: 'fire' });
+  });
+
+  // ---------- 5. 冰彈槍：絕零彈幕 ----------
+  MM('frostgun', '絕零彈幕', p => {
+    intro2(p, 'frostgun', '#9fe8ff', '#ffffff', { sfx: 'shotgun', sfx2: 'ice', tint: 0.28 });
+    if (G()) G().slowMoT = Math.max(G().slowMoT | 0, 60);         // 子彈時間
+    storm(p, {
+      n: 8, gap: 6, dmg: 6, type: 'ice', sfx: 'gun', sfxEvery: 2, freeze: true,
+      each(q, i) {
+        const R = camRect();
+        ringShot(q, 'proj_mix2_shard_ice', { n: 12, off: i * 0.22, dmg: 3, speed: 5.2, type: 'ice' });
+        KB.fx('fx_muzzle', q.cx, q.cy, { life: 8 });
+        v('circle', q.cx, q.cy, { r: 30 + i * 5, frames: 22, color: '#c0f0ff', spin: -0.1, glyphs: 8 });
+        for (let k = 0; k < 3; k++) KB.fx('fx_ice', R.x + rnd(10, R.w - 10), R.y + rnd(16, R.h - 16), { life: 16 });
+        if (i === 7) { v('flash', '#e0f8ff', 14, 0.85); v('worldTint', '#80c8ff', 0.45, 50); }
+      },
+    });
+    // 子彈時間結束後的收尾齊射
+    storm(p, {
+      n: 3, gap: 9, dmg: 9, type: 'ice', sfx: 'shotgun', delay: 64, freeze: true,
+      each(q, i) {
+        ringShot(q, 'proj_mix2_shard_ice', { n: 10, off: i * 0.35, dmg: 3, speed: 5.8, type: 'ice' });
+        v('beam', q.cx, q.cy, q.dir, 240, { width: 22, color: '#a8e8ff', frames: 14, taper: true });
+        v('circle', q.cx, q.cy, { r: 46, frames: 22, color: '#e8fbff', spin: -0.14, glyphs: 8 });
+      },
+    });
+    finale(96, '絕零彈幕', '#9fe8ff', { flash: '#e0f8ff', sfx: 'icewall', dmg: 8, type: 'ice' });
+  });
+
+  // ---------- 6. 雷弓：天雷千矢 ----------
+  MM('thunderbow', '天雷千矢', p => {
+    intro2(p, 'thunderbow', '#ffd020', '#ffffff', { sfx: 'arrow_rain', sfx2: 'thunder' });
+    storm(p, {
+      n: 8, gap: 6, dmg: 7, type: 'spark', sfx: 'bow', sfxEvery: 2,
+      each(q, i) {
+        const R = camRect();
+        rain(q, 'proj_mix2_arrow_spark', { n: 4, dmg: 3, vy: 7.5, grav: 0.08, type: 'spark', trail: ['#ffe040', '#ffffff'], streak: '#ffe880' });
+        for (let k = 0; k < 3; k++) {
+          const x = R.x + rnd(8, R.w - 8);
+          v('lightning', x, R.y - 10, x + rnd(-16, 16), R.y + R.h, { color: k & 1 ? '#ffffff' : '#ffd020', frames: 12, jitter: 10, branches: 3 });
+        }
+        v('ring', q.cx, q.cy, { r0: 8, r1: 62, frames: 14, color: '#ffd020', width: 2 });
+        if (i % 3 === 0) KB.fx('fx_spark_field', q.cx, q.cy, { life: 12 });
+      },
+    });
+    finale(52, '天雷千矢', '#ffd020', { sfx: 'thunder', dmg: 8, type: 'spark' });
+  });
+
+  // ---------- 7. 火鎚：隕炎天崩 ----------
+  MM('flamehammer', '隕炎天崩', p => {
+    intro2(p, 'flamehammer', '#ff6a10', '#ffd0a0', { sfx: 'hammer', sfx2: 'meteor', zoom: 1.32, shake: 12 });
+    storm(p, {
+      n: 5, gap: 11, dmg: 13, type: 'fire', sfx: 'hammer', shake2: 11, hitstop: 4, breakBlocks: true,
+      each(q, i) {
+        const R = camRect();
+        v('beam', q.cx, R.y, Math.PI / 2, q.cy - R.y, { width: 48, color: '#ff8030', frames: 10, taper: true });
+        v('shockwave', q.cx, q.bottom, { w: 256, h: 22, dir: 1, speed: 10, frames: 18, color: '#ffd0a0' });
+        v('shockwave', q.cx, q.bottom, { w: 256, h: 22, dir: -1, speed: 10, frames: 18, color: '#ffd0a0' });
+        v('ring', q.cx, q.bottom, { r0: 4, r1: 96, frames: 18, color: '#ff7020', width: 3 });
+        v('burst', q.cx, q.bottom, { n: 20, colors: ['#ffe040', '#ff8020', '#8a4020'], speed: 3.6, life: 32, grav: 0.16, size: 3 });
+        rain(q, 'proj_mix_orb_fire', { n: 3, dmg: 3, vy: 6.5, type: 'fire', trail: ['#ffb060', '#ff4010'] });
+        v('textPop', q.cx, q.y - 16, i === 4 ? 'INFERNO!!' : 'SMASH!', { color: '#ffe040', size: 10, frames: 28, rise: 0.5, outline: '#3a2400' });
+      },
+    });
+    finale(60, '隕炎天崩', '#ff6a10', { sfx: 'fireball', dmg: 8, type: 'fire', breakBlocks: true, hitstop: 4 });
+  });
+
+  // ---------- 8. 岩鎚：大地終焉 ----------
+  MM('stonehammer', '大地終焉', p => {
+    intro2(p, 'stonehammer', '#c0b098', '#ffe0b0', { sfx: 'hardblock', sfx2: 'stone', zoom: 1.3, shake: 12 });
+    storm(p, {
+      n: 5, gap: 11, dmg: 13, type: 'stone', sfx: 'hardblock', shake2: 12, hitstop: 4, breakBlocks: true,
+      each(q, i) {
+        const R = camRect();
+        for (let k = 0; k < 4; k++) {
+          const x = R.x + rnd(14, R.w - 14);
+          v('beam', x, R.y, Math.PI / 2, R.h * 0.85, { width: 20, color: '#9a8878', frames: 10, taper: true });
+          v('burst', x, R.y + R.h - 12, { n: 10, colors: ['#e8e0d0', '#a89078', '#5a4838'], speed: 2.8, life: 30, grav: 0.14, size: 2 });
+        }
+        v('shockwave', q.cx, q.bottom, { w: 280, h: 24, dir: 1, speed: 11, frames: 20, color: '#e0d8c8' });
+        v('shockwave', q.cx, q.bottom, { w: 280, h: 24, dir: -1, speed: 11, frames: 20, color: '#e0d8c8' });
+        v('ring', q.cx, q.bottom, { r0: 6, r1: 88, frames: 18, color: '#c0b098', width: 3 });
+        if (i % 2 === 0) rain(q, 'proj_mix_orb_stone', { n: 3, dmg: 3, vy: 6, type: 'stone' });
+      },
+    });
+    finale(62, '大地終焉', '#c0b098', { flash: '#ffe0b0', sfx: 'stone', dmg: 8, type: 'stone', breakBlocks: true, hitstop: 4 });
+  });
+
+  // ---------- 9. 影刃：千影刃陣 ----------
+  MM('shadowblade', '千影刃陣', p => {
+    intro2(p, 'shadowblade', '#b070f0', '#e0c8ff', { sfx: 'teleport', sfx2: 'cutter' });
+    storm(p, {
+      n: 9, gap: 5, dmg: 7, type: 'cutter', sfx: 'shuriken', sfxEvery: 2,
+      each(q, i) {
+        const R = camRect();
+        // 影分身現身斬 + 迴旋刃向心收束
+        for (let k = 0; k < 3; k++) {
+          const x = R.x + rnd(22, R.w - 22), y = R.y + rnd(28, R.h - 28);
+          v('slash', x, y, 28, rnd(-Math.PI, Math.PI), { color: '#d0b0ff', width: 3, frames: 10, arc: 2.1 });
+          KB.fx('fx_poof', x, y, { life: 12 });
+        }
+        ringShot(q, 'proj_mix_bolt_shadow', { n: 6, off: i * 0.42, dmg: 3, speed: 5, type: 'cutter', rotSpeed: 0.5 });
+        v('ring', q.cx, q.cy, { r0: 66 - i * 5, r1: 6, frames: 14, color: '#b070f0', width: 2 });
+        v('afterimage', q, { frames: 12, color: '#b070f0', every: 1, alpha: 0.55 });
+      },
+    });
+    finale(52, '千影刃陣', '#b070f0', { sfx: 'cutter', dmg: 8, type: 'cutter' });
+  });
+
+  // ---------- 10. 星光法師：銀河創世 ----------
+  MM('starmage', '銀河創世', p => {
+    intro2(p, 'starmage', '#fff0a0', '#c090ff', { sfx: 'magic_big', sfx2: 'beam', zoom: 1.34, lb: 200 });
+    const COLS = ['#fff0a0', '#c090ff', '#80d8ff', '#ffffff', '#ffd030', '#ff90d0'];
+    storm(p, {
+      n: 7, gap: 8, dmg: 10, type: 'beam', sfx: 'magic_circle', sfxEvery: 2,
+      each(q, i) {
+        const c = COLS[i % COLS.length], R = camRect();
+        v('circle', q.cx, q.cy, { r: 28 + i * 8, frames: 30, color: c, spin: (i & 1 ? 0.14 : -0.14), glyphs: 9 + i });
+        v('beam', q.cx, R.y, Math.PI / 2, R.h, { width: 34 - i * 3, color: '#fff0a0', frames: 16, taper: false });
+        for (let k = 0; k < 6; k++) {
+          const a = (k / 6) * TAU + i * 0.34;
+          v('beam', q.cx, q.cy, a, 150, { width: 8, color: c, frames: 14, taper: true });
+        }
+        v('burst', R.cx + rnd(-60, 60), R.cy + rnd(-40, 40), { n: 14, colors: [c, '#ffffff'], speed: 3, life: 30, grav: -0.03, size: 2 });
+        KB.fx('fx_rune', q.cx + rnd(-44, 44), q.cy + rnd(-30, 30), { life: 20 });
+      },
+    });
+    finale(62, '銀河創世', '#fff0a0', { r: 110, sfx: 'magic_big', dmg: 8, type: 'beam' });
+  });
+
+  // ---------- 11. 冰龍：冰龍神咆哮 ----------
+  MM('frostdragon', '冰龍神咆哮', p => {
+    intro2(p, 'frostdragon', '#8fdcff', '#ffffff', { sfx: 'dragon_breath', sfx2: 'icewall', zoom: 1.3, tint: 0.28 });
+    storm(p, {
+      n: 7, gap: 8, dmg: 9, type: 'ice', sfx: 'dragon_breath', sfxEvery: 2, freeze: true,
+      each(q, i) {
+        const R = camRect();
+        v('beam', q.cx, q.cy, 1, 320, { width: 36 - i * 2, color: '#8fdcff', frames: 16, taper: true });
+        v('beam', q.cx, q.cy, -1, 320, { width: 36 - i * 2, color: '#e8fbff', frames: 16, taper: true });
+        rain(q, 'proj_mix_orb_ice', { n: 3, dmg: 3, vy: 6, type: 'ice', trail: ['#e8fbff', '#78d8ff'] });
+        for (let k = 0; k < 3; k++) KB.fx('fx_ice', R.x + rnd(12, R.w - 12), R.y + rnd(18, R.h - 18), { life: 16 });
+        v('ring', q.cx, q.cy, { r0: 8, r1: 82, frames: 16, color: '#8fdcff', width: 3 });
+        if (i === 6) { v('flash', '#e0f8ff', 14, 0.85); v('worldTint', '#80c8ff', 0.45, 54); }
+      },
+    });
+    finale(62, '冰龍神咆哮', '#8fdcff', { flash: '#e0f8ff', sfx: 'wing_flap', dmg: 8, type: 'ice' });
+  });
+
+  // ---------- 12. 雷電機甲：雷神兵器 ----------
+  MM('thundermech', '雷神兵器', p => {
+    intro2(p, 'thundermech', '#80c8ff', '#ffe040', { sfx: 'rocket_punch', sfx2: 'thunder', zoom: 1.3 });
+    storm(p, {
+      n: 8, gap: 7, dmg: 8, type: 'mech', sfx: 'missile', sfxEvery: 2,
+      each(q, i) {
+        const R = camRect();
+        for (let k = 0; k < 4; k++) {
+          const a = -Math.PI / 2 + rnd(-1, 1);
+          ashoot({
+            spr: 'proj_mix2_rocket_spark', x: q.cx + rnd(-10, 10), y: q.cy, vx: Math.cos(a) * 4.6, vy: Math.sin(a) * 4.6,
+            dmg: 3, owner: 'player', life: 80, grav: 0.05, pierce: false, solid: false,
+            w: 12, h: 8, breakBlocks: false, type: 'mech', trail: ['#ffe040', '#80c8ff'],
+          });
+        }
+        if (i % 2 === 1) v('beam', q.cx, q.cy, q.dir, 320, { width: 26, color: '#a0e0ff', frames: 14, taper: true });
+        v('lightning', q.cx, q.cy, R.x + rnd(0, R.w), R.y + rnd(0, R.h), { color: '#ffe040', frames: 10, jitter: 10, branches: 3 });
+        KB.fx('fx_gear', R.cx + rnd(-60, 60), R.cy + rnd(-40, 40), { life: 18 });
+        if (i === 7) KB.fx('fx_spark_field', q.cx, q.cy, { life: 14 });
+      },
+    });
+    finale(62, '雷神兵器', '#80c8ff', { sfx: 'rocket_punch', dmg: 8, type: 'mech', hitstop: 4 });
+  });
+
+  // ---------- 13. 焰弓：鳳凰流星 ----------
+  MM('flamebow', '鳳凰流星', p => {
+    intro2(p, 'flamebow', '#ff7a30', '#ffe040', { sfx: 'arrow_rain', sfx2: 'fireball' });
+    storm(p, {
+      n: 8, gap: 6, dmg: 7, type: 'fire', sfx: 'bow', sfxEvery: 2,
+      each(q, i) {
+        const R = camRect();
+        rain(q, 'proj_mix2_arrow_fire', { n: 4, dmg: 3, vy: 7, grav: 0.1, type: 'fire', trail: ['#ffe040', '#ff8020'], streak: '#ffd080' });
+        // 鳳凰雙翼（兩道大弧）
+        v('slash', q.cx - 16, q.cy - 6, 38, -2.2, { color: '#ff9030', width: 4, frames: 14, arc: 2.0 });
+        v('slash', q.cx + 16, q.cy - 6, 38, -0.9, { color: '#ffe040', width: 4, frames: 14, arc: 2.0, flip: true });
+        v('burst', q.cx, q.cy - 8, { n: 12, colors: ['#ffe040', '#ff8020', '#ffffff'], speed: 3, life: 28, grav: -0.06, size: 2 });
+        if (i % 3 === 0) v('ring', q.cx, q.cy, { r0: 8, r1: 70, frames: 14, color: '#ff7a30', width: 2 });
+      },
+    });
+    finale(56, '鳳凰流星', '#ff7a30', { r: 104, sfx: 'meteor', dmg: 8, type: 'fire' });
+  });
+
+  // ---------- 14. 冰鎚：冰河終焉 ----------
+  MM('frosthammer', '冰河終焉', p => {
+    intro2(p, 'frosthammer', '#6fd0f8', '#e8fbff', { sfx: 'hammer', sfx2: 'icewall', zoom: 1.3, shake: 11, tint: 0.4 });
+    storm(p, {
+      n: 5, gap: 11, dmg: 12, type: 'ice', sfx: 'hammer', shake2: 10, hitstop: 4, freeze: true,
+      each(q, i) {
+        const R = camRect();
+        v('shockwave', q.cx, q.bottom, { w: 272, h: 22, dir: 1, speed: 10, frames: 20, color: '#c0f0ff' });
+        v('shockwave', q.cx, q.bottom, { w: 272, h: 22, dir: -1, speed: 10, frames: 20, color: '#c0f0ff' });
+        for (let k = 0; k < 5; k++) {
+          const x = R.x + (k + 0.5) * (R.w / 5) + rnd(-8, 8);
+          v('beam', x, R.y + R.h, -Math.PI / 2, 56 + i * 6, { width: 13, color: '#a8e8ff', frames: 14, taper: true });
+          KB.fx('fx_ice', x, R.y + R.h - 30, { life: 16 });
+        }
+        v('circle', q.cx, q.cy, { r: 34 + i * 9, frames: 26, color: '#e8fbff', spin: 0.05, glyphs: 7 });
+        v('textPop', q.cx, q.y - 16, i === 4 ? 'GLACIER!!' : 'FREEZE!', { color: '#c0f0ff', size: 10, frames: 28, rise: 0.5, outline: '#14324a' });
+      },
+    });
+    finale(60, '冰河終焉', '#6fd0f8', { flash: '#e0f8ff', sfx: 'icewall', dmg: 8, type: 'ice', hitstop: 4 });
+  });
+
+  // ---------- 15. 雷劍：雷帝百斬 ----------
+  MM('thundersword', '雷帝百斬', p => {
+    intro2(p, 'thundersword', '#ffe860', '#ffffff', { sfx: 'thunder', sfx2: 'sword' });
+    storm(p, {
+      n: 9, gap: 5, dmg: 7, type: 'spark', sfx: 'sword', sfxEvery: 2,
+      each(q, i) {
+        const R = camRect();
+        for (let k = 0; k < 3; k++) {
+          const x = R.x + rnd(18, R.w - 18), y = R.y + rnd(24, R.h - 24);
+          v('slash', x, y, 34, rnd(-Math.PI, Math.PI), { color: k & 1 ? '#ffffff' : '#ffe860', width: 4, frames: 12, arc: 2.2, flip: (i + k) & 1 });
+          v('lightning', q.cx, q.cy, x, y, { color: '#ffe040', frames: 10, jitter: 8, branches: 2 });
+        }
+        v('afterimage', q, { frames: 10, color: '#ffe860', every: 1, alpha: 0.55 });
+        if (i % 3 === 0) { KB.fx('fx_spark_field', q.cx, q.cy, { life: 12 }); v('worldTint', '#ffe860', 0.22, 16); }
+      },
+    });
+    finale(52, '雷帝百斬', '#ffe860', { sfx: 'thunder', dmg: 8, type: 'spark' });
+  });
+
+  // ---------- 16. 火忍：火遁・大焚天 ----------
+  MM('flameninja', '火遁・大焚天', p => {
+    intro2(p, 'flameninja', '#ff5828', '#e0c8ff', { sfx: 'teleport', sfx2: 'fireball' });
+    storm(p, {
+      n: 9, gap: 5, dmg: 7, type: 'fire', sfx: 'shuriken', sfxEvery: 2,
+      each(q, i) {
+        const R = camRect();
+        for (let k = 0; k < 3; k++) {
+          const x = R.x + rnd(22, R.w - 22), y = R.y + rnd(28, R.h - 28);
+          KB.fx('fx_poof', x, y, { life: 12 });
+          v('slash', x, y, 26, rnd(-Math.PI, Math.PI), { color: '#ff9040', width: 3, frames: 10, arc: 2.0 });
+          v('burst', x, y, { n: 8, colors: ['#ffe040', '#ff5828', '#3a1860'], speed: 2.2, life: 24, grav: -0.05, size: 2 });
+        }
+        if (i % 2 === 0) ringShot(q, 'proj_mix2_star_fire', { n: 5, off: i * 0.5, dmg: 3, speed: 5.4, type: 'fire', rotSpeed: 0.7 });
+        v('afterimage', q, { frames: 12, color: '#ff7040', every: 1, alpha: 0.55 });
+        if (i === 8) { v('circle', q.cx, q.cy, { r: 62, frames: 28, color: '#ff5828', spin: 0.16, glyphs: 12 }); v('flash', '#ffd0a0', 14, 0.8); }
+      },
+    });
+    finale(54, '火遁・大焚天', '#ff5828', { sfx: 'fire', dmg: 8, type: 'fire' });
+  });
+
+  // ---------- 17. 冰忍：冰遁・絕零陣 ----------
+  MM('frostninja', '冰遁・絕零陣', p => {
+    intro2(p, 'frostninja', '#a8e8ff', '#9060e0', { sfx: 'teleport', sfx2: 'ice', tint: 0.28 });
+    storm(p, {
+      n: 9, gap: 5, dmg: 7, type: 'ice', sfx: 'shuriken', sfxEvery: 2, freeze: true,
+      each(q, i) {
+        const R = camRect();
+        // 冰鏡分身：現身 → 碎鏡冰片
+        for (let k = 0; k < 3; k++) {
+          const x = R.x + rnd(22, R.w - 22), y = R.y + rnd(28, R.h - 28);
+          KB.fx('fx_ice', x, y, { life: 16 });
+          v('slash', x, y, 26, rnd(-Math.PI, Math.PI), { color: '#e8fbff', width: 3, frames: 10, arc: 2.0 });
+          v('burst', x, y, { n: 7, colors: ['#ffffff', '#a8e8ff', '#2060b0'], speed: 1.9, life: 26, grav: 0.02, size: 2 });
+        }
+        if (i % 2 === 0) ringShot(q, 'proj_mix2_star_ice', { n: 5, off: i * 0.45, dmg: 3, speed: 5.2, type: 'ice', rotSpeed: 0.7 });
+        v('circle', q.cx, q.cy, { r: 30 + i * 5, frames: 24, color: '#c0f0ff', spin: -0.12, glyphs: 8 });
+        v('afterimage', q, { frames: 12, color: '#a8e8ff', every: 1, alpha: 0.5 });
+      },
+    });
+    finale(54, '冰遁・絕零陣', '#a8e8ff', { flash: '#e0f8ff', sfx: 'icewall', dmg: 8, type: 'ice' });
+  });
+
+  // ---------- 18. 雷槍：雷射死亡輪舞 ----------
+  MM('thundergun', '雷射死亡輪舞', p => {
+    intro2(p, 'thundergun', '#ffc830', '#a0e0ff', { sfx: 'shotgun', sfx2: 'thunder' });
+    if (G()) G().slowMoT = Math.max(G().slowMoT | 0, 60);         // 子彈時間
+    storm(p, {
+      n: 7, gap: 7, dmg: 7, type: 'spark', sfx: 'gun', sfxEvery: 2,
+      each(q, i) {
+        const R = camRect();
+        // 旋轉雷射（6 道）+ 電擊彈
+        for (let k = 0; k < 6; k++) {
+          const a = (k / 6) * TAU + i * 0.32;
+          v('beam', q.cx, q.cy, a, 170, { width: 9, color: k & 1 ? '#ffc830' : '#a0e0ff', frames: 14, taper: true });
+        }
+        ringShot(q, 'proj_mix_bolt_spark', { n: 8, off: i * 0.3, dmg: 3, speed: 5.6, type: 'spark' });
+        KB.fx('fx_muzzle', q.cx, q.cy, { life: 8 });
+        v('lightning', R.x, R.cy + Math.sin(i) * 30, R.x + R.w, R.cy - Math.sin(i) * 30, { color: '#ffe040', frames: 12, jitter: 12, branches: 3 });
+        v('afterimage', q, { frames: 10, color: '#ffe880', every: 2, alpha: 0.45 });
+      },
+    });
+    // 子彈時間結束後的收尾雷射
+    storm(p, {
+      n: 3, gap: 9, dmg: 9, type: 'spark', sfx: 'shotgun', delay: 64,
+      each(q, i) {
+        for (let k = 0; k < 4; k++) {
+          const a = (k / 4) * TAU + i * 0.4;
+          v('beam', q.cx, q.cy, a, 220, { width: 14, color: k & 1 ? '#ffc830' : '#a0e0ff', frames: 14, taper: true });
+        }
+        ringShot(q, 'proj_mix_bolt_spark', { n: 6, off: i * 0.4, dmg: 3, speed: 6, type: 'spark' });
+        KB.fx('fx_spark_field', q.cx, q.cy, { life: 14 });
+      },
+    });
+    finale(96, '雷射死亡輪舞', '#ffc830', { sfx: 'thunder', dmg: 8, type: 'spark' });
+  });
+
+  // ---------- 19. 岩巨人：山崩地裂 ----------
+  MM('stonegiant', '山崩地裂', p => {
+    intro2(p, 'stonegiant', '#a89078', '#ffe0b0', { sfx: 'giant_roar', sfx2: 'stomp', zoom: 1.36, shake: 14 });
+    storm(p, {
+      n: 5, gap: 11, dmg: 13, type: 'stone', sfx: 'stomp', shake2: 13, hitstop: 5, breakBlocks: true,
+      each(q, i) {
+        const R = camRect();
+        v('shockwave', q.cx, q.bottom, { w: 300, h: 28, dir: 1, speed: 12, frames: 20, color: '#e8e0d0' });
+        v('shockwave', q.cx, q.bottom, { w: 300, h: 28, dir: -1, speed: 12, frames: 20, color: '#e8e0d0' });
+        rain(q, 'proj_mix_orb_stone', { n: 4, dmg: 3, vy: 6.4, type: 'stone' });
+        for (let k = 0; k < 5; k++) v('burst', R.x + (k + 0.5) * R.w / 5, R.y + R.h - 6, { n: 11, colors: ['#e8e0d0', '#a89078', '#5a4838'], speed: 3.4, life: 32, grav: 0.18, size: 3 });
+        v('ring', q.cx, q.bottom, { r0: 6, r1: 100, frames: 20, color: '#a89078', width: 3 });
+        v('textPop', q.cx, q.y - 18, i === 4 ? 'COLLAPSE!!' : 'QUAKE!', { color: '#ffe0b0', size: 10, frames: 30, rise: 0.5, outline: '#3a2400' });
+      },
+    });
+    finale(64, '山崩地裂', '#a89078', { flash: '#fff0d0', sfx: 'giant_roar', dmg: 8, type: 'stone', breakBlocks: true, hitstop: 5, shake: 12 });
+  });
+
+  // ---------- 20. 炎龍：太陽龍神 ----------
+  MM('flamedragon', '太陽龍神', p => {
+    intro2(p, 'flamedragon', '#ff5030', '#ffe040', { sfx: 'giant_roar', sfx2: 'dragon_breath', zoom: 1.34, lb: 200 });
+    const sun = { x: p.cx, y: p.cy - 14 };
+    v('circle', sun.x, sun.y, { r: 58, frames: 100, color: '#ffb020', spin: 0.1, glyphs: 14 });
+    storm(p, {
+      n: 7, gap: 8, dmg: 9, type: 'fire', sfx: 'dragon_breath', sfxEvery: 2,
+      each(q, i) {
+        const R = camRect();
+        // 太陽（放射光柱）+ 左右貫穿龍焰 + 火雨
+        for (let k = 0; k < 8; k++) {
+          const a = (k / 8) * TAU + i * 0.2;
+          v('beam', sun.x, sun.y, a, 130, { width: 10, color: k & 1 ? '#ffe040' : '#ff5030', frames: 14, taper: true });
+        }
+        v('beam', q.cx, q.cy, 1, 320, { width: 32 - i * 2, color: '#ff7040', frames: 16, taper: true });
+        v('beam', q.cx, q.cy, -1, 320, { width: 32 - i * 2, color: '#ffb060', frames: 16, taper: true });
+        rain(q, 'proj_mix_orb_fire', { n: 3, dmg: 3, vy: 6.2, type: 'fire', trail: ['#ffe040', '#ff5010'] });
+        v('burst', sun.x, sun.y, { n: 14, colors: ['#fff0a0', '#ff8020', '#c03000'], speed: 3.4, life: 30, grav: -0.03, size: 2 });
+        if (i === 6) { v('flash', '#fff0c0', 16, 0.9); v('worldTint', '#ff8020', 0.42, 50); }
+      },
+    });
+    finale(66, '太陽龍神', '#ff5030', { r: 112, sfx: 'wing_flap', dmg: 8, type: 'fire' });
+  });
+
+  // ---------- 21. 雷龍：雷雲龍神 ----------
+  MM('thunderdragon', '雷雲龍神', p => {
+    intro2(p, 'thunderdragon', '#b0d8ff', '#ffe040', { sfx: 'giant_roar', sfx2: 'thunder', zoom: 1.32, tint: 0.27 });
+    storm(p, {
+      n: 7, gap: 8, dmg: 9, type: 'spark', sfx: 'thunder', sfxEvery: 2,
+      each(q, i) {
+        const R = camRect();
+        // 雷雲落雷柱 + 左右雷息
+        for (let k = 0; k < 5; k++) {
+          const x = R.x + (k + 0.5) * (R.w / 5) + rnd(-12, 12);
+          v('lightning', x, R.y - 10, x + rnd(-14, 14), R.y + R.h, { color: k & 1 ? '#ffffff' : '#ffe040', frames: 12, jitter: 11, branches: 3 });
+          v('beam', x, R.y, Math.PI / 2, R.h * 0.9, { width: 8, color: '#b0d8ff', frames: 10, taper: true });
+        }
+        v('beam', q.cx, q.cy, 1, 300, { width: 30 - i * 2, color: '#b0d8ff', frames: 16, taper: true });
+        v('beam', q.cx, q.cy, -1, 300, { width: 30 - i * 2, color: '#ffe040', frames: 16, taper: true });
+        KB.fx('fx_spark_field', q.cx, q.cy, { life: 14 });
+        if (i % 2 === 0) v('worldTint', '#a0c8ff', 0.3, 18);
+      },
+    });
+    finale(66, '雷雲龍神', '#b0d8ff', { sfx: 'wing_flap', dmg: 8, type: 'spark' });
+  });
+
+  // ---------- 22. 時光束：時空崩壞（時停 + 光柱）----------
+  MM('timebeam', '時空崩壞', p => {
+    intro2(p, 'timebeam', '#c0a8ff', '#ffffff', { sfx: 'timestop', sfx2: 'beam', zoom: 1.3, lb: 210, tint: 0.27 });
+    const g = G(), STOP = 150;
+    if (g) g.timeStopT = Math.max(g.timeStopT | 0, STOP);       // 全場定格
+    v('worldTint', '#8090b0', 0.4, STOP);
+    v('textPop', p.cx, p.y - 24, '時間停止', { color: '#e0e8ff', size: 12, frames: 80, rise: 0.3, outline: '#181c28' });
+    storm(p, {
+      n: 9, gap: 8, dmg: 7, type: 'beam', sfx: 'beam', sfxEvery: 2,
+      each(q, i) {
+        const R = camRect();
+        // 停滯的時空裡落下光柱
+        const x = R.x + (i % 3) * (R.w / 3) + R.w / 6 + rnd(-14, 14);
+        v('beam', x, R.y, Math.PI / 2, R.h, { width: 30 - i * 2, color: '#fff0ff', frames: 18, taper: false });
+        v('beam', q.cx, R.y, Math.PI / 2, R.h, { width: 16, color: '#c0a8ff', frames: 14, taper: false });
+        v('circle', q.cx, q.cy, { r: 44 + i * 4, frames: 24, color: '#e0e8ff', spin: -0.22, glyphs: 12 });
+        v('burst', x, R.y + R.h - 10, { n: 10, colors: ['#ffffff', '#c0a8ff', '#404870'], speed: 2.6, life: 28, grav: -0.02, size: 2 });
+        v('afterimage', q, { frames: 10, color: '#c0d0ff', every: 1, alpha: 0.4 });
+        if (i === 8) { v('flash', '#ffffff', 16, 0.9); v('shake', 12); }
+      },
+    });
+    // 時停解除的瞬間：剛才停滯的光柱「一起落下」（5 段解放，時停期間被凍住的目標這時才吃滿）
+    A.after(STOP - 8, () => { sfx('timeresume'); v('flash', '#ffffff', 14, 0.8); v('shake', 10); });
+    storm(p, {
+      n: 5, gap: 7, dmg: 8, type: 'beam', sfx: 'beam', sfxEvery: 2, delay: STOP + 4,
+      each(q, i) {
+        const R = camRect();
+        for (let k = 0; k < 3; k++) {
+          const x = R.x + (k + 0.5) * (R.w / 3) + rnd(-16, 16);
+          v('beam', x, R.y, Math.PI / 2, R.h, { width: 26 - i * 2, color: k & 1 ? '#c0a8ff' : '#ffffff', frames: 16, taper: false });
+        }
+        v('ring', q.cx, q.cy, { r0: 6, r1: 80, frames: 16, color: '#c0a8ff', width: 3 });
+        v('burst', q.cx, q.cy, { n: 12, colors: ['#ffffff', '#c0a8ff', '#404870'], speed: 3, life: 26, grav: -0.02, size: 2 });
+      },
+    });
+    finale(STOP + 46, '時空崩壞', '#c0a8ff', { r: 108, sfx: 'magic_big', dmg: 8, type: 'beam', hitstop: 4 });
+  });
+
+  // ---------- 23. 重力刃：刃之黑洞 ----------
+  MM('gravityblade', '刃之黑洞', p => {
+    intro2(p, 'gravityblade', '#9060e0', '#d0b0ff', { sfx: 'blackhole', sfx2: 'cutter', zoom: 1.32, lb: 200 });
+    const hole = { x: p.cx, y: p.cy - 10 };
+    v('circle', hole.x, hole.y, { r: 58, frames: 100, color: '#6030c0', spin: 0.24, glyphs: 14 });
+    storm(p, {
+      n: 9, gap: 7, dmg: 7, type: 'cutter', sfx: 'gravity_lift', sfxEvery: 3, knock: 0,
+      each(q, i) {
+        const g = G(), R = camRect();
+        // 把敵人 / 敵彈吸進黑洞，刃在外圈向心收束
+        if (g) for (const e of g.entities) {
+          if (e.dead || (e.type !== 'enemy' && !(e.type === 'proj' && e.owner === 'enemy'))) continue;
+          const dx = hole.x - e.cx, dy = hole.y - e.cy, d = Math.max(6, Math.hypot(dx, dy));
+          e.vx = dx / d * 2.8; e.vy = dy / d * 2.8 - 0.2;
+        }
+        for (let k = 0; k < 4; k++) {
+          const a = (k / 4) * TAU + i * 0.5, r = 74 - i * 5;
+          ashoot({
+            spr: 'proj_mix2_ring_void', x: hole.x + Math.cos(a) * r, y: hole.y + Math.sin(a) * r,
+            vx: -Math.cos(a) * 4.6, vy: -Math.sin(a) * 4.6, dmg: 3, owner: 'player', life: 40,
+            grav: 0, pierce: true, solid: false, w: 12, h: 12, rotSpeed: 0.6, breakBlocks: false, type: 'cutter',
+          });
+          v('slash', hole.x + Math.cos(a) * r, hole.y + Math.sin(a) * r, 26, a + Math.PI, { color: '#d0b0ff', width: 3, frames: 10, arc: 2.0 });
+        }
+        v('ring', hole.x, hole.y, { r0: 78 - i * 6, r1: 6, frames: 14, color: '#b080ff', width: 3 });
+        v('burst', hole.x, hole.y, { n: 12, colors: ['#9060e0', '#280a4a', '#ffffff'], speed: 2.4, life: 24, grav: 0, size: 2 });
+        if (i === 8) { v('flash', '#c0a0ff', 16, 0.9); v('hitstop', 6); v('shake', 12); bigbox(q, { dmg: 14, type: 'cutter', life: 6, cx: hole.x, cy: hole.y }); }
+      },
+    });
+    finale(72, '刃之黑洞', '#9060e0', { r: 106, sfx: 'blackhole' });
+  });
+
+  // ---------- 24. 鎚機甲：軌道終焉鎚 ----------
+  MM('hammermech', '軌道終焉鎚', p => {
+    intro2(p, 'hammermech', '#ff9850', '#90a8c8', { sfx: 'jet', sfx2: 'hammer', zoom: 1.34, shake: 12, lb: 200 });
+    storm(p, {
+      n: 5, gap: 12, dmg: 13, type: 'mech', sfx: 'hammer', shake2: 12, hitstop: 5, breakBlocks: true,
+      each(q, i) {
+        const R = camRect();
+        // 軌道砲柱從天而降 + 鎚擊衝擊波 + 飛彈齊射
+        const x = q.cx + rnd(-30, 30);
+        v('beam', x, R.y, Math.PI / 2, R.h, { width: 44 - i * 3, color: '#e8f0ff', frames: 16, taper: false });
+        v('beam', q.cx, R.y, Math.PI / 2, q.cy - R.y, { width: 40, color: '#ff9850', frames: 10, taper: true });
+        v('shockwave', q.cx, q.bottom, { w: 264, h: 24, dir: 1, speed: 11, frames: 20, color: '#ffd0a0' });
+        v('shockwave', q.cx, q.bottom, { w: 264, h: 24, dir: -1, speed: 11, frames: 20, color: '#ffd0a0' });
+        for (let k = 0; k < 3; k++) {
+          const a = -Math.PI / 2 + rnd(-0.8, 0.8);
+          ashoot({
+            spr: 'proj_mix2_rocket_steel', x: q.cx + rnd(-10, 10), y: q.cy, vx: Math.cos(a) * 4.4, vy: Math.sin(a) * 4.4,
+            dmg: 3, owner: 'player', life: 80, grav: 0.05, pierce: false, solid: false,
+            w: 12, h: 8, breakBlocks: false, type: 'mech', trail: ['#ffd0a0', '#90a8c8'],
+          });
+        }
+        KB.fx('fx_gear', R.cx + rnd(-60, 60), R.cy + rnd(-40, 40), { life: 18 });
+        v('textPop', q.cx, q.y - 18, i === 4 ? 'ORBITAL!!' : 'LOCK ON', { color: '#ffd0a0', size: 10, frames: 28, rise: 0.5, outline: '#24303c' });
+      },
+    });
+    finale(66, '軌道終焉鎚', '#ff9850', { r: 108, sfx: 'missile', dmg: 8, type: 'mech', breakBlocks: true, hitstop: 5, shake: 12 });
   });
 
   // ================================================================ 掛鉤

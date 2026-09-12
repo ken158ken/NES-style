@@ -8,12 +8,15 @@ Lv4 覺醒系統驗證（Round 7 / agent: awaken）—— src/awaken.js 的 KB.A
   3. 觸發：跳+攻同幀 / 3 幀內先後 → 覺醒；量表沒滿或未 Lv4 → 不攔截（仍是普通跳與普通攻擊）；
      變身演出（停格）期間的輸入會排隊，演出結束自動發動（R7-P2-05）
   4. 覺醒狀態：300 幀後結束、量表歸 0、期間傷害 ×1.5、移動速度 ×1.2、無敵
-  5. 20 種基本能力的覺醒招：各自命中 waddledee 致死；混合能力用主成分 A 的招
+  5. 20 種基本能力的覺醒招：各自命中 waddledee 致死
   5b. 覺醒招對魔王減傷（R7-P1-01）：20 招各打 60HP 魔王模擬體，單次覺醒總傷害 ≤ 40%
+  5c. Round 8「awaken-mix」：24 種混合能力的**專屬**覺醒招 —— 各自命中致死、結束後回到正常狀態、
+      對 60HP 魔王模擬體單次覺醒 ≤ 40%；baseKey 有專屬招用專屬、沒有才退回主成分
   6. HUD 量表：畫在能力圖示下方（y218），不與 Lv 星（y194~197）重疊
   7. 全程監看 pageerror / console.error；MISSING SPRITES 必須為空
 
-用法：python tools/test_awaken.py [-v] [--only lv4,gauge,trigger,state,moves,boss,hud]
+用法：python tools/test_awaken.py [-v] [--only lv4,gauge,trigger,state,moves,boss,mix,mixboss,hud] [--shots]
+（--shots 會把 24 招混合覺醒招各存一張到 shots/agent_awakenmix/）
 （測試地圖與頁面輔助函式沿用 tools/enemy_test.py 的 Harness / HOOK_JS / TEST_LEVEL）
 """
 import sys, pathlib, argparse
@@ -34,6 +37,17 @@ check = ET.check
 BASIC20 = ['fire', 'sword', 'beam', 'cutter', 'spark', 'stone', 'ice', 'hammer',
            'gunner', 'ninja', 'blade', 'bow', 'mage', 'time', 'gravity', 'clone',
            'giant', 'dragon', 'mech', 'ghost']
+
+# Round 8「awaken-mix」：24 種混合能力的專屬覺醒招（順序 = KB.AWAKEN.MIX_ORDER）
+MIX24 = ['flamesword', 'frostsword', 'thunderblade', 'flamegun', 'frostgun', 'thunderbow',
+         'flamehammer', 'stonehammer', 'shadowblade', 'starmage', 'frostdragon', 'thundermech',
+         'flamebow', 'frosthammer', 'thundersword', 'flameninja', 'frostninja', 'thundergun',
+         'stonegiant', 'flamedragon', 'thunderdragon', 'timebeam', 'gravityblade', 'hammermech']
+
+MIX_SHOTS = pathlib.Path(__file__).resolve().parent.parent / 'shots' / 'agent_awakenmix'
+# --shots 的取景幀（從 startAwaken 起算的實際幀數）：預設 52，
+# 少數招式在那一瞬間正好是全畫面白閃（居合的一閃、收尾的爆閃），改抓別的時間點
+SHOT_AT = {'thunderblade': 46, 'frostgun': 34, 'frostdragon': 36, 'flamedragon': 36}
 
 # 把某能力釘死在指定等級（直接寫 abilityXp / abilityLv，不經過 giveAbility 的升級演出）
 SET_LV = """([key, lv]) => {
@@ -290,24 +304,24 @@ def phase_state(h):
     # 覺醒中的外觀精靈存在
     spr = h.ev("()=>[KB.has('fx_awaken_aura'), KB.has('hat_awaken_crown')]")
     check('覺醒外觀精靈 fx_awaken_aura / hat_awaken_crown 已註冊', spr == [True, True], spr)
-    # 混合能力 → 主成分 A 的覺醒招
+    # 混合能力 → 各自的專屬覺醒招（Round 8）
     mix = h.ev("""()=>{ const out = {};
       if (KB.MIX && KB.MIX.table) { for (const k of Object.keys(KB.ABILITIES)) {
         if (KB.MIX.isMix && KB.MIX.isMix(k)) { const m = KB.AWAKEN.moveFor(k); out[k] = m ? m.name : null; } } }
       return out; }""")
-    check('混合能力都對應得到覺醒招（主成分 A）', len(mix) > 0 and all(v for v in mix.values()), mix)
+    check('混合能力都對應得到覺醒招', len(mix) > 0 and all(v for v in mix.values()), mix)
 
 
 # ---------------------------------------------------------------------------
 # 5. 20 招
 # ---------------------------------------------------------------------------
 def phase_moves(h, shots=False):
-    print('-' * 8, '20 招覺醒招')
+    print('-' * 8, '20 招基本覺醒招')
     keys = h.ev("()=>Object.keys(KB.AWAKEN.moves)")
-    check('覺醒招共 20 招', len(keys) == 20, keys)
-    check('20 招對應 20 種基本能力', sorted(keys) == sorted(BASIC20), sorted(set(keys) ^ set(BASIC20)))
+    check('覺醒招共 44 招（基本 20 + 混合 24）', len(keys) == 44, len(keys))
+    check('20 種基本能力都有覺醒招', all(k in keys for k in BASIC20), sorted(set(BASIC20) - set(keys)))
     names = h.ev("()=>Object.keys(KB.AWAKEN.moves).map(k=>KB.AWAKEN.moves[k].name)")
-    check('招式名稱不重複', len(set(names)) == 20, names)
+    check('招式名稱不重複', len(set(names)) == 44, [n for n in set(names) if names.count(n) > 1])
     for key in BASIC20:
         nm = h.ev("(k)=>KB.AWAKEN.moves[k].name", key)
         h.goto(3, 9, ability=None, immune=True)
@@ -398,6 +412,129 @@ def phase_boss(h):
 
 
 # ---------------------------------------------------------------------------
+# 5c. Round 8「awaken-mix」：24 種混合能力的專屬覺醒招
+# ---------------------------------------------------------------------------
+# 招式結束後「回正常」的判定：覺醒已結束、量表歸 0、無敵 / 排程 / 停格 / 時停 / 子彈時間全部收乾淨、
+# 場上不再有玩家方的判定框 / 投射物、卡比回到可操作狀態。
+NORMAL = """() => {
+  const p = KB.player, g = KB.game, A = KB.AWAKEN;
+  const boxes = g.entities.filter(e => !e.dead && e.owner === 'player' && (e.type === 'hitbox' || e.type === 'proj')).length;
+  return { active: A.active(), t: A.activeT, gauge: A.gauge, q: A.q.length, pend: A.pending | 0,
+    awakenT: p.awakenT | 0, inv: p.invincibleT | 0, state: p.state, hp: p.hp,
+    freeze: g.freezeT | 0, stop: g.timeStopT | 0, slow: g.slowMoT | 0, boxes };
+}"""
+OK_STATES = ('idle', 'walk', 'run', 'jump', 'fall', 'float', 'duck', 'crouch', 'slide', 'land')
+
+
+def _mix_shot(h, key):
+    # 截圖前把「開場橫幅 / ENTER 提示 / 成就 toast」讓開：兩者都只看 game.frame，
+    # 暫時把 frame 往後推 400 幀再 render，拍完立刻還原（只影響這一次繪製，不動任何狀態）
+    data = h.ev("""()=>{ const g = KB.game; if (!g) return null;
+      const f0 = g.frame; if (g.toasts) g.toasts.length = 0;
+      g.frame = f0 + 400; const d = __t.shot(); g.frame = f0; return d; }""")
+    if not data:
+        return None
+    MIX_SHOTS.mkdir(parents=True, exist_ok=True)
+    f = MIX_SHOTS / ('awk_%s.png' % key)
+    f.write_bytes(ET.base64.b64decode(data.split(',', 1)[1]))
+    return f
+
+
+def phase_mix(h, shots=False):
+    print('-' * 8, '24 招混合覺醒招（Round 8 awaken-mix）')
+    order = h.ev("()=>KB.AWAKEN.MIX_ORDER || []")
+    check('KB.AWAKEN.MIX_ORDER 共 24 個混合 key', sorted(order) == sorted(MIX24), sorted(set(order) ^ set(MIX24)))
+    ismix = h.ev("(ks)=>ks.map(k=>!!(KB.MIX && KB.MIX.isMix && KB.MIX.isMix(k)))", MIX24)
+    check('24 個 key 都是 KB.MIX 的混合能力', all(ismix), [k for k, b in zip(MIX24, ismix) if not b])
+    info = h.ev("""(ks)=>ks.map(k=>{ const m = KB.AWAKEN.moves[k];
+      return { k, own: KB.AWAKEN.hasOwnMove(k), base: KB.AWAKEN.baseKey(k), name: m ? m.name : null,
+               parts: KB.MIX.parts(k) }; })""", MIX24)
+    check('24 招都是「專屬招」（baseKey 回自己，不退回主成分）',
+          all(r['own'] and r['base'] == r['k'] and r['name'] for r in info),
+          [r for r in info if not (r['own'] and r['base'] == r['k'])])
+    basic_names = h.ev("(ks)=>ks.map(k=>KB.AWAKEN.moves[k].name)", BASIC20)
+    mix_names = [r['name'] for r in info]
+    check('24 個招名彼此不重複、也不與基本 20 招重複',
+          len(set(mix_names)) == 24 and not (set(mix_names) & set(basic_names)),
+          [n for n in mix_names if mix_names.count(n) > 1] or list(set(mix_names) & set(basic_names)))
+    # baseKey：沒有專屬招時才退回主成分 A（暫時把 flamesword 的招拿掉驗證，再放回去）
+    fb = h.ev("""()=>{ const A = KB.AWAKEN, save = A.moves.flamesword; delete A.moves.flamesword;
+      const back = A.baseKey('flamesword'), nm = A.moveFor('flamesword');
+      A.moves.flamesword = save;
+      return [back, nm ? nm.name : null, A.baseKey('flamesword')]; }""")
+    check('沒有專屬招時退回主成分 A（flamesword → fire「焚天龍炎」）',
+          fb[0] == 'fire' and fb[1] == '焚天龍炎', fb)
+    check('放回專屬招後又用專屬（flamesword → flamesword）', fb[2] == 'flamesword', fb)
+    # 每招的新精靈：詠唱姿勢 kirby_awaken_cast + 專屬印記 fx_awk_<mixkey>（art/kirby_awaken.js）
+    h.goto(3, 9, ability=None, immune=True)
+    h.ev(RESET)
+    sig = h.ev("""(ks)=>{ const A = KB.AWAKEN, g = KB.game, bad = [];
+      const has = n => !!KB.has(n);
+      for (const k of ks) {
+        if (!has('fx_awk_' + k)) { bad.push(k + ':no-sprite'); continue; }
+        const n0 = g.entities.length;
+        A.moves[k].exec(KB.player);
+        const fx = g.entities.slice(n0).filter(e => e.type === 'fx').map(e => e.spr);
+        if (fx.indexOf('kirby_awaken_cast') < 0) bad.push(k + ':no-cast');
+        if (fx.indexOf('fx_awk_' + k) < 0) bad.push(k + ':no-sigil');
+        for (const e of g.entities.slice(n0)) e.dead = true;
+        A.reset(); KB.VFX.clear();
+        if (g) { g.timeStopT = 0; g.slowMoT = 0; g.freezeT = 0; }
+      }
+      return { bad, cast: has('kirby_awaken_cast') }; }""", MIX24)
+    check('新精靈：kirby_awaken_cast + 24 張 fx_awk_<mixkey> 都有註冊且每招都會疊上',
+          sig['cast'] and not sig['bad'], sig['bad'][:6])
+
+    for key in MIX24:
+        nm = h.ev("(k)=>KB.AWAKEN.moves[k].name", key)
+        h.goto(3, 9, ability=None, immune=True)
+        h.ev(RESET)
+        h.ev(GIVE, key)
+        h.ev(SET_LV, [key, 4])
+        h.ev("()=>{ KB.AWAKEN.reset(); KB.AWAKEN.add(100); }")
+        h.spawn('waddledee', 7, 9, d=-1)
+        h.ev("()=>{ KB.player.startAwaken(); }")
+        at = SHOT_AT.get(key, 52)
+        h.run(at, 13)
+        if shots:
+            _mix_shot(h, key)          # 招式演出中段（多段判定 + 特效最密的時候）
+        h.run(262 - at, 20)
+        e = h.ent()
+        check(f'{key} [{nm}]: 混合覺醒招打死 waddledee', e['dead'], dict(hp=e['hp'], x=e['x']))
+        h.run(360, 60)                      # 跑到覺醒（300 幀）+ 時停 / 排程 全部結束
+        st2 = h.ev(NORMAL)
+        ok = (not st2['active'] and st2['t'] == 0 and st2['gauge'] == 0 and st2['q'] == 0
+              and st2['pend'] == 0 and st2['awakenT'] == 0 and st2['freeze'] == 0
+              and st2['stop'] == 0 and st2['slow'] == 0 and st2['boxes'] == 0
+              and st2['state'] in OK_STATES)
+        check(f'{key} [{nm}]: 招式結束後回到正常狀態', ok, st2)
+
+
+def phase_mixboss(h):
+    print('-' * 8, '24 招混合覺醒招對魔王的傷害（BOSS_MUL / BOSS_CAP）')
+    worst = []
+    for key in MIX24:
+        nm = h.ev("(k)=>KB.AWAKEN.moves[k].name", key)
+        h.goto(3, 9, ability=None, immune=True)
+        h.ev(RESET)
+        h.ev(GIVE, key)
+        h.ev(SET_LV, [key, 4])
+        h.ev("()=>{ KB.AWAKEN.reset(); KB.AWAKEN.add(100); }")
+        h.ev(SIM_BOSS, SIM_HP0)
+        h.ev("()=>{ KB.player.startAwaken(); }")
+        h.run(480, 40)
+        b = h.ev(SIM_HP)
+        lost = SIM_HP0 - b['hp'] if b else 999
+        pct = lost / SIM_HP0
+        worst.append((pct, key))
+        check(f'{key} [{nm}]: 一次覺醒對 60HP 魔王 ≤ 40%（實測 {lost}/{SIM_HP0} = {pct:.0%}）',
+              pct <= BOSS_CAP and not (b and b['dead']), dict(hp=b['hp'] if b else None, lost=lost))
+    worst.sort(reverse=True)
+    print('   最高 5 名：' + ', '.join(f'{k} {p:.0%}' for p, k in worst[:5]))
+    check('沒有任何一招混合覺醒招能一次覺醒打死 60HP 魔王', worst[0][0] <= BOSS_CAP, worst[:3])
+
+
+# ---------------------------------------------------------------------------
 # 6. HUD 量表
 # ---------------------------------------------------------------------------
 def phase_hud(h):
@@ -438,7 +575,8 @@ def main():
         h = Harness(pg, a.shots, a.hitbox)
         for name, fn in (('lv4', phase_lv4), ('gauge', phase_gauge), ('trigger', phase_trigger),
                          ('state', phase_state), ('moves', lambda hh: phase_moves(hh, a.shots)),
-                         ('boss', phase_boss), ('hud', phase_hud)):
+                         ('boss', phase_boss), ('mix', lambda hh: phase_mix(hh, a.shots)),
+                         ('mixboss', phase_mixboss), ('hud', phase_hud)):
             if only and name not in only: continue
             fn(h)
         miss = pg.evaluate("()=>[...KB.missing]")
