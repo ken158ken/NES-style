@@ -416,7 +416,10 @@
     }
     hurt(amount, src) {
       if (this.dead || this.stunned || this.invuln > 0) return false;
-      this.hp -= amount; this.flash = 8; this.invuln = 8;
+      // 元素弱點 / 抗性與燃燒 / 麻痺狀態（與 Enemy.hurt 一致；R6-P1-03）
+      const dmg = KB.ELEM ? KB.ELEM.applyHit(this, amount, src) : amount;
+      this.hp -= dmg; this.flash = 8; this.invuln = 8;
+      if (KB.ELEM) KB.ELEM.onHit(this, src);
       if (this.hp <= 0) { this.hp = 0; this.stun(src); return true; }
       sfx('boss_hurt'); return true;
     }
