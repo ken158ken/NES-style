@@ -395,6 +395,7 @@
     ['跳（連按）', '漂浮；X 吐氣結束'],
     ['滑鏟中 跳', '滑鏟可用跳躍取消'],
     ['受傷時', '能力星噴出，可撿回'],
+    ['SELECT 丟星', '砸中帶能力的敵人可混合'],
     ['能力台座', '碰到即可重複取得能力'],
     ['傳送星', '碰到後自動飛往另一處'],
   ];
@@ -1099,7 +1100,17 @@
       this.game = game || null;
       this.score = game ? game.score : (KB.session ? KB.session.score : 0);
       this.t = 0; this.frame = 0; this.fade = 1; this.leaving = null;
-      this.lines = [
+      // fix6：打倒暗影卡比（W6「星之彼端」）之後走專屬結局文案 + 收集度總表
+      const shadow = !!((KB.session && KB.session.shadowDefeated) || (KB.save && KB.save.cleared && KB.save.cleared.w6));
+      this.shadow = shadow;
+      this.lines = shadow ? [
+        { s: '影子消散，星之彼端重新亮起', size: 16, color: C.yellow, y: 10 },
+        { s: '追到最後才發現，那個影子', size: 14, color: '#fff', y: 32 },
+        { s: '一直是你自己走過來的路', size: 14, color: '#fff', y: 48 },
+        { s: '能力發現 ' + EndingScene.seenLine(), size: 12, color: '#c8d8f0', y: 66 },
+        { s: '成就 ' + EndingScene.achLine() + '　大星星 ' + EndingScene.starLine(), size: 12, color: '#c8d8f0', y: 80 },
+        { s: 'FINAL SCORE ' + pad7(this.score), size: 8, color: '#fff', y: 94 },
+      ] : [
         { s: '和平回到了普普星！', size: 16, color: C.yellow, y: 12 },
         { s: '感謝遊玩', size: 16, color: '#fff', y: 38 },
         { s: '本作為同人致敬作品', size: 14, color: '#c8d8f0', y: 60 },
@@ -1154,5 +1165,22 @@
       drawMuteToast(ctx); drawFade(ctx, this);
     }
   }
+  // 結局收集度（n/總數）：能力 32 種 / 成就 20 條 / 大星星 6 關 × 3 = 18
+  EndingScene.seenLine = function () {
+    const all = UI.abilityKeys().length || 32;
+    return UI.seenCount() + '/' + all;
+  };
+  EndingScene.achLine = function () {
+    const P = KB.PROG;
+    if (!P || !P.achCount) return '0/20';
+    return P.achCount() + '/' + P.achTotal();
+  };
+  EndingScene.starLine = function () {
+    const levels = (KB.LEVELS || []).length || 6;
+    let n = 0;
+    if (KB.PROG && KB.PROG.starTotal) n = KB.PROG.starTotal();
+    else { const st = (KB.save && KB.save.stars) || {}; for (const k in st) if (Array.isArray(st[k])) n += st[k].filter(Boolean).length; }
+    return n + '/' + (levels * 3);
+  };
   KB.EndingScene = EndingScene;
 })();

@@ -18,6 +18,10 @@
   const HAMMER_SPIN = 40;   // 鐵鎚・大迴旋（招式表：按住 40 幀放開）
   const BEAM_WAVE = 45;   // 光束・星潮光束（招式表：按住 45 幀放開）
   const SPARK_BURST = 45;   // 電擊・電擊波（招式表：按住 45 幀放開）
+  // fix6：Lv3 蓄力時間 ×0.8（KB.PROG.holdMul）。招式表上的數字一律是 **Lv1** 的門檻，
+  //   能力練到 Lv3 之後同一招會提早 20% 蓄滿（KB.PROG 未載入時回傳原值，行為完全不變）。
+  const HOLD = (key, n) => (KB.PROG && KB.PROG.holdMul) ? Math.max(4, Math.round(n * KB.PROG.holdMul(key))) : n;
+
   const def = (key, o) => {
     o.key = key; o.name = o.name || KB.ABILITY_NAMES[key]; o.hudName = o.hudName || KB.ABILITY_HUD[key];
     o.hat = o.hat || ('hat_' + key); o.icon = o.icon || ('ui_ability_' + key);
@@ -332,7 +336,7 @@
       if (t >= 16) {
         if (d.whip) { d.whip.dead = true; d.whip = null; d.box = null; }
         if (held) {
-          if (t >= BEAM_WAVE - 1) {
+          if (t >= HOLD('beam', BEAM_WAVE) - 1) {
             if (!d.charged) chargeFx(p, '#ffe040');
             d.charged = true;
             if (t % 3 === 0) KB.particles(p.cx + p.dir * 10, p.cy - 2, ['#ffffff', '#ffe040'], 2, { spread: 1.6, grav: 0, life: 12, up: 0, size: 1 });
@@ -543,7 +547,7 @@
       if (d.t % 2 === 0) KB.fx('fx_spark_field', p.cx + rnd(-20, 20), p.cy + rnd(-14, 18) + 8, { life: 4, flip: Math.random() < 0.5, fps: 15 });
       KB.particles(p.cx + rnd(-22, 22), p.cy + rnd(-18, 18), ['#ffffff', '#80d0ff', '#c0f0ff'], 1, { spread: 1.2, grav: 0, life: 8, up: 0, size: 1 });
       if (d.t % 10 === 0) KB.audio.sfx('spark');
-      if (p.stateT >= SPARK_BURST - 1) {   // fix5b：實際 = 招式表的 45 幀（原本 >= 45 實測要 46 幀）
+      if (p.stateT >= HOLD('spark', SPARK_BURST) - 1) {   // fix5b：實際 = 招式表的 45 幀（原本 >= 45 實測要 46 幀）
         if (!d.charged) chargeFx(p, '#60c0ff');
         d.charged = true;
         if (d.t % 4 === 0) KB.particles(p.cx, p.y - 6, ['#ffffff', '#ffe040'], 2, { spread: 1, grav: 0, life: 12, up: 0.4, size: 1 });
@@ -832,7 +836,7 @@
         if (b && !b.dead) { b.dead = true; d.box = null; }
         if (held) {
           d.charge++;
-          if (d.charge >= HAMMER_SPIN - 24) {
+          if (d.charge >= HOLD('hammer', HAMMER_SPIN) - 24) {
             if (!d.ready) { d.ready = true; chargeFx(p, '#e08040'); }
             if (d.charge % 3 === 0) KB.particles(p.cx + rnd(-10, 10), p.y - 4, ['#ffffff', '#ffe040'], 2, { spread: 1, grav: 0, life: 12, up: 0.5, size: 1 });
           } else {

@@ -2081,6 +2081,54 @@
   }
 
   // ---------------------------------------------------------------------
+  // Round 6 元素層（fix6）—— 讓 elements agent 的「火燒草 / 木箱 W / 冰面 / 電擊水域」真的被玩到
+  //   W 木箱：新的實心磁磚（可站、火燒 40 幀消失、鎚 / 石頭類重擊砸得破）
+  //   燒草：只對植被 deco 有效（green 主題 = 'gfbm'），要「連續好幾格」才看得到蔓延
+  //   電擊水域：整片相連水域一起放電，水中敵人 dmg 4 + 凍結（squishy / glunk 一次清光）
+  // 格式同上面的 MECH（tiles / deco / add）。
+  // ---------------------------------------------------------------------
+  const ELEM6 = [
+    // w1 r0 起點草原：(58,9) 已經有 fire 台座 →
+    //   ① x=72~77 鋪 6 格連續草 'g'（噴一次火就會沿著草往兩側各蔓延 3 格）
+    //   ② 星星方塊柱 (66,67) 與 (70,71) 之間的凹槽本來就藏著點數星，
+    //      現在用 3 個木箱蓋住上方開口 → 燒開 / 砸開才拿得到（支線）
+    {
+      lv: 'w1', r: 0,
+      deco: [[72, 9, 'g'], [73, 9, 'g'], [74, 9, 'g'], [75, 9, 'g'], [76, 9, 'g'], [77, 9, 'g']],
+      tiles: [[67, 6, 'W'], [68, 6, 'W'], [69, 6, 'W']],
+      add: [
+        { t: 'pointstar', x: 68, y: 7 }, { t: 'pointstar', x: 68, y: 9 }, { t: 'pointstar', x: 69, y: 9 },
+      ],
+    },
+    // w3 r0 海濱沙灘：右側水池 (61~71) 裡本來就有 squishy(64) 與 glunk(70) →
+    //   池子左邊放 ice / spark 兩座台座：冰 → 結冰水面當臨時橋；電 → 整池放電（成就「導電高手」）
+    {
+      lv: 'w3', r: 0,
+      add: [
+        { t: 'essence', x: 50, y: 9, a: 'ice' },
+        { t: 'essence', x: 56, y: 9, a: 'spark' },
+      ],
+    },
+    // w6 r0 星港：貨櫃區的箱堆（2 個木箱，主題上也合理；擋不住路，是「可以燒掉的地景」）
+    { lv: 'w6', r: 0, tiles: [[74, 9, 'W'], [75, 9, 'W']] },
+  ];
+  for (const m of ELEM6) {
+    const lv = KB.LEVELS.find(l => l.id === m.lv); if (!lv) continue;
+    const room = lv.rooms[m.r]; if (!room) continue;
+    if (m.tiles && m.tiles.length) {
+      const g = room.map.map(r => r.split(''));
+      for (const [x, y, ch] of m.tiles) if (g[y] && x >= 0 && x < g[y].length) g[y][x] = ch;
+      room.map = g.map(r => r.join(''));
+    }
+    if (m.deco && m.deco.length && room.deco) {
+      const g = room.deco.map(r => r.split(''));
+      for (const [x, y, ch] of m.deco) if (g[y] && x >= 0 && x < g[y].length) g[y][x] = ch;
+      room.deco = g.map(r => r.join(''));
+    }
+    if (m.add && m.add.length) room.entities = (room.entities || []).concat(m.add);
+  }
+
+  // ---------------------------------------------------------------------
   // audio2 接線：每世界後半房間（r ≥ 2，魔王房 / 秘密房除外）改用第二首曲；房間環境音
   // ---------------------------------------------------------------------
   const SECOND_SONG = { w1: 'green2', w2: 'castle2', w3: 'island2', w4: 'cloud2', w5: 'dedede2' };

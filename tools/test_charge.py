@@ -15,6 +15,9 @@
 weapons / magic / forms 三系在各自的 tools/test_weapons.py / test_magic.py / test_forms.py
 匯入這裡的 run_charge() 驗證。
 
+fix6：門檻會乘 KB.PROG.holdMul(key)（Lv3 ×0.8），所以測試分兩組 ——
+  Lv1：招式表寫的數字就是真實門檻（N+2 觸發 / N-6 不觸發）
+  Lv3：門檻縮成 round(N×0.8)（同樣 +2 觸發 / -6 不觸發）
 用法：python tools/test_charge.py [--only hammer] [-v]
 """
 import sys, pathlib, argparse
@@ -45,9 +48,15 @@ CHARGE_CASES = {
 }
 
 # 站在地上、乾淨狀態 → 按住 hold 幀 → 放開 → 觀察 60 幀內有沒有進入必殺模式
-_CHARGE_JS = """([key, hold, ult]) => {
+# fix6：門檻會乘 KB.PROG.holdMul(key)（Lv3 ×0.8），所以先把該能力的等級釘死在 lv
+#       （直接寫 abilityXp / abilityLv，讓接下來的 giveAbility 不會再升級、也不會放 LEVEL UP 演出）。
+_CHARGE_JS = """([key, hold, ult, lv]) => {
   const p = KB.player;
   __kb.release();
+  try {
+    const sv = (KB.PROG && KB.PROG.save) ? KB.PROG.save() : null;
+    if (sv) { sv.abilityXp[key] = (lv >= 3 ? 8 : lv >= 2 ? 3 : 0); sv.abilityLv[key] = lv || 1; }
+  } catch (e) { }
   p.ability = null; p.abilityData = {}; p.vx = 0; p.vy = 0;
   p.giveAbility(key); p.setState('idle');
   // 變身演出的 hitstop 期間 game.update 直接 return，__kb.step() 不會推進玩家；
@@ -67,21 +76,44 @@ _CHARGE_JS = """([key, hold, ult]) => {
 }"""
 
 
+def lv3_hold(n):
+    """Lv3 門檻 = round(N × KB.PROG.holdMul) = round(N × 0.8)（下限 4）。"""
+    return max(4, round(n * 0.8))
+
+
 def run_charge(h, keys, chk=None):
-    """對 keys 裡的每個能力驗證「N+2 觸發 / N-6 不觸發」。
+    """Lv1 下驗證「N+2 觸發 / N-6 不觸發」，且招式表寫的數字 = 真實門檻。
     h = Harness（只用到 goto / ev），chk = 各測試檔自己的 check（預設用 enemy_test 的）。"""
     check = chk or ET.check
     for key in keys:
         n, ult, name = CHARGE_CASES[key]
         h.goto(3, 9)
-        on = h.ev(_CHARGE_JS, [key, n + 2, ult])
+        on = h.ev(_CHARGE_JS, [key, n + 2, ult, 1])
         check(f'{key} [{name}]: 按住 {n + 2} 幀放開 → 必殺觸發', on, on)
         h.goto(3, 9)
-        off = h.ev(_CHARGE_JS, [key, n - 6, ult])
+        off = h.ev(_CHARGE_JS, [key, n - 6, ult, 1])
         check(f'{key} [{name}]: 只按住 {n - 6} 幀 → 必殺不觸發', not off, off)
-        # 招式表文案要和門檻一致（玩家看到的數字 = 實際幀數）
+        # 招式表文案要和門檻一致（玩家看到的數字 = Lv1 的實際幀數）
         mv = h.ev("([k,n])=>{const d=KB.ABILITIES[k]; return (d.moves||[]).some(m=>String(m[0]).indexOf(String(n))>=0);}", [key, n])
-        check(f'{key} [{name}]: 招式表有寫出 {n} 幀', mv, mv)
+        check(f'{key} [{name}]: 招式表有寫出 {n} 幀（Lv1）', mv, mv)
+
+
+def run_charge_lv3(h, keys, chk=None):
+    """fix6：Lv3 的蓄力門檻 = round(N × 0.8)。
+    驗證「round(N×0.8)+2 觸發 / round(N×0.8)-6 不觸發」，並確認 KB.PROG.holdMul 真的回 0.8。"""
+    check = chk or ET.check
+    for key in keys:
+        n, ult, name = CHARGE_CASES[key]
+        m = lv3_hold(n)
+        mul = h.ev("""(k)=>{ const sv = KB.PROG.save(); sv.abilityXp[k] = 8; sv.abilityLv[k] = 3;
+          return [KB.PROG.level(k), KB.PROG.holdMul(k)]; }""", key)
+        check(f'{key} [{name}]: Lv3 → holdMul 0.8', mul == [3, 0.8], mul)
+        h.goto(3, 9)
+        on = h.ev(_CHARGE_JS, [key, m + 2, ult, 3])
+        check(f'{key} [{name}]: Lv3 按住 {m + 2} 幀（原本 {n}）→ 必殺觸發', on, on)
+        h.goto(3, 9)
+        off = h.ev(_CHARGE_JS, [key, m - 6, ult, 3])
+        check(f'{key} [{name}]: Lv3 只按住 {m - 6} 幀 → 必殺不觸發', not off, off)
 
 
 def main():
@@ -102,8 +134,10 @@ def main():
         pg.evaluate(TEST_LEVEL)
         pg.evaluate(HOOK_JS)
         h = Harness(pg, False, False)
-        print('-' * 8, 'charge', ','.join(only))
+        print('-' * 8, 'charge Lv1', ','.join(only))
         run_charge(h, only)
+        print('-' * 8, 'charge Lv3 (×0.8)', ','.join(only))
+        run_charge_lv3(h, only)
         check('charge: no page errors', not logs, logs[:3])
         b.close()
     print('---')

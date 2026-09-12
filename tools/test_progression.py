@@ -227,11 +227,30 @@ def main():
         cnt = ev("()=>KB.PROG.achCount()")
         check('本輪至少解鎖 5 條成就（實測 %d 條）' % cnt, cnt >= 5, cnt)
         # toast + 不重複解鎖
-        dup = ev("()=>{ KB.PROG.toasts.length=0; const a = KB.PROG.unlock('helper'); const b = KB.PROG.unlock('helper'); return [a, b, KB.PROG.toasts.length]; }")
+        dup = ev("()=>{ KB.PROG.toasts.length=0; KB.PROG.toastQ.length=0; const a = KB.PROG.unlock('helper'); const b = KB.PROG.unlock('helper'); return [a, b, KB.PROG.toastQ.length]; }")
         check('已解鎖的成就不會重複跳 toast', dup[1] is False and dup[2] <= 1, dup)
-        ts = ev("""()=>{ KB.PROG.reset(); KB.PROG.toasts.length = 0; KB.PROG.unlock('combo10');
-          const n = KB.PROG.toasts.length; for (let i=0;i<150;i++) KB.PROG.update(KB.game); return [n, KB.PROG.toasts.length]; }""")
-        check('成就 toast 出現後 150 幀自動消失', ts[0] == 1 and ts[1] == 0, ts)
+        # fix6：unlock 先進佇列，下一次 update 才放出來（橫幅演出期間會繼續等）
+        ts = ev("""()=>{ KB.PROG.reset(); KB.VFX.clear(); KB.game.abilityFlash = 0;
+          KB.PROG.toasts.length = 0; KB.PROG.toastQ.length = 0; KB.PROG.unlock('combo10');
+          const q = KB.PROG.toastQ.length; KB.PROG.update(KB.game);
+          const n = KB.PROG.toasts.length; for (let i=0;i<150;i++) KB.PROG.update(KB.game);
+          return [q, n, KB.PROG.toasts.length]; }""")
+        check('成就 toast 排隊 → 放出後 150 幀自動消失', ts == [1, 1, 0], ts)
+        # fix6：變身橫幅期間延後、一次只顯示 1 張、位置在遊戲區右下（y 150~180）
+        dl = ev("""()=>{ KB.PROG.reset(); KB.VFX.clear(); KB.PROG.toasts.length=0; KB.PROG.toastQ.length=0;
+          KB.game.abilityFlash = 30;
+          KB.PROG.unlock('combo10'); KB.PROG.unlock('lv3');
+          for (let i=0;i<10;i++) KB.PROG.update(KB.game);
+          const held = [KB.PROG.toasts.length, KB.PROG.toastQ.length];
+          KB.game.abilityFlash = 0;
+          for (let i=0;i<10;i++) KB.PROG.update(KB.game);
+          return { held, shown: KB.PROG.toasts.length, queued: KB.PROG.toastQ.length,
+                   max: KB.PROG.TOAST_MAX, y: KB.PROG.TOAST_Y }; }""")
+        check('變身橫幅期間（abilityFlash > 0）成就 toast 延後排隊',
+              dl['held'] == [0, 2], dl)
+        check('橫幅結束後一次只放 1 張、其餘留在佇列',
+              dl['shown'] == 1 and dl['queued'] == 1 and dl['max'] == 1, dl)
+        check('成就 toast 畫在遊戲區右下（y 150~180）', 150 <= dl['y'] <= 180 - 26 + 4, dl['y'])
         # 存檔
         sv = ev("""()=>{ KB.PROG.reset(); KB.PROG.unlock('combo10');
           const raw = JSON.parse(localStorage.getItem('kirbystar_save')||'{}');

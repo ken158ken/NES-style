@@ -20,7 +20,22 @@
   const V = KB.VFX = KB.VFX || {};
   const MAX = 400;
   const TAU = Math.PI * 2;
-  const rnd = (a, b) => a + Math.random() * (b - a);
+  // fix6：特效專用 RNG（mulberry32）。特效的隨機數如果走 vrand()，
+  //   「畫了幾顆粒子」就會偏移整個遊戲邏輯的亂數序列 —— boss_test 對此極敏感
+  //   （同一套招式只因為多放一次 burst，魔王 / 機器人後面的判定就整串走樣）。
+  //   種子固定（0x5eed6），只在 V.clear() 時重播，所以特效本身仍然「看起來隨機」但完全不影響遊戲邏輯。
+  const RNG_SEED = 0x5eed6;
+  let _rs = RNG_SEED >>> 0;
+  function vrand() {
+    _rs = (_rs + 0x6D2B79F5) >>> 0;
+    let t = _rs;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  V.rand = vrand;
+  V.reseed = function (seed) { _rs = ((seed === undefined ? RNG_SEED : seed) | 0) >>> 0; };
+  const rnd = (a, b) => a + vrand() * (b - a);
   const clamp01 = v => v < 0 ? 0 : (v > 1 ? 1 : v);
 
   V.MAX = MAX;
@@ -60,7 +75,7 @@
     return e;
   }
   V.push = push;
-  V.clear = function () { V.list.length = 0; V._pending.length = 0; };
+  V.clear = function () { V.list.length = 0; V._pending.length = 0; V.reseed(); };
   /** 立刻結束所有 kind 相同的效果（同一時間只該有一條橫幅 / 一次變身演出）*/
   function dropKind(kind) {
     for (const e of V.list) if (e.kind === kind) e.dead = true;
@@ -288,7 +303,7 @@
       const main = bolt(x1, y1, x2, y2, jitter);
       const all = [main];
       for (let b = 0; b < branches; b++) {
-        const i = 2 + ((Math.random() * (segN - 3)) | 0);
+        const i = 2 + ((vrand() * (segN - 3)) | 0);
         const p0 = main[i];
         all.push(bolt(p0[0], p0[1], p0[0] + rnd(-22, 22), p0[1] + rnd(-18, 18), jitter * 0.6));
       }
@@ -343,7 +358,7 @@
     for (let i = 0; i < n; i++) {
       const a = o.dir !== undefined ? o.dir + rnd(-(o.spread || 0.6), o.spread || 0.6) : rnd(0, TAU);
       const s = sp * rnd(0.35, 1);
-      ps.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, c: colors[i % colors.length], s: (Math.random() < 0.4 ? size : Math.max(1, size - 1)) });
+      ps.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, c: colors[i % colors.length], s: (vrand() < 0.4 ? size : Math.max(1, size - 1)) });
     }
     return push({
       layer: 'w', life: life + 6, ps, grav,
@@ -409,7 +424,7 @@
         const f = this.t / this.life;
         const grow = Math.min(1, (this.t + 1) / 3);
         const a = 1 - f * f;
-        const w0 = wid * (1 - f * 0.5) * (0.85 + 0.3 * Math.random());
+        const w0 = wid * (1 - f * 0.5) * (0.85 + 0.3 * vrand());
         const w1 = w0 * taper;
         const L = this.len * grow;
         ctx.save();
@@ -539,7 +554,7 @@
     for (let i = 0; i < N; i++) jit.push(rnd(0.65, 1.15));
     // 幾顆被掀起來的碎屑
     const deb = [];
-    for (let i = 0; i < V.pn(5); i++) deb.push({ o: rnd(0, 10), vy: rnd(-1.9, -0.9), y: 0, s: Math.random() < 0.5 ? 1 : 2 });
+    for (let i = 0; i < V.pn(5); i++) deb.push({ o: rnd(0, 10), vy: rnd(-1.9, -0.9), y: 0, s: vrand() < 0.5 ? 1 : 2 });
     return push({
       layer: 'w', life: o.frames || 22, x, y, color: o.color || '#f0e0c0', dx: 0, jit, deb,
       up() {
@@ -585,7 +600,7 @@
       up() {
         const e = this.ent;
         if (e && !e.dead && this.t % every === 0) {
-          this.ps.push({ x: e.cx + rnd(-4, 4), y: e.cy + rnd(-5, 5), vx: rnd(-0.3, 0.3), vy: rnd(-0.4, 0.1), t: 0, c: colors[(Math.random() * colors.length) | 0] });
+          this.ps.push({ x: e.cx + rnd(-4, 4), y: e.cy + rnd(-5, 5), vx: rnd(-0.3, 0.3), vy: rnd(-0.4, 0.1), t: 0, c: colors[(vrand() * colors.length) | 0] });
           if (this.ps.length > 40) this.ps.shift();
         }
         for (const p of this.ps) { p.x += p.vx; p.y += p.vy; p.t++; }

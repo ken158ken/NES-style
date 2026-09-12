@@ -156,6 +156,54 @@ KB.LEVELS.push({
 });
 ```
 磁磚字元：`#` 實心、`=` 單向平台、`*` 星星方塊、`B` 炸彈方塊、`^` 尖刺、`~` 水、`H` 梯子、`/` 與 `\` 45° 斜坡、`.` 或空白為空。
+機關磁磚（Round 4~6）：`X` 硬磚（只有 hammer / stone / 火焰衝刺 / dmg≥5 打得破）、`F` 導火線（可通行，被火點燃會延燒到 `B`）、
+`I` 冰磚（實心，被火焰命中 20 幀後融化）、**`W` 木箱（Round 6 / elements）**——實心可站，被火焰命中燒 40 幀後消失、
+鎚 / 石頭類重擊（`KB.TileMap.hardBreakable`）砸得破、被風吹會熄火。`tools/level_check.js` 的 `KNOWN` / `SOLID` 都已收錄。
+
+## 6.5 Round 5~6 系統（KB.MIX / KB.Helper / KB.ELEM / KB.PROG）
+> 四套系統都是「載入即生效、缺了也不會壞」的獨立命名空間；詳細介面見 `docs/PROGRESS.md` Round 6 各 agent 區段。
+
+- **`KB.MIX`（能力混合，`src/abilities_mix.js`）**——12 組混合能力，`KB.ABILITY_KEYS` 由 20 擴到 **32**。
+  `KB.MIX.table`（key = 排序後的 `a|b`）/ `keyOf(a, b)`（無序查表，同能力 / 已是混合 / 查無組合 → `null`）/
+  `isMix(key)` / `parts(key)` → `[A, B]`。取得途徑：① `player.giveAbility(key)` 在持有 A 時收到 B 會自動換成混合 key
+  （吞下敵人 / 撿能力星 / 能力台座 / 夥伴吸回四條路共用）；② **短按 SELECT 把能力星丟出去砸中帶能力的敵人**
+  （fix6：`KB.ITEMS.abilitystar.throwForward()`，敵人被吞噬、能力星變成「混合星」，撿起來就是混合能力）。
+  受傷掉落混合能力時，能力星退回主成分 A。
+- **`KB.Helper`（AI 夥伴，`src/helper.js`）**——長按 SELECT 45 幀把目前能力變成跟隨的小夥伴（HP 4），
+  `spawn(p) / recall(p) / exists() / get() / clear() / tick(game) / drawHUD(ctx, game)`。
+  夥伴實體是「假玩家介面」，直接重用 `KB.ABILITIES[key]` 的 `onGet / onAttack / update / onEnd`，判定框 `owner:'player'`。
+- **`KB.ELEM`（元素反應，`src/elements.js`）**——`of(hitboxOrProj)` → `fire|ice|spark|wind|none`；
+  `applyHit(target, dmg, src)` 統一乘算弱點 ×2 / 抗性 ×`resistK`（敵人與魔王共用）；
+  `scanTiles(a)` 由 `Hitbox.update` / `Projectile.update` 呼叫，觸發環境反應：
+  火燒草 deco（蔓延 3 格 → 焦黑 30 秒）／火燒木箱 `W`／火融冰磚 `I`／冰結水面（8 秒可站的滑溜平台）／
+  電擊整片水域（水中敵人 dmg 4 + 凍結、水中的卡比自傷 1）／風吹熄燃燒中的草與木箱。
+  敵人 / 魔王身上的標籤欄位：`element` / `weak[]` / `resist[]` / `resistK`。
+- **`KB.PROG`（成長系統，`src/progression.js`）**——能力等級（`level / xp / dmgMul / partMul / holdMul / scaleDmg`；
+  取得同一能力 3 次 → Lv2、8 次 → Lv3，傷害 ×1.25 / ×1.5，**蓄力門檻 ×0.8**）、連擊、20 條成就、Style Rank（S/A/B/C）、
+  事件匯流排（`emit / on`：`kill / hurt / abilityGet / levelClear / bossDefeated / secretRoom / arenaClear / mix / helper /
+  inhaleBoss / possess / elemKill / burn / bigstar`）。
+  各 `abilities*.js` 的蓄力具名常數（`HAMMER_SPIN / BEAM_WAVE / SPARK_BURST / GUNNER_ULT / BLADE_IAI / BOW_METEOR /
+  MAGIC_ULT / DRAGON_NOVA / MECH_BARRAGE`）都經過 `HOLD(key, n) = round(n × KB.PROG.holdMul(key))`，
+  **招式表上寫的數字一律是 Lv1 的門檻**。
+
+## 6.6 存檔格式（`KB.save`，localStorage `kirbystar_save`，`KB.saveGame()`）
+| 欄位 | 型別 | 說明 |
+|---|---|---|
+| `cleared` | `{levelId: true}` | 已通關的世界 |
+| `score` | number | 累計總分 |
+| `best` | `{levelId: number}` | 各關最佳結算總分 |
+| `stars` | `{levelId: [bool×3]}` | 大星星收集（6 關 × 3 = 18） |
+| `seen` | `{abilityKey: true}` | 圖鑑「已發現」的能力（共 32 種）；`seenNew` 是「圖鑑有新東西」紅點 |
+| `arena` | `{…}` | 競技場最佳時間（`src/arena.js`） |
+| `settings` | `{vfx:'high'\|'mid'\|'low', …}` | 畫質等級等玩家設定（`KB.VFX.level` 讀這裡） |
+| `abilityXp` | `{abilityKey: n}` | 能力累積取得次數（Round 6 / progression） |
+| `abilityLv` | `{abilityKey: 1..3}` | 能力等級（xp 3 → Lv2、xp 8 → Lv3） |
+| `achievements` | `{achId: 解鎖時間戳}` | 20 條成就 |
+| `rank` | `{levelId: 'S'\|'A'\|'B'\|'C'}` | 各關 Style Rank（只升不降） |
+| `secrets` | `{levelId: {roomIdx: 1}}` | 找到過的秘密房 |
+| `prog` | `{tsKills, elecWaterKills, burnGrass, comboBest}` | 跨關累計計數器（成就用） |
+| `ending` | bool | 看過結局 |
+`KB.PROG.save()` 會在讀檔後自動補齊上列 Round 6 新欄位（舊存檔相容）；`KB.PROG.reset()` 清空全部進度。
 
 ## 7. 場景（Scene）
 `KB.setScene(scene)`；scene 需有 `update(dt)`、`draw(ctx)`；可選 `enter()`、`exit()`。

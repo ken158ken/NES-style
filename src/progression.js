@@ -171,10 +171,11 @@
     if (P.breakT > 0) P.breakT--;
     for (const t of P.toasts) t.t++;
     P.toasts = P.toasts.filter(t => t.t < TOAST_LIFE);
+    P.pumpToasts();
   };
   // 進入關卡：重置本關統計（連擊、受傷次數、時停擊殺）
   P.beginLevel = function (game) {
-    P.resetCombo(); P.comboMax = 0; P.breakT = 0; P.toasts.length = 0; P.pendingUp = null;
+    P.resetCombo(); P.comboMax = 0; P.breakT = 0; P.toasts.length = 0; P.toastQ.length = 0; P.pendingUp = null;
     P.run = { levelId: game ? game.levelId : null, hurts: 0, kills: 0, tsKills: 0, startedAt: Date.now() };
   };
   P.run = { levelId: null, hurts: 0, kills: 0, tsKills: 0 };
@@ -210,17 +211,37 @@
   P.achDef = function (id) { return P.ACH.find(a => a.id === id) || null; };
 
   const TOAST_LIFE = 150;
+  // fix6：一次只顯示 1 張成就卡，其餘排隊；變身 / 名稱橫幅播放期間整批延後
+  //   （橫幅在畫面正中央、成就卡在遊戲區右下 y152，位置雖然不重疊，但兩段演出同時跑會互相搶注意力）
   P.toasts = [];
+  P.toastQ = [];
+  P.TOAST_MAX = 1;
+  P.TOAST_Y = 152;      // 遊戲區右下（遊戲區 0~192，卡片高 26 → 152~178）
+  /** 變身 / LEVEL UP / 必殺名稱橫幅是否正在演出（含 KB.game.abilityFlash 的變身閃光） */
+  P.bannerBusy = function () {
+    const g = KB.game;
+    if (g && (g.abilityFlash | 0) > 0) return true;
+    if (P.pendingUp) return true;
+    const v = V();
+    if (v && v.list) { for (const e of v.list) if (e && (e.kind === 'banner' || e.kind === 'transform')) return true; }
+    return false;
+  };
   P.unlock = function (id) {
     const def = P.achDef(id); if (!def) return false;
     const s = S();
     if (s.achievements[id]) return false;
     s.achievements[id] = Date.now();
     store();
-    P.toasts.push({ id, t: 0 });
-    if (P.toasts.length > 3) P.toasts.shift();
+    P.toastQ.push({ id, t: 0 });
+    if (P.toastQ.length > 8) P.toastQ.shift();
     sfx('bigstar');
     return true;
+  };
+  /** 每幀：橫幅演出結束且目前沒有卡片在播 → 放出佇列中的下一張 */
+  P.pumpToasts = function () {
+    if (P.toasts.length >= P.TOAST_MAX || !P.toastQ.length) return;
+    if (P.bannerBusy()) return;
+    P.toasts.push(P.toastQ.shift());
   };
 
   // ---------------------------------------------------------------- 事件
@@ -385,10 +406,10 @@
       KB.text(ctx, sub, sx, by + ((bh - 8) >> 1), { color: col, align: 'right', outline: '#181c28' });
       ctx.restore();
     }
-    // 成就 toast：右上滑入的卡片（最多 3 張，往下堆疊）
+    // 成就 toast：遊戲區右下滑入的卡片（一次 1 張，其餘排隊；避開正中央的變身橫幅與開場 WORLD 橫幅）
     for (let i = 0; i < P.toasts.length; i++) {
       const t = P.toasts[i], def = P.achDef(t.id); if (!def) continue;
-      const w = 146, h = 26, y = 64 + i * 30;
+      const w = 146, h = 26, y = P.TOAST_Y + i * 30;
       const slide = t.t < 10 ? (10 - t.t) * 8 : (t.t > TOAST_LIFE - 12 ? (t.t - (TOAST_LIFE - 12)) * 10 : 0);
       const x = 250 - w + slide;
       ctx.save();
@@ -446,7 +467,7 @@
   P.reset = function () {
     const s = S();
     s.abilityLv = {}; s.abilityXp = {}; s.achievements = {}; s.rank = {}; s.secrets = {}; s.prog = {};
-    P.resetCombo(); P.comboMax = 0; P.toasts.length = 0; P.pendingUp = null;
+    P.resetCombo(); P.comboMax = 0; P.toasts.length = 0; P.toastQ.length = 0; P.pendingUp = null;
     P.run = { levelId: null, hurts: 0, kills: 0, tsKills: 0 };
     store();
     return true;

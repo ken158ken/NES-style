@@ -12,6 +12,11 @@
   // 所以下面使用時會扣掉各自的偏移量；改數字時只改這裡，招式表文案也用同一個值。
   // 驗證：tools/test_magic.py 的「蓄力門檻」段（按住 N+2 幀觸發、N-6 幀不觸發）。
   const MAGIC_ULT = 60;   // mage 元素風暴 / gravity 奇點 / clone 百裂分身（招式表：按住 60 幀放開）
+  // fix6：Lv3 蓄力時間 ×0.8（KB.PROG.holdMul）。招式表上的數字一律是 **Lv1** 的門檻，
+  //   能力練到 Lv3 之後同一招會提早 20% 蓄滿（KB.PROG 未載入時回傳原值，行為完全不變）。
+  //   mage / gravity / clone 共用 MAGIC_ULT，所以 key 直接讀 p.ability。
+  const HOLD = (key, n) => (KB.PROG && KB.PROG.holdMul) ? Math.max(4, Math.round(n * KB.PROG.holdMul(key))) : n;
+
 
   // ---------- 共用工具 ----------
   const rnd = (a, b) => a + Math.random() * (b - a);
@@ -381,7 +386,7 @@
       if (d.t >= 18) {
         if (held) {
           D.anim = 'kirby_attack_mage_storm'; p.attackFps = 10;
-          if (d.t >= MAGIC_ULT - 1) {   // fix5b：實際 = 招式表的 60 幀（原本 >= 60 實測要 61 幀）
+          if (d.t >= HOLD(p.ability, MAGIC_ULT) - 1) {   // fix5b：實際 = 招式表的 60 幀（原本 >= 60 實測要 61 幀）
             if (!d.charged) { sfx('charge_ready'); V('aura', p, { color: '#d8b0ff', r: 22, frames: 240 }); }
             d.charged = true;
             if (d.t % 3 === 0) KB.particles(p.cx + rnd(-12, 12), p.y + rnd(-6, 10), ['#ffffff', '#a860f0', '#ffe040'], 2, { spread: 1.4, grav: 0, life: 14, up: 0.4, size: 1 });
@@ -850,7 +855,7 @@
       if (d.t >= 20) {
         if (held) {
           D.anim = 'kirby_attack_gravity_singularity'; p.attackFps = 10;
-          if (d.t >= MAGIC_ULT - 1) {   // fix5b：實際 = 招式表的 60 幀（原本 >= 60 實測要 61 幀）
+          if (d.t >= HOLD(p.ability, MAGIC_ULT) - 1) {   // fix5b：實際 = 招式表的 60 幀（原本 >= 60 實測要 61 幀）
             if (!d.charged) { sfx('charge_ready'); V('aura', p, { color: '#d8b0ff', r: 24, frames: 240 }); }
             d.charged = true;
             if (d.t % 3 === 0) KB.particles(p.cx + rnd(-14, 14), p.cy + rnd(-12, 12), ['#a860f0', '#ffffff'], 2, { spread: 1.2, grav: 0, life: 14, up: 0.2, size: 1 });
@@ -1073,7 +1078,7 @@
       if (d.t >= 16) {
         if (held) {
           D.anim = 'kirby_attack_clone_rush'; p.attackFps = 10;
-          if (d.t >= MAGIC_ULT - 1) {   // fix5b：實際 = 招式表的 60 幀（原本 >= 60 實測要 61 幀）
+          if (d.t >= HOLD(p.ability, MAGIC_ULT) - 1) {   // fix5b：實際 = 招式表的 60 幀（原本 >= 60 實測要 61 幀）
             if (!d.charged) { sfx('charge_ready'); V('aura', p, { color: '#ffb0d0', r: 22, frames: 240 }); }
             d.charged = true;
             if (d.t % 3 === 0) {

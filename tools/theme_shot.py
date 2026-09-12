@@ -12,7 +12,7 @@ from playwright.sync_api import sync_playwright
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 INDEX = (ROOT / 'index.html').as_uri()
-THEMES = ['green', 'castle', 'island', 'cloud', 'dedede']
+THEMES = ['green', 'castle', 'island', 'cloud', 'dedede', 'space']   # fix6：Round 6 新主題 space（星之彼端）
 
 
 def take(page, path, scale):

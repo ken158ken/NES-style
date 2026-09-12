@@ -8,8 +8,10 @@
   C. 12 組合 × 3 招：命中 waddledee 會死、招式結束回到正常狀態、招式專屬證據（投射物 / 判定框）。
   D. 受傷掉落混合能力 → 能力星的 key 是「主成分 A」。
   E. player select：短按仍然丟棄能力；沒有 KB.Helper 時長按 45 幀放開也只是丟棄。
+  F. fix6 丟星混合：短按 SELECT 丟出的能力星（vx ±2.4 / vy -3）砸中帶 ability 的敵人 →
+     敵人被吞噬、星星變成混合星，撿起來就是混合能力；沒有組合 / 受傷掉出來的星星行為完全不變。
   F. 全程監看 pageerror / console.error；MISSING SPRITES 必須為空。
-用法：python tools/test_mix.py [--only flamesword,mixflow,defs,select] [--hitbox] [-v] [--shots]
+用法：python tools/test_mix.py [--only flamesword,mixflow,defs,select,throwmix] [--hitbox] [-v] [--shots]
 （測試地圖與頁面輔助函式沿用 tools/enemy_test.py 的 Harness / HOOK_JS / TEST_LEVEL）
 """
 import sys, pathlib, argparse
@@ -364,6 +366,134 @@ def phase_select(h):
 
 
 # ---------------------------------------------------------------------------
+# F. fix6：短按 SELECT 丟出能力星 → 砸中帶能力的敵人 → 混合星
+# ---------------------------------------------------------------------------
+_THROW_JS = """([enemyKey, ex, useSelect]) => {
+  const p = KB.player;
+  p.dir = 1;
+  const en = __t.spawn({ t: enemyKey, x: ex, y: 9, dir: -1 });
+  if (en && en.setCenter) { /* 站定即可 */ }
+  if (useSelect) { __kb.press({ select: true }); for (let i = 0; i < 5; i++) __kb.step(1); __kb.release(); }
+  else { p.dropAbility(true, true); }
+  let mixed = null, enemyDeadAt = -1, landed = -1;
+  for (let i = 0; i < 120; i++) {
+    __kb.step(1);
+    const e = KB.game.entities.find(x => x.name === enemyKey || (x.type === 'enemy' && x.name === enemyKey));
+    if (enemyDeadAt < 0 && (!e || e.dead)) enemyDeadAt = i;
+    const s = KB.game.entities.find(x => !x.dead && x.name === 'abilitystar');
+    if (s && s.mixed && !mixed) mixed = { ability: s.ability, parts: s.mixParts, at: i };
+    if (s && landed < 0 && s.bounces > 0) landed = i;
+    if (mixed && landed >= 0) break;
+  }
+  const s = KB.game.entities.find(x => !x.dead && x.name === 'abilitystar');
+  // 卡比走過去撿（直接搬到星星上，避開地形差異）
+  let picked = null;
+  if (s) {
+    p.x = s.cx - p.w / 2; p.bottom = s.bottom; p.vx = 0; p.vy = 0;
+    for (let i = 0; i < 40 && !p.ability; i++) __kb.step(1);
+    picked = p.ability;
+  }
+  return { mixed, enemyDeadAt, landed, star: s ? { ability: s.ability, mixed: !!s.mixed, thrown: !!s.thrown } : null, picked };
+}"""
+
+
+def phase_throwmix(h):
+    # 1) 初速：丟出去的星星往前拋（vx ±2.4 / vy -3）、受傷掉的維持原本的慢速
+    v = h.ev("""()=>{
+      const s = new KB.ITEMS.abilitystar(0, 0, 'fire', 1);
+      const drop = { vx: s.vx, vy: s.vy, thrown: !!s.thrown };
+      s.throwForward(1);
+      const right = { vx: s.vx, vy: s.vy, thrown: !!s.thrown };
+      const s2 = new KB.ITEMS.abilitystar(0, 0, 'fire', 1); s2.throwForward(-1);
+      return { drop, right, leftVx: s2.vx, fn: typeof s.throwForward };
+    }""")
+    check('abilitystar.throwForward() 存在', v['fn'] == 'function', v)
+    check('丟出的能力星初速 vx +2.4 / vy -3',
+          abs(v['right']['vx'] - 2.4) < 1e-6 and abs(v['right']['vy'] + 3) < 1e-6 and v['right']['thrown'], v['right'])
+    check('往左丟 → vx -2.4', abs(v['leftVx'] + 2.4) < 1e-6, v['leftVx'])
+    check('受傷掉出的能力星維持 R3 的慢速（vx 1.0 / vy -3.5、thrown=false）',
+          abs(v['drop']['vx'] - 1.0) < 1e-6 and abs(v['drop']['vy'] + 3.5) < 1e-6 and not v['drop']['thrown'], v['drop'])
+
+    # 2) 真實流程：持有 fire → 短按 SELECT 丟出 → 砸中 bladeknight（sword）→ 炎劍混合星 → 撿起來就是炎劍
+    h.goto(3, 9, ability='fire'); h.run(6, 6)
+    o = h.ev(_THROW_JS, ['bladeknight', 8, True])
+    check('短按 SELECT 丟出的 fire 星砸中 bladeknight → 變成 flamesword 混合星',
+          o['mixed'] is not None and o['mixed']['ability'] == 'flamesword', o)
+    check('混合星記得兩個成分 [fire, sword]',
+          o['mixed'] is not None and o['mixed']['parts'] == ['fire', 'sword'], o['mixed'])
+    check('被砸中的敵人當場被吞噬', o['enemyDeadAt'] >= 0, o)
+    check('卡比撿起混合星 → 直接獲得 flamesword', o['picked'] == 'flamesword', o)
+
+    # 3) 對照組 A：沒有組合（fire + hothead 的 fire）→ 敵人不死、星星還是 fire
+    h.goto(3, 9, ability='fire'); h.run(6, 6)
+    o2 = h.ev(_THROW_JS, ['hothead', 8, True])
+    check('對照組: fire 星砸 hothead（同樣是 fire）→ 不混合、星星仍是 fire',
+          o2['mixed'] is None and o2['star'] is not None and o2['star']['ability'] == 'fire', o2)
+    check('對照組: 沒有組合時敵人不會被吞噬', o2['enemyDeadAt'] < 0, o2)
+    check('對照組: 沒碰到組合就照原本落地彈跳（bounces > 0）', o2['landed'] >= 0, o2)
+
+    # 4) 對照組 B：受傷掉出來的星星（thrown=false）飛過敵人也不會混合
+    #    —— boss_test 的 kracko / dedede 機器人靠這條路徑撿回劍，行為必須完全不變
+    h.goto(3, 9, ability='fire'); h.run(6, 6)
+    o3 = h.ev("""()=>{
+      const p = KB.player;
+      __t.spawn({ t: 'bladeknight', x: 5, y: 9, dir: -1 });
+      p.dropAbility(true, false);
+      const s0 = KB.game.entities.find(x => !x.dead && x.name === 'abilitystar');
+      if (s0) { s0.vx = 2.4; s0.vy = -3; }          // 速度一樣快，只差沒有 thrown 旗標
+      let mixed = false;
+      for (let i = 0; i < 90; i++) {
+        __kb.step(1);
+        const s = KB.game.entities.find(x => !x.dead && x.name === 'abilitystar');
+        if (s && s.mixed) { mixed = true; break; }
+      }
+      const s = KB.game.entities.find(x => !x.dead && x.name === 'abilitystar');
+      return { mixed, ability: s ? s.ability : null };
+    }""")
+    check('受傷掉出的能力星（thrown=false）飛過帶能力的敵人不會混合',
+          o3['mixed'] is False, o3)
+
+    # 5) fix6（QA R6-P1-02）：長按吸回後「繼續按著」不會被當成新的短按把能力再丟掉
+    h.ev("()=>{ window.__realHelper2 = KB.Helper; }")
+    h.goto(3, 9, ability='fire'); h.run(6, 6)
+    o4 = h.ev("""()=>{
+      const p = KB.player;
+      // 假夥伴：第 45 幀「吸回」—— 夥伴消失、能力隔 12 幀才回到卡比身上（模擬 ReturnStar 飛行）
+      let has = true, back = -1, t = 0;
+      KB.Helper = {
+        exists(){ return has; },
+        spawn(pl){ has = false; back = t + 12; return true; },
+      };
+      p.ability = null; has = true;
+      __kb.press({ select: true });
+      for (t = 0; t < 120; t++) {
+        if (has && t === 45) { has = false; back = t + 12; }     // helper.js 的 pollSelect 路徑
+        if (back >= 0 && t === back) { p.giveAbility('fire'); back = -1; }
+        __kb.step(1);
+      }
+      const beforeRelease = p.ability;
+      __kb.release();
+      for (let i = 0; i < 10; i++) __kb.step(1);
+      const star = KB.game.entities.find(e => !e.dead && e.name === 'abilitystar');
+      return { beforeRelease, after: p.ability, star: star ? star.ability : null, lock: !!p.selectLock };
+    }""")
+    check('長按吸回後繼續按住 SELECT，放開時不會把剛拿回的能力丟掉',
+          o4['beforeRelease'] == 'fire' and o4['after'] == 'fire' and o4['star'] is None, o4)
+    h.ev("()=>{ KB.Helper = window.__realHelper2; }")
+
+    # 6) 說明文案：暫停「無能力」卡與操作說明第 2 頁都要看得到這條提示
+    txt = h.ev("""()=>{
+      const mv = (KB.UI.abilityInfo(null).moves || []).map(m => m.join(' '));
+      const h2 = (KB.UI.HELP2 || []).map(r => r.join(' '));
+      return { mv, h2 };
+    }""")
+    check('暫停「無能力」卡有「丟能力星砸敵人可混合」',
+          any('混合' in m for m in txt['mv']), txt['mv'])
+    check('操作說明第 2 頁有「丟星砸敵人可混合」',
+          any('混合' in r for r in txt['h2']), txt['h2'])
+
+
+# ---------------------------------------------------------------------------
 # E. 定義完整性
 # ---------------------------------------------------------------------------
 def phase_defs(h):
@@ -428,6 +558,10 @@ def main():
             print('-' * 8, 'select')
             try: phase_select(h)
             except Exception as ex: check('select: raised', False, repr(ex))
+        if not only or 'throwmix' in only:
+            print('-' * 8, 'throwmix')
+            try: phase_throwmix(h)
+            except Exception as ex: check('throwmix: raised', False, repr(ex))
         if not only or move_only:
             print('-' * 8, 'moves'); phase_moves(h, move_only)
         missing = pg.evaluate("()=>__kb.missing()")

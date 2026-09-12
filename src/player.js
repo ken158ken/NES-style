@@ -41,7 +41,7 @@
       // Round 5（forms）：整體變身。詳見 setForm()
       this.form = null; this.sizeMul = 1; this.possessed = null;
       // Round 6（mix）：SELECT 按住幀數（放開時決定「丟棄能力」還是「呼叫夥伴」）
-      this.selectHoldT = 0;
+      this.selectHoldT = 0; this.selectLock = false;
       this.name = 'kirby';
     }
 
@@ -282,15 +282,24 @@
       //   長按 45 幀以上放開 → KB.Helper.spawn(p)：沒有夥伴就把能力變成夥伴、已經有夥伴就吸回；
       //   回傳 true 代表夥伴系統接手了，這裡不再丟能力。
       //   ※ 能力交給夥伴後 this.ability 是 null，所以「有夥伴時」也要繼續累加 selectHoldT（才能長按吸回）。
+      //   ※ fix6（QA R6-P1-02）：一次按住只處理一次。長按吸回時，夥伴在第 45 幀就變回能力星飛走，
+      //     下一幀 selOk 會變 false（沒能力也沒夥伴）→ 舊版會立刻結算一次，等能力星飛回來又從 0 開始數，
+      //     於是玩家只是「還按著」就被當成新的短按，把剛拿回的能力又丟出去。
+      //     改成結算後上鎖（selectLock），一定要放開 SELECT 才會開始數下一次。
+      const selDown = inp.down('select');
+      if (!selDown) this.selectLock = false;
       const selOk = !!(this.ability || (KB.Helper && KB.Helper.exists && KB.Helper.exists()));
-      if (inp.down('select') && selOk) this.selectHoldT++;
+      if (selDown && selOk && !this.selectLock) this.selectHoldT++;
       else if (this.selectHoldT > 0) {
         const held = this.selectHoldT; this.selectHoldT = 0;
+        if (selDown) this.selectLock = true;
         let toHelper = false;
         if (held >= SELECT_HOLD) {
           try { toHelper = !!(KB.Helper && KB.Helper.spawn && KB.Helper.spawn(this) === true); } catch (e) { toHelper = false; }
         }
-        if (!toHelper && this.ability) this.dropAbility(true);
+        // 長按（>= SELECT_HOLD）而夥伴系統沒接手時，維持原本的「掉在腳邊」；
+        // 只有真正的短按才是「往前拋出去砸敵人」。
+        if (!toHelper && this.ability) this.dropAbility(true, held < SELECT_HOLD);
       }
 
       const vyPre = this.vy;
@@ -514,7 +523,8 @@
         } catch (e) { }
       }
     }
-    dropAbility(spawnStar) {
+    // thrown = true：短按 SELECT 主動丟出（往面向方向明顯拋出，可以瞄準帶能力的敵人做混合）
+    dropAbility(spawnStar, thrown) {
       const key = this.ability; if (!key) return;
       const d = KB.ABILITIES[key]; if (d && d.onLose) d.onLose(this);
       if (this.form) this.clearForm();
@@ -523,7 +533,10 @@
       // Round 6（mix）：掉落混合能力時，能力星給回「主成分 A」（撿回去只會拿回原本的能力）
       let starKey = key;
       try { if (KB.MIX && KB.MIX.isMix(key)) { const ps = KB.MIX.parts(key); if (ps && ps[0]) starKey = ps[0]; } } catch (e) { }
-      if (spawnStar && KB.ITEMS.abilitystar) KB.spawn(new KB.ITEMS.abilitystar(this.cx - 8, this.y - 8, starKey, -this.dir));
+      if (spawnStar && KB.ITEMS.abilitystar) {
+        const st = KB.spawn(new KB.ITEMS.abilitystar(this.cx - 8, this.y - 8, starKey, -this.dir));
+        if (thrown && st && st.throwForward) { st.throwForward(this.dir); KB.audio.sfx('spit'); }
+      }
     }
 
     // ---------- 能力攻擊 ----------
@@ -568,7 +581,7 @@
       this.grav = P.grav; this.maxFall = P.maxFall;
       if ((inp.pressed('attack') && this.stoneT > 12) || this.stoneT > 900 || inp.pressed('select')) {
         if (this.stoneBox) { this.stoneBox.dead = true; this.stoneBox = null; }
-        if (inp.pressed('select')) { this.dropAbility(true); }
+        if (inp.pressed('select')) { this.dropAbility(true, true); }
         this.setState(this.onGround ? 'idle' : 'fall');
         KB.particles(this.cx, this.cy, '#a0a0a8', 6, { spread: 1.5 });
       }

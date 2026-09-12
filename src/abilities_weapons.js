@@ -14,6 +14,10 @@
   const BLADE_IAI = 50;   // 居合・居合一閃（招式表：按住 50 幀放開）
   const BOW_PIERCE = 40;   // 弓・貫穿箭（招式表：蓄力 40）
   const BOW_METEOR = 80;   // 弓・流星箭（招式表：蓄力 80）
+  // fix6：Lv3 蓄力時間 ×0.8（KB.PROG.holdMul）。招式表上的數字一律是 **Lv1** 的門檻，
+  //   能力練到 Lv3 之後同一招會提早 20% 蓄滿（KB.PROG 未載入時回傳原值，行為完全不變）。
+  const HOLD = (key, n) => (KB.PROG && KB.PROG.holdMul) ? Math.max(4, Math.round(n * KB.PROG.holdMul(key))) : n;
+
 
   // ---------- 註冊表 ----------
   const NEW_KEYS = [
@@ -148,7 +152,7 @@
       const A = p.dir > 0 ? 0 : Math.PI;
       if (d.mode === 'rapid') {
         if (d.t <= 60 && d.t % 6 === 1) { gunShot(p, A, 6.4, 2); d.fired++; }
-        if (d.t === GUNNER_ULT + 1) { d.charged = true; sfx('reload'); textPop(p.cx, p.y - 14, 'LOAD!', { color: '#fff8c0', size: 8, frames: 30, rise: 0.5 }); }
+        if (d.t === HOLD('gunner', GUNNER_ULT) + 1) { d.charged = true; sfx('reload'); textPop(p.cx, p.y - 14, 'LOAD!', { color: '#fff8c0', size: 8, frames: 30, rise: 0.5 }); }
         if (d.charged) {
           if (d.t % 8 === 0) aura(p, { color: '#fff8c0', r: 18, frames: 12 });
           if (d.t % 3 === 0) KB.particles(p.cx + rnd(-11, 11), p.cy + rnd(-10, 10), ['#fff8c0', '#ffffff'], 1, { spread: 0.3, grav: -0.05, life: 12, up: 0.4, size: 1 });
@@ -493,7 +497,7 @@
             if (d.chargeT % 3 === 0) KB.particles(p.cx + rnd(-12, 12), p.cy + rnd(-10, 12), d.charged ? ['#ffffff', '#eef2ff'] : ['#9aa6c0', '#eef2ff'], 1, { spread: 0.3, grav: -0.06, life: 14, up: 0.5, size: 1 });
             // fix5b / R5-P1-03：居合架式是從 t=13（第 1 段斬揮完）才開始計 chargeT，
             // 所以原本的 chargeT === 50 實測要按住 63 幀。扣掉那 13 幀，實際 = 招式表的 50 幀。
-            if (d.chargeT === BLADE_IAI - 13) {
+            if (d.chargeT === HOLD('blade', BLADE_IAI) - 13) {
               d.charged = true; flash('#ffffff', 4, 0.3); sfx('sword');
               textPop(p.cx, p.y - 14, '居合', { color: '#ffffff', size: 8, frames: 30, rise: 0.4 });
             }
@@ -642,7 +646,7 @@
       if (d.mode === 'shot') {
         if (d.t === 4) { fireArrow(p, p.dir * 5.4, -0.9, { oy: 2, grav: 0.085 }); sfx('bow'); burst(p.cx + p.dir * 12, p.cy - 2, { n: 5, colors: ['#48c048', '#ffffff'], speed: 1.6, life: 9, grav: 0 }); }
         if (d.t === BOW_PIERCE) { d.lv = 1; setAnim(p, 'kirby_attack_bow_charge', 10); flash('#fff8c0', 3, 0.25); sfx('bow'); textPop(p.cx, p.y - 14, '貫穿', { color: '#fff8c0', size: 8, frames: 26, rise: 0.4 }); }
-        if (d.t === BOW_METEOR) { d.lv = 2; setAnim(p, 'kirby_attack_bow_meteor', 10); flash('#ffffff', 5, 0.4); textPop(p.cx, p.y - 16, '流星', { color: '#ffffff', size: 8, frames: 30, rise: 0.4 }); }
+        if (d.t === HOLD('bow', BOW_METEOR)) { d.lv = 2; setAnim(p, 'kirby_attack_bow_meteor', 10); flash('#ffffff', 5, 0.4); textPop(p.cx, p.y - 16, '流星', { color: '#ffffff', size: 8, frames: 30, rise: 0.4 }); }
         if (d.lv > 0) {
           if (d.t % 8 === 0) aura(p, { color: d.lv > 1 ? '#ffffff' : '#fff8c0', r: 14 + d.lv * 4, frames: 12 });
           p.vx *= 0.86;

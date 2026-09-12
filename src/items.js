@@ -276,21 +276,80 @@
   };
 
   // 能力星：丟棄 / 受傷時掉出；碰到或吸入可取回能力
+  // fix6：短按 SELECT 丟出的能力星（throwForward）砸到帶能力的敵人就會當場混合（卡比之星 64 式）
+  const THROW_VX = 2.4, THROW_VY = -3;
+  const g0 = () => KB.game;
+  const starColor = k => { const d = k && KB.ABILITIES ? KB.ABILITIES[k] : null; return (d && d.color) || '#ffe040'; };
+  const hexA = (hex, a) => {
+    const m = /^#([0-9a-f]{6})$/i.exec(String(hex || ''));
+    if (!m) return 'rgba(255,224,64,' + a + ')';
+    const n = parseInt(m[1], 16);
+    return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')';
+  };
   KB.ITEMS.abilitystar = class extends Item {
     constructor(x, y, ability, dir) {
       super(x, y); this.spr = 'item_abilitystar'; this.name = 'abilitystar'; this.ability = ability; this.w = 14; this.h = 14; this.bob = false;
       // R3：初速 vx 從 1.6 減半到 1.0 —— Round 2 把落地彈跳從 6 次改成 2 次之後，能力星會滑得離屍體太遠，
       //      boss_test 的 kracko / dedede 樣本因此撿不回劍（enemies-bosses2 的 bisect 結論）。
       this.grav = 0.18; this.solid = true; this.maxFall = 3; this.vx = (dir || 1) * 1.0; this.vy = -3.5; this.score = 0;
+      // Round 6 / fix6：thrown = 短按 SELECT 主動丟出的能力星（throwForward）。
+      //   只有「丟出去」的星星會在飛行中檢查混合（受傷掉出來的星維持 Round 3 的慢速落地，
+      //   boss_test 的 kracko / dedede 機器人靠那個速度才撿得回劍）。
+      this.thrown = false; this.mixed = false; this.mixParts = null;
       // 存在時間由 KB.PHYS.abilityStarLife 決定（Extra 模式減半）；最後 120 幀開始閃爍（player2 規格）
       this.maxLife = Math.round(((KB.PHYS && KB.PHYS.abilityStarLife) || 600) * (KB.session && KB.session.extra ? 0.5 : 1));
       this.life = this.maxLife; this.blinkAt = Math.max(30, Math.round(this.maxLife * 0.2));
       this.inhalable = true; this.graceT = 30; this.bounces = 0;
     }
+    /** 短按 SELECT 丟出：明顯往前拋（vx ±2.4 / vy -3），玩家可以瞄準帶能力的敵人做混合 */
+    throwForward(dir) {
+      this.thrown = true;
+      this.vx = (dir || 1) * THROW_VX; this.vy = THROW_VY;
+      this.dir = dir || 1;
+      return this;
+    }
+    /** 飛行中砸到「帶 ability 的敵人」且兩者有混合組合 → 敵人被吞噬、星星變成混合星 */
+    tryMix() {
+      const M = KB.MIX, g = KB.game;
+      if (!M || !M.keyOf || !g) return false;
+      for (const e of g.entities) {
+        if (e === this || e.dead || e.type !== 'enemy' || !e.ability) continue;
+        if (!this.overlaps(e)) continue;
+        const mk = M.keyOf(this.ability, e.ability);
+        if (!mk || !KB.ABILITIES[mk]) continue;
+        this.becomeMix(mk, e);
+        return true;
+      }
+      return false;
+    }
+    becomeMix(mk, e) {
+      const d = KB.ABILITIES[mk] || {}, col = d.color || '#ffe040';
+      const cA = starColor(this.ability), cB = starColor(e.ability);
+      this.mixParts = [this.ability, e.ability];
+      this.mixed = true; this.ability = mk;
+      // 敵人被能力星「吞噬」（不掉自己的能力星、不噴屍體）
+      e.dead = true;
+      if (g0() && e.score) g0().addScore(e.score, e.cx, e.y);
+      KB.audio.sfx('transform');
+      const V = KB.VFX;
+      if (V) {
+        try { V.burst(e.cx, e.cy, { n: 20, colors: [cA, cB, '#ffffff'], speed: 2.8, life: 30, grav: 0.02, size: 2 }); } catch (err) { }
+        try { V.ring(e.cx, e.cy, { r0: 3, r1: 26, frames: 16, color: col, width: 2 }); } catch (err) { }
+        try { V.textPop(this.cx, this.y - 14, 'MIX?', { color: col, size: 10, frames: 50, rise: 0.4, outline: '#000' }); } catch (err) { }
+      } else {
+        KB.particles(e.cx, e.cy, [cA, cB, '#ffffff'], 16, { spread: 2.6, life: 28 });
+      }
+      // 吞下之後稍微上浮並減速，讓混合星停在敵人倒下的位置附近（玩家馬上撿得到）
+      this.vx *= 0.35; this.vy = Math.min(this.vy, -1.8); this.bounces = 0;
+      this.life = Math.max(this.life, 420);
+      return this;
+    }
     update(dt) {
       this.baseUpdate(dt);
       if (this.beingInhaled) return;
       this.physics();
+      // 飛行中（第一次落地之前）才判定混合
+      if (this.thrown && !this.mixed && this.bounces === 0) this.tryMix();
       // 落地彈 2 次（-2.8 → -1.6）後停住；每次落地水平速度再 ×0.5，星星就停在敵人倒下的位置附近
       if (this.onGround) { this.bounces++; this.vx *= 0.5; this.vy = this.bounces === 1 ? -2.8 : this.bounces === 2 ? -1.6 : 0; if (this.bounces >= 3) { this.vx = 0; this.vy = 0; } }
       if (this.hitWall) { this.vx *= -1; this.dir *= -1; }
@@ -305,6 +364,16 @@
     draw(g) {
       if (this.life > 0 && this.life < this.blinkAt && (Math.floor(this.t * 60) & 2)) return;
       const d = KB.ABILITIES[this.ability]; const col = d && d.color ? d.color : '#ffe040';
+      // 混合星：兩色小球繞著星星旋轉 + 一圈光環（和普通能力星一眼分得出來）
+      if (this.mixed) {
+        const pr = this.mixParts || [], cA = starColor(pr[0]), cB = starColor(pr[1]);
+        g.circle(this.cx, this.cy, 9 + Math.sin(this.t * 6) * 1.5, 'rgba(255,255,255,0.16)');
+        g.circle(this.cx, this.cy, 6 + Math.sin(this.t * 6) * 1, hexA(col, 0.3));
+        for (let i = 0; i < 2; i++) {
+          const a = this.t * 5 + i * Math.PI;
+          g.rect(Math.round(this.cx + Math.cos(a) * 8) - 1, Math.round(this.cy + Math.sin(a) * 5) - 1, 3, 3, i ? cB : cA);
+        }
+      }
       g.spr(this.spr, this.cx, this.bottom, { t: this.t, fps: 6 });
       const icon = 'ui_ability_' + this.ability + '_mini';
       if (KB.has(icon)) g.spr(icon, this.cx, this.cy + 4, {});

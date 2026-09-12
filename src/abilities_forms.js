@@ -20,6 +20,10 @@
   // 驗證：tools/test_forms.py 的「蓄力門檻」段（按住 N+2 幀觸發、N-6 幀不觸發）。
   const DRAGON_NOVA = 60;   // 龍化・龍炎彈（招式表：按住 60 幀放開）
   const MECH_BARRAGE = 50;   // 機甲・全彈發射（招式表：按住 50 幀放開）
+  // fix6：Lv3 蓄力時間 ×0.8（KB.PROG.holdMul）。招式表上的數字一律是 **Lv1** 的門檻，
+  //   能力練到 Lv3 之後同一招會提早 20% 蓄滿（KB.PROG 未載入時回傳原值，行為完全不變）。
+  const HOLD = (key, n) => (KB.PROG && KB.PROG.holdMul) ? Math.max(4, Math.round(n * KB.PROG.holdMul(key))) : n;
+
 
   // ---------- 註冊表 ----------
   const NAMES = { giant: '巨大化', dragon: '龍化', mech: '機甲', ghost: '幽靈' };
@@ -393,7 +397,7 @@
       }
       if (held) {
         d.charge = (d.charge || 0) + 1;
-        if (d.charge === DRAGON_NOVA - 1) { d.ready = true; sfx('charge_ready'); vf('chargeReady', p.cx, p.cy, '#ff9020'); }
+        if (d.charge === HOLD('dragon', DRAGON_NOVA) - 1) { d.ready = true; sfx('charge_ready'); vf('chargeReady', p.cx, p.cy, '#ff9020'); }
         if (d.ready && d.charge % 4 === 0) KB.particles(p.cx + rnd(-12, 12), p.y - 2, ['#ffffff', '#ffe040'], 2, { spread: 1, grav: 0, life: 12, up: 0.5, size: 1 });
       } else if (d.ready) { startMove(p, 'nova'); return; }
     },
@@ -605,7 +609,7 @@
       if (d.t >= 18) {
         if (held) {
           d.charge = (d.charge || 0) + 1;
-          if (d.charge === MECH_BARRAGE - 18) { d.ready = true; sfx('charge_ready'); vf('chargeReady', p.cx, p.cy, '#78e8ff'); }
+          if (d.charge === HOLD('mech', MECH_BARRAGE) - 18) { d.ready = true; sfx('charge_ready'); vf('chargeReady', p.cx, p.cy, '#78e8ff'); }
           if (d.ready && d.charge % 4 === 0) KB.particles(p.cx + rnd(-10, 10), p.y - 2, ['#ffffff', '#78e8ff'], 2, { spread: 1, grav: 0, life: 12, up: 0.5, size: 1 });
           else if (d.charge % 8 === 1) sfx('charge');
           p.attackTimer = Math.max(p.attackTimer, 2);

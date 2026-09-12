@@ -7,10 +7,11 @@ const path = require('path');
 global.window = {}; global.KB = { LEVELS: [] };
 require(path.join(__dirname, '..', 'src', 'levels.js'));
 
-// 機關磁磚（mechanics）：X 硬磚 / I 冰磚 皆為實心；F 導火線可通行
-const SOLID = { '#': 1, '*': 1, 'B': 1, 'X': 1, 'I': 1 };
+// 機關磁磚（mechanics）：X 硬磚 / I 冰磚 / W 木箱 皆為實心；F 導火線可通行
+// Round 6（elements）：W 木箱＝實心（可站），火燒 40 幀消失 / 鎚・石頭類重擊砸得破
+const SOLID = { '#': 1, '*': 1, 'B': 1, 'X': 1, 'I': 1, 'W': 1 };
 const SLOPE = { '/': 1, '\\': 1 };
-const KNOWN = new Set(['#', '=', '*', 'B', 'X', 'I', 'F', '^', '~', 'H', '/', '\\', '.', ' ']);
+const KNOWN = new Set(['#', '=', '*', 'B', 'X', 'I', 'W', 'F', '^', '~', 'H', '/', '\\', '.', ' ']);
 // 機關磁磚需要的能力，以及可提供該能力的敵人（讓「有機關但拿不到能力」在靜態檢查就抓得到）
 const MECH_NEED = { X: ['hammer', 'stone'], F: ['fire'], I: ['fire'] };
 const ABILITY_FROM = {
