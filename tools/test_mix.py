@@ -318,8 +318,8 @@ def phase_mixflow(h):
       isMix: [KB.MIX.isMix('flamesword'), KB.MIX.isMix('fire'), KB.MIX.isMix(null)],
       parts: [KB.MIX.parts('flamesword'), KB.MIX.parts('fire')],
     })""")
-    check('KB.ABILITY_KEYS 20 → 32', api['n'] == 32, api['n'])
-    check('KB.MIX.table 有 12 組', api['tbl'] == 12, api['tbl'])
+    check('KB.ABILITY_KEYS ≥ 32', api['n'] >= 32, api['n'])
+    check('KB.MIX.table ≥ 12 組', api['tbl'] >= 12, api['tbl'])
     check('KB.MIX.keyOf 無序相同', api['sym'] == ['flamesword', 'flamesword'], api['sym'])
     check('KB.MIX.keyOf 無組合 / 同能力 / null → null', api['none'] == [None, None, None], api['none'])
     check('KB.MIX.keyOf 混合能力不能再混 → null', api['nomix'] == [None, None], api['nomix'])

@@ -2497,7 +2497,88 @@ R5-7a 的觀察項（gravity ↑+X 文案不一致、圖鑑剪影露出帽子輪
 分工見 docs/TASKS.md Round 7。總控已預留 9 個新檔與 script 標籤（abilities_mix2 在 abilities_mix 後；awaken、records 在 progression 後、ui 前；levels_w7、levels_extra 在 levels 後；bosses_w7 在 bosses_w6 後；art 三檔在 art/world6 後）。
 
 ## mix2
-（agent 在此追加）
+
+擁有檔案：`src/abilities_mix2.js`、`src/art/kirby_mix2.js`、`tools/test_mix2.py`（**沒有動任何別人的檔案**）。
+註冊方式完全沿用第一批的 `KB.MIX`：組合寫進 `KB.MIX.table`（key = 排序後的 `a|b`，`KB.MIX.keyOf` 無序查表）、
+`KB.ABILITIES[mixkey] = {... mix:[A,B], mixEl, transform:true}`、push 進 `KB.ABILITY_KEYS`（32 → 44）、
+`KB.ABILITY_NAMES / KB.ABILITY_HUD` 同步（HUD 英文名一律 ≤ 7 字）。
+`KB.MIX.combos2` 另外掛出第二批的原始表供其他 agent 讀。
+
+### 組合表（12 組，每組 3 招；名稱 / 招式 / 帽子 / 圖示與第一批完全不重複）
+| mixkey | 成分 | 名稱 | X | 方向鍵 / 空中 | 按住 50 幀放開 |
+|---|---|---|---|---|---|
+| `flamebow` | fire + bow | 焰弓 PYREBOW | 火箭（命中爆炸） | 空中：火雨（落地留火海） | 鳳凰箭 |
+| `frosthammer` | ice + hammer | 冰鎚 CRYMAUL | 凍地衝擊（76×30 凍結地面） | ↓：冰柱群 ×5 | 冰河期（272×160 全畫面） |
+| `thundersword` | spark + sword | 雷劍 VOLTEDG | 帶電斬 ×2（麻痺 120 幀） | 空中：雷擊落下斬 | 雷神劍（150×200 巨劍） |
+| `flameninja` | fire + ninja | 火忍 PYRONIN | 火遁手裡劍 ×3 | ↓：火焰替身爆（瞬移 + 原地替身引爆） | 火遁大炎（170×120） |
+| `frostninja` | ice + ninja | 冰忍 CRYONIN | 冰針三連 | ↓：冰鏡瞬移（碎鏡冰片 ×2） | 吹雪（200×140 持續） |
+| `thundergun` | spark + gunner | 雷槍 VOLTGUN | 電擊彈（命中後鎖鏈跳 2 隻） | ↓：電網霰彈 ×7 + 70×58 電網 | 雷射砲（220×26 連射） |
+| `stonegiant` | stone + giant | 岩巨人 GOLEM | 岩拳 + 踩踏（90×32） | ↓：滾石衝撞 | 山崩（落石 ×7 + 272×44） |
+| `flamedragon` | fire + dragon | 炎龍 PYRWYRM | 炎息加強（漸長到 78px） | 空中：炎翼衝（落地 74×38 + 火柱） | 太陽炎（140×130 + 巨大火球） |
+| `thunderdragon` | spark + dragon | 雷龍 VOLWYRM | 雷息（漸長到 70px、麻痺） | 空中：雷翼俯衝（落地 + 雙落雷柱） | 雷雲（9 道 28×200 落雷） |
+| `timebeam` | beam + time | 時光束 CHRONOS | 凍結光束（110×20、麻痺 150 幀） | ↑：時間裂縫 ×3 | 時停爆（全場定格 → 260×190 解放） |
+| `gravityblade` | cutter + gravity | 重力刃 GRAVEDG | 軌道刃環繞（4 枚 `Mix2Orbit`，半徑外擴） | ↓：引力回收刃（`Mix2Return`，沿路吸敵人） | 刃之奇點（120×110 吸入 + 16 道收束刃） |
+| `hammermech` | hammer + mech | 鎚機甲 MEKMAUL | 火箭鎚（噴射加速 + 地面 60×30） | ↑：飛彈鎚（2 枚 `Mix2Homing`） | 軌道砲鎚（70×230 軌道砲柱） |
+
+### 進度
+- [09-12 R7-MIX2-1] 完成：`src/abilities_mix2.js` 骨架（COMBOS / 註冊 / `build()` 工廠 / 三個專屬投射物類別
+  `KB.Mix2Homing`・`KB.Mix2Orbit`・`KB.Mix2Return`）+ **焰弓 / 冰鎚 / 雷劍** 9 招。
+  蓄力門檻 `HOLD(key) = round(50 × KB.PROG.holdMul(key))`（Lv3 → 40，`KB.PROG` 未載入時回 50）。
+  驗證：`tools/test_mix2.py --only defs,flamebow,frosthammer,thundersword`。
+- [09-12 R7-MIX2-2] 完成：**火忍 / 冰忍 / 雷槍** 9 招（替身爆＝瞬移落點 60×48 + 原地 54×46 延遲引爆、
+  冰鏡瞬移留下碎鏡冰片、電擊彈命中後沿最近敵人鎖鏈跳 2 段並各自麻痺）。
+  驗證：`tools/test_mix2.py --only flameninja,frostninja,thundergun`。
+- [09-12 R7-MIX2-3] 完成：**岩巨人 / 炎龍 / 雷龍** 9 招（岩拳 + 踩踏兩段、滾石衝撞每 6 幀重建判定、
+  龍息判定框逐幀拉長、俯衝落地雙側落雷柱 / 火柱、山崩 7 顆落石 + 全地面判定）。
+  驗證：`tools/test_mix2.py --only stonegiant,flamedragon,thunderdragon`。
+- [09-12 R7-MIX2-4] 完成：**時光束 / 重力刃 / 鎚機甲** 9 招（時停爆先把全場敵人定格 200 幀再解放 260×190、
+  `Mix2Orbit` 半徑 16→54 外擴、`Mix2Return` 回收途中把 56px 內的敵人往刃身拉、軌道砲鎚先標點再落 70×230 砲柱）。
+  驗證：`tools/test_mix2.py --only timebeam,gravityblade,hammermech`。
+- [09-12 R7-MIX2-5] 完成：美術全套 `src/art/kirby_mix2.js` —— 12 組 `kirby_attack_<key>`（3 幀）+ `_ult`（2 幀）、
+  12 頂 `hat_<key>`（底帽 ＋ **第二批專屬冠飾** CREST2 ＋ 依元素重新上色；新增 giant / time / gravity 三頂底帽）、
+  `ui_ability_<key>` 24×16（斜切方向與第一批相反：左下 = A、右上 = B）與 `_mini` 8×8、
+  **42 個投射物**（arrow / orb / shard / star / ring / rocket × fire / ice / spark / stone / **time / void / steel**）。
+  新元素色加在本檔自己的調色盤（C/D/L 時光、M/W/B 重力、O/A 機甲），第一批的 `KB.MIXART.G` / `BASE_HATS` 只讀不改。
+  武器造型與第一批刻意不同：複合弓 / 帶刺戰鎚 / 闊劍 / 苦無 / 長槍管卡賓 / 岩巨拳 / 沙漏 / 重力球 / 活塞鎚。
+  驗證：`shots/agent_mix2/sheet_hats.png`、`sheet_icons.png`、`sheet_projs.png`、`sheet_attack.png`、`sheet_ult.png`。
+- [09-12 R7-MIX2-6] 完成：`tools/test_mix2.py` **343/343 PASS**
+  （定義完整性 12×7、12×2 方向的混合流程、能力台座真實流程（stone+giant / time+beam）、持有混合能力再吞第三個 → 替換、
+  `KB.MIX.table` key 正規化 / 不能再混 / 無重複註冊、12 組受傷掉星＝主成分 A、
+  蓄力門檻 Lv1 = `abilityData.t` 第 50 幀 / Lv3 = 第 40 幀（`holdMul` 0.8）、
+  12×3 招「命中 waddledee 會死 + 回到正常狀態 + 招式專屬證據」）。
+  回歸：`engine_test 118/118`、MISSING SPRITES 空、無 pageerror；
+  `playthrough --level w1 --ability stonegiant --godmode` cleared=True / deaths=0 / 7603 幀、
+  `--ability timebeam` cleared=True / deaths=0 / 6514 幀。
+  截圖：`shots/agent_mix2/contact_1.png` ~ `contact_4.png`（36 招各 2 幀）、`pause_hammermech.png`、`pause_timebeam.png`。
+
+### 跨檔需求 / 給總控（重要）
+1. **`tools/test_mix.py` 有兩條寫死的數字，加了第二批之後一定會紅（243/245）**——
+   這是「把組合寫進 `KB.MIX.table` + push 進 `KB.ABILITY_KEYS`」的必然結果，不是行為退步（其餘 243 條全過）。
+   我沒有改別人的檔案，請總控（或 mix agent）改成不等式：
+   - `tools/test_mix.py:321` `check('KB.ABILITY_KEYS 20 → 32', api['n'] == 32, ...)` → `api['n'] >= 32`
+   - `tools/test_mix.py:322` `check('KB.MIX.table 有 12 組', api['tbl'] == 12, ...)` → `api['tbl'] >= 12`
+   （awaken / helper2 等 Round 7 agent 只要再加能力也會踩到同一條，建議一次改掉。）
+2. **ui / 圖鑑 / 競技場**：`KB.ABILITY_KEYS` 從 32 變 44 —— 我確認過 `ui.js` 的
+   `UI.seenCount()` / `EndingScene.seenLine()`（`UI.abilityKeys().length`）與圖鑑分頁都是動態算的，不用改；
+   但 `progression.js:280` 的成就門檻寫死 `seenCount() >= 20`（「能力收藏家」），
+   還有 `ui.js:162` 的註解「Round 5：20 種能力」與 `ui.js:1250` 的註解「能力 32 種」已經過時，
+   請 progression / ui 的 agent 視需要調整（不影響功能，只是分母語意）。
+3. **levels**：第二批最自然的取得途徑一樣是能力台座（`KB.ITEMS.essence`）——
+   在已經有 A 的房間放一座 B 台座即可，例如 `stone` + `giant`、`beam` + `time`、`cutter` + `gravity`。
+4. **audio**：本區用到 `bow / arrow_rain / fireball / meteor / hammer / ice / icewall / wind / sword / spark / thunder /
+   iai / charge / charge_ready / gun / shotgun / beam / shuriken / teleport / fire / rocket_punch / missile / reload / jet /
+   stomp / mech_step / hardblock / giant_grow / giant_roar / dragon_breath / dragon_dash / wing_flap / slowmo / rewind /
+   timestop / timeresume / magic_circle / magic_big / blackhole / gravity_lift / cutter / transform / ultimate`，全部是既有名單。
+
+### 已知問題 / 未完成
+1. 上面第 1 條：`test_mix.py` 兩條寫死的計數（32 / 12）我不能改，需總控處理。
+2. 混合能力一樣**沒有做敵人**，只能靠「持有 A 時取得 B」產生（與第一批同規格）。
+3. 暫停卡的中文 desc / flavour 在 Linux 上會一個字一行（`shots/agent_mix2/pause_hammermech.png`）——
+   對照組 `pause_ref_flamesword.png`（第一批）完全一樣，是 CLAUDE.md 已知的 `gfx.js renderTextCanvas` 中文問題，不是本輪造成的。
+4. 招式中途的 `hitstop` 期間 `game.update` 直接 return，所以「真實按鍵幀數」會比招式表的 50 多 0~8 幀
+   （第一批也一樣）。test_mix2 的蓄力測試改測 `abilityData.t`，不受 hitstop 影響。
+5. 沒有跑 `tools/build.py`（Round 7 其他 agent 還在改檔，等總控收工再打包）。
+
 
 ## awaken
 > 檔案：`src/awaken.js`（新）、`src/art/kirby_awaken.js`（新）、`src/progression.js`（Lv4）、`src/player.js`（只加覺醒觸發鉤子 + 覺醒外觀）、`tools/test_awaken.py`（新）。

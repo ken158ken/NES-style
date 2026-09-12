@@ -186,7 +186,7 @@
       hat: 'hat_' + key, icon: 'ui_ability_' + key,
       duration: spec.m1.dur, fps: spec.m1.fps || 14, hold: true, maxHold: 600,
       lockMove: spec.m1.lock !== false, canJump: false,
-      desc: spec.desc, flavour: spec.flavour, moves,
+      desc: spec.desc, flavour: Array.isArray(spec.flavour) ? spec.flavour : (spec.flavour ? [String(spec.flavour)] : []), moves,
       onGet(p) { const d = data(p); d.t = 0; d.charged = false; d.next = null; },
       onLose(p) { killBox(p); clearAnim(p); },
       onCrouchAttack: spec.m2 === 'down' ? (p => startMove(p, 'm2')) : undefined,
