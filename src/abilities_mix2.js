@@ -239,7 +239,7 @@
         } else if (d.t > 14 && d.t % 6 === 0) {
           parts(p.cx + rnd(-9, 9), p.cy + rnd(-8, 8), [color], 1, { spread: 0.2, grav: -0.03, life: 10, up: 0.3, size: 1 });
         }
-        if (!held && d.charged) { startMove(p, 'ult'); }
+        if (!held && d.charged) { sfx('mix_' + p.ability); startMove(p, 'ult'); }
       },
       onEnd(p) { killBox(p); clearAnim(p); },
     };
