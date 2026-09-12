@@ -996,6 +996,9 @@
       }
       // 受傷瞬間閃白一幀
       if (this.hurtFlashT > 0) opts.tint = '#ffffff';
+      // Round 8（skins）：可解鎖配色 —— 在這裡把精靈名換成配色版（kirby_* 才換，帽子不換）。
+      // 覺醒金身 / 無敵糖的 tint 照舊疊在配色版上。
+      if (KB.SKINS && KB.SKINS.spr) anim = KB.SKINS.spr(anim);
       let bob = 0;
       if (this.state === 'float') bob = Math.round(Math.sin(this.t * 6) * 1);
       if (this.state === 'ride') {

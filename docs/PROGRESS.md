@@ -3220,7 +3220,84 @@ R5-7a 的觀察項（gravity ↑+X 文案不一致、圖鑑剪影露出帽子輪
 （agent 在此追加）
 
 ## skins
-（agent 在此追加）
+> 檔案：`src/skins.js`（新，全部功能都在這裡）、`src/player.js`（`draw()` 只加 1 行）、`tools/test_skins.py`。
+> **`src/gfx.js` 沒有改**（`KB.spriteRecolor` 現成的就夠用）、**`src/ui.js` 沒有改**（HUD 臉用覆蓋 `KB.SPR` 的方式同步）。
+> 截圖：`shots/agent_skins/`。
+
+### KB.SKINS API 一覽（ach2 設定頁照這個呼叫；載入順序 `art/* → skins.js → player.js`，全部在缺 KB.save / KB.PROG 時安全）
+
+| 呼叫 | 回傳 / 效果 |
+|---|---|
+| `KB.SKINS.list()` | **已解鎖**的 id 陣列（cycle 用；永遠含 `'pink'`，順序固定同 `ids()`） |
+| `KB.SKINS.all()` | 12 筆 `{id, name, cond, unlocked}`（含未解鎖，要畫「??? / 條件」時用） |
+| `KB.SKINS.ids()` / `count()` / `total()` | 全部 id / 已解鎖數 / 12 |
+| `KB.SKINS.current()` | 目前 id；存檔裡的配色若變成未解鎖會自動回 `'pink'` |
+| `KB.SKINS.set(id)` | 成功 `true`（寫 `KB.save.settings.skin` + `KB.saveGame()` + 同步 HUD 臉）；**未解鎖 / 未知 id 回 `false` 且什麼都不改** |
+| `KB.SKINS.unlocked(id)` | 是否解鎖（`KB.DEBUG` 或 `KB.UI.unlockAll` 時全 `true`） |
+| `KB.SKINS.name(id)` | 中文名稱（未知 id 回 `''`） |
+| `KB.SKINS.unlockCond(id)` | 條件文字，例：`成就「登峰造極」：把任一能力練到 Lv3`、`通關 夢幻迴廊（W7）`、`一開始就有` |
+| `KB.SKINS.drawPreview(ctx, x, y, id, opts?)` | **選單預覽**：在螢幕座標畫該配色的 `kirby_idle`（錨點＝底部中央；`opts.spr` 可改畫別張、其餘同 `KB.drawSpr`） |
+| `KB.SKINS.spr(name)` | 配色版精靈名（`kirby_*` → `name@id`；其他一律原樣回傳）。player.js 已接，一般不用自己叫 |
+| `KB.SKINS.refresh()` | 依存檔重新套用（`set()` 會自動呼叫；開機時也會自動跑一次） |
+| `KB.SKINS.def(id)` / `map(id)` / `colors(id)` | 定義 / `{舊色碼:新色碼}` / 完整色表（測試 / 進階用） |
+
+**設定頁 cycle 範例**
+```js
+const ids = KB.SKINS.list();                       // 只會列出已解鎖的
+const i = (ids.indexOf(KB.SKINS.current()) + d + ids.length) % ids.length;
+KB.SKINS.set(ids[i]);                              // 存檔 + HUD 臉同步都在裡面
+// 顯示：KB.SKINS.name(ids[i])；預覽：KB.SKINS.drawPreview(ctx, x, y, ids[i])
+// 想連未解鎖的一起列（畫成 ??? + 條件）就用 KB.SKINS.all()
+```
+
+### 12 種配色 / 解鎖條件（原創命名）
+
+| id | 名稱 | p 主色 | P 陰影 | l 高光 | c 腮紅 | m 嘴內 | r / R 腳 | 解鎖 |
+|---|---|---|---|---|---|---|---|---|
+| pink | 櫻花粉 | `#ffb0d0`(原) | `#e07aa8` | `#ffd8e8` | `#f27090` | `#a02040` | `#e8305c` / `#a81c48` | 永遠（預設） |
+| yellow | 檸檬黃 | `#ffe870` | `#d8a820` | `#fff8c8` | `#f0c038` | `#8c5410` | `#f08828` / `#a04c10` | 成就 `first_ability` 初次變身 |
+| blue | 天空藍 | `#8cd0ff` | `#4084d0` | `#d8f0ff` | `#58aae8` | `#1c4478` | `#2f5cd0` / `#183080` | `KB.save.cleared.w1` |
+| green | 抹茶綠 | `#aae088` | `#5c9c4c` | `#ddf8b8` | `#82c05c` | `#2c5820` | `#4a9c38` / `#28601e` | 成就 `combo10` 十連擊 |
+| red | 蘋果紅 | `#ff8078` | `#c03040` | `#ffc4b4` | `#e85060` | `#6c1018` | `#d02028` / `#840c18` | 成就 `clear_w5` 大王退治 |
+| white | 雪白 | `#f4f4fc` | `#bcc0d8` | `#ffffff` | `#d4d8ec` | `#7c84a0` | `#b4bcd8` / `#78809c` | 成就 `secret5` 密室探險家 |
+| purple | 葡萄紫 | `#c8a0f0` | `#8854c0` | `#e8d4ff` | `#a878d8` | `#401868` | `#7c3cc8` / `#481c84` | 成就 `all20` 能力收藏家 |
+| orange | 蜜柑橘 | `#ffb060` | `#d07418` | `#ffd8a4` | `#f08c38` | `#8c3808` | `#f06818` / `#9c3808` | 成就 `stars15` 星星獵人 |
+| black | 暗影黑 | `#6c6c7c` | `#3c3c4c` | `#9c9cac` | `#4c4c60` | `#14141c` | `#303040` / `#1a1a26` | `KB.save.cleared.w6`（另把眼睛高光 `b` 換白＝白眼） |
+| gold | 黃金 | `#ffd85c` | `#c08c18` | `#fff4bc` | `#e8b030` | `#6c4408` | `#d89818` / `#8c5808` | 成就 `lv3` 登峰造極 |
+| mint | 薄荷 | `#9cecd8` | `#44b09c` | `#d8fff4` | `#68d0c0` | `#1c5c50` | `#38a890` / `#1a6454` | 成就 `arena_clear` 競技場霸者 |
+| galaxy | 星河 | `#4c4ea0` | `#262a60` | `#c0c8ff`(星點) | `#7c58c8` | `#120c30` | `#6a3cc0` / `#341c78` | `KB.save.cleared.w7`（眼睛高光換白＝星光） |
+
+- 成就 id 以 progression.js 現有 20 條為準；若 ach2 之後新增更合適的條件，只要改 `src/skins.js` 的 `DEFS[].cond`（`{kind:'ach', id}` 或 `{kind:'clear', id}`）即可，其他都不用動。
+- **`KB.DEBUG`（`?debug=1`）或 `KB.UI.unlockAll` 時 12 種全解鎖。**
+
+### 進度
+- [18:05] 完成：**12 種配色定義 + KB.SKINS API**（`src/skins.js`）—— 以 `KB.spriteRecolor(name, name+'@'+id, map)` 懶生成配色版精靈（只做一次、之後命中快取）；
+  替換 `KB.PAL.kirby` 的 `p/P/l/c/m/r/R`（腳一起換），暗影 / 星河另外把眼睛藍高光 `b #5060c0` 換成白色。
+  驗證：`node --check src/skins.js`、`shots/agent_skins/sheet_12skins.png`（一排 12 配色 kirby_idle）
+- [18:20] 完成：**解鎖判定**（`unlocked` / `list` / `unlockCond`）—— 成就走 `KB.PROG.has(id)`、通關走 `KB.save.cleared[wid]`、`KB.DEBUG` 全開；
+  `set()` 對未解鎖 / 未知 id 回 false 且不寫存檔；存檔裡的配色若解鎖被取消（例如 `PROG.reset()`）`current()` 自動退回 pink。
+  驗證：`tools/test_skins.py` 的「解鎖條件」段（逐一驗證 12 條）
+- [18:35] 完成：**player.js 換色**（`draw()` 內 1 行 `if (KB.SKINS && KB.SKINS.spr) anim = KB.SKINS.spr(anim);`，放在受傷閃白之後、實際 `g.spr` 之前）——
+  `currentAnim()`、`form.spr()`（變身 / 混合專用圖，如 `kirby_dragon_*`）、落地擠壓退回的 `kirby_crouch` 全部都會經過；
+  **帽子 `hat_*` 不換、夥伴不換、覺醒金身 / 無敵糖的 tint 照舊疊在配色版上**。
+  驗證：`shots/agent_skins/game_gold.png`、`game_galaxy.png`、`game_black.png`（實機走路 + HUD）
+- [18:45] 完成：**HUD 卡比臉同步**（skins.js 內做，**ui.js 一行沒改**）—— 開機與每次 `set()` 時把 `KB.SPR['ui_kirby_face']` 指到配色版；
+  原圖另存一份、每次都從原圖重著色（連續切換不會疊色）；`set('pink')` 會還原成原圖。
+  驗證：`shots/agent_skins/hud_faces.png`（12 種臉）、`game_*.png` 右下角 `x3` 的臉
+- [18:55] 完成：**選單預覽 `drawPreview(ctx,x,y,id)`**（給 ach2 設定頁用）＋ `tools/test_skins.py`（**67 項全 PASS**）。
+  驗證：`.venv/bin/python tools/test_skins.py` 67/67 PASS、`.venv/bin/python tools/engine_test.py` **118/118 PASS**、實機 0 console error。未跑 `tools/build.py`（其他 Round 8 agent 還在寫檔，交給總控）。未 commit。
+
+### 跨檔需求 / 給其他 agent
+1. **選單裡的卡比預覽還是粉紅色**：`UI.drawKirby`（`src/ui.js`）與用它的暫停能力卡 / 能力圖鑑 / 競技場走的是 `KB.drawSpr('kirby_idle')`。
+   想讓選單也跟著配色，請在 `UI.drawKirby` 開頭加一行 `if (KB.SKINS) name = KB.SKINS.spr(name || 'kirby_idle');`（ui-menu / ach2 的檔）。
+2. **HUD 左下的能力圖示 `ui_ability_<key>` 仍是粉紅卡比臉**（`src/art/items_ui.js` 的 24×16 圖示，44 張）。
+   目前刻意不動（圖鑑 / 競技場也共用同一張，且規格只要求 `ui_kirby_face`）；要一起換的話 skins.js 有現成作法（`faceVariant()` 同款覆蓋 `KB.SPR`），說一聲即可加上。
+3. ach2 若新增「配色全收集」之類的成就，可直接用 `KB.SKINS.count() === KB.SKINS.total()` 判定。
+
+### 已知問題 / 未完成（skins）
+- 重著色是**逐像素換色**，所以只有列在表裡的色碼會變；`kirby_*` 圖裡的武器 / 火焰 / 冰等元素色刻意保持原樣（辨識度）。
+- 配色版精靈會進 `KB.SPR_ORDER`，`--scene sheet --filter kirby` 在切過配色後會多出 `xxx@<id>` 條目（只在該場次記憶體裡，不影響遊戲）。
+- 夥伴（helper）依規格不換色；卡比變黑 / 變金時夥伴仍是粉紅。
 
 ## audio8
 （agent 在此追加）
