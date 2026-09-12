@@ -67,14 +67,29 @@ const SPEC_SFX = ['jump', 'inhale', 'spit', 'swallow', 'hurt', 'die', 'enemyhit'
   'giant_grow', 'stomp', 'giant_roar', 'shrink', 'dragon_breath', 'dragon_dash', 'tail_whip', 'wing_flap',
   'rocket_punch', 'missile', 'jet', 'mech_step', 'armor_break', 'ghost_phase', 'possess', 'unpossess', 'ghost_wail',
   //   通用
-  'transform', 'untransform', 'ultimate', 'max'];
+  'transform', 'untransform', 'ultimate', 'max',
+  // Round 8（audio8）追加 —— 24 種混合能力代表音（2 層合成）
+  'mix_flamesword', 'mix_frostsword', 'mix_thunderblade', 'mix_flamegun', 'mix_frostgun', 'mix_thunderbow',
+  'mix_flamehammer', 'mix_stonehammer', 'mix_shadowblade', 'mix_starmage', 'mix_frostdragon', 'mix_thundermech',
+  'mix_flamebow', 'mix_frosthammer', 'mix_thundersword', 'mix_flameninja', 'mix_frostninja', 'mix_thundergun',
+  'mix_stonegiant', 'mix_flamedragon', 'mix_thunderdragon', 'mix_timebeam', 'mix_gravityblade', 'mix_hammermech',
+  // Round 8 —— 20 招覺醒招 + 量表 / 發動 / 結束
+  'awk_fire', 'awk_sword', 'awk_beam', 'awk_cutter', 'awk_spark', 'awk_stone', 'awk_ice', 'awk_hammer',
+  'awk_gunner', 'awk_ninja', 'awk_blade', 'awk_bow', 'awk_mage', 'awk_time', 'awk_gravity', 'awk_clone',
+  'awk_giant', 'awk_dragon', 'awk_mech', 'awk_ghost', 'awk_ready', 'awk_start', 'awk_end',
+  // Round 8 —— 挑戰模式
+  'tick', 'time_up', 'floor_clear', 'nohit_fail', 'new_record'];
 const SPEC_MUSIC = ['title', 'select', 'green', 'castle', 'island', 'cloud', 'dedede', 'boss', 'finalboss', 'invincible', 'clear', 'gameover', 'ending',
   // Round 1 追加
   'boss2', 'finalboss2', 'secret', 'miniboss',
   // Round 2（audio2）追加
   'result', 'arena', 'arena_rest', 'w_intro', 'green2', 'castle2', 'island2', 'cloud2', 'dedede2',
   // Round 5（audio5）追加
-  'ultimate_loop', 'transform_jingle'];
+  'ultimate_loop', 'transform_jingle',
+  // Round 6 / 7（world6 / world7 agent 自行加入 audio.js 的世界曲，補進名單）
+  'space', 'space2', 'shadowboss', 'shadowboss2', 'dream', 'dream2', 'nightmare', 'nightmare2', 'trueend',
+  // Round 8（audio8）追加：挑戰模式
+  'challenge', 'tower', 'timeattack'];
 const SPEC_AMBIENT = ['water', 'wind', 'cave', 'castle'];
 const usedSfx = new Set(), usedMusic = new Set();
 for (const f of fs.readdirSync(path.join(ROOT, 'src')).filter(f => f.endsWith('.js') && f !== 'audio.js')) {
@@ -139,7 +154,7 @@ console.log('[音效節流]');
 {
   const FRAME = 1000 / 60;
   // 呼叫間隔（幀）：可連續呼叫的音效，節流值必須小於呼叫間隔才不會被吃掉
-  const need = { count: 4, fuse: 6, gun: 6, dragon_breath: 6, jet: 4 };
+  const need = { count: 4, fuse: 6, gun: 6, dragon_breath: 6, jet: 4, tick: 60 };
   const thr = A.SFX_THROTTLE || {};
   const def = A.THROTTLE_MS || 80;
   for (const [n, frames] of Object.entries(need)) {
@@ -151,6 +166,70 @@ console.log('[音效節流]');
     if (typeof t !== 'number' || t < 0 || t > 1000) fail(`節流表 '${n}' 值 ${t} 不合理`);
   }
   ok(`節流表 ${Object.keys(thr).length} 項（預設 ${def}ms）：` + Object.entries(thr).map(([k, v]) => `${k}=${v}`).join(', '));
+}
+
+// ---------- Round 8：混合 / 覺醒 / 挑戰 ----------
+console.log('[Round 8：混合 / 覺醒 / 挑戰]');
+{
+  // 混合能力：直接從 abilities_mix*.js 的組合表解析 mixkey（不需執行那些檔案），確保 24 組一個都不漏
+  const mixKeys = [];
+  for (const f of ['src/abilities_mix.js', 'src/abilities_mix2.js']) {
+    const fp = path.join(ROOT, f);
+    if (!fs.existsSync(fp)) { console.log('  WARN 找不到 ' + f + '（略過混合能力名單比對）'); continue; }
+    const src = fs.readFileSync(fp, 'utf8');
+    for (const m of src.matchAll(/^\s*\['(\w+)',\s*'(\w+)',\s*'(\w+)',/gm)) mixKeys.push(m[1]);
+  }
+  if (mixKeys.length) {
+    if (mixKeys.length !== 24) fail(`abilities_mix*.js 解析到 ${mixKeys.length} 組混合能力（預期 24）`);
+    for (const k of mixKeys) if (!A.SFX_NAMES.includes('mix_' + k)) fail('缺少混合能力音效 mix_' + k);
+    ok(`24 組混合能力代表音 mix_<mixkey> 齊全（${mixKeys.length} 組比對自 abilities_mix*.js）`);
+  }
+  // 覺醒招：從 awaken.js 解析 M('key', ...) 的 20 個 basekey
+  const awkFile = path.join(ROOT, 'src/awaken.js');
+  if (!fs.existsSync(awkFile)) console.log('  WARN 找不到 src/awaken.js（略過覺醒招名單比對）');
+  else {
+    const src = fs.readFileSync(awkFile, 'utf8');
+    const keys = [...src.matchAll(/^\s*M\('(\w+)',/gm)].map(m => m[1]);
+    if (keys.length !== 20) fail(`awaken.js 解析到 ${keys.length} 招覺醒招（預期 20）`);
+    for (const k of keys) if (!A.SFX_NAMES.includes('awk_' + k)) fail('缺少覺醒招音效 awk_' + k);
+    for (const k of ['awk_ready', 'awk_start', 'awk_end']) if (!A.SFX_NAMES.includes(k)) fail('缺少 ' + k);
+    ok(`20 招覺醒招 awk_<basekey> + awk_ready / awk_start / awk_end 齊全（比對自 awaken.js）`);
+  }
+  // 節流：覺醒招 500ms、混合招 80ms、tick 900ms
+  const thr = A.SFX_THROTTLE || {};
+  for (const n of A.SFX_NAMES) {
+    if (n.startsWith('awk_') && thr[n] !== 500) fail(`${n} 節流應為 500ms（目前 ${thr[n]}）`);
+    if (n.startsWith('mix_') && thr[n] !== 80) fail(`${n} 節流應為 80ms（目前 ${thr[n]}）`);
+  }
+  if (thr.tick !== 900) fail(`tick 節流應為 900ms（目前 ${thr.tick}）`);
+  ok('節流：awk_* = 500ms、mix_* = 80ms、tick = 900ms');
+  // 挑戰模式三曲
+  for (const k of ['challenge', 'tower', 'timeattack']) {
+    if (!A.MUSIC_NAMES.includes(k)) { fail('缺少挑戰模式音樂 ' + k); continue; }
+    if (A.SONGS[k].loop === false) fail(`${k} 應為循環曲`);
+  }
+  ok('挑戰模式音樂 challenge / tower / timeattack 皆為 loop');
+}
+
+// ---------- 音樂速度倍率 setTempoMul ----------
+console.log('[音樂速度倍率 setTempoMul]');
+{
+  if (typeof A.setTempoMul !== 'function' || typeof A.getTempoMul !== 'function') fail('setTempoMul() / getTempoMul() 缺少');
+  else {
+    const cases = [[1, 1], [1.3, 1.3], [1.15, 1.15], [0.5, 1], [-2, 1], [9, 1.3], [NaN, 1], ['x', 1], [undefined, 1]];
+    for (const [inp, want] of cases) {
+      const got = A.setTempoMul(inp);
+      if (Math.abs(got - want) > 1e-9) fail(`setTempoMul(${JSON.stringify(inp)}) → ${got}（應為 ${want}）`);
+      if (A.getTempoMul() !== got) fail('getTempoMul() 與 setTempoMul() 回傳不一致');
+      if (A.status().tempo !== got) fail('status().tempo 未反映倍率');
+    }
+    // 播放中改倍率不得拋錯、不得換歌
+    A.music('tower'); A.setTempoMul(1.25); A.music('tower'); A.setTempoMul(1);
+    if (A.musicKey !== 'tower') fail('setTempoMul 影響了 musicKey');
+    A.music(null);
+    if (A.getTempoMul() !== 1) fail('setTempoMul(1) 未還原');
+    ok('setTempoMul 夾限 1.0~1.3、非數字視為 1、播放中可改、status().tempo 正確');
+  }
 }
 
 // ---------- 曲目檢查 ----------

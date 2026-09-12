@@ -231,12 +231,25 @@ __kb.state()                  // 回傳 JSON 快照
 　魔法系 `fireball icewall thunder magic_circle magic_big timestop timeresume slowmo rewind blackhole meteor gravity_lift clone_summon clone_swap clone_rush`
 　變身系 `giant_grow stomp giant_roar shrink dragon_breath dragon_dash tail_whip wing_flap rocket_punch missile jet mech_step armor_break ghost_phase possess unpossess ghost_wail`
 　通用 `transform`（變身演出 0.7s）`untransform` `ultimate`（必殺 stinger 0.5s）`max`（蓄力全滿，比 charge_ready 亮）
+＋ Round 8（共 52 個）：
+　混合能力（24，每個 2 層合成＝成分 A 音色 + 成分 B 音色，0.25~0.45 秒）`mix_<mixkey>`：
+　`mix_flamesword mix_frostsword mix_thunderblade mix_flamegun mix_frostgun mix_thunderbow mix_flamehammer mix_stonehammer mix_shadowblade mix_starmage mix_frostdragon mix_thundermech`
+　`mix_flamebow mix_frosthammer mix_thundersword mix_flameninja mix_frostninja mix_thundergun mix_stonegiant mix_flamedragon mix_thunderdragon mix_timebeam mix_gravityblade mix_hammermech`
+　覺醒招（20，低頻衝擊 + 高頻上揚 + 尾音 0.85~1.2 秒）`awk_<basekey>`：
+　`awk_fire awk_sword awk_beam awk_cutter awk_spark awk_stone awk_ice awk_hammer awk_gunner awk_ninja awk_blade awk_bow awk_mage awk_time awk_gravity awk_clone awk_giant awk_dragon awk_mech awk_ghost`
+　覺醒流程 `awk_ready`（量表滿）`awk_start`（覺醒發動）`awk_end`（覺醒終了）
+　挑戰模式 `tick`（倒數最後 10 秒每秒一下）`time_up` `floor_clear`（過層 jingle 0.6s）`nohit_fail` `new_record`（破紀錄 jingle）
 `KB.audio.music(key|null)`：`title select green castle island cloud dedede boss finalboss invincible clear gameover ending`
 ＋ `boss2 finalboss2 secret miniboss result arena arena_rest w_intro green2 castle2 island2 cloud2 dedede2`
 ＋ Round 5：`ultimate_loop`（必殺期間高張力 loop，2 小節素材交替 × 8）、`transform_jingle`（變身 1 小節短句，不循環 2.0 秒）
+＋ Round 6 / 7（world6 / world7）：`space space2 shadowboss shadowboss2 dream dream2 nightmare nightmare2 trueend`
+＋ Round 8（挑戰模式）：`challenge`（選單 loop，D 小調 126）、`tower`（挑戰塔 loop，A 小調 142，B 段逐級爬升）、`timeattack`（緊湊 loop，E 小調 170）
 `KB.audio.ambient(key|null)`：環境音層 `water wind cave castle`（跟隨音效音量；與 music 獨立；同 key 不重啟，切房可直接呼叫）
 `KB.audio.setVolume({music,sfx})` / `getVolume()` / `duck(on)` / `setMute(m)` / `toggleMute()` / `status()`
-每音效節流見 `KB.audio.SFX_THROTTLE`（count 25ms、gun 30ms（可每 6 幀連射）、jet 60ms、dragon_breath 90ms、大招 200~500ms…預設 80ms）。
+`KB.audio.setTempoMul(k)` / `getTempoMul()`：**音樂播放速度倍率 1.0~1.3**（超出自動夾限、非數字視為 1）。
+　只改音序器 step 長度、不重啟曲子，可在播放中隨時呼叫（挑戰塔隨層數加速用）；切歌 / `music(null)` 不會重設，離開挑戰模式請自行 `setTempoMul(1)`。`status().tempo` 可查。
+每音效節流見 `KB.audio.SFX_THROTTLE`（count 25ms、gun 30ms（可每 6 幀連射）、jet 60ms、dragon_breath 90ms、大招 200~500ms、
+　**`awk_*` 500ms、`mix_*` 80ms、`tick` 900ms**…預設 80ms）。
 `KB.audio.unlock()` 於第一次使用者輸入時呼叫。無聲環境（headless）需全部 try/catch。完整清單以 `node tools/audio_check.js` 輸出為準。
 
 ## 10. 手感參數（const.js，勿隨意改）

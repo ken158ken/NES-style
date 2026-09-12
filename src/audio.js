@@ -13,8 +13,11 @@
 // 介面：KB.audio.sfx(name) / music(key|null) / ambient(key|null) / unlock() / setMute(bool) / toggleMute() / status()
 //       KB.audio.setVolume({music, sfx}) / getVolume() → {music, sfx, muted}（0~1，存 KB.save.settings.audio）
 //       KB.audio.duck(on)   暫停時把音樂平滑降到 30%（ui-menu 於暫停 / 恢復呼叫）
+//       KB.audio.setTempoMul(1.0~1.3) / getTempoMul()  音樂播放速度倍率（挑戰塔隨層數加速；不重啟曲子）
 //       KB.audio.SFX_NAMES / MUSIC_NAMES / AMBIENT_NAMES / SONGS / SFX_THROTTLE
 //       KB.audio.compileSong / noteFreq / renderSong / renderSfx / renderAmbient（離線渲染，供測試工具）
+// - Round 8：mix_<24 種混合能力>（2 層合成）、awk_<20 種覺醒招> + awk_ready / awk_start / awk_end、
+//   挑戰模式 challenge / tower / timeattack 三曲與 tick / time_up / floor_clear / nohit_fail / new_record
 (function () {
   const W = (typeof window !== 'undefined') ? window : {};
   const AC = W.AudioContext || W.webkitAudioContext || null;
@@ -37,6 +40,9 @@
     // ---- Round 5：長音 / 演出用（避免重疊）----
     thunder: 200, meteor: 250, arrow_rain: 250, ghost_wail: 200, giant_roar: 250,
     blackhole: 500, timestop: 400, transform: 400, untransform: 400, ultimate: 400,
+    // ---- Round 8：挑戰模式（tick 倒數每秒一下；jingle 類避免重疊）----
+    tick: 900, time_up: 600, new_record: 800, floor_clear: 300, nohit_fail: 400,
+    // 另外 mix_*（80ms）/ awk_*（500ms）在音效表建立後以迴圈補上（見下方 Round 8 區段）
   };
   const LOOKAHEAD = 0.1, TICK_MS = 25;                  // 預排參數
   const nowMs = () => (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
@@ -774,6 +780,272 @@
 
   // 別名：player.js（player2 的 rideStar）以 'warp' 呼叫傳送星起飛音，與 'ride' 同一個聲音
   SFX.warp = SFX.ride;
+
+  // ======================================================================
+  // Round 8（audio8）：混合能力 / 覺醒招 / 挑戰模式
+  // ======================================================================
+  // 【混合能力 mix_<mixkey>】24 組，一律 2 層合成：成分 A 的音色 + 成分 B 的音色錯開 0.06 秒疊加，
+  // 整體 0.25~0.45 秒。下面是 18 種「成分音色」（只給混合用的短版，與各能力原本的招式音效刻意不同）。
+  const MIXV = {
+    // 火：低通滾動火焰 + 鋸齒下墜
+    fire(b, t) {
+      noise(b, t, 0.28, 0.26, { type: 'lowpass', f0: 900, f1: 260, wobble: 30, attack: 0.006, release: 0.1 });
+      tone(b, 'saw', 180, t, 0.24, 0.14, { to: 70, release: 0.08 });
+    },
+    // 冰：結晶三音上行 + 極高頻霜噪
+    ice(b, t) {
+      ['E6', 'B6', 'E7'].forEach((n, i) => tone(b, 'p12', F(n), t + i * 0.035, 0.18, 0.11, { release: 0.08 }));
+      noise(b, t, 0.26, 0.14, { type: 'highpass', f0: 7000, f1: 12000, release: 0.1 });
+    },
+    // 雷：高通爆裂 + 階梯跳頻方波
+    spark(b, t) {
+      noise(b, t, 0.2, 0.18, { type: 'highpass', f0: 3500, f1: 8000, wobble: 60, release: 0.07 });
+      tone(b, 'sq', 1400, t, 0.16, 0.08, { steps: [[0.04, 2100], [0.08, 1100], [0.12, 2600]], release: 0.05 });
+    },
+    // 岩：低頻悶擊 + 砂礫低通
+    stone(b, t) {
+      tone(b, 'tri', 120, t, 0.26, 0.34, { to: 38, slideT: 0.12, release: 0.1 });
+      noise(b, t, 0.24, 0.16, { type: 'lowpass', f0: 1700, f1: 220, release: 0.09 });
+    },
+    // 劍：金屬掃頻風切 + 刀鳴
+    sword(b, t) {
+      noise(b, t, 0.22, 0.27, { type: 'bandpass', f0: 900, f1: 5200, q: 1.6, attack: 0.004, release: 0.07 });
+      tone(b, 'sq', 1500, t + 0.04, 0.18, 0.1, { to: 520, release: 0.07 });
+    },
+    // 刀（居合）：更銳利的高通斬 + 正弦下滑
+    blade(b, t) {
+      noise(b, t, 0.2, 0.22, { type: 'highpass', f0: 2600, f1: 9000, attack: 0.002, release: 0.06 });
+      tone(b, 'sine', 2600, t, 0.2, 0.08, { to: 700, release: 0.08 });
+    },
+    // 迴旋刃：顫音旋轉 + 帶通旋刃噪
+    cutter(b, t) {
+      tone(b, 'p12', 1800, t, 0.26, 0.13, { to: 900, vib: { rate: 30, depth: 0.06 }, release: 0.08 });
+      noise(b, t, 0.24, 0.17, { type: 'bandpass', f0: 3200, f1: 1500, q: 3, wobble: 34, release: 0.08 });
+    },
+    // 光束：脈衝上揚 + 帶通能量
+    beam(b, t) {
+      tone(b, 'p25', 700, t, 0.26, 0.11, { to: 2300, release: 0.09, vib: { rate: 16, depth: 0.02 } });
+      noise(b, t, 0.2, 0.08, { type: 'bandpass', f0: 2000, f1: 4200, q: 2, release: 0.08 });
+    },
+    // 鎚：巨大低頻落擊 + 短低通撞擊
+    hammer(b, t) {
+      tone(b, 'tri', 150, t, 0.3, 0.4, { to: 32, slideT: 0.1, release: 0.12 });
+      noise(b, t, 0.12, 0.2, { type: 'lowpass', f0: 2600, f1: 300, attack: 0.002, release: 0.05 });
+    },
+    // 槍：高通爆音 + 低頻後座
+    gunner(b, t) {
+      noise(b, t, 0.14, 0.3, { type: 'highpass', f0: 3000, f1: 800, attack: 0.001, release: 0.05 });
+      tone(b, 'tri', 210, t, 0.16, 0.26, { to: 45, slideT: 0.07, release: 0.06 });
+    },
+    // 弓：弓弦嗡 + 破空哨音
+    bow(b, t) {
+      tone(b, 'tri', 250, t, 0.2, 0.18, { to: 118, release: 0.07 });
+      noise(b, t + 0.04, 0.2, 0.13, { type: 'bandpass', f0: 4200, f1: 1400, q: 4, release: 0.08 });
+    },
+    // 忍：高通疾風 + 顫音旋轉手裡劍
+    ninja(b, t) {
+      noise(b, t, 0.22, 0.16, { type: 'highpass', f0: 4200, f1: 2000, wobble: 38, release: 0.08 });
+      tone(b, 'sine', 2500, t, 0.2, 0.08, { to: 560, vib: { rate: 32, depth: 0.05 }, release: 0.07 });
+    },
+    // 魔法：懸浮正弦和聲 + 漸強空氣感
+    mage(b, t) {
+      ['D5', 'A5', 'D6', 'F#6'].forEach((n, i) => tone(b, 'sine', F(n), t + i * 0.03, 0.26 - i * 0.02, 0.1, { attack: 0.02, release: 0.1 }));
+      noise(b, t + 0.05, 0.22, 0.07, { type: 'bandpass', f0: 1800, f1: 5200, q: 2.5, attack: 0.03, release: 0.1 });
+    },
+    // 時間：三下越來越慢的滴答 + 低頻停滯嗡
+    time(b, t) {
+      [0, 0.07, 0.15].forEach((d, i) => tone(b, 'sq', 1500 - i * 180, t + d, 0.05, 0.09, { release: 0.02 }));
+      tone(b, 'sine', 60, t, 0.3, 0.2, { to: 52, attack: 0.06, release: 0.12 });
+    },
+    // 重力：倒放包絡的吸入下墜
+    gravity(b, t) {
+      tone(b, 'saw', 260, t, 0.3, 0.17, { to: 48, attack: 0.16, release: 0.05 });
+      noise(b, t, 0.3, 0.18, { type: 'bandpass', f0: 2600, f1: 300, q: 2.4, attack: 0.18, release: 0.05 });
+    },
+    // 龍：低通吐息 + 折線咆哮
+    dragon(b, t) {
+      noise(b, t, 0.3, 0.2, { type: 'lowpass', f0: 1300, f1: 420, wobble: 24, attack: 0.01, release: 0.1 });
+      tone(b, 'saw', 110, t, 0.28, 0.16, { seg: [[0.12, 140], [0.28, 86]], release: 0.1 });
+    },
+    // 機甲：伺服馬達 + 液壓帶通 + 鋼板落地
+    mech(b, t) {
+      tone(b, 'saw', 180, t, 0.22, 0.12, { to: 320, vib: { rate: 42, depth: 0.05 }, release: 0.06 });
+      noise(b, t + 0.1, 0.18, 0.16, { type: 'bandpass', f0: 1500, f1: 3400, q: 1.4, release: 0.07 });
+      tone(b, 'tri', 115, t + 0.12, 0.2, 0.24, { to: 36, release: 0.08 });
+    },
+    // 巨大化：三角波隆隆上升 + 低通土石
+    giant(b, t) {
+      tone(b, 'tri', 70, t, 0.34, 0.36, { to: 120, slideT: 0.2, attack: 0.02, release: 0.12 });
+      noise(b, t, 0.3, 0.14, { type: 'lowpass', f0: 600, f1: 180, wobble: 8, release: 0.12 });
+    },
+  };
+  // 24 組混合：[成分 A, 成分 B]（與 KB.MIX.table / abilities_mix*.js 的組合表一致）
+  const MIX_PAIRS = {
+    // 第一批（abilities_mix.js）
+    flamesword: ['fire', 'sword'], frostsword: ['ice', 'sword'], thunderblade: ['spark', 'blade'],
+    flamegun: ['fire', 'gunner'], frostgun: ['ice', 'gunner'], thunderbow: ['spark', 'bow'],
+    flamehammer: ['fire', 'hammer'], stonehammer: ['stone', 'hammer'], shadowblade: ['cutter', 'ninja'],
+    starmage: ['beam', 'mage'], frostdragon: ['ice', 'dragon'], thundermech: ['spark', 'mech'],
+    // 第二批（abilities_mix2.js）
+    flamebow: ['fire', 'bow'], frosthammer: ['ice', 'hammer'], thundersword: ['spark', 'sword'],
+    flameninja: ['fire', 'ninja'], frostninja: ['ice', 'ninja'], thundergun: ['spark', 'gunner'],
+    stonegiant: ['stone', 'giant'], flamedragon: ['fire', 'dragon'], thunderdragon: ['spark', 'dragon'],
+    timebeam: ['beam', 'time'], gravityblade: ['cutter', 'gravity'], hammermech: ['hammer', 'mech'],
+  };
+  for (const mk of Object.keys(MIX_PAIRS)) {
+    const pa = MIX_PAIRS[mk][0], pb = MIX_PAIRS[mk][1];
+    SFX['mix_' + mk] = function (b, t) { MIXV[pa](b, t); MIXV[pb](b, t + 0.06); };
+  }
+
+  // 【覺醒招 awk_<basekey>】20 招。共同骨架：低頻衝擊（tri 大幅下墜 + 低通爆）
+  //   → 高頻上揚（高通掃頻噪 + 上行脈衝）→ 0.8~1.2 秒的和弦尾音（各招和弦 / 波形 / 噪音層不同）
+  function awaken(b, t, o) {
+    const tail = o.tail || 1.0, up = o.upF || 420, hp = o.hp || [1800, 11000];
+    // 1) 低頻衝擊
+    tone(b, 'tri', o.root || 150, t, 0.5, 0.4, { to: o.sub || 36, slideT: 0.18, release: 0.2 });
+    noise(b, t, 0.26, 0.22, { type: 'lowpass', f0: 3000, f1: 200, attack: 0.002, release: 0.1 });
+    // 2) 高頻上揚
+    noise(b, t + 0.04, 0.42, 0.15, { type: 'highpass', f0: hp[0], f1: hp[1], attack: 0.02, release: 0.18 });
+    tone(b, o.upW || 'p25', up, t + 0.05, 0.4, 0.1, { to: up * 4.2, release: 0.14 });
+    // 3) 尾音和弦（0.8~1.2 秒）
+    (o.chord || ['A4', 'E5', 'A5']).forEach((n, i) =>
+      tone(b, o.wave || 'saw', F(n), t + 0.18 + i * 0.02, tail, 0.07, {
+        attack: 0.05, decay: 0.25, sustain: 0.6, release: tail * 0.4,
+        vib: o.vib || { rate: 5.5, depth: 0.012, delay: 0.2 },
+      }));
+    if (o.nz) noise(b, t + 0.2, tail * 0.9, o.nz.vol || 0.08, {
+      type: o.nz.type || 'bandpass', f0: o.nz.f0, f1: o.nz.f1, q: o.nz.q || 1.5,
+      attack: 0.1, release: tail * 0.4, wobble: o.nz.wobble,
+    });
+  }
+  // 20 招的音色參數（root/sub 低頻衝擊、upF 上揚起點、hp 高頻掃頻、chord+wave 尾音、nz 尾音噪音層、extra 專屬層）
+  const AWK = {
+    fire: { root: 170, chord: ['D4', 'A4', 'D5', 'F5'], wave: 'saw', hp: [2200, 12000], upF: 380, tail: 1.1, nz: { type: 'lowpass', f0: 1400, f1: 400, wobble: 26, vol: 0.1 } },
+    sword: { root: 210, chord: ['E5', 'B5', 'E6'], wave: 'p25', hp: [3000, 13000], upF: 620, tail: 0.9, nz: { type: 'bandpass', f0: 3400, f1: 6800, q: 3, vol: 0.07 } },
+    beam: { root: 140, chord: ['C5', 'G5', 'C6', 'E6'], wave: 'p12', hp: [2600, 12000], upF: 700, tail: 1.15, nz: { type: 'bandpass', f0: 2000, f1: 5200, q: 2, vol: 0.06 } },
+    cutter: { root: 190, chord: ['A4', 'E5', 'A5', 'C6'], wave: 'p12', hp: [3400, 10000], upF: 900, tail: 0.85, nz: { type: 'bandpass', f0: 3000, f1: 1400, q: 3.5, wobble: 30, vol: 0.08 } },
+    spark: {
+      root: 160, chord: ['B4', 'F#5', 'B5', 'D#6'], wave: 'sq', hp: [4000, 14000], upF: 560, tail: 0.95,
+      nz: { type: 'highpass', f0: 5000, f1: 9000, wobble: 48, vol: 0.08 },
+      extra(b, t) { [0.24, 0.41, 0.62].forEach((d, i) => noise(b, t + d, 0.07, 0.13 - i * 0.02, { type: 'highpass', f0: 6000, f1: 3000, attack: 0.001, release: 0.03 })); },
+    },
+    stone: { root: 120, sub: 26, chord: ['C4', 'G4', 'C5'], wave: 'tri', hp: [900, 5200], upF: 300, tail: 1.05, nz: { type: 'lowpass', f0: 900, f1: 180, wobble: 6, vol: 0.1 } },
+    ice: {
+      root: 150, chord: ['E5', 'B5', 'E6', 'G#6'], wave: 'p12', hp: [6000, 14000], upF: 820, tail: 1.2,
+      nz: { type: 'highpass', f0: 8000, f1: 13000, vol: 0.07 },
+      extra(b, t) { ['B6', 'E7', 'G#7'].forEach((n, i) => tone(b, 'sine', F(n), t + 0.3 + i * 0.12, 0.3, 0.05, { release: 0.14 })); },
+    },
+    hammer: { root: 135, sub: 24, chord: ['F4', 'C5', 'F5'], wave: 'saw', hp: [1200, 7000], upF: 320, tail: 1.0, nz: { type: 'lowpass', f0: 1800, f1: 220, vol: 0.1 } },
+    gunner: {
+      root: 180, chord: ['D5', 'A5', 'D6'], wave: 'saw', hp: [2400, 9000], upF: 520, tail: 0.85,
+      nz: { type: 'highpass', f0: 3000, f1: 1200, vol: 0.08 },
+      extra(b, t) { for (let i = 0; i < 5; i++) noise(b, t + 0.3 + i * 0.1, 0.05, 0.1, { type: 'highpass', f0: 2600 + i * 300, f1: 900, attack: 0.001, release: 0.03 }); },
+    },
+    ninja: {
+      root: 155, chord: ['F#4', 'C#5', 'F#5', 'A5'], wave: 'p12', hp: [3600, 12000], upF: 660, tail: 0.9,
+      nz: { type: 'bandpass', f0: 4200, f1: 1800, q: 3, wobble: 24, vol: 0.07 },
+      extra(b, t) { [0.26, 0.4, 0.55, 0.72].forEach((d, i) => tone(b, 'sine', 2400 - i * 260, t + d, 0.1, 0.07, { to: 800, release: 0.05 })); },
+    },
+    blade: { root: 200, chord: ['G4', 'D5', 'G5', 'B5'], wave: 'p25', hp: [4200, 15000], upF: 980, tail: 1.0, nz: { type: 'bandpass', f0: 5200, f1: 2200, q: 4, vol: 0.07 } },
+    bow: { root: 165, chord: ['A4', 'E5', 'A5', 'C#6'], wave: 'tri', hp: [2800, 11000], upF: 480, tail: 0.95, nz: { type: 'bandpass', f0: 4600, f1: 1500, q: 4, vol: 0.07 } },
+    mage: { root: 145, chord: ['D5', 'F#5', 'A5', 'D6'], wave: 'sine', hp: [2000, 10000], upF: 600, tail: 1.2, vib: { rate: 6.5, depth: 0.02, delay: 0.15 }, nz: { type: 'bandpass', f0: 1600, f1: 6000, q: 2, vol: 0.07 } },
+    time: {
+      root: 110, sub: 46, chord: ['C5', 'Eb5', 'G5', 'Bb5'], wave: 'sine', hp: [1500, 8000], upF: 340, tail: 1.2,
+      vib: { rate: 2.5, depth: 0.03, delay: 0.1 }, nz: { type: 'lowpass', f0: 2400, f1: 600, wobble: 3, vol: 0.06 },
+      extra(b, t) { [0.26, 0.46, 0.72, 1.04].forEach((d, i) => tone(b, 'sq', 1500 - i * 200, t + d, 0.05, 0.07 - i * 0.012, { release: 0.02 })); },
+    },
+    gravity: { root: 125, sub: 22, chord: ['A3', 'E4', 'A4', 'C5'], wave: 'saw', hp: [1000, 6000], upF: 260, tail: 1.15, nz: { type: 'bandpass', f0: 2600, f1: 260, q: 2.4, vol: 0.09 } },
+    clone: {
+      root: 175, chord: ['E5', 'A5', 'E6'], wave: 'p25', hp: [2600, 11000], upF: 540, tail: 0.9,
+      nz: { type: 'bandpass', f0: 2400, f1: 4800, q: 2, vol: 0.06 },
+      extra(b, t) { [[0.05, 1.006, 0.06], [0.1, 0.993, 0.045]].forEach(d => ['E5', 'A5'].forEach(n => tone(b, 'p25', F(n) * d[1], t + 0.2 + d[0], 0.5, d[2], { attack: 0.04, release: 0.24 }))); },
+    },
+    giant: { root: 95, sub: 20, chord: ['C4', 'E4', 'G4'], wave: 'tri', hp: [700, 4600], upF: 240, tail: 1.1, nz: { type: 'lowpass', f0: 700, f1: 150, wobble: 5, vol: 0.11 } },
+    dragon: { root: 130, sub: 28, chord: ['D4', 'A4', 'D5', 'F5'], wave: 'saw', hp: [1600, 9000], upF: 350, tail: 1.15, nz: { type: 'lowpass', f0: 1500, f1: 380, wobble: 20, vol: 0.1 } },
+    mech: { root: 145, chord: ['F4', 'C5', 'F5', 'Ab5'], wave: 'saw', hp: [2200, 10000], upF: 430, tail: 1.0, nz: { type: 'bandpass', f0: 1400, f1: 3600, q: 1.6, wobble: 38, vol: 0.08 } },
+    ghost: {
+      root: 115, sub: 40, chord: ['E4', 'B4', 'E5', 'G5'], wave: 'sine', hp: [2400, 9000], upF: 380, tail: 1.2,
+      vib: { rate: 4.5, depth: 0.035, delay: 0.15 }, nz: { type: 'bandpass', f0: 1200, f1: 600, q: 3, wobble: 5, vol: 0.07 },
+      extra(b, t) { tone(b, 'sine', 640, t + 0.24, 0.85, 0.07, { seg: [[0.3, 880], [0.6, 520], [0.85, 340]], attack: 0.12, release: 0.3, vib: { rate: 5, depth: 0.04 } }); },
+    },
+  };
+  for (const ak of Object.keys(AWK)) {
+    const o = AWK[ak];
+    SFX['awk_' + ak] = function (b, t) { awaken(b, t, o); if (o.extra) o.extra(b, t); };
+  }
+
+  // 覺醒量表滿：金色三音上行 + 兩層鐘聲 + 高頻閃爍（比 max 更長、帶「準備好了」的懸浮感）
+  SFX.awk_ready = function (b, t) {
+    ['A5', 'C#6', 'E6'].forEach((n, i) => tone(b, 'p25', F(n), t + i * 0.07, 0.2, 0.13, { release: 0.1 }));
+    tone(b, 'p12', F('A6'), t + 0.2, 0.46, 0.09, { release: 0.2, vib: { rate: 7, depth: 0.012, delay: 0.1 } });
+    tone(b, 'sine', F('A4'), t + 0.02, 0.5, 0.11, { attack: 0.03, release: 0.2 });
+    noise(b, t + 0.16, 0.42, 0.09, { type: 'highpass', f0: 7000, f1: 13000, attack: 0.02, decay: 0.1, release: 0.2 });
+  };
+  // 覺醒發動：0.28 秒充能上衝 → 金色重擊和弦 + 低頻轟 + 1.1 秒餘韻
+  SFX.awk_start = function (b, t) {
+    tone(b, 'saw', 90, t, 0.3, 0.14, { to: 560, attack: 0.18, release: 0.05 });
+    noise(b, t, 0.3, 0.14, { type: 'bandpass', f0: 600, f1: 6000, q: 1.4, attack: 0.2, release: 0.05 });
+    const s = t + 0.28;
+    ['A3', 'E4', 'A4', 'C#5', 'E5'].forEach((n, i) => tone(b, 'saw', F(n), s + i * 0.012, 1.1, 0.07, { attack: 0.02, decay: 0.2, sustain: 0.55, release: 0.45, vib: { rate: 5.5, depth: 0.012, delay: 0.25 } }));
+    tone(b, 'tri', 180, s, 0.6, 0.42, { to: 34, slideT: 0.24, release: 0.24 });
+    noise(b, s, 0.7, 0.2, { type: 'highpass', f0: 3500, f1: 12000, decay: 0.16, release: 0.34 });
+    tone(b, 'p25', 620, s + 0.24, 0.34, 0.11, { to: 2600, release: 0.14 });
+    tone(b, 'p12', F('A6'), s + 0.3, 0.5, 0.07, { release: 0.24 });
+  };
+  // 覺醒終了：金光退去（下行五音 + 洩壓低通 + 低頻收束）
+  SFX.awk_end = function (b, t) {
+    ['E6', 'C#6', 'A5', 'E5', 'A4'].forEach((n, i) => tone(b, 'p25', F(n), t + i * 0.065, 0.16, 0.11, { release: 0.07 }));
+    tone(b, 'tri', 200, t + 0.18, 0.5, 0.24, { to: 55, release: 0.22 });
+    noise(b, t + 0.1, 0.6, 0.13, { type: 'lowpass', f0: 6000, f1: 320, attack: 0.02, release: 0.28 });
+    tone(b, 'sine', F('A3'), t + 0.3, 0.5, 0.1, { attack: 0.04, release: 0.26 });
+  };
+
+  // 【挑戰模式】
+  // tick：倒數最後 10 秒每秒一下（乾淨的機械滴答，短而不吵，節流 900ms）
+  SFX.tick = function (b, t) {
+    noise(b, t, 0.035, 0.2, { type: 'bandpass', f0: 4200, q: 4, attack: 0.001, release: 0.015 });
+    tone(b, 'sq', 2100, t, 0.03, 0.11, { to: 1500, release: 0.012 });
+    tone(b, 'tri', 320, t, 0.05, 0.1, { to: 190, release: 0.025 });
+  };
+  // time_up：時間到（兩聲低沉不諧和的蜂鳴 + 洩氣下墜）
+  SFX.time_up = function (b, t) {
+    [0, 0.26].forEach(d => {
+      tone(b, 'sq', 233, t + d, 0.22, 0.16, { release: 0.06 });
+      tone(b, 'sq', 247, t + d, 0.22, 0.13, { release: 0.06 });
+      noise(b, t + d, 0.2, 0.1, { type: 'lowpass', f0: 1400, f1: 500, release: 0.06 });
+    });
+    tone(b, 'saw', 220, t + 0.52, 0.5, 0.17, { to: 58, release: 0.2 });
+    noise(b, t + 0.52, 0.5, 0.1, { type: 'lowpass', f0: 2200, f1: 200, release: 0.2 });
+  };
+  // floor_clear：過層 jingle（0.6 秒，C→E→G→C 上行 + 明亮收尾和弦 + 小鈸）
+  SFX.floor_clear = function (b, t) {
+    ['C6', 'E6', 'G6'].forEach((n, i) => tone(b, 'p25', F(n), t + i * 0.09, 0.1, 0.15, { release: 0.05 }));
+    ['C7', 'E6', 'G6'].forEach((n, i) => tone(b, i ? 'p12' : 'p25', F(n), t + 0.27, 0.32, i ? 0.07 : 0.15, { release: 0.16 }));
+    tone(b, 'tri', F('C4'), t + 0.27, 0.3, 0.2, { release: 0.14 });
+    noise(b, t + 0.27, 0.3, 0.1, { type: 'highpass', f0: 6000, f1: 11000, decay: 0.08, release: 0.16 });
+  };
+  // nohit_fail：無傷挑戰失敗（下行半音 + 悶擊 + 低通拉長的失望感）
+  SFX.nohit_fail = function (b, t) {
+    ['E5', 'Eb5', 'D5', 'C#5'].forEach((n, i) => tone(b, 'p12', F(n), t + i * 0.11, 0.13, 0.12, { release: 0.06 }));
+    tone(b, 'tri', 150, t, 0.16, 0.28, { to: 44, slideT: 0.08, release: 0.06 });
+    tone(b, 'saw', F('A3'), t + 0.44, 0.46, 0.12, { to: 80, release: 0.22 });
+    noise(b, t + 0.44, 0.44, 0.09, { type: 'lowpass', f0: 1800, f1: 220, attack: 0.02, release: 0.2 });
+  };
+  // new_record：破紀錄 jingle（上行琶音 + 高八度重複 + 星光細噪 + 收尾大三和弦）
+  SFX.new_record = function (b, t) {
+    ['G5', 'B5', 'D6', 'G6'].forEach((n, i) => tone(b, 'p25', F(n), t + i * 0.075, 0.1, 0.14, { release: 0.05 }));
+    ['B6', 'D7'].forEach((n, i) => tone(b, 'p12', F(n), t + 0.3 + i * 0.075, 0.1, 0.09, { release: 0.05 }));
+    ['G4', 'B4', 'D5', 'G5'].forEach((n, i) => tone(b, 'p25', F(n), t + 0.46, 0.5, i ? 0.07 : 0.12, { attack: 0.01, release: 0.25 }));
+    tone(b, 'tri', F('G3'), t + 0.46, 0.5, 0.24, { release: 0.22 });
+    noise(b, t + 0.44, 0.55, 0.11, { type: 'highpass', f0: 7000, f1: 13000, decay: 0.12, release: 0.28 });
+    noise(b, t + 0.46, 0.3, 0.1, { type: 'highpass', f0: 5000, release: 0.16 });
+  };
+
+  // Round 8 節流：覺醒招 500ms（長尾音不重疊）、混合招 80ms（與預設相同，明列方便查表）
+  for (const k of Object.keys(SFX)) {
+    if (k.indexOf('awk_') === 0) SFX_THROTTLE[k] = 500;
+    else if (k.indexOf('mix_') === 0) SFX_THROTTLE[k] = 80;
+  }
 
   // ======================================================================
   // 環境音層（ambient）：低音量循環噪音床，獨立於音樂，受 sfx 音量控制
@@ -2133,6 +2405,121 @@
     },
   };
 
+
+  // ======================================================================
+  // Round 8（audio8）：挑戰模式三曲（全部原創）
+  // ======================================================================
+  // ---- challenge：D 小調 BPM 126，挑戰選單 loop（A 沉穩鋪陳 / B 推進，16 小節）----
+  SONGS.challenge = {
+    bpm: 126, loop: true, order: ['A', 'B'],
+    sec: {
+      A: {
+        p1: ['D5 - - . F5 - A5 - - - G5 - F5 - - -',
+          'E5 - - . G5 - Bb5 - - - A5 - G5 - - -',
+          'F5 - A5 - D6 - - - C6 - A5 - G5 - F5 -',
+          'E5 - - - - - - - . . D5 E5 F5 - G5 -',
+          'A5 - - . C6 - A5 - F5 - - - E5 - - -',
+          'Bb5 - - . A5 - G5 - F5 - - - E5 - D5 -',
+          'G5 - F5 - E5 - D5 - C#5 - - - E5 - - -',
+          'D5 - - - - - - - . . . . A4 - C#5 -'],
+        p2: [tres('D4', 'F4', 'A4'), tres('E4', 'G4', 'Bb4'), tres('F4', 'A4', 'D5'), tres('E4', 'G4', 'B4'),
+          tres('F4', 'A4', 'C5'), tres('D4', 'F4', 'Bb4'), tres('E4', 'G4', 'C5'), 'D4 - - - - - - - . . . . . . . .'],
+        bass: [oom('D2', 'A2'), oom('E2', 'B2'), oom('F2', 'C3'), oom('E2', 'B2'),
+          oom('F2', 'C3'), oom('Bb2', 'F3'), oom('A2', 'E3'), 'D2 - - - - - - - . . . . A2 - - -'],
+        drum: [D.basic, D.basic, D.basic, D.fill, D.basic, D.basic, D.basic, D.fill],
+      },
+      B: {
+        p1: ['A5 - A5 - G5 - F5 - E5 - - - F5 - G5 -',
+          'A5 - - - D6 - - - C6 - A5 - F5 - - -',
+          'Bb5 - Bb5 - A5 - G5 - F5 - - - G5 - A5 -',
+          'G5 - - - E5 - - - D5 - - - . . . .',
+          'D6 - - . C6 - A5 - Bb5 - - - A5 - G5 -',
+          'F5 - A5 - D6 - - - E6 - D6 - C6 - A5 -',
+          'Bb5 - A5 - G5 - F5 - E5 - D5 - C#5 - E5 -',
+          'D5 - - - - - - - - - - - . . . .'],
+        p2: [cmp('A4', 'C5'), cmp('D5', 'F5'), cmp('Bb4', 'D5'), cmp('G4', 'B4'),
+          cmp('A4', 'D5'), cmp('A4', 'C5'), cmp('G4', 'Bb4'), 'A4 - - - . . . . D4 - - - . . . .'],
+        bass: [syn('A2', 'E3'), syn('D2', 'A2'), syn('Bb2', 'F3'), syn('G2', 'D3'),
+          syn('A2', 'E3'), syn('F2', 'C3'), syn('G2', 'D3'), 'A2 - - - A2 - - - D2 - - - - - - -'],
+        drum: [D.march, D.march, D.march, D.marchF, D.march, D.march, D.basic, D.fill],
+      },
+    },
+  };
+
+  // ---- tower：A 小調 BPM 142，挑戰塔 loop（B 段是逐級爬升的音型；配合 setTempoMul(1.0~1.3) 隨層數加速）----
+  SONGS.tower = {
+    bpm: 142, loop: true, order: ['A', 'B'],
+    sec: {
+      A: {
+        p1: ['A5 - - . E5 - A5 - C6 - B5 - A5 - - -',
+          'G5 - - . D5 - G5 - B5 - A5 - G5 - - -',
+          'F5 - A5 - C6 - E6 - D6 - C6 - B5 - A5 -',
+          'E5 - - - - - - - . . E5 F5 G5 - A5 -',
+          'C6 - - . B5 - C6 - E6 - - - D6 - C6 -',
+          'B5 - - . A5 - B5 - D6 - - - C6 - B5 -',
+          'A5 - C6 - E6 - A6 - G6 - E6 - C6 - A5 -',
+          'E5 - - - - - - - - - - - . . . .'],
+        p2: [arpE('A4', 'C5', 'E5', 'C5'), arpE('G4', 'B4', 'D5', 'B4'), arpE('F4', 'A4', 'C5', 'A4'), arpE('E4', 'G#4', 'B4', 'G#4'),
+          arpE('C5', 'E5', 'G5', 'E5'), arpE('B4', 'D5', 'F5', 'D5'), arpE('A4', 'C5', 'E5', 'A5'), 'E4 - - - - - - - . . . . . . . .'],
+        bass: [oct('A2', 'E3'), oct('G2', 'D3'), oct('F2', 'C3'), oct('E2', 'B2'),
+          oct('C3', 'G2'), oct('B2', 'F#3'), oct('A2', 'E3'), 'E2 - - - E2 - - - E2 - E2 - . . . .'],
+        drum: [D.dbl, D.dbl, D.dbl, D.fill, D.dbl, D.dbl, D.dbl, D.fill],
+      },
+      B: {
+        p1: ['A5 - B5 - C6 - D6 - E6 - - - D6 - C6 -',
+          'B5 - C6 - D6 - E6 - F6 - - - E6 - D6 -',
+          'C6 - D6 - E6 - F6 - G6 - - - F6 - E6 -',
+          'A6 - - - E6 - - - C6 - - - . . . .',
+          'E6 - D6 - C6 - B5 - A5 - - - B5 - C6 -',
+          'D6 - C6 - B5 - A5 - G5 - - - A5 - B5 -',
+          'C6 - B5 - A5 - G#5 - A5 - B5 - C6 - E6 -',
+          'A5 - - - - - - - . . . . E5 - G#5 -'],
+        p2: [stab('E5', 'C5'), stab('F5', 'D5'), stab('G5', 'E5'), stab('A5', 'E5'),
+          stab('C5', 'A4'), stab('B4', 'G4'), stab('C5', 'B4'), 'A4 - - - - - - - . . . . B4 - C5 -'],
+        bass: [b16('A2', 'A2'), b16('B2', 'B2'), b16('C3', 'C3'), b16('A2', 'E3'),
+          b16('C3', 'C3'), b16('G2', 'G2'), b16('E2', 'E2'), 'A2 - - - E2 - - - A2 - - - - - - -'],
+        drum: [D.dblH, D.dblH, D.dblH, D.bossF, D.dblH, D.dblH, D.dblH, D.fill],
+      },
+    },
+  };
+
+  // ---- timeattack：E 小調 BPM 170，時間攻擊用的緊湊 loop（十六分驅動貝斯 + 密集鼓）----
+  SONGS.timeattack = {
+    bpm: 170, loop: true, order: ['A', 'B'],
+    sec: {
+      A: {
+        p1: ['E5 - G5 - B5 - E6 - D6 - B5 - G5 - E5 -',
+          'F#5 - A5 - D6 - F#6 - E6 - D6 - A5 - F#5 -',
+          'G5 - B5 - E6 - G6 - F#6 - E6 - B5 - G5 -',
+          'A5 - - - B5 - - - E6 - - - . . . .',
+          'E6 - D6 - B5 - A5 - G5 - A5 - B5 - - -',
+          'D6 - C6 - A5 - G5 - F#5 - G5 - A5 - - -',
+          'B5 - - . A5 - G5 - F#5 - E5 - D#5 - F#5 -',
+          'E5 - - - - - - - . . B4 - D#5 - F#5 -'],
+        p2: [cal('B4', 'E5'), cal('A4', 'D5'), cal('B4', 'E5'), cal('C5', 'E5'),
+          cal('G4', 'B4'), cal('A4', 'D5'), cal('F#4', 'B4'), 'E4 - - - . . . . B4 - - - . . . .'],
+        bass: [b16('E2', 'E2'), b16('D2', 'D2'), b16('E2', 'E2'), b16('A2', 'B2'),
+          b16('C3', 'C3'), b16('D3', 'D3'), b16('B2', 'B2'), 'E2 - - - E2 - - - B2 - - - - - - -'],
+        drum: [D.dbl, D.dbl, D.dbl, D.fill, D.dbl, D.dbl, D.dbl, D.fill],
+      },
+      B: {
+        p1: ['B5 - B5 - C6 - B5 - A5 - G5 - F#5 - E5 -',
+          'A5 - A5 - B5 - A5 - G5 - F#5 - E5 - D5 -',
+          'G5 - A5 - B5 - C6 - D6 - E6 - F#6 - G6 -',
+          'F#6 - E6 - D6 - B5 - E6 - - - . . . .',
+          'E6 - - . D6 - E6 - G6 - - - F#6 - E6 -',
+          'D6 - - . C6 - D6 - F#6 - - - E6 - D6 -',
+          'B5 - D6 - F#6 - B6 - A6 - F#6 - D6 - B5 -',
+          'E6 - - - - - - - - - - - . . . .'],
+        p2: [arpUD('E4', 'G4', 'B4', 'E5'), arpUD('D4', 'F#4', 'A4', 'D5'), arpUD('G4', 'B4', 'D5', 'G5'), arpUD('B4', 'D5', 'F#5', 'B5'),
+          arpUD('E5', 'G5', 'B5', 'E5'), arpUD('D5', 'F#5', 'A5', 'D5'), arpUD('B4', 'D5', 'F#5', 'B5'), 'E4 - - - B4 - - - E5 - - - . . . .'],
+        bass: [syn('E2', 'B2'), syn('D2', 'A2'), syn('G2', 'D3'), syn('B2', 'F#3'),
+          syn('E2', 'B2'), syn('D2', 'A2'), syn('B2', 'F#3'), 'E2 - - - - - - - E2 - - - - - - -'],
+        drum: [D.dblH, D.dblH, D.dblH, D.bossF, D.dblH, D.dblH, D.dblH, D.fill],
+      },
+    },
+  };
+
   // ======================================================================
   // 音序器
   // ======================================================================
@@ -2188,6 +2575,9 @@
   }
 
   let cur = null, timer = null;
+  // 音樂播放速度倍率（1.0~1.3）。setTempoMul(k) 只改 stepDur，不重啟曲子（挑戰塔隨層數加速用）
+  let tempoMul = 1;
+  const clampTempo = (k) => (typeof k === 'number' && isFinite(k)) ? (k < 1 ? 1 : (k > 1.3 ? 1.3 : k)) : 1;
   function tick() {
     if (!cur || !ctx) return;
     const p = cur, now = ctx.currentTime;
@@ -2215,7 +2605,7 @@
     const t = ctx.currentTime;
     g.gain.setTargetAtTime(song.gain || 1, t, 0.03);
     const c = compileSong(song);
-    cur = { key, song, bus: g, tracks: c.tracks, len: c.len, stepDur: c.stepDur, step: 0, nextT: t + 0.05, ended: false };
+    cur = { key, song, bus: g, tracks: c.tracks, len: c.len, baseStep: c.stepDur, stepDur: c.stepDur / tempoMul, step: 0, nextT: t + 0.05, ended: false };
     if (!timer) timer = setInterval(() => { try { tick(); } catch (e) { } }, TICK_MS);
     tick();
   }
@@ -2252,11 +2642,12 @@
     const song = SONGS[key]; if (!song) return Promise.reject(new Error('unknown song ' + key));
     const c = compileSong(song);
     if (seconds === undefined) seconds = (song.loop === false ? c.bars * 16 * c.stepDur + 1.5 : c.bars * 16 * c.stepDur);
+    const sd = c.stepDur / tempoMul;
     return withOffline(seconds, (oc, bus) => {
       bus.gain.value = VOL.master * VOL.music * (song.gain || 1);
-      const p = { bus, song, tracks: c.tracks, stepDur: c.stepDur };
+      const p = { bus, song, tracks: c.tracks, stepDur: sd };
       let t = 0.02, i = 0;
-      while (t < seconds) { scheduleStep(p, i, t); t += c.stepDur; i++; if (i >= c.len) { if (song.loop === false) break; i = 0; } }
+      while (t < seconds) { scheduleStep(p, i, t); t += sd; i++; if (i >= c.len) { if (song.loop === false) break; i = 0; } }
     });
   }
   function renderAmbient(key, seconds) {
@@ -2366,12 +2757,24 @@
       try { duckHold = (on === undefined) ? true : !!on; applyVolume(); } catch (e) { }
       return duckHold;
     },
+    // 音樂播放速度倍率（挑戰塔隨層數加速）：setTempoMul(1.0~1.3)，超出範圍自動夾限，非數字視為 1。
+    // 只改音序器的 step 長度，不重啟曲子（可在播放中隨時呼叫）；切歌 / music(null) 不會重設，
+    // 離開挑戰模式請自行呼叫 setTempoMul(1)。回傳實際套用的倍率。
+    setTempoMul(k) {
+      try {
+        tempoMul = clampTempo(k);
+        if (cur && cur.baseStep) cur.stepDur = cur.baseStep / tempoMul;
+      } catch (e) { }
+      return tempoMul;
+    },
+    getTempoMul() { return tempoMul; },
+
     // 目前播放狀態（除錯 / 測試頁）
     status() {
       return {
         unlocked, muted, ctxState: ctx ? ctx.state : null, playing: cur ? cur.key : null,
         step: cur ? cur.step : 0, bars: cur ? cur.len / STEPS : 0, pending: pendingMusic,
-        volume: { music: UVOL.music, sfx: UVOL.sfx }, ducked: duckHold,
+        volume: { music: UVOL.music, sfx: UVOL.sfx }, ducked: duckHold, tempo: tempoMul,
         ambient: ambCur ? ambCur.key : null, ambientPending: pendingAmb,
         sfxCount: Object.keys(SFX).length, musicCount: Object.keys(SONGS).length,
         ambientCount: Object.keys(AMBIENT).length,

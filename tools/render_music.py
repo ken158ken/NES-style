@@ -2,6 +2,7 @@
 """
 以 Playwright(Chromium) 開啟 tools/audio_test.html，用 OfflineAudioContext 離線渲染每個音效、每首曲子與每個環境音層，
 檢查：不拋錯、輸出非靜音（peak > 門檻）、不爆音（peak < 1.0）。
+另檢查即時 API：音量 / duck / ambient / 節流表 / Round 8 的 mix_ · awk_ 節流與 setTempoMul（音樂速度倍率 1.0~1.3）。
 也可輸出 WAV 供人耳試聽。
 用法：
   python tools/render_music.py                 # 只檢查
@@ -77,7 +78,7 @@ def main():
                 print('  <-- ambient(null) / 未知名稱處理異常'); bad += 1
         # 高頻音效節流：可連續呼叫的音效（count 每 4 幀、fuse / gun / dragon_breath 每 6 幀、jet 每 4 幀）必須放行
         thr = pg.evaluate("()=>({t: KB.audio.SFX_THROTTLE, d: KB.audio.THROTTLE_MS})")
-        for name, frames in (('count', 4), ('fuse', 6), ('gun', 6), ('dragon_breath', 6), ('jet', 4)):
+        for name, frames in (('count', 4), ('fuse', 6), ('gun', 6), ('dragon_breath', 6), ('jet', 4), ('tick', 60)):
             v = thr['t'].get(name, thr['d'])
             if v >= frames * 1000 / 60:
                 print(f"  <-- sfx '{name}' 節流 {v}ms ≥ 呼叫間隔 {frames*1000/60:.0f}ms"); bad += 1
@@ -86,6 +87,46 @@ def main():
         if ghost:
             print('  <-- 節流表有不存在的音效:', ','.join(ghost)); bad += len(ghost)
         print('throttle     :', f"{len(thr['t'])} 項（預設 {thr['d']}ms）", thr['t'])
+        # Round 8：mix_*（80ms）/ awk_*（500ms）節流規則
+        r8 = pg.evaluate("""()=>{
+            const t = KB.audio.SFX_THROTTLE, n = KB.audio.SFX_NAMES;
+            const bad = [];
+            for (const k of n) {
+              if (k.indexOf('awk_') === 0 && t[k] !== 500) bad.push(k + '=' + t[k] + '(want 500)');
+              if (k.indexOf('mix_') === 0 && t[k] !== 80) bad.push(k + '=' + t[k] + '(want 80)');
+            }
+            return {bad, mix: n.filter(k=>k.indexOf('mix_')===0).length, awk: n.filter(k=>k.indexOf('awk_')===0).length, tick: t.tick};
+        }""")
+        if r8['bad']:
+            print('  <-- Round 8 節流異常:', ', '.join(r8['bad'])); bad += len(r8['bad'])
+        if r8['mix'] != 24: print(f"  <-- mix_* 音效 {r8['mix']} 個（預期 24）"); bad += 1
+        if r8['awk'] != 23: print(f"  <-- awk_* 音效 {r8['awk']} 個（預期 20 招 + ready/start/end = 23）"); bad += 1
+        if r8['tick'] != 900: print(f"  <-- tick 節流 {r8['tick']}ms（預期 900）"); bad += 1
+        print('round8       :', f"mix_* {r8['mix']} 個 / awk_* {r8['awk']} 個 / tick {r8['tick']}ms")
+        # 音樂速度倍率 setTempoMul（挑戰塔隨層數加速）
+        tempo = pg.evaluate("""()=>{
+            if (typeof KB.audio.setTempoMul !== 'function') return {missing: true};
+            const out = {set: []};
+            for (const v of [1, 1.15, 1.3, 0.4, 9, NaN, 'x', undefined]) out.set.push([String(v), KB.audio.setTempoMul(v)]);
+            KB.audio.music('tower'); KB.audio.setTempoMul(1.3);
+            out.playing = KB.audio.status().playing; out.tempo = KB.audio.status().tempo;
+            return out;
+        }""")
+        if tempo.get('missing'):
+            print('  <-- 缺少 KB.audio.setTempoMul'); bad += 1
+        else:
+            want = {'1': 1, '1.15': 1.15, '1.3': 1.3, '0.4': 1, '9': 1.3, 'NaN': 1, 'x': 1, 'undefined': 1}
+            for k, v in tempo['set']:
+                if abs(v - want[k]) > 1e-9:
+                    print(f'  <-- setTempoMul({k}) → {v}（應為 {want[k]}）'); bad += 1
+            if tempo['tempo'] != 1.3: print('  <-- status().tempo 未反映倍率'); bad += 1
+            if st1.get('ctxState') == 'running':
+                pg.wait_for_timeout(500)
+                tst = pg.evaluate("()=>KB.audio.status()")
+                if tst['playing'] != 'tower' or tst['step'] <= 0:
+                    print('  <-- 加速播放中音序器異常:', tst); bad += 1
+            pg.evaluate("()=>{ KB.audio.setTempoMul(1); KB.audio.music(null); }")
+        print('tempoMul     :', tempo)
         # 音量 / duck API（提供給 ui-menu）
         api = pg.evaluate("()=>['setVolume','getVolume','duck','setMute','status'].filter(k=>typeof KB.audio[k]!=='function')")
         if api:

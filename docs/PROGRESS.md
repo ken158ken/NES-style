@@ -3300,7 +3300,128 @@ KB.SKINS.set(ids[i]);                              // 存檔 + HUD 臉同步都�
 - 夥伴（helper）依規格不換色；卡比變黑 / 變金時夥伴仍是粉紅。
 
 ## audio8
-（agent 在此追加）
+> 擁有檔案：`src/audio.js`、`tools/audio_check.js`、`tools/render_music.py`（＋ `docs/SPEC.md` 第 9 節補名單，本輪授權）。
+> 其他檔案一行都沒動。未 commit、未跑 build（Round 8 其他 agent 仍在改檔）。試聽 WAV：`shots/agent_audio8/`。
+
+### Round 8 名單（**52 個新 sfx + 3 首新 music + 1 個新 API**，名稱已固定，其他 agent 可直接寫死）
+
+**① 混合能力代表音（24）`mix_<mixkey>`** —— 一律 **2 層合成**：成分 A 的音色 + 成分 B 的音色錯開 0.06 秒疊加，整體 0.25~0.45 秒。
+節流 **80ms**（＝預設值，已明列在 `SFX_THROTTLE` 方便查表）。
+
+| mixkey（第一批） | 合成 | mixkey（第二批） | 合成 |
+|---|---|---|---|
+| `mix_flamesword` | 火焰噪音 + 金屬掃頻 | `mix_flamebow` | 火焰噪音 + 弓弦嗡/破空 |
+| `mix_frostsword` | 結晶三音 + 金屬掃頻 | `mix_frosthammer` | 結晶三音 + 低頻落擊 |
+| `mix_thunderblade` | 電爆裂 + 高通銳斬 | `mix_thundersword` | 電爆裂 + 金屬掃頻 |
+| `mix_flamegun` | 火焰噪音 + 槍爆音 | `mix_flameninja` | 火焰噪音 + 疾風旋刃 |
+| `mix_frostgun` | 結晶三音 + 槍爆音 | `mix_frostninja` | 結晶三音 + 疾風旋刃 |
+| `mix_thunderbow` | 電爆裂 + 弓弦嗡 | `mix_thundergun` | 電爆裂 + 槍爆音 |
+| `mix_flamehammer` | 火焰噪音 + 低頻落擊 | `mix_stonegiant` | 岩石悶擊 + 隆隆巨大化 |
+| `mix_stonehammer` | 岩石悶擊 + 低頻落擊 | `mix_flamedragon` | 火焰噪音 + 龍吐息 |
+| `mix_shadowblade` | 旋轉迴旋刃 + 疾風忍 | `mix_thunderdragon` | 電爆裂 + 龍吐息 |
+| `mix_starmage` | 脈衝光束 + 懸浮和聲 | `mix_timebeam` | 脈衝光束 + 滴答停滯 |
+| `mix_frostdragon` | 結晶三音 + 龍吐息 | `mix_gravityblade` | 旋轉迴旋刃 + 倒放吸入 |
+| `mix_thundermech` | 電爆裂 + 伺服/鋼板 | `mix_hammermech` | 低頻落擊 + 伺服/鋼板 |
+
+成分音色表 `MIXV` 共 18 種（fire / ice / spark / stone / sword / blade / cutter / beam / hammer / gunner / bow / ninja / mage / time / gravity / dragon / mech / giant），
+刻意做成「短版、與該能力原本的招式音效不同」，所以 24 組兩兩互相都聽得出差別。
+
+**② 覺醒招（20 + 3）`awk_<basekey>`** —— 共同骨架：**低頻衝擊**（tri 大幅下墜 + 低通爆）→ **高頻上揚**（高通掃頻噪 + 上行脈衝）
+→ **0.85~1.2 秒的和弦尾音**（每招和弦 / 波形 / 噪音層不同）。節流 **500ms**。
+
+| key | 尾音和弦 / 波形 | 專屬層 |
+|---|---|---|
+| `awk_fire` | Dm(D4 A4 D5 F5) saw | 低通火焰床 wobble 26 |
+| `awk_sword` | E5 B5 E6 p25 | 高帶通刀鳴 |
+| `awk_beam` | C5 G5 C6 E6 p12 | 帶通能量掃 |
+| `awk_cutter` | A4 E5 A5 C6 p12 | 旋刃 wobble 30 |
+| `awk_spark` | B4 F#5 B5 D#6 sq | 三下高頻放電 |
+| `awk_stone` | C4 G4 C5 tri | 低通土石 wobble 6 |
+| `awk_ice` | E5 B5 E6 G#6 p12 | 三顆結晶鐘（B6/E7/G#7） |
+| `awk_hammer` | F4 C5 F5 saw | 低通轟鳴 |
+| `awk_gunner` | D5 A5 D6 saw | 5 連彈殼散落 |
+| `awk_ninja` | F#4 C#5 F#5 A5 p12 | 4 道分身斬 |
+| `awk_blade` | G4 D5 G5 B5 p25 | 高 Q4 金屬餘響 |
+| `awk_bow` | A4 E5 A5 C#6 tri | 破空哨音 |
+| `awk_mage` | D5 F#5 A5 D6 sine | 慢顫音 6.5Hz |
+| `awk_time` | Cm7(C5 Eb5 G5 Bb5) sine | 4 下越來越慢的滴答 |
+| `awk_gravity` | A3 E4 A4 C5 saw | 帶通吸入 2.6k→260 |
+| `awk_clone` | E5 A5 E6 p25 | ×1.006 / ×0.993 失諧殘影 |
+| `awk_giant` | C4 E4 G4 tri | 最低 root 95→20 |
+| `awk_dragon` | D4 A4 D5 F5 saw | 低通吐息 wobble 20 |
+| `awk_mech` | Fm(F4 C5 F5 Ab5) saw | 伺服 wobble 38 |
+| `awk_ghost` | Em(E4 B4 E5 G5) sine | 折線長哭聲 640→340 |
+
+＋ `awk_ready`（量表滿：A5-C#6-E6 金色上行 + A6 鐘 + 高頻閃爍，0.66s）、
+`awk_start`（**發動**：0.28s 充能上衝 → A 大調金色重擊和弦 + tri 180→34 低頻轟 + 1.1s 餘韻）、
+`awk_end`（終了：E6→A4 下行五音 + 洩壓低通 + 低頻收束，0.8s）。
+
+**③ 挑戰模式** —— music 3 首（皆 16 小節 loop、order `AB`）：
+
+| key | 內容 |
+|---|---|
+| `challenge` | 挑戰選單：D 小調 **BPM 126**，A 段 3-3-2 和弦鋪陳、B 段進行曲鼓推進 |
+| `tower` | 挑戰塔：A 小調 **BPM 142**，A 段八分琶音、**B 段是逐級爬升的音型**（十六分連打貝斯 + dblH 鼓）；搭配 `setTempoMul(1.0~1.3)` 隨層數加速 |
+| `timeattack` | 時間攻擊：E 小調 **BPM 170**，十六分主旋律 + 十六分驅動貝斯 + 密集鼓，最緊湊 |
+
+sfx 5 個：`tick`（倒數最後 10 秒**每秒一下**，帶通 4.2k 機械滴答 0.05s，節流 **900ms**）、
+`time_up`（兩聲 233/247Hz 不諧和蜂鳴 + 洩氣下墜，0.9s）、
+`floor_clear`（**過層 jingle 0.6s**：C6-E6-G6 上行 → C7 + E6/G6 收尾和弦 + 小鈸）、
+`nohit_fail`（E5-Eb5-D5-C#5 半音下行 + 悶擊 + 低通拉長，0.9s）、
+`new_record`（**破紀錄 jingle 1.0s**：G5-B5-D6-G6 琶音 → B6/D7 高八度 → G 大三和弦 + 星光細噪）。
+
+**④ 新 API `KB.audio.setTempoMul(k)` / `getTempoMul()`**
+
+| 呼叫 | 說明 |
+|---|---|
+| `KB.audio.setTempoMul(k)` | **音樂播放速度倍率**，夾限 **1.0~1.3**（<1 → 1、>1.3 → 1.3、非數字 / `undefined` / `NaN` → 1）。只改音序器的 step 長度、**不重啟曲子**，可在播放中隨時呼叫（挑戰塔第 n 層 → `setTempoMul(1 + Math.min(0.3, n * 0.03))` 之類）。回傳實際套用的倍率。 |
+| `KB.audio.getTempoMul()` | 目前倍率；`status().tempo` 也看得到 |
+| 注意 | 切歌 / `music(null)` **不會**自動重設倍率，離開挑戰模式請自行 `setTempoMul(1)`；離線 `renderSong` 也會套用同一倍率 |
+
+合計：**151 個 sfx（含 1 別名 `warp`）、40 首 music、4 種 ambient**；完整清單以 `node tools/audio_check.js` 輸出為準。
+
+### 進度
+- [09-12 R8-AUD-1] 完成：**24 個混合能力代表音 `mix_<mixkey>`**（18 種成分音色 `MIXV` × 2 層錯開 0.06s 疊加，0.25~0.45 秒）
+  ＋ `SFX_THROTTLE` 以迴圈補上 `mix_* = 80ms`。組合表與 `abilities_mix.js` / `abilities_mix2.js` 的 `COMBOS` 完全對齊（24 組）。
+  驗證：`node tools/audio_check.js` 新增「Round 8」區段——**直接從 `src/abilities_mix*.js` 解析 mixkey** 比對 `mix_<key>` 是否齊全（24/24 通過）。
+- [09-12 R8-AUD-2] 完成：**20 招覺醒招 `awk_<basekey>` + `awk_ready` / `awk_start` / `awk_end`**
+  （共同骨架：低頻衝擊 → 高頻上揚 → 0.85~1.2 秒和弦尾音；每招和弦 / 波形 / 噪音層 / 專屬層各不相同）＋ `awk_* = 500ms` 節流。
+  驗證：`audio_check` 由 `src/awaken.js` 的 `M('key', …)` 解析出 20 招比對 `awk_<key>`（20/20 通過），節流規則檢查通過。
+- [09-12 R8-AUD-3] 完成：**挑戰模式**——music `challenge` / `tower` / `timeattack`（皆 16 小節 loop）＋
+  sfx `tick` / `time_up` / `floor_clear` / `nohit_fail` / `new_record`（節流 900 / 600 / 300 / 400 / 800ms）＋
+  **新 API `KB.audio.setTempoMul(k)`（1.0~1.3）/ `getTempoMul()`**（只改 stepDur、不重啟曲子；`status().tempo` 可查；`renderSong` 同步套用）。
+  驗證：`audio_check` 曲目檢查 40 首全過（各軌小節數一致、每小節 16 token、循環曲 ≥16 小節且有段落變化）＋ 新增 `setTempoMul` 夾限 / 播放中切換 / status 一致性檢查。
+- [09-12 R8-AUD-4] 完成：**工具同步擴充**。`tools/audio_check.js`：SPEC 名單補 52 sfx + 3 music（另補上 world6 / world7 自行加入的
+  `space space2 shadowboss shadowboss2 dream dream2 nightmare nightmare2 trueend` 9 首）、新增「Round 8」與「音樂速度倍率」兩個檢查區段、
+  節流 need 表加入 `tick`（每 60 幀）。`tools/render_music.py`：新增 Round 8 節流規則檢查（mix_* = 80 / awk_* = 500 / tick = 900、數量 24 與 23）
+  與 `setTempoMul` 即時 API 檢查（夾限 8 組 case + 加速播放中音序器仍推進）。
+  驗證：
+  - `node tools/audio_check.js` → **全部通過**（151 sfx / 40 music / 4 ambient；節流表 85 項）。
+  - `.venv/bin/python tools/render_music.py` → **全部通過**；新 sfx peak 0.083~0.460、新曲 `challenge` 0.317 / `tower` 0.341 / `timeattack` 0.322（皆非靜音、皆 < 1.0 不爆音）；
+    `round8: mix_* 24 個 / awk_* 23 個 / tick 900ms`、`tempoMul: 1→1, 1.15→1.15, 1.3→1.3, 0.4→1, 9→1.3, NaN→1, 'x'→1, undefined→1`。
+    （初版 `mix_gravityblade` / `mix_flamesword` peak 僅 0.08~0.13 偏小，已調高 fire / ice / sword / cutter / gravity / mage 六種成分音色的音量到 0.15~0.46 與其他一致。）
+  - playwright 實機（`index.html?debug=1`，unlock 後 `setVolume({music:0,sfx:0})` 真的跑合成但不出聲）：逐一呼叫 52 個新 sfx（每個之間 `__kb.step(6)`）、
+    `tick` 每 60 幀 × 12 輪、`mix_flamesword` 每 6 幀 × 12 輪、切換 3 首新曲（`status().playing` 正確且 `step > 0`）、
+    `setTempoMul(1.0/1.1/1.2/1.3/2.0/0.2)` 播放中連續切換（回傳 1/1.1/1.2/1.3/1.3/1，`status().tempo` 一致、曲子不重啟、step 持續推進）、
+    再進 w1 跑 240 幀 → **console 訊息 0 筆、無 error、無 unknown sfx / music、MISSING SPRITES 空**。
+  - 試聽 WAV：`shots/agent_audio8/`（24 個 `sfx_mix_*` + 23 個 `sfx_awk_*` + 5 個挑戰 sfx 各 2.5 秒、`music_challenge` / `music_tower` / `music_timeattack` 各 14 秒）。
+  - docs/SPEC.md 第 9 節已補上 Round 8 名單與 `setTempoMul` 說明（本輪授權）。
+
+### 給其他 agent 的呼叫建議（名稱已固定，可直接寫死）
+- **awaken-mix**：混合能力使用招式時 `KB.audio.sfx('mix_' + p.ability)`（可每 6 幀重複呼叫，節流 80ms）；
+  混合能力的覺醒招若仍退回主成分 A，就用 `sfx('awk_' + KB.AWAKEN.baseKey(key))`。
+- **awaken（既有）**：量表滿改用 `sfx('awk_ready')`（目前是 `max`）；`KB.AWAKEN.start()` 時 `sfx('awk_start')`（0.28s 充能後才落重音，
+  可與 letterbox / zoom 同幀開始）＋ 該招的 `sfx('awk_' + baseKey)`；`end()` 時 `sfx('awk_end')`。
+- **challenge**：挑戰選單 `music('challenge')`；挑戰塔 `music('tower')` ＋ 每上一層 `sfx('floor_clear')` 並把
+  `KB.audio.setTempoMul(1 + Math.min(0.3, (floor - 1) * 0.03))`（10 層到頂 1.3）；時間攻擊 `music('timeattack')`。
+  倒數最後 10 秒**每 60 幀** `sfx('tick')`；時間到 `sfx('time_up')`；無傷挑戰破功 `sfx('nohit_fail')`；破紀錄 `sfx('new_record')`。
+  **離開挑戰模式務必 `KB.audio.setTempoMul(1)`**（切歌不會自動重設）。
+- **records / saves-input**：成績板刷新紀錄時 `sfx('new_record')`（節流 800ms，一次結算只會響一次）。
+
+#### 跨檔需求（由總控 / 對應 agent 處理）
+- 無。`docs/SPEC.md` 第 9 節已由本 agent 依授權補完；`src/` 其餘檔案、`tools/audio_test.html` 均未動
+  （audio_test.html 的按鈕是由 `SFX_NAMES` / `MUSIC_NAMES` 動態產生，新音效自動出現在試聽頁）。
+
 
 ## qa8
 （agent 在此追加）
