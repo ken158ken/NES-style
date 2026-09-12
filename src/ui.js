@@ -1192,7 +1192,7 @@
       this.total = this.lines.reduce((a, l) => a + l.s.length + this.gapUnits, 0);
       this.stars = mkStars(48, 21, 0, 0, W, 130); this.sparks = [];
     }
-    enter() { music('ending'); try { if (KB.save) { KB.save.ending = true; KB.saveGame && KB.saveGame(); } } catch (e) { } }
+    enter() { music(this.trueEnd ? 'trueend' : 'ending'); try { if (KB.save) { KB.save.ending = true; if (this.trueEnd) KB.save.trueEnding = true; KB.saveGame && KB.saveGame(); } } catch (e) { } }
     get done() { return this.reveal >= this.total; }
     update(dt) {
       this.t += dt; this.frame++;

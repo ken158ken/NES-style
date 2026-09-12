@@ -309,7 +309,7 @@ def main():
         # 選關畫面真的畫得出來（含星空島）
         draw6 = ev("""()=>{ __kb.goto('select', {index:5}); KB.scene.fade=0; KB.scene.fadeDir=0; __kb.step(4); __kb.render();
           return [KB.scene.nodes.length, KB.scene.cur]; }""")
-        check('選關畫面可繪製（cur 停在可進入的最後一關）', draw6[0] == 6, draw6)
+        check('選關畫面可繪製（≥6 節點、游標停在 index 5）', draw6[0] >= 6 and draw6[1] == 5, draw6)
         # 能力進度讀 KB.ABILITY_KEYS.length（mix 之後會變 32）
         akn = ev("()=>[KB.UI.abilityKeys().length, KB.ABILITY_KEYS.length]")
         check('「能力 n/N」的 N 直接讀 KB.ABILITY_KEYS.length', akn[0] == akn[1], akn)
