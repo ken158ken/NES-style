@@ -157,3 +157,15 @@
 | extra | src/levels_extra.js、src/records.js、src/ui.js、src/menu.js、src/arena.js、src/game.js、src/bosses.js（Extra 變體）、src/tilemap.js（BURN_DECO cloud/dedede）、src/art/world.js、tools/test_extra.py | Extra 模式：每世界疊加層（更多敵人 / 新機關 / 尖刺）、魔王 Extra 變體（開場二階段 + 新招）、本機成績板場景（各世界 BEST / RANK / 時間、競技場、成就進度）、選關第 7 節點與解鎖條件 |
 | world7 | src/levels_w7.js、src/art/world7.js、src/bosses_w7.js、src/const.js（theme dream）、src/art/backgrounds.js、src/audio.js、tools/level_check.js、tools/boss_test.py、tools/playthrough.py | W7「夢幻迴廊」：5 房 + 秘密房（6 魔王場地重製混合體 + 夢境機關）+ 真最終魔王「夢魘之核」三階段 + 真結局 |
 | qa7（第二波） | docs/QA_REPORT.md | 全系統驗收 |
+
+---
+# Round 8：挑戰與個人化（2026-09-12）
+| agent | 擁有檔案 | 內容 |
+|---|---|---|
+| ach2（選單整合） | src/progression.js、src/menu.js、tools/test_progression.py | 查「大王退治」誤觸發、成就擴到 40 條（含 Round 5~7 系統）、成就頁分頁；TitleMenu / SettingsMenu 整合其他 agent 的入口（挑戰模式 / 存檔槽 / 按鍵設定 / 卡比配色，以 KB.* 存在為條件） |
+| awaken-mix | src/awaken.js、src/art/kirby_awaken.js、tools/test_awaken.py | 24 混合能力各 1 專屬覺醒招 |
+| challenge | src/challenge.js、src/game.js、src/records.js、src/arena.js、tools/test_challenge.py | 時間攻擊（各世界計時 + 幽靈最佳線？至少 best）、無傷挑戰、挑戰塔 10 層（種子重混房間 + 修飾條件）、每日挑戰（日期種子）、Boss Rush Extra；成績板加挑戰頁 |
+| saves-input | src/saves.js、src/keyconfig.js、src/input.js、tools/test_saves.py | 3 存檔槽（讀 / 建 / 複製 / 刪除、舊存檔遷移）、KB.SaveSelectScene、按鍵重映射場景（鍵盤 + 手把、衝突處理、還原預設） |
+| skins | src/skins.js、src/player.js（draw 換精靈）、src/gfx.js（重著色快取）、tools/test_skins.py | 12 種卡比配色（成就解鎖）、KB.SKINS API、預覽、HUD 臉同步（若能不改 ui.js 就用精靈別名） |
+| audio8 | src/audio.js、tools/audio_check.js、tools/render_music.py | 24 混合 sfx、20 覺醒招 sfx、挑戰模式 2 曲 + 計時 / 達成 jingle |
+| qa8（第二波） | docs/QA_REPORT.md | 全系統驗收 |

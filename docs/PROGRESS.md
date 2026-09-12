@@ -3202,3 +3202,28 @@ R5-7a 的觀察項（gravity ↑+X 文案不一致、圖鑑剪影露出帽子輪
 2. 混合能力沒有覺醒招（退回主成分 A）；可為 24 種混合各做專屬覺醒。
 3. 未做：非無敵難度量測（使用者表示剛好）、成就 20 條未涵蓋 Round 7（覺醒 / 合體技 / W7 / Extra 全通關可加 6~8 條）、成績板無「時間攻擊」模式、按鍵重映射 UI。
 4. 可再深：時間攻擊 / 無傷挑戰模式、每日挑戰（種子）、Boss Rush Extra、關卡編輯器（本機）、多存檔槽。
+
+---
+# Round 8：挑戰與個人化（2026-09-12 啟動）
+分工見 docs/TASKS.md Round 8。總控已預留 4 個新檔與 script 標籤（skins.js 在 art/world7 後、player 前；challenge.js 在 arena 後；saves.js、keyconfig.js 在 records 後）。
+
+## ach2
+（agent 在此追加）
+
+## awaken-mix
+（agent 在此追加）
+
+## challenge
+（agent 在此追加）
+
+## saves-input
+（agent 在此追加）
+
+## skins
+（agent 在此追加）
+
+## audio8
+（agent 在此追加）
+
+## qa8
+（agent 在此追加）
