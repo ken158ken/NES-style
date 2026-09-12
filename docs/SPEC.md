@@ -192,17 +192,20 @@ KB.LEVELS.push({
 | `cleared` | `{levelId: true}` | 已通關的世界 |
 | `score` | number | 累計總分 |
 | `best` | `{levelId: number}` | 各關最佳結算總分 |
-| `stars` | `{levelId: [bool×3]}` | 大星星收集（6 關 × 3 = 18） |
-| `seen` | `{abilityKey: true}` | 圖鑑「已發現」的能力（共 32 種）；`seenNew` 是「圖鑑有新東西」紅點 |
+| `stars` | `{levelId: [bool×3]}` | 大星星收集（7 關 × 3 = 21） |
+| `seen` | `{abilityKey: true}` | 圖鑑「已發現」的能力（共 44 種：20 基本 + 24 混合）；`seenNew` 是「圖鑑有新東西」紅點 |
 | `arena` | `{…}` | 競技場最佳時間（`src/arena.js`） |
 | `settings` | `{vfx:'high'\|'mid'\|'low', …}` | 畫質等級等玩家設定（`KB.VFX.level` 讀這裡） |
 | `abilityXp` | `{abilityKey: n}` | 能力累積取得次數（Round 6 / progression） |
-| `abilityLv` | `{abilityKey: 1..3}` | 能力等級（xp 3 → Lv2、xp 8 → Lv3） |
+| `abilityLv` | `{abilityKey: 1..4}` | 能力等級（xp 3 → Lv2、xp 8 → Lv3、xp 15 → Lv4 覺醒） |
 | `achievements` | `{achId: 解鎖時間戳}` | 20 條成就 |
 | `rank` | `{levelId: 'S'\|'A'\|'B'\|'C'}` | 各關 Style Rank（只升不降） |
 | `secrets` | `{levelId: {roomIdx: 1}}` | 找到過的秘密房 |
 | `prog` | `{tsKills, elecWaterKills, burnGrass, comboBest}` | 跨關累計計數器（成就用） |
 | `ending` | bool | 看過結局 |
+| `playCount` | `{levelId: n}` | 各關通關次數（Round 7 / records） |
+| `bestTime` | `{levelId: 幀數}` | 各關最短通關時間 |
+| `extraCleared` | `{levelId: true}` | Extra 模式通關標記 |
 `KB.PROG.save()` 會在讀檔後自動補齊上列 Round 6 新欄位（舊存檔相容）；`KB.PROG.reset()` 清空全部進度。
 
 ## 7. 場景（Scene）
