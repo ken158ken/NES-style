@@ -205,7 +205,7 @@
         if (mv.tick) mv.tick(p, d, d.t, held);
         if (d.mode !== 'm1') return;
         // 蓄力：X 招式打完後繼續按住 → 第 CHARGE 幀蓄滿 → 放開放必殺
-        if (d.t === CHARGE) { d.charged = true; sfx('charge_ready'); vx('chargeReady', p.cx, p.cy - 14, color); }
+        if (d.t === Math.round(CHARGE * ((KB.PROG && KB.PROG.holdMul) ? KB.PROG.holdMul(p.ability) : 1))) { d.charged = true; sfx('charge_ready'); vx('chargeReady', p.cx, p.cy - 14, color); }
         if (d.charged) {
           if (d.t % 8 === 0) vx('aura', p, { color, r: 19, frames: 12, pulse: 0.4 });
           if (d.t % 3 === 0) parts(p.cx + rnd(-12, 12), p.cy + rnd(-11, 11), [color, '#ffffff'], 1, { spread: 0.3, grav: -0.05, life: 12, up: 0.4, size: 1 });
