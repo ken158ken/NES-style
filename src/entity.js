@@ -79,6 +79,11 @@
       this.turnAtEdge = true; this.turnAtWall = true;
       this.beingInhaled = false; this.inhaleSrc = null;
       this.freezeT = 0;  // 被冰凍幀數
+      // ---- 元素標籤（Round 6 elements；規則見 src/elements.js）----
+      // element: 'fire'|'ice'|'spark'|'metal'|'ghost'|null（火屬性不會被點燃）
+      // weak / resist: ['fire','ice','spark','wind','physical'] —— 命中元素在表內 → ×2 / ×resistK（預設 0.5）
+      this.element = null; this.weak = null; this.resist = null;
+      this.status = null;   // { burn, para }：被火打到燃燒 3 秒、被電打到麻痺 60 幀
       this.z = 1; this.walkAnim = true;
       this.dropItem = null; // 死亡掉落道具 key（spawnDef 的 drop，優先於 dropTable）
       // 掉落表：{道具 key: 機率}，由 die() 統一 roll（見 rollDrop）。
@@ -131,8 +136,12 @@
     }
     update(dt) {
       this.baseUpdate(dt);
+      if (KB.ELEM) KB.ELEM.updateStatus(this);       // 燃燒 DoT / 連鎖點燃 / 麻痺粒子
+      if (this.dead) return;
       if (this.freezeT > 0) { this.freezeT--; this.vx = 0; this.physics(); if (this.freezeT === 0) this.vx = 0; return; }
       if (this.beingInhaled) { return; }
+      // 麻痺：不能行動（重力照走），到期自動恢復
+      if (this.status && this.status.para > 0) { this.vx = 0; this.physics(); return; }
       this.ai(dt);
       this.physics();
       if (this.fellOut) this.dead = true;
@@ -172,8 +181,11 @@
     hurt(amount, src) {
       if (this.dead) return false;
       if (this.invuln > 0) return false;
-      this.hp -= amount; this.flash = 8; this.invuln = 6;
+      // 屬性弱點 ×2 / 抗性 ×0.5（含「弱點!」「抗性」演出），統一在這裡乘算
+      const dmg = KB.ELEM ? KB.ELEM.applyHit(this, amount, src) : amount;
+      this.hp -= dmg; this.flash = 8; this.invuln = 6;
       if (src && src.freeze) { this.freezeT = 120; }
+      if (KB.ELEM) KB.ELEM.onHit(this, src);         // 火＝燃燒 3 秒 / 電＝麻痺 60 幀
       if (this.hp <= 0) { this.die(src); return true; }
       if (KB.audio) KB.audio.sfx('enemyhit');
       return true;
@@ -183,6 +195,10 @@
       if (this.freezeT > 0) {
         // 冰塊滑出
         if (KB.IceBlock) KB.spawn(new KB.IceBlock(this.x, this.y, src && src.cx !== undefined ? (this.cx < src.cx ? -1 : 1) : this.dir));
+      } else if (this.status && this.status.burn > 0) {
+        // 燒死：灰燼 + 火星（元素死亡反應）
+        KB.fx('fx_poof', this.cx, this.cy + 8);
+        KB.particles(this.cx, this.cy, ['#ffe040', '#ff9020', '#404048'], 10, { spread: 2.4, life: 30 });
       } else {
         KB.fx('fx_poof', this.cx, this.cy + 8);
         KB.particles(this.cx, this.cy, '#ffe040', 6, { spread: 2 });
@@ -262,6 +278,7 @@
         if (f.dead || (f.type === 'enemy' && f.active === false)) this.dead = true;
       }
       if (this.onUpdate) this.onUpdate(this);
+      if (KB.ELEM) KB.ELEM.scanTiles(this);   // 元素環境反應（燒草 / 燒木箱 / 結冰 / 電擊水域 / 吹熄）
       this.life--; if (this.life <= 0) this.dead = true;
     }
     canHit(e) {
@@ -345,6 +362,7 @@
         } else if (this.onGround && this.bounce > 0) { this.vy = -Math.abs(pvy) * this.bounce; if (Math.abs(this.vy) < 0.8) this.vy = -1.2; }
       }
       if (this.fellOut) this.dead = true;
+      if (KB.ELEM) KB.ELEM.scanTiles(this);   // 元素環境反應（燒草 / 燒木箱 / 結冰 / 電擊水域 / 吹熄）
       if (this.trail && (Math.floor(this.t * 60) % 3 === 0)) KB.particles(this.cx, this.cy, this.trail, 1, { spread: 0.5, grav: 0, life: 12, up: 0 });
     }
     draw(g) { g.spr(this.spr, this.cx, this.bottom, { t: this.t, flip: this.flip, rot: this.rot, fps: this.fps }); }

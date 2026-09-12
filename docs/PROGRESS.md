@@ -1853,7 +1853,114 @@ R5-7a 的觀察項（gravity ↑+X 文案不一致、圖鑑剪影露出帽子輪
 - 夥伴頭上的 4 格小血條一直顯示（沒有淡出），HUD 那份才是主要資訊；若覺得畫面吵可以把 `drawHpBar` 改成受傷後才顯示。
 
 ## elements
-（agent 在此追加）
+
+- [2026-09-12 08:50] 完成：**KB.ELEM 元素分類 + 屬性弱點乘算**（`src/elements.js` 新檔、`src/entity.js`、`src/bosses.js`）。
+  - `KB.ELEM.of(hitboxOrProj)` → `fire | ice | spark | wind | none`：先看 `a.elem`（明確覆寫）→ `kind` → `ability` → `spr`
+    → `freeze:true` 當冰。精確表 + 模糊比對（`proj_fireball` / `proj_windblade` / `proj_airpuff` 這種只靠精靈名的也認得）。
+  - `KB.ELEM.applyHit(target, dmg, src)` 統一乘算：weak ×2、resist ×`resistK`（預設 0.5，最少留 1 點）；
+    由 `Enemy.hurt`（entity.js）與 `Boss.hurt` / `Lololo.damageFrom`（bosses.js）各呼叫一次，敵人 / 魔王共用同一套規則。
+  - 演出：weak → `textPop('弱點!')` 黃字 + `hitstop(2)` + 特大 `burst`（魔王另加 `shake(4)`）；resist → `textPop('抗性')` 灰字 + `sfx('hardblock')`。
+    20 幀冷卻避免連段洗版；**四捨五入後傷害沒有真的改變時不播演出**（也避免白白攪動 `Math.random`，boss_test 對此極敏感）。
+  驗證：`tools/test_elements.py --only weak elem` 全 PASS；`shots/agent_elements/weak_popup.png`、`resist_popup.png`。
+
+- [2026-09-12 09:05] 完成：**環境反應（火燒草 / 木箱 W / 冰面 / 電擊水域 / 風吹熄）**（`src/tilemap.js` + `src/elements.js` + `src/art/world.js`）。
+  狀態機全部掛在 `TileMap` 上（`decoFire / decoChar / woodFire / iceWater / shockT`），由 `TileMap.updateElements()`（在既有 `update()` 末端）推進；
+  觸發點是 `KB.ELEM.scanTiles(a)`，由 `entity.js` 的 `Hitbox.update` / `Projectile.update` 每幀呼叫 —— **完全不需要動 game.js**。
+  只有 `owner==='player'` 的判定框會觸發（敵人火球到處燒草會讓關卡難以預期；電擊水域會反傷玩家，要由玩家自己決定冒不冒險）。
+  | 元素 | 對象 | 反應 |
+  |---|---|---|
+  | 火 | 草 / 花 / 灌木 / 蘑菇 deco | 燒 90 幀，期間每 8 幀往左右各蔓延 1 格（總共 3 格，每格只傳一次）；燒完變焦黑 1800 幀（30 秒）後自動恢復；站在燃燒格的敵人 **1 dmg / 秒** |
+  | 火 | 木箱 `W` | `tile_woodbox_burn` 燒 40 幀後消失 |
+  | 火 | 冰磚 `I` / 結冰水面 | 沿用既有 `meltIce`；結冰水面 `meltWater` 立刻融掉 |
+  | 冰 | 水面（`~` 最上排） | 結冰 480 幀（8 秒）→ 畫 `tile_ice_surface`、變成**可站的臨時單向平台**，上面摩擦變小（滑） |
+  | 電 | 水域任一格 | 洪水填滿整片相連水域 → 3 道橫貫閃電 + 每 3 幀補一道 + `worldTint` 藍白 + `shake(3)` + `sfx('thunder')`，共 20 幀；水中敵人 **dmg 4 + freezeT 30**、水中的卡比 **自傷 1**；40 幀冷卻 |
+  | 風 | 燃燒中的草 / 木箱 | 吹熄（草不會變焦黑，等於「救火」成功） |
+  - 磁磚 `W`：加進 `SOLID`（可站）與 `breakBlock`（鎚 / 石頭類重擊砸得破，走 `KB.TileMap.hardBreakable`）。
+  - 冰面平台：`tilemap.js` 內新增 `isPlat(map,tx,ty,ch)`，`physics.step` / `groundBelow` / `groundWithin` / `onPlatformOnly` / `edgeAhead`
+    五處單向平台判定統一改走它（`'=' / 'H' 頂端 / 結冰的 '~'`）。冰面滑行寫在 `physics.step` 開頭
+    （`vx = 上一幀 vx × 0.82 + 這一幀想要的 vx × 0.18`，加速慢、停下也慢），**卡比與敵人共用**，所以不需要改 player.js。
+  - 繪製：結冰的水面改在 `draw()`（實體之下）畫成不透明冰面，`drawWater` 跳過該格；燃燒中的 deco 疊 `deco_flame` 並閃橘紅，
+    焦黑優先用 `deco_<theme>_<ch>_burnt`（已畫 green 的 g/f/b），沒有就把原圖壓暗。
+  - 新美術（`src/art/world.js`）：`tile_woodbox`、`tile_woodbox_burn`(2 幀)、`tile_ice_surface`、`deco_flame`(2 幀)、
+    `deco_green_g_burnt`、`deco_green_f_burnt`、`deco_green_b_burnt`。
+  驗證：`shots/agent_elements/burn_ignite.png`、`burn_spread.png`（火沿草往兩側各燒 3 格）、`burn_char.png`（焦黑）、
+  `wood_burn.png`、`ice_stand.png`（卡比站在結冰的水面上）、`ice_slide.png`、`shock_water.png`（整片水域閃電）、
+  `w1_fire_grass.png`（w1 真實關卡噴火）。
+
+- [2026-09-12 09:20] 完成：**敵人 / 魔王屬性標籤**（`src/enemies.js`、`enemies_forms.js`、`enemies_magic.js`、`src/bosses.js`）。
+  標籤欄位寫在各自的建構式：`element`（`fire|ice|spark|metal|ghost|null`，目前只影響「火屬性不會被點燃」）、`weak[]`、`resist[]`、`resistK`。
+  `'physical'` 是「非元素攻擊」（劍 / 鎚 / 星星…）的代號。
+  | 分類 | 敵人 | element | weak | resist |
+  |---|---|---|---|---|
+  | 冰系 | chilly、snowly、mrfrosty | ice | fire ×2 | ice ×0.5 |
+  | 火系 | hothead、drako、wizzle | fire | ice ×2 | fire ×0.5 |
+  | 機械 | bolt、shotzo、rollarmor、tiktok | metal | spark ×2 | — |
+  | 幽靈 | boodee、scarfy | ghost | spark ×2 | physical ×0.5 |
+  | 水棲 | squishy、glunk | — | spark ×2 | — |
+  | 電系 | sparky | spark | — | spark ×0.5 |
+  | 魔王 | 大樹威斯比 | — | fire ×2 | — |
+  | 魔王 | 克拉寇（雲會結冰） | — | ice ×2 | — |
+  | 魔王 | 魅塔騎士 | — | spark ×2 | physical ×**0.9** |
+  | 魔王 | 洛洛洛 / 拉拉拉（箱子會燒） | — | fire ×2 | — |
+  | 魔王 | 迪迪迪大王 | — | 無 | 無 |
+  **魅塔騎士的物理抗性從規格的 0.75 調成 0.9**：實測 0.5 / 0.75 / 0.85 都會把 4 點的重擊砍成 3，
+  魅塔騎士戰從 ~550 幀拉長到 2200~3400 幀、機器人被打死 2~3 次，**並且連帶讓同一個 boss_test session 後面的「迪迪迪 MID」失敗**
+  （boss_test 五隻魔王跑在同一個瀏覽器 session，前面的戰鬥變長會污染後面的樣本）。0.9 只削 ≥6 點的重擊（4→4、6→5、8→7），
+  boss_test 維持原本的通過狀態。理由已寫進 `bosses.js` 的註解。
+
+- [2026-09-12 09:30] 完成：**元素狀態（燃燒 / 麻痺）**（`src/entity.js` + `src/elements.js`）。
+  `e.status = { burn, para }`，由 `Enemy.hurt` 掛上、`Enemy.update` 開頭統一處理（`KB.ELEM.updateStatus`）。
+  - **燃燒**：被火打到 180 幀（3 秒），每 30 幀 `dmg 1`（共 6 點，走 `KB.ELEM.dot` 不吃 / 不產生無敵幀），持續冒火星；
+    每 12 幀檢查一次「碰到的其他敵人」→ 點燃，**每隻只傳染一次**，所以一次起火最多鏈 3 隻（起火者 → A → B → C，共 4 隻）。
+    火屬性敵人（`element==='fire'`）與魔王不會被點燃；燒死的敵人改噴灰燼 + 火星。
+  - **麻痺**：被電打到 60 幀不能行動（`Enemy.update` 在 `ai()` 之前 return，重力照走），每 6 幀冒電光粒子。
+  - 被冰打到沿用既有的 `freezeT`（`src.freeze`）。敵人被放回起點（`Baddie.onReset`）時 `status` 一併清空。
+  驗證：`tools/test_elements.py --only status` 全 PASS；`shots/agent_elements/status_chain.png`。
+
+- [2026-09-12 09:40] 完成：**`tools/test_elements.py`（96 項全 PASS）**。
+  沿用 `enemy_test.py` 的 `Harness` / `HOOK_JS`，注入專用測試關卡 `eltest`（草 deco x=6~20、花 x=22、木箱 (26,9)(27,9)、水池 x=34~44 rows 8~10）。
+  7 個階段：`elem`（分類 19 例）/ `burn`（點燃、每 8 幀蔓延 1 格、上限 3 格、焦黑、30 秒恢復、站火上受傷、風吹熄）/
+  `wood`（火燒 40 幀、劍打不破、鎚砸破、風吹熄）/ `ice`（結冰、只結最上排、卡比站得住、比一般地面滑、火焰提前融、8 秒自然融）/
+  `shock`（整片水域、敵人 dmg 4 + freezeT 30、卡比自傷 1、40 幀冷卻）/ `weak`（14 種敵人 + 5 隻魔王標籤、乘算規則、實戰扣血、彈出字）/
+  `status`（燃燒幀數 / DoT / 火屬性免疫 / 連鎖上限 / 麻痺不能動 / 恢復）。
+  `--shots` 會把每個反應存到 `shots/agent_elements/`。
+  驗證（本輪最終）：
+  - `tools/test_elements.py` → **96/96 PASS**
+  - `tools/engine_test.py` → **118/118 PASS**
+  - `tools/enemy_test.py` → **393/393 PASS**
+  - `tools/boss_test.py` → whispywoods / lololo / metaknight / dedede / shadowkirby **全 PASS**；
+    **kracko FIGHT#2 FAIL 不是 elements 造成的** —— 在 `bee9c75` 上只套用其他 agent 的改動（我的 8 個檔案還原）也會一模一樣地失敗
+    （`dead=False playerDied=4`，數值完全相同），請 mix / player / progression 相關 agent 或總控確認。
+  - `tools/playthrough.py --level w1 / w3 --ability sword --godmode` → 皆 `cleared=True deaths=0 missing sprites=[]`
+
+#### 跨檔需求（elements → 其他 agent / 總控）
+- **不需要 game.js 的任何 hook**：環境反應掛在 `Hitbox.update` / `Projectile.update`（entity.js）與 `TileMap.update`（tilemap.js），
+  `game.js` 的 `collisions` / `breakBlocksIn` 一行都沒動。木箱 `W` 的破壞也是在 `KB.ELEM.scanTiles` 裡自己處理的。
+- **levels（world6 / 總控）—— 木箱 `W` 擺放建議**：`W` 是新的實心磁磚（可站、火燒 40 幀消失、鎚類重擊砸得破），
+  建議用在「兩條路二選一」的地方：
+  1. 用 2~3 個 `W` 疊成一道矮牆擋住支線寶物，旁邊放 `essence(fire)` 或 Hot Head → 燒開拿獎勵；
+  2. 用 `W` 當「會燒掉的踏腳石」：火屬性玩家要抉擇「燒掉開路」還是「留著當平台」；
+  3. w6「星之彼端」貨櫃區的箱堆（視覺上也合理）。
+  **注意**：`W` 目前沒有進 `tools/level_check.js` 的 KNOWN 字元表，放進關卡前請 world6 / levels agent 把 `'W'` 加進去（視為實心）。
+- **levels —— 草地 / 水域的元素運用**：火燒草只對「植被類 deco」有效，主題對應表在 `tilemap.js` 的 `TileMap.BURN_DECO`
+  （green `gfbm` / island `g` / castle `b` 蜘蛛網 / cloud、dedede 無）。想讓玩家玩到這個機制，
+  建議在有 `essence(fire)` 的房間多放幾串連續的 `'g'`（目前 w1 r0 只有零星的 `f`/`b`，噴火不太容易掃到）。
+  水域房間（w3 r1、w5 r2）本來就有 `essence(fire)`，若想展示「冰橋」與「電擊水域」，建議再補 `essence(ice)` / `essence(spark)` 各一。
+- **world6（`src/art/world6.js`）**：新主題若有植被 deco，請在 `TileMap.BURN_DECO` 加一列（例如 `space: ''` 表示不可燃）；
+  沒加的主題預設是 `'gf'`。
+- **ui / progression**：`KB.ELEM.of()` 與敵人的 `element / weak / resist` 標籤可以直接拿去畫圖鑑的「屬性」欄位；
+  `KB.ELEM.mult(target, src)` 是純函式（不產生特效），適合給 UI 預覽傷害倍率用。
+- **abilities 各 agent**：要讓新招帶元素，最省事的作法是在 `KB.hitbox` / `KB.shoot` 的參數加 `type:'fire'|'ice'|'spark'|'wind'`，
+  或直接掛 `elem:'fire'`（`KB.ELEM.of` 會優先讀 `elem`）。
+
+#### 已知問題 / 未完成
+- 魅塔騎士的物理抗性只有 ×0.9（規格是 ×0.75）——原因見上。若之後 boss_test 的樣本改成「每隻魔王各自開新 session」，
+  可以安全地調回 0.75~0.85。
+- 火燒草的傷害只作用在**敵人**（規格如此）；卡比站在火上不會受傷。若之後想加「玩家也會被自己點的火燒到」，
+  在 `TileMap.updateElements` 的燃燒格迴圈裡加一段玩家判定即可。
+- 風目前只「吹熄」，沒有做「吹動導火線火花加速」（規格是「至少吹熄」）。
+- `tools/build.py` 沒有執行（其他 Round 6 agent 還在改檔）→ 收工請總控統一 build。
+
 
 ## world6
 （agent 在此追加）

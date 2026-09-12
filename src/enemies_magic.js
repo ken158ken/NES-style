@@ -33,6 +33,7 @@
       this.name = 'wizzle'; this.spr = 'wizzle_walk'; this.w = 12; this.h = 18;
       this.speed = 0.35; this.ability = 'mage'; this.hp = 2; this.maxHp = 2; this.score = 400; this.cool = 50;
       this.blinks = 0; this.hidden = false;
+      this.element = 'fire'; this.weak = ['ice']; this.resist = ['fire'];   // 火球法師：怕冰、抗火
     }
     get castCD() { return this.tough ? 70 : 110; }
     think() {
@@ -102,6 +103,7 @@
       this.name = 'tiktok'; this.spr = 'tiktok_walk'; this.w = 14; this.h = 16;
       this.speed = 0.25; this.ability = 'time'; this.hp = 3; this.maxHp = 3; this.score = 400; this.cool = 60;
       this.slowP = 0;   // 對卡比的減速剩餘幀數
+      this.element = 'metal'; this.weak = ['spark'];   // 發條機械：怕電
     }
     get fieldCD() { return this.tough ? 110 : 160; }
     think() {

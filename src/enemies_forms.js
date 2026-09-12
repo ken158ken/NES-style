@@ -70,6 +70,7 @@
       this.w = 16; this.h = 14;
       this.grav = 0; this.solid = false;
       this.hp = 3; this.maxHp = 3; this.speed = 0.9; this.score = 420;
+      this.element = 'fire'; this.weak = ['ice']; this.resist = ['fire'];   // 火屬性：怕冰、抗火
       this.ability = 'dragon'; this.cool = 60; this.state = 'fly';
       this.phase = Math.random() * Math.PI * 2;
     }
@@ -123,6 +124,7 @@
       this.w = 14; this.h = 18;
       this.hp = 3; this.maxHp = 3; this.speed = 0.5; this.score = 400;
       this.ability = 'mech'; this.cool = 70;
+      this.element = 'metal'; this.weak = ['spark'];   // 機械：怕電
     }
     onReset() { super.onReset(); this.setSpr('bolt_walk'); }
     attack() { if (this.state !== 'aim') { this.setState('aim'); this.setSpr('bolt_attack'); } }
@@ -177,6 +179,7 @@
       this.grav = 0; this.solid = false;          // 穿牆
       this.hp = 2; this.maxHp = 2; this.speed = 0.6; this.score = 380;
       this.ability = 'ghost'; this.cool = 60; this.state = 'float';
+      this.element = 'ghost'; this.weak = ['spark']; this.resist = ['physical'];   // 幽靈：物理打不痛、怕電
       this.phase = Math.random() * Math.PI * 2;
     }
     onReset() { super.onReset(); this.grav = 0; this.solid = false; this.setSpr('boodee_float'); this.setState('float'); }

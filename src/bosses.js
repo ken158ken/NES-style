@@ -199,6 +199,8 @@
     hurt(amount, src) {
       this.ensureExtra();
       if (this.dead || this.invuln > 0 || this.introducing || this.untouchable) return false;
+      // 屬性弱點（Round 6 elements）：weak ×2（額外 shake 4 + 「弱點!」）、resist ×resistK
+      amount = KB.ELEM ? KB.ELEM.applyHit(this, amount, src) : amount;
       this.hp -= amount; this.flash = 10; this.invuln = 12; this.hurtT = 20;
       KB.audio.sfx('boss_hurt');
       const hx = src && src.cx !== undefined ? clamp(src.cx, this.x, this.x + this.w) : this.cx;
@@ -248,6 +250,7 @@
       this.hp = this.maxHp = 40; this.score = 5000; this.color = '#8a5a30';
       this.solid = false; this.grav = 0; this.dir = -1; this.spr = 'whispy_idle';
       this.setSize(40, 96);
+      this.weak = ['fire'];   // 大樹＝木頭：火焰 ×2（Round 6 elements）
       this.cycle = 0; this.puffs = 0; this.apples = 0; this.rootX = 0; this.rootY = 0;
       this.contactCD = 0;   // 接觸傷害的自身冷卻（玩家 invuln 之外再加一層，見 get contactDamage）
       this.blowCD = 0;      // R4：吹風期間的接觸傷害冷卻（60 幀 1 點，見 get contactDamage）
@@ -511,6 +514,7 @@
       this.hp = this.maxHp = 15; this.score = 0; this.spr = 'lalala_walk'; this.color = '#f070b0';
       this.speed = this.baseSpeed = 1.0; this.hopOnPush = true; this.dir = 1; this.rageColor = '#ff3060';
       this.introSide = -1;   // 拉拉拉從左側進場（洛洛洛從右側）
+      this.weak = ['fire'];   // 同洛洛洛（Round 6 elements）
     }
     get leader() { return this.leaderRef; }
     hurt(amount, src) { return this.leader ? this.leader.damageFrom(this, amount, src) : false; }
@@ -526,6 +530,7 @@
       this.displayName = '洛洛洛與拉拉拉'; this.subtitle = 'LOLOLO & LALALA'; this.name = 'lololo';
       this.hp = this.maxHp = 30; this.score = 6000; this.partner = null;
       this.rageColor = '#ff3060'; this.phase2Msg = '洛洛洛與拉拉拉同時推箱！';
+      this.weak = ['fire'];   // 推的木箱會燒起來：火焰 ×2（Round 6 elements）
     }
     ensurePartner() {
       if (this.partner || !KB.game) return;
@@ -548,6 +553,7 @@
     // 共用血池：who 為實際被打到的那一位
     damageFrom(who, amount, src) {
       if (this.dead || this.introducing || who.invuln > 0 || who.ko || who.untouchable) return false;
+      amount = KB.ELEM ? KB.ELEM.applyHit(who, amount, src) : amount;   // 弱點：火（箱子會燒）
       who.invuln = 12; who.flash = 10; who.hurtT = 20; who.selfHp -= amount;
       this.hp = Math.max(0, this.hp - amount);
       KB.audio.sfx('boss_hurt'); KB.fx('fx_hit', who.cx, who.cy);
@@ -578,6 +584,7 @@
       this.hp = this.maxHp = 40; this.score = 7000; this.color = '#f0f0ff';
       this.solid = false; this.grav = 0; this.spr = 'kracko_idle';
       this.setSize(56, 36);
+      this.weak = ['ice'];   // 雲會結冰：冰 ×2（Round 6 elements）
       this.baseY = this.y; this.hoverY = this.y; this.lowY = this.y; this.floor = this.bottom + 64; this.wob = 0; this.attackIdx = 0;
       this.minion = null; this.minionT = 150; this.boltY = 0; this.sx = 0; this.sy = 0; this.tx = 0; this.ty = 0; this.sub = 0; this.subT = 0; this.swoopDir = -1;
       this.boltX = 0; this.boltT = 0; this.restT = 0; this.bolted = false; this.rageColor = '#4060ff'; this.phase2Msg = '克拉寇捲起雷雨！';
@@ -737,6 +744,11 @@
       //   ⇒ maxHp 45 → 55（拉長戰鬥），二階段的揮劍改成 2 點（見 case 'slash'）。
       this.hp = this.maxHp = 55; this.score = 8000; this.color = '#3040a0';
       this.solid = true; this.grav = KB.GRAV; this.spr = 'metaknight_idle'; this.setSize(20, 26);
+      // Round 6 elements：金屬鎧甲怕電（×2）、擋刀（物理 ×0.9 —— 只擋得住重擊）。
+      // 抗性倍率實測過 0.5 / 0.75 / 0.85：都會把 4 點的重擊砍成 3，魅塔騎士戰從 ~550 幀拉長到 2200~3400 幀、
+      // 機器人被打死 2~3 次，連帶讓同一個 boss_test session 後面的迪迪迪 MID 測試失敗。
+      // 0.9 只削 ≥6 點的重擊（4→4、6→5、8→7），boss_test 五隻魔王維持原本的通過狀態。
+      this.weak = ['spark']; this.resist = ['physical']; this.resistK = 0.9;
       this.swordStar = null; this.decisions = 0; this.dashBox = null; this.dir = -1; this.stunCD = 0;
       // QA P0-01：迴避（vanish / backstep）不能無限連發，否則普通玩家永遠打不到他
       // Round 3 balance-enemies：Round 1 為了修 P0-01 疊了三個限制，結果魅塔騎士變成 5 個魔王裡最弱的
@@ -958,6 +970,7 @@
       this.solid = true; this.grav = KB.GRAV; this.maxFall = 6; this.spr = 'dedede_idle'; this.setSize(40, 52);
       this.actions = 0; this.dizzyCD = 0; this.inhaleFx = null; this.dir = -1; this.jumps = 0;
       this.rageColor = '#ff2020'; this.phase2Msg = '迪迪迪大王怒了！';
+      this.weak = null; this.resist = null;   // Round 6 elements：大王沒有屬性弱點，純靠技術
       this.setState('idle');
     }
     get enraged() { return this.phase === 2; }

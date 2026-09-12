@@ -348,6 +348,55 @@
     tile('tile_fuse_burn', PX, [fuseB0, fuseB1], { fps: 12 });
 
     // ------------------------------------------------------------------
+    // 元素反應磁磚（Round 6 elements）
+    //   W tile_woodbox      ：木箱（實心可站）；火燒 40 幀燒毀（tile_woodbox_burn）、鎚 / 石頭砸得破
+    //     tile_ice_surface  ：結冰的水面（8 秒的臨時單向平台，站上去會滑）
+    // ------------------------------------------------------------------
+    const WOOD = Object.assign({}, PX, { t: '#c88850', T: '#905828', q: '#e8b070', k: '#503018' });
+    const woodbox = [
+      'kkkkkkkkkkkkkkkk',
+      'kqqqqqqqqqqqqqqk',
+      'kqttttttttttttqk',
+      'kqtTtttttttTttqk',
+      'kqttTtttttTtttqk',
+      'kqtttTttttTtttqk',
+      'kqttttTttTttttqk',
+      'kqtttttTTtttttqk',
+      'kqtttttTTtttttqk',
+      'kqttttTttTttttqk',
+      'kqtttTttttTtttqk',
+      'kqttTtttttTtttqk',
+      'kqtTtttttttTttqk',
+      'kqttttttttttttqk',
+      'kqqqqqqqqqqqqqqk',
+      'kkkkkkkkkkkkkkkk',
+    ];
+    tile('tile_woodbox', WOOD, woodbox);
+    // 燃燒中：木紋換成橘紅火色，兩幀交替
+    const wb0 = woodbox.map(r => r.replace(/t/g, 'o').replace(/T/g, 'r').replace(/q/g, 'y'));
+    const wb1 = woodbox.map(r => r.replace(/t/g, 'y').replace(/T/g, 'o').replace(/q/g, 'h'));
+    tile('tile_woodbox_burn', WOOD, [wb0, wb1], { fps: 10 });
+
+    tile('tile_ice_surface', PX, [
+      'wwwwwwwwwwwwwwww',
+      'weeeewwweeeeweew',
+      'eccccccccccccccc',
+      'ecccCccccccccCcc',
+      'cccCccccccCccccc',
+      'ccCccccccCcccccc',
+      'cccccccccccccccc',
+      'ccccCcccccccCccc',
+      'cCccccccccccccCc',
+      'cccccccccCcccccc',
+      'ccccccCccccccccc',
+      'CCcCCCcCCCcCCCcC',
+      'CCCCCCCCCCCCCCCC',
+      'CbCbCCbCCbCCbCCb',
+      'bbbbbbbbbbbbbbbb',
+      'bbbbbbbbbbbbbbbb',
+    ]);
+
+    // ------------------------------------------------------------------
     // 能力台座（KB.ITEMS.essence）與傳送星（KB.ITEMS.warpstar）
     // ------------------------------------------------------------------
     KB.sprite('item_essence_base', PX, [[
@@ -1139,6 +1188,87 @@
       for (let y = 8; y < 12; y++) for (let x = 0; x < 20; x++) if (g[y][x] === 's') g[y][x] = 'S';
       px(g, 5, 3, 'w'); px(g, 6, 3, 'w'); px(g, 12, 2, 'w'); px(g, 10, 8, 'S'); px(g, 15, 7, 'S');
     }));
+
+    // ---- 元素反應（Round 6 elements）：燃燒火焰疊圖 + 燒焦的草 / 花 / 灌木 ----
+    // deco_flame 疊在燃燒中的裝飾上（anchor=bottom，與 deco 同錨點）；
+    // deco_<theme>_<ch>_burnt 是「焦黑 30 秒」的外觀，沒有對應圖時 tilemap.js 會自動改用壓暗的原圖。
+    const FL = Object.assign({}, P, { o: '#f89040', y: '#f8e040', h: '#fff8a0', w: '#ffffff' });
+    deco('deco_flame', FL, [
+      [
+        '................',
+        '................',
+        '................',
+        '.......o........',
+        '......oyo....o..',
+        '.....oyhyo..oyo.',
+        '..o..oyhyo..oyo.',
+        '.oyo.oyhwyo.oyho',
+        '.oyo.oyhwyo.oyho',
+        'oyhyooyhwwyooyhy',
+        'oyhyooyhwwyooyhy',
+        'oyhwyoyhwwyooyhw',
+        'oyhwyoyhwwyoyyhw',
+        'oyhwyyyhwwhyyyhw',
+        'ooyhwwyhwwhywyhw',
+        'ooyyhwwhwwhwwyho',
+      ],
+      [
+        '................',
+        '................',
+        '................',
+        '............o...',
+        '..o........oyo..',
+        '.oyo..o....oyo..',
+        '.oyo.oyo...oyho.',
+        'oyhyooyho..oyho.',
+        'oyhyooyho.ooyhy.',
+        'oyhwooyhyooyhwy.',
+        'oyhwooyhyooyhwy.',
+        'oyhwyoyhwyoyhwyo',
+        'oyhwyyyhwyoyhwyo',
+        'ooyhwwyhwyoyhwwy',
+        'ooyhwwyhwwyyhwwy',
+        'oooyhwwhwwhwwhwy',
+      ],
+    ], { fps: 10 });
+    deco('deco_green_g_burnt', P, [
+      '................',
+      '..x.............',
+      '..x....x....x...',
+      '.xx..xxx.x.xx.x.',
+      '.xx.xxx.xx.xx.xx',
+      'xxxxxxxxxxxxxxxx',
+      'xSxxSSxxSSxSSxSx',
+      'SSSSSSSSSSSSSSSS',
+    ]);
+    deco('deco_green_f_burnt', P, [
+      '................',
+      '................',
+      '..x.........x...',
+      '..x....x....x...',
+      '.x.x..xxx..xx.x.',
+      'x.x.x.x.x.xx.x.x',
+      'xxxxxxxxxxxxxxxx',
+      'xxxSxxxxSxxxxSxx',
+      'SSxSSSxSSSxSSSSx',
+      'SSSSSSSSSSSSSSSS',
+    ]);
+    deco('deco_green_b_burnt', P, [
+      '........................',
+      '........................',
+      '...x......x.....x.......',
+      '..xxx....xxx...xxx......',
+      '..xxxx..xxxxx..xxxx.....',
+      '.xxxxxxxxxxxxxxxxxxx....',
+      '.xxxxxxxxxxxxxxxxxxxx...',
+      'xxxxxxxxxxxxxxxxxxxxx...',
+      'xxxSxxxxSxxxxxSxxxxxx...',
+      'xSSSSxxSSSSxxSSSSxxSx...',
+      '.SSSSSSSSSSSSSSSSSSS....',
+      '..SSSSSSSSSSSSSSSSS.....',
+      '....SSSSSSSSSSSSS.......',
+      '........................',
+    ]);
     // w 木柵欄 16×14
     deco('deco_green_w', P, [
       '.kkk.......kkk..',

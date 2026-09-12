@@ -27,6 +27,7 @@
       if (this.state0 !== undefined) { this.setState(this.state0); this.setSpr(this.spr0); this.cool = this.cool0; }
       this.vx = 0; this.vy = 0; this.freezeT = 0; this.beingInhaled = false; this.inhaleSrc = null;
       this.alert = false; this.alertT = 0;
+      this.status = null;   // 元素狀態（燃燒 / 麻痺）也一起清掉，回到畫面時不會還在燒（Round 6 elements）
     }
     // Extra（超難）難度：所有敵人的調整集中在這裡（倍率見 entity.js 的 KB.EXTRA）。
     // 子類建構式會在 super() 之後才設定 speed / hp，所以不能在建構式裡做 —— 改在「第一次 update」套用一次。
@@ -240,7 +241,9 @@
 
   // Hot Head：走路；近距離噴火（前方火焰判定 30 幀），中距離發射拋物線火球
   class HotHead extends Baddie {
-    constructor(x, y) { super(x, y); this.name = 'hothead'; this.spr = 'hothead_walk'; this.w = 14; this.h = 14; this.speed = 0.4; this.ability = 'fire'; this.cool = 60; }
+    constructor(x, y) { super(x, y); this.name = 'hothead'; this.spr = 'hothead_walk'; this.w = 14; this.h = 14; this.speed = 0.4; this.ability = 'fire'; this.cool = 60;
+      this.element = 'fire'; this.weak = ['ice']; this.resist = ['fire'];   // 火屬性：怕冰、抗火
+    }
     think() {
       if (this.state === 'flame') {
         this.vx = 0;
@@ -297,7 +300,9 @@
 
   // Sparky：每 40 幀小跳前進；玩家靠近時停下放電（周圍 40×36 判定）
   class Sparky extends Baddie {
-    constructor(x, y) { super(x, y); this.name = 'sparky'; this.spr = 'sparky_hop'; this.w = 14; this.h = 14; this.ability = 'spark'; this.hopT = 20; this.cool = 60; this.state = 'hop'; }
+    constructor(x, y) { super(x, y); this.name = 'sparky'; this.spr = 'sparky_hop'; this.w = 14; this.h = 14; this.ability = 'spark'; this.hopT = 20; this.cool = 60; this.state = 'hop';
+      this.element = 'spark'; this.resist = ['spark'];   // 電屬性：抗電
+    }
     think() {
       if (this.state === 'attack') {
         this.vx = 0;
@@ -346,7 +351,9 @@
 
   // Chilly：走路；定時朝前方噴冰（判定帶 freeze 旗標）
   class Chilly extends Baddie {
-    constructor(x, y) { super(x, y); this.name = 'chilly'; this.spr = 'chilly_walk'; this.w = 14; this.h = 16; this.speed = 0.4; this.ability = 'ice'; this.cool = 60; }
+    constructor(x, y) { super(x, y); this.name = 'chilly'; this.spr = 'chilly_walk'; this.w = 14; this.h = 16; this.speed = 0.4; this.ability = 'ice'; this.cool = 60;
+      this.element = 'ice'; this.weak = ['fire']; this.resist = ['ice'];   // 冰屬性：怕火、抗冰
+    }
     think() {
       if (this.state === 'attack') {
         this.vx = 0;
@@ -492,7 +499,9 @@
 
   // Mr. Frosty：走向玩家；遠時丟滑行冰塊，近時衝撞。暈倒後吸入給 ice
   class MrFrosty extends MiniBoss {
-    constructor(x, y) { super(x, y); this.name = 'mrfrosty'; this.spr = this.walkSpr = 'mrfrosty_walk'; this.w = 26; this.h = 28; this.hp = 12; this.maxHp = 12; this.ability = 'ice'; this.speed = 0.5; this.cool = 50; }
+    constructor(x, y) { super(x, y); this.name = 'mrfrosty'; this.spr = this.walkSpr = 'mrfrosty_walk'; this.w = 26; this.h = 28; this.hp = 12; this.maxHp = 12; this.ability = 'ice'; this.speed = 0.5; this.cool = 50;
+      this.element = 'ice'; this.weak = ['fire']; this.resist = ['ice'];   // 冰屬性：怕火、抗冰
+    }
     think() {
       if (this.state === 'throw') {
         this.vx = 0;
@@ -553,6 +562,7 @@
       this.speed = 0.55; this.cool = 50; this.score = 3500; this.stunH = 18;
       this.rot = 0; this.bounces = 0; this.hurtT = 0; this.clang = 0; this.combo = 0;
       this.state = 'walk';
+      this.element = 'metal'; this.weak = ['spark'];   // 鐵甲：怕電
     }
     onReset() {
       super.onReset();
@@ -734,6 +744,7 @@
     constructor(x, y) {
       super(x, y); this.name = 'scarfy'; this.spr = 'scarfy_fly'; this.w = 14; this.h = 14; this.grav = 0; this.solid = false;
       this.inhalable = false; this.angry = false; this.angryT = 0; this.phase = Math.random() * Math.PI * 2; this.ability = null;
+      this.element = 'ghost'; this.weak = ['spark']; this.resist = ['physical'];   // 幽靈：物理打不痛、怕電
     }
     onInhaleAttempt(p) { if (!this.angry) this.goAngry(); }
     goAngry() { this.angry = true; this.angryT = 120; this.setSpr('scarfy_angry'); KB.particles(this.cx, this.cy, '#ff4040', 6, { spread: 2 }); sfx('enemyhit'); }
@@ -841,7 +852,9 @@
 
   // Shotzo：無敵大砲，定時朝玩家方向發射砲彈（速度 2.5、不受重力）
   class Shotzo extends Baddie {
-    constructor(x, y) { super(x, y); this.name = 'shotzo'; this.spr = 'shotzo'; this.w = 16; this.h = 16; this.hp = 999; this.maxHp = 999; this.inhalable = false; this.solid = false; this.grav = 0; this.score = 0; this.cool = 60; this.ability = null; }
+    constructor(x, y) { super(x, y); this.name = 'shotzo'; this.spr = 'shotzo'; this.w = 16; this.h = 16; this.hp = 999; this.maxHp = 999; this.inhalable = false; this.solid = false; this.grav = 0; this.score = 0; this.cool = 60; this.ability = null;
+      this.element = 'metal'; this.weak = ['spark'];   // 機械：怕電（本體無敵，標籤供圖鑑 / 混合能力判定）
+    }
     hurt() { return false; }
     // 射程 170 → 120px（QA R2-1 #2：w5 城門的斜坡上爬時無處可躲）；開火間隔 w1~w2 ×1.6、w3~w5 ×1.3（砲彈速度不變）
     get range() { return 120; }
@@ -862,7 +875,9 @@
 
   // Squishy：水中上下游動，偶爾朝玩家衝；離開水就落下
   class Squishy extends Baddie {
-    constructor(x, y) { super(x, y); this.name = 'squishy'; this.spr = 'squishy_swim'; this.w = 14; this.h = 14; this.grav = 0; this.phase = Math.random() * Math.PI * 2; this.cool = 60; this.dashT = 0; this.hopT = 40; this.ability = null; }
+    constructor(x, y) { super(x, y); this.name = 'squishy'; this.spr = 'squishy_swim'; this.w = 14; this.h = 14; this.grav = 0; this.phase = Math.random() * Math.PI * 2; this.cool = 60; this.dashT = 0; this.hopT = 40; this.ability = null;
+      this.weak = ['spark'];   // 水中生物：怕電
+    }
     think() {
       const map = KB.game.map, inW = map.inWater(this.cx, this.cy);
       this.phase += 0.06;
@@ -891,7 +906,9 @@
 
   // Glunk：固定不動，每 90 幀往上吐泡泡
   class Glunk extends Baddie {
-    constructor(x, y) { super(x, y); this.name = 'glunk'; this.spr = 'glunk'; this.w = 14; this.h = 14; this.cool = 45; this.ability = null; }
+    constructor(x, y) { super(x, y); this.name = 'glunk'; this.spr = 'glunk'; this.w = 14; this.h = 14; this.cool = 45; this.ability = null;
+      this.weak = ['spark'];   // 水中生物：怕電
+    }
     think() {
       this.vx = 0;
       if (playerAlive()) this.facePlayer();
@@ -1020,6 +1037,7 @@
     constructor(x, y) {
       super(x, y); this.name = 'snowly'; this.spr = 'snowly_walk'; this.w = 14; this.h = 17;
       this.hp = 3; this.maxHp = 3; this.speed = 0.45; this.score = 350; this.ability = 'ice'; this.cool = 50;
+      this.element = 'ice'; this.weak = ['fire']; this.resist = ['ice'];   // 冰屬性：怕火、抗冰
     }
     think() {
       if (this.state === 'attack') {
