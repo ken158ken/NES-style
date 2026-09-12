@@ -2900,7 +2900,157 @@ R5-7a 的觀察項（gravity ↑+X 文案不一致、圖鑑剪影露出帽子輪
   | `dreamswitch` | 夢之開關 | 16×16 | — | `{t:'dreamswitch', x, y, a:順序}`。要**照亮著的順序**按（目前該按的那顆會發光 + 光暈）；按錯只會「鏘」一聲不會重來；全部按完才 `KB.unlockDoors`。**註冊在 `KB.ITEMS`，沒有改 `src/items.js`** |
 
   驗證：`sheet_eater2.png`、`sheet_nl.png`、`w7r2.png`（暗房裡的夢之開關與星星燈光圈）。
-（agent 在此追加）
+- [09-12 W7-4] 完成：**關卡 w7「夢幻迴廊」5 房 + 魔王房 + 秘密房**（`id:'w7', theme:'dream', music:'dream', boss:'nightmarecore'`，
+  `KB.LEVELS` 的最後一關）。房間表見下方「w7 房間一覽」。`node tools/level_check.js` → **0 error**。
+  每房截圖 `w7r0.png`~`w7r5.png`（含 `w7r0b~e` 的 6 段回憶門）已逐張 Read 確認。
+- [09-12 W7-5] 完成：**魔王「夢魘之核」nightmarecore 一階段「核心」（HP 40）**。32×32 懸浮球體（深藍球體 + 旋轉夢紋 + 中央巨眼），
+  **4 片護盾碎片沿橢圓軌道（rx 34 / ry 20）繞行**：攻擊本體會被碎片擋下（`hurt()` 把傷害轉給離攻擊來源最近的一片，播 `hardblock` 火花），
+  4 片全破（各 3 點）→ **核心裸露 240 幀**（真正扣血的窗口，橫幅「核心裸露 / 趁現在！」）→ 碎片重組。
+  招式：**夢彈扇形**（5 發、可吸入吐回）/ **召喚 2 隻食夢獸** / **漂移**（唯一有碰觸傷害的招）。
+  **登場：坐在王座上睡著**（`nightmarecore_hurt` 閉眼 + 三顆往上飄的夢泡 46 幀）→ 夢境擴散 → **第 92 幀睜眼**（閃光 + 震動）→ 浮起。
+  驗證：`boss_intro_00..06.png`、`p1_fan_00..04.png`（護盾環 + 扇形彈幕）、`p1_summon_*`、`p1_drift_*`。
+- [09-12 W7-6] 完成：**二階段「夢魘騎士」（HP 40，24×32 披風劍士）**。4 招：
+  **劍氣三連** `slash3`（高 / 中 / 低三道 `proj_nightslash`）/ **瞬移斬** `warpslash`（消失 → 出現在玩家背後 → 32×30 大斬擊）/
+  **夢境黑洞** `voidhole`（在兩人之間放黑洞，0.9px/f 拉人 + 62 幀時判定框）/
+  **幻影招** `phantom`（隨機一個「過往 6 魔王的招式」：威斯比蘋果 ×3（可吸入吐回）、洛洛洛箱（滑過來）、
+  克拉寇落雷（30 幀預警）、魅塔龍捲（貼地追擊）、迪迪迪震波（左右兩道）、暗影星雨（6 顆），每一招都有專屬橫幅）。
+  驗證：`p2_slash3_*`、`p2_warpslash_*`、`p2_voidhole_*`、`p2_phantom_*`（「幻影・克拉寇的落雷」橫幅 + 金色魔法陣）。
+- [09-12 W7-7] 完成：**三階段「終焉之翼」（HP 50，64×48 巨翼平時停在畫面上方）+ 階段轉換 + 擊敗演出**。
+  招式：**羽毛雨** `featherrain`（letterbox + worldTint + **地面一處安全區光環**，48~170 幀每 6 幀灑 2 根可吸入的羽毛）/
+  **俯衝** `dive`（拉高 → 降到玩家高度 → 3px/f 橫掃）/ **必殺「永夜」** `eternalnight`
+  （letterbox + **全畫面壓黑只留卡比 44px 光圈** + 每 76 幀從左 / 右兩道貼地衝擊波 + 正上方落下羽刃，共 300 幀）。
+  **每次出招後都會降到低空「喘息」`rest` 120~140 幀 —— 那是玩家唯一的攻擊窗**（比照克拉寇的低空盤旋）。
+  **階段轉換**：`hurt()` 打到 0 → `beginPhaseChange()`（hitstop 14 + 震動 9 + 白閃 + 48 顆碎片往外炸）→ 40 幀後魔法陣 →
+  56 幀碎片往內聚攏 → 第 96 幀 `finishPhaseChange()`（形態橫幅 + zoom + 音樂 `nightmare` → `nightmare2`）。
+  **擊敗**：hitstop 16 + **16 道放射光束 + 兩圈擴散光環 + 60 顆粒子 + 白閃**、橫幅「夢醒了 / TRUE END」、
+  `KB.session.trueEnd = true`、`music('trueend')`。
+  **永夜沒有去動 `room.dark`**（那是關卡資料本身，玩家中途死掉重載房間就還原不回來）—— 改用 `KB.VFX.push` 的視窗層自訂效果。
+  驗證：`p3_featherrain_*`（安全區光環 + 羽毛雨）、`p3_dive_*`、`p3_eternalnight_00..05.png`（全暗 + 卡比光圈 + 「永夜」橫幅）、
+  `morph12_00..06.png` / `morph23_00..06.png`（碎裂 → 重組）、`boss_death_00..05.png`（光芒四射）。
+- [09-12 W7-8] 完成：**5 首原創曲**（`src/audio.js`，格式完全照既有 `song()`；`node tools/audio_check.js` → 全部通過）。
+
+  | key | 調性 / BPM | 說明 |
+  |---|---|---|
+  | `dream` | F 利底亞 / 96 | 世界主曲。八分琶音（sine）鋪底 + 極輕的鼓，#4 的 B 自然音＝夢境的漂浮感 |
+  | `dream2` | C# 小調 / 126 | 第二首「顛倒的迴廊」：方波主旋律 + 切分貝斯，比 dream 有推進感（r1 / r2 / r3 使用）|
+  | `nightmare` | Bb 小調（含降二級 Cb）/ 176 | 魔王戰一 / 二形態：鋸齒主旋律 + 十六分連打貝斯 |
+  | `nightmare2` | Db 小調 / 198 | 三形態：`variation('nightmare', {semis:3})` + 八分驅動貝斯 + 雙倍鼓 |
+  | `trueend` | C 大調 / 92 | 真結局：寬廣溫暖的主題（p1 主旋律 + p2 對旋律 + 二分音符貝斯），`loop:true` |
+
+### w7 房間一覽
+
+| 房 | 名稱 | 尺寸 | 音樂 / 旗標 | 重點 |
+|---|---|---|---|---|
+| r0 | 記憶迴廊 | 104×12 | dream / wind | **6 道「回憶門」**（裝飾 'd' 飄浮門框標示入口），每段重現 w1~w6 的一種招牌機關：<br>① x=12~16 **星星方塊拱**（w1）② x=24~30 **炸彈迴廊**（w2，F 導火線 → B 炸開天花板密室）③ x=34~42 **水道**（w3，glunk）<br>④ x=46~53 **雲平台跳**（w4，坑底鋪 '=' 安全網）⑤ x=56~67 **守衛長廊**（w5，劍士 + 瓦豆嘟 + 食夢獸）⑥ x=70~82 **星軌傳送**（w6，warpstar）<br>終點階梯上是 ★1，(97,9) 有木箱小倉；x=15~20 是可燃夢草叢（旁邊 (21,9) 有 fire 台座）|
+| r1 | 顛倒之塔 | 32×24（垂直）| dream2 / cave | 下半段一路往上爬；**上半段是「反向」路線** —— (26,11) 的傳送星把你往**左上**送到 (4,3)，再沿單向平台往右走到門口 (11,1)。(7,19) 有 gravity 台座（Round 5 新能力）|
+| r2 | 夢境迷宮 | 80×12 | dream2 / cave / **dark** | 只看得見身邊 40px，光源是 6 個星星燈 'r' 與 **會跟著你走的 nightlight**；**4 個夢之開關要照亮著的順序按**（① (11,6) → ② (24,5) → ③ (36,6) → ④ (60,6)）才解鎖出口；中段是**鏡子瓦豆 ×2 合戰**；右側 X 硬磚密室藏 ★2（(56,9) hammer 台座砸開）；(30,9) 是秘密房的門 |
+| r3 | 六王試煉 | 56×12 | dream2 / castle | **中魔王連戰**：鐵鎚大王 (16,9) → 冰霜先生 (30,9) → 鐵甲滾球 (44,9)，`gatekeeper` (52,9) 鎖住王座的門。起點 (6,9) fire + (8,9) sword **兩座台座並排 ⇒ 踩過去就變成「炎劍」** |
+| r4 | 醒不來的王座 | 28×14 | **nightmare** | 魔王房。spawn [10,10] / bossPos [17,10] = **112px**（≥96 且 ≤200）；exit (7,10)；魔王背後畫了一道巨大門框當王座 |
+| r5 | 甜夢（秘密）| 24×12 | secret | 由 r2 (30,9) 的門進入；★3 + 1UP + 番茄 + **4 個能力台座**：(4,9) fire / (6,9) sword（→ 炎劍）、(17,9) ice / (19,9) gunner（→ 冰彈槍；ice + sword → 冰劍）|
+
+### w7 大星星 / 能力台座 / 秘密房
+
+| 項目 | 房 | 座標 | 取得方式 |
+|---|---|---|---|
+| ★ a0 | r0 記憶迴廊 | (93, 2) | 終點前 (86,7)→(89,5)→(92,3) 的三段平台階梯 |
+| ★ a1 | r2 夢境迷宮 | (69, 9) | 暗房右側 x=66~72 的硬磚密室（用 (56,9) 的 hammer 台座砸開 `X`）|
+| ★ a2 | r5 甜夢（秘密房）| (11, 3) | r2 (30,9) 的隱藏門 |
+| 能力台座 ×8 | r0 (21,9) fire / r1 (7,9→19) **gravity** / r2 (6,9) spark、(56,9) hammer / r3 (6,9) fire、(8,9) sword / r5 (4,9) fire、(6,9) sword、(17,9) ice、(19,9) **gunner** | — | **並排的兩座＝混合能力**（炎劍 / 冰劍 / 冰彈槍）；台座的 `hasEssence()` 會認得混合能力的成分，不會重複觸發 |
+| 出口鎖 | r2 夢境迷宮 | dreamswitch ×4 + locked 門 (76,9) | 4 個開關照順序按完才開 |
+| 出口鎖 | r3 六王試煉 | gatekeeper (52,9) + locked 門 (52,9) | 三隻中魔王全倒才開 |
+
+### 敵人配置（w7）
+- **新敵人**：dreameater ×5（r0 ×1 / r1 ×1 / r2 ×1 / r3 ×2）、nightlight ×3（r0 ×1 / r1 ×1 / r2 ×1）、dreamswitch ×4（r2）。
+- **Round 6 敵人混編**：meteorite ×2（r1）、starling ×2（r0 / r1）、voidling ×2（r1 / r2）、mirrordee ×2（r2 合戰）。
+- **Round 5 新能力敵人混編**：ronin(r0) / archerwaddle(r1) / gravitron(r1) / boodee(r2) / kagedee(r2) / tiktok(r3) / wizzle(r3) / drako(r3) / bolt(r3)，每種 1 隻。
+- **中魔王**：bonkers / mrfrosty / rollarmor（r3 連戰）+ mirrordee ×2（r2）。
+- **既有敵人**：waddledee / waddledoo / bladeknight / glunk / brontoburt。
+
+### 夢魘之核 三階段招式表
+
+| 形態 | HP | 招式 | 內容 / 玩家的應對 |
+|---|---|---|---|
+| ① 核心（32×32 懸浮球）| 40 | `fan` 夢彈扇形 | 5 發可吸入的夢彈（裸露時 4 發），朝玩家扇形射出；吸回來吐可以打人 |
+| | | `summon` 召喚 | 左右各生 1 隻 dreameater（本體施法時有魔法陣預警）|
+| | | `drift` 漂移 | 飄到玩家上方，**這是一階段唯一有碰觸傷害的招** |
+| | | 〔護盾〕4 片碎片 | 打本體＝打最近的碎片（各 3 點）；4 片全破 → **核心裸露 240 幀**（唯一扣血窗口）→ 重組 |
+| ② 夢魘騎士（24×32）| 40 | `slash3` 劍氣三連 | 高 / 中 / 低三道劍氣（蹲下 / 跳起各躲得掉一道）|
+| | | `warpslash` 瞬移斬 | 消失 22 幀 → 出現在玩家**背後 42px** → 第 40 幀 32×30 大斬擊（聽到 teleport 就轉身）|
+| | | `voidhole` 夢境黑洞 | 兩人之間放黑洞，0.9px/f 拉人（走路 1.3px/f 掙脫得掉）；第 62 幀中心判定框 |
+| | | `phantom` 幻影招 | 隨機一個過往魔王的招（蘋果 / 箱子 / 落雷 / 龍捲 / 震波 / 星雨），每招有專屬橫幅 |
+| | | 〔Extra〕`phantomrush` 幻影亂舞 | **只有 Extra 難度**：幻影招連放 3 個（不重複）|
+| ③ 終焉之翼（64×48）| 50 | `featherrain` 羽毛雨 | letterbox + 全畫面羽毛（可吸入），**地面有一處安全區光環**，站進去就不會被打到 |
+| | | `dive` 俯衝 | 拉高 → 降到玩家高度 → 3px/f 橫掃（跳起來躲）|
+| | | `eternalnight` 必殺「永夜」| letterbox + **全畫面壓黑只剩卡比 44px 光圈**，每 76 幀左右兩道貼地衝擊波 + 正上方落下羽刃，共 300 幀 |
+| | | `rest` 低空喘息 | **每次出招後降到低空 120~140 幀 —— 玩家唯一的攻擊窗**（比照克拉寇的低空盤旋）|
+
+- **階段轉換**：碎裂（hitstop 14 + 48 顆碎片往外炸）→ 40 幀魔法陣 → 碎片往內聚攏 → 第 96 幀重組成新形態；音樂 `nightmare` → `nightmare2`。
+- **Extra 難度**：三個形態的血量各 ×`KB.exK('bossHp')`（1.25 → 50 / 50 / 63）；**登場結束直接變成第二形態「夢魘騎士」**
+  （基底 `Boss.update` 的「Extra 開場二階段」因為我覆寫了 `get half()` 回傳 -1 而不會觸發 —— 三階段各自一條血，門檻式的二階段不適用），並解鎖 `phantomrush`。
+- **擊敗**：16 道放射光束 + 兩圈光環 + 白閃 + 橫幅「夢醒了 / TRUE END」，`KB.session.trueEnd = true`，`music('trueend')`。
+
+### 跨檔需求（world7 → 其他 agent / 總控）
+1. **ui / EndingScene（extra agent）**：`KB.session.trueEnd === true` 就是「打倒夢魘之核」的旗標（`onDeath` 設定）。
+   注意 `game.js` 第 129 行玩家走進過關門時會 `KB.audio.music('clear')` 蓋掉 `trueend`，
+   **TRUE END 版面請自己再 `KB.audio.music('trueend')` 一次**。
+   文案可用：夢魘之核是「所有人的噩夢聚成的核心」，擊敗後夢幻迴廊的門一道一道亮起、過往六個世界的剪影回到原位。
+2. **progression / 選關第 7 節點（extra agent）**：`KB.LEVELS` 已有 `id:'w7'`、`theme:'dream'`、`name:'夢幻迴廊'`、`bossName:'夢魘之核'`，
+   `KB.THEME_NAMES.dream = '夢幻迴廊'` 也加好了；存檔的 `KB.save.stars.w7` 是長度 3 的布林陣列。
+   解鎖條件若要「w1~w6 全破」請自行在 ui.js 判斷，w7 這邊沒有任何額外旗標。
+3. **audio**：新增 `dream` / `dream2` / `nightmare` / `nightmare2` / `trueend` 五首（`KB.audio.SONGS`），沒有動既有曲；
+   用到的 sfx 全部是既有的，並且一律走「沒有這個 sfx 就退回同類舊 sfx」的包裝
+   （`meteor` / `stomp` / `teleport` / `blackhole` / `thunder` / `magic_circle` / `clone_summon` / `ultimate` / `slash_big` / `hardblock` / `torch` / `bubble` / `wind`）。
+4. **items.js（沒有改）**：夢之開關 `dreamswitch` 是**在 `src/bosses_w7.js` 裡註冊到 `KB.ITEMS`** 的，
+   `src/items.js` 一行未動。它與既有的 `switchblock` 一樣走 `KB.unlockDoors`，只是多了「照順序」。
+5. **elements**：w7 的新敵人自帶元素標籤（dreameater `element:'ghost'` weak spark、nightlight `element:'fire'` weak ice）；
+   夢魘之核本體沒有屬性弱點（純靠技術），要調整請直接改 `src/bosses_w7.js`。
+6. **levels_extra.js（extra agent 的檔案，依總控指示代為補上）**：加了 w7 r0/r1/r2/r3/r5 五房的 Extra 疊加層
+   （每房 +3~4 隻強敵、+1 處尖刺、-1 份補給、+1 個隱藏 1UP；魔王房 r4 依慣例不套）。
+   混編對象刻意挑 w7 本體沒放的 Round 5 敵人（mimi / pistolo / bigbloom），避免 `level_check --extra` 的
+   「每個世界每種新能力敵人 1~2 隻」被踩過頭。`node tools/level_check.js --extra` → **0 error**。
+
+- [09-12 W7-9] 完成：**工具**。
+  `tools/level_check.js`：`require('../src/levels_w7.js')`（w7 才會被檢查）、新實體尺寸表 `W7_ENEMY`
+  （dreameater 16×16 / nightlight 14×18 / dreamswitch 16×16）、`GROUND` 加 dreameater、`FLY` 加 nightlight、
+  `GADGET` + `UNLOCKER` 加 dreamswitch、`BOSS.nightmarecore = {w:2,h:2,ground:true}`、`DECO.dream = 'cdrsmg'`、
+  `DARK_LIGHTS.dream = 'r'`、`ABILITY_FROM.fire` 補 nightlight，
+  並新增 **「夢之開關的 a 必須是 0..n-1 且不重複」** 檢查（順序錯了出口會永遠鎖死）與「Round 7 新敵人 / 新機關」統計區。
+  `tools/boss_test.py`：`ROOMS/ORDER/REAL_ROOMS/CURVE_TARGET/PHASE2_STATES` 加 nightmarecore、
+  新增 **`MULTI_PHASE`（多階段魔王）與 `__bt.toPhase(n)`** —— 這類魔王每個形態各一條血，`hurtToHalf(0.4)` 打到 40% 不會換形態，
+  改成直接呼叫魔王的 `forcePhase(n)`；另外新增 **`[phase3]` 測試**（`PHASE3_STATES` + `--phase3-frames`）。
+  `tools/playthrough.py`：新增 **「夢之開關」路線**（w7 r2 的出口被 4 顆開關鎖住）。三個關鍵修法：
+  ① **有沒按完的開關就由這個分支全權接管**（不讓中魔王分支把機器人往牆上推）；
+  ② **離目標遠的時候只在地面走、不漂浮** —— 夢境迷宮的隔牆只擋住上半部（rows 1~6），地面那一層是通的，
+     原本一路漂著飛向目標會整隻卡死在半空的牆前面（實測 57000 幀寸步難行）；
+  ③ **卡住偵測改用「有沒有更靠近目標」而不是「位置有沒有動」**（站在牆前 idle ↔ slide 會抖 1.8px，用位置判斷永遠不算卡住），
+     卡住後依序試 **↓+跳穿過腳下的單向平台** → 漂浮越過 → 攻擊打掉擋路方塊 → 往反方向繞。
+     （①②③ 缺一不可：站在 r2 第一座平台上時右邊就是隔牆，唯一的出路是「穿下去」。）
+- [09-12 W7-10] 完成：**驗收**。
+  - `node tools/level_check.js` → **0 error / 1 warning**（僅既有的 w2「拉拉拉預設出生點」提示）；
+    `node tools/level_check.js --extra` → **0 error / 1 warning**（同一則）。
+  - `node tools/audio_check.js` → **全部通過**（36 首曲子，新增的 5 首都在表內）。
+  - `tools/boss_test.py --runs 3` → **ALL PASS**（`nightmarecore idle / intro / fight 3-3 / phase2 / phase3 / mid` 全過；
+    唯一的 WARNING 是既有的 `kracko fight 2/3`，與這一輪無關）。
+    `tools/boss_test.py --boss nightmarecore --extra` → **PASS**（開場即第二形態、maxHp 40→50、`phantomrush` 有出現）。
+  - `tools/playthrough.py --level wN --ability sword --godmode` → **w1~w7 全部 cleared=True、deaths=0、missing sprites 皆空**
+    （w1 5835 / w2 6443 / w3 7706 / w4 7563 / w5 8613 / w6 6180 / **w7 8916** 幀；w7 bossDamage=100%）。
+  - `node --check src/*.js src/art/*.js` 全過。
+  - 收工前修掉兩個自己踩到的 bug：
+    ① **瞬移斬被外力打斷會永遠隱形** —— `warpslash` 期間設了 `hidden/untouchable/grav=0`，
+       改成覆寫 `setState()`，離開這個狀態時一律還原（階段轉換 / 工具直接改 state 都會經過）。
+    ② **`KB.VFX.aura` 的半徑要比本體大** —— aura 畫的是 3 圈「描邊圓環」，半徑 10~16 會直接壓在 24×32 的身上糊成一團光暈；
+       改成一 / 二形態 22、三形態 38，並把二 / 三形態的怒氣色調從 0.18~0.22 降到 0.13~0.20。
+
+### 已知問題 / 未完成（world7）
+- `boss_test --boss nightmarecore --runs 3` 的第 0 個樣本會 `playerDied=2`（3 條命用掉 2 條）才打贏 —— 三階段共 130 點血、
+  第三形態只有 `rest` 的 120 幀是攻擊窗，這是「真最終魔王」刻意留的難度。若 QA 覺得太硬，
+  最好調的三個旋鈕是：`PHASE_HP`（40/40/50）、碎片血量（3）、`rest` 幀數（120/140）。
+- `tools/boss_test.py --runs 3` 的 SUMMARY 目前帶一個 WARNING：`kracko fight 2/3`。
+  **不是這一輪造成的**（Round 6 的 world6 段落已經記過同一件事）；w7 只新增檔案 + 只動 `const.js` / `backgrounds.js` /
+  `audio.js` 的新增段落與三支工具，克拉寇的戰鬥完全不經過這些。
+- 「永夜」期間畫面全暗，HUD 仍然看得見（`KB.VFX` 的 `'v'` 視窗層只蓋 256×192 的遊戲區）——這是刻意的，
+  但如果之後 ui agent 想要連 HUD 一起壓暗，把那個效果的 `layer` 改成 `'s'` 即可。
+- `tools/build.py` 尚未執行（其他 Round 7 agent 仍在改檔）→ 請總控收尾時統一 build。未 commit。
 
 ## qa7
 （agent 在此追加）

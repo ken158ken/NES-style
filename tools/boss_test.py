@@ -89,6 +89,8 @@ EXTRA_STATES = {
     'metaknight': ['crossslash'],     # 劍氣十字
     'dedede': ['quake'],              # 巨鎚震盪波
     'shadowkirby': ['split', 'guard'],  # 影分身 4 隻（另外檢查分身數 >= 4）
+    # Round 7 world7：夢魘之核在 Extra 下跳過「核心」形態、夢魘騎士直接登場，並多一招「幻影亂舞」
+    'nightmarecore': ['phantomrush'],
 }
 
 # 瀏覽器端驅動：整個迴圈在頁面內跑（每幀 evaluate 太慢），回傳統計與事件截圖

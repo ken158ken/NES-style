@@ -1913,6 +1913,185 @@
     },
   });
 
+
+  // ======================================================================
+  // Round 7（world7）：第七世界「夢幻迴廊」與真最終魔王「夢魘之核」
+  // ======================================================================
+  // ---- dream：F 利底亞調（#4 的 B 自然音＝夢境的漂浮感）、BPM 96。八分琶音鋪底 + 極輕的鼓 ----
+  {
+    const A1 = 'A5 - - - C6 - - - B5 - - - A5 - - -';
+    SONGS.dream = {
+      bpm: 96, loop: true, order: ['A', 'B'], inst: { p1: 'sine', p2: 'p25' }, vol: { p1: 0.18, p2: 0.12, bass: 0.24 },
+      sec: {
+        A: {
+          p1: [A1,
+            'G5 - - - A5 - C6 - D6 - - - - - - -',
+            'C6 - - - E6 - D6 - C6 - - - A5 - - -',
+            'G5 - - - - - - - . . A5 B5 C6 - - -',
+            A1,
+            'C6 - - - B5 - A5 - G5 - - - E5 - G5 -',
+            'F5 - A5 - C6 - F6 - E6 - D6 - C6 - A5 -',
+            'F5 - - - - - - - . . . . . . . .'],
+          p2: [arpE('F4', 'A4', 'C5', 'A4'), arpE('G4', 'B4', 'D5', 'B4'), arpE('C5', 'E5', 'G5', 'E5'), arpE('G4', 'B4', 'D5', 'B4'),
+            arpE('F4', 'A4', 'C5', 'A4'), arpE('A4', 'C5', 'E5', 'C5'), arpE('D4', 'F4', 'A4', 'F4'), 'F4 - A4 - C5 - - - . . . . . . . .'],
+          bass: [oct('F2', 'C3'), oct('G2', 'D3'), oct('C3', 'G2'), oct('G2', 'D3'),
+            oct('F2', 'C3'), oct('A2', 'E3'), oct('D3', 'A2'), 'F2 - - - C3 - - - F2 - - - . . . .'],
+          drum: [D.soft, D.soft, D.soft, D.sparse2, D.soft, D.soft, D.soft, D.fill],
+        },
+        B: {
+          p1: ['D6 - - - C6 - B5 - A5 - - - B5 - C6 -',
+            'E6 - - - D6 - C6 - B5 - - - - - - -',
+            'A5 - C6 - E6 - A6 - G6 - E6 - D6 - C6 -',
+            'B5 - - - - - - - . . D5 E5 F5 - A5 -',
+            'D6 - - - C6 - B5 - A5 - - - C6 - D6 -',
+            'F6 - - - E6 - D6 - C6 - - - A5 - C6 -',
+            'B5 - D6 - F6 - - - E6 - C6 - A5 - G5 -',
+            'F5 - - - - - - - . . . . C5 - E5 -'],
+          p2: [arpE('D4', 'F4', 'A4', 'F4'), arpE('E4', 'G4', 'B4', 'G4'), arpE('A4', 'C5', 'E5', 'C5'), arpE('G4', 'B4', 'D5', 'B4'),
+            arpE('D4', 'F4', 'A4', 'F4'), arpE('F4', 'A4', 'C5', 'A4'), arpE('G4', 'B4', 'D5', 'B4'), 'F4 - A4 - C5 - - - . . . . . . . .'],
+          bass: [oct('D3', 'A2'), oct('E3', 'B2'), oct('A2', 'E3'), oct('G2', 'D3'),
+            oct('D3', 'A2'), oct('F2', 'C3'), oct('G2', 'D3'), 'F2 - - - C3 - - - F2 - - - . . . .'],
+          drum: [D.light, D.light, D.light, D.sparse2, D.light, D.light, D.light, D.fill],
+        },
+      },
+    };
+  }
+
+  // ---- dream2：同世界第二首「顛倒的迴廊」。C# 小調、BPM 126，切分貝斯 + 方波主旋律（比 dream 有推進感）----
+  {
+    const A1 = 'C#5 - - E5 G#5 - - - F#5 - E5 - C#5 - - -';
+    const B1 = 'G#5 - - B5 E6 - - - D#6 - - B5 G#5 - - -';
+    SONGS.dream2 = {
+      bpm: 126, loop: true, order: ['A', 'B'], inst: { p1: 'sq', p2: 'p12' }, vol: { p1: 0.16, p2: 0.11, bass: 0.29 },
+      sec: {
+        A: {
+          p1: [A1,
+            'B4 - - D#5 F#5 - - - E5 - D#5 - B4 - - -',
+            'A4 - C#5 - E5 - A5 - G#5 - - F#5 E5 - - -',
+            'F#5 - - - G#5 - - - . . C#5 D#5 E5 - F#5 -',
+            A1,
+            'B4 - - D#5 F#5 - - - A5 - G#5 - F#5 - E5 -',
+            'D#5 - F#5 - A5 - C#6 - B5 - A5 - G#5 - F#5 -',
+            'C#5 - - - - - - - . . . . G#4 - B4 -'],
+          p2: [cmp('E4', 'G#4'), cmp('D#4', 'F#4'), cmp('C#4', 'E4'), cmp('D#4', 'F#4'),
+            cmp('E4', 'G#4'), cmp('D#4', 'F#4'), cmp('F#4', 'A4'), 'C#4 - E4 - G#4 - - - . . . . . . . .'],
+          bass: [syn('C#2', 'G#2'), syn('B1', 'F#2'), syn('A1', 'E2'), syn('B1', 'F#2'),
+            syn('C#2', 'G#2'), syn('B1', 'F#2'), syn('F#2', 'C#3'), 'C#2 - - . G#2 - - . C#2 - - - . . . .'],
+          drum: [D.basic, D.basic, D.basic, D.fill, D.basic, D.basic, D.basic, D.fill],
+        },
+        B: {
+          p1: [B1,
+            'F#5 - - A5 C#6 - - - B5 - - A5 F#5 - - -',
+            'E5 - G#5 - B5 - E6 - D#6 - C#6 - B5 - G#5 -',
+            'A5 - - - G#5 - - - F#5 - - - - - . .',
+            B1,
+            'A5 - - C#6 E6 - - - D#6 - - C#6 B5 - - -',
+            'G#5 - B5 - E6 - - - D#6 - B5 - G#5 - F#5 -',
+            'C#5 - - - - - - - . . . . . . . .'],
+          p2: [cmp('G#4', 'B4'), cmp('F#4', 'A4'), cmp('E4', 'G#4'), cmp('F#4', 'A4'),
+            cmp('G#4', 'B4'), cmp('F#4', 'A4'), cmp('E4', 'G#4'), 'C#4 - E4 - G#4 - - - . . . . . . . .'],
+          bass: [syn('G#2', 'D#3'), syn('F#2', 'C#3'), syn('E2', 'B2'), syn('F#2', 'C#3'),
+            syn('G#2', 'D#3'), syn('F#2', 'C#3'), syn('E2', 'B2'), 'C#2 - - . G#2 - - . C#2 - - - . . . .'],
+          drum: [D.basic, D.basic, D.basic, D.fill, D.basic, D.basic, D.basic, D.fill],
+        },
+      },
+    };
+  }
+
+  // ---- nightmare：夢魘之核（一 / 二形態）。Bb 小調 + 降二級 Cb(=B) 的陰影感、BPM 176，鋸齒主旋律 + 十六分貝斯 ----
+  {
+    const A1 = 'Bb4 - - - Db5 - Bb4 - F5 - - - E5 - F5 -';
+    const A2 = 'Gb5 - F5 - Db5 - Bb4 - C5 - - - A4 - C5 -';
+    const B1 = 'Bb5 - - - Ab5 - Gb5 - F5 - - - Gb5 - Ab5 -';
+    const B2 = 'Db6 - - - C6 - Bb5 - A5 - - - F5 - A5 -';
+    SONGS.nightmare = {
+      bpm: 176, loop: true, order: ['A', 'B'], inst: { p1: 'saw', p2: 'p25' }, vol: { p1: 0.15, p2: 0.11, bass: 0.33 },
+      sec: {
+        A: {
+          p1: [A1, A2,
+            'B4 - - - Db5 - Gb5 - B5 - - - Bb5 - - -',
+            'A5 - - - F5 - - - C5 - - - A4 - - -',
+            A1, A2,
+            'B5 - - - Bb5 - Ab5 - Gb5 - - - F5 - Gb5 -',
+            'F5 - - - C5 - - - Bb4 - - - . . . .'],
+          p2: [stab('Db4', 'F4'), stab('Db4', 'F4'), stab('B3', 'Gb4'), stab('C4', 'F4'),
+            stab('Db4', 'F4'), stab('Db4', 'F4'), stab('B3', 'Gb4'), 'F4 - - - C4 - - - Bb3 - - - . . . .'],
+          bass: [b16('Bb1', 'Ab1'), b16('Bb1', 'Ab1'), b16('B1', 'Bb1'), b16('F2', 'E2'),
+            b16('Bb1', 'Ab1'), b16('Bb1', 'Ab1'), b16('B1', 'Bb1'), b16('F2', 'F2')],
+          drum: [D.boss, D.boss, D.boss, D.bossF, D.boss, D.boss, D.boss, D.bossF],
+        },
+        B: {
+          p1: [B1, B2,
+            'Gb5 - Bb5 - Db6 - Gb6 - F6 - - - Eb6 - Db6 -',
+            'C6 - - - A5 - - - F5 - - - - - . .',
+            B1, B2,
+            'Eb6 - - - Db6 - B5 - Bb5 - - - A5 - Bb5 -',
+            'Bb5 - - - F5 - - - Bb4 - - - . . . .'],
+          p2: [stab('Bb3', 'Db4'), stab('F4', 'A4'), stab('Gb4', 'Bb4'), stab('F4', 'A4'),
+            stab('Bb3', 'Db4'), stab('F4', 'A4'), stab('B3', 'Eb4'), 'Bb3 - - - F4 - - - Bb4 - - - . . . .'],
+          bass: [b16('Bb1', 'Ab1'), b16('F2', 'E2'), b16('Gb1', 'F1'), b16('F2', 'E2'),
+            b16('Bb1', 'Ab1'), b16('F2', 'E2'), b16('B1', 'Bb1'), b16('Bb1', 'F2')],
+          drum: [D.boss, D.bossF, D.boss, D.bossF, D.boss, D.bossF, D.boss, D.bossF],
+        },
+      },
+    };
+  }
+
+  // ---- nightmare2：第三形態「終焉之翼」（BPM +22、升 3 半音 Bb 小調→Db 小調、八分驅動貝斯 + 雙倍鼓）----
+  SONGS.nightmare2 = variation('nightmare', {
+    bpm: 198, semis: 3, gain: 1.05, vol: { p1: 0.17, p2: 0.12, bass: 0.35 },
+    bass: {
+      A: [dr8('Db2', 'Db3'), dr8('Db2', 'Ab2'), dr8('D2', 'A2'), dr8('Ab2', 'G2'),
+        dr8('Db2', 'Db3'), dr8('Db2', 'Ab2'), dr8('D2', 'A2'), dr8('Ab2', 'Ab2')],
+      B: [dr8('Db2', 'Ab2'), dr8('Ab2', 'G2'), dr8('A1', 'Ab1'), dr8('Ab2', 'G2'),
+        dr8('Db2', 'Ab2'), dr8('Ab2', 'G2'), dr8('D2', 'A2'), dr8('Db2', 'Ab2')],
+    },
+    drum: {
+      A: [D.dblH, D.tight, D.dblH, D.tightF, D.dblH, D.tight, D.dblH, D.tightF],
+      B: [D.dblH, D.dblH, D.dblH, D.tightF, D.dblH, D.dblH, D.dblH, D.tightF],
+    },
+  });
+
+  // ---- trueend：真結局。C 大調、BPM 92，寬廣溫暖的主題（p1 主旋律 + p2 對旋律 + 二分音符貝斯）----
+  {
+    const A1 = 'G4 - - - C5 - - - E5 - - - D5 - - -';
+    SONGS.trueend = {
+      bpm: 92, loop: true, gain: 0.95, order: ['A', 'B'], inst: { p1: 'p25', p2: 'sine' }, vol: { p1: 0.19, p2: 0.13, bass: 0.26 },
+      sec: {
+        A: {
+          p1: [A1,
+            'C5 - - - E5 - G5 - A5 - - - - - - -',
+            'F5 - - - E5 - D5 - C5 - - - B4 - - -',
+            'C5 - - - - - - - . . E5 F5 G5 - - -',
+            A1,
+            'E5 - - - G5 - A5 - C6 - - - B5 - A5 -',
+            'G5 - - - F5 - E5 - D5 - - - G5 - - -',
+            'C5 - - - - - - - . . . . . . . .'],
+          p2: [half('E4', 'G4'), half('G4', 'C5'), half('A4', 'G4'), half('G4', 'E4'),
+            half('E4', 'G4'), half('C5', 'E5'), half('B4', 'D5'), 'E4 - - - - - - - G4 - - - - - - -'],
+          bass: [half('C2', 'G2'), half('F2', 'C3'), half('D2', 'G2'), half('C2', 'E2'),
+            half('C2', 'G2'), half('A2', 'F2'), half('G2', 'D2'), 'C2 - - - - - - - G2 - - - - - - -'],
+          drum: [D.quiet, D.quiet, D.quiet, D.sparse, D.quiet, D.quiet, D.quiet, D.sparse2],
+        },
+        B: {
+          p1: ['E5 - - - G5 - - - C6 - - - B5 - - -',
+            'A5 - - - G5 - E5 - F5 - - - - - - -',
+            'D5 - F5 - A5 - D6 - C6 - - - B5 - A5 -',
+            'G5 - - - - - - - . . A5 B5 C6 - - -',
+            'E6 - - - D6 - C6 - B5 - - - A5 - B5 -',
+            'C6 - - - B5 - A5 - G5 - - - E5 - G5 -',
+            'F5 - A5 - C6 - - - E5 - G5 - B5 - D6 -',
+            'C6 - - - - - - - . . . . . . . .'],
+          p2: [half('C5', 'E5'), half('C5', 'A4'), half('A4', 'D5'), half('B4', 'D5'),
+            half('G4', 'B4'), half('G4', 'E4'), half('A4', 'G4'), 'E5 - - - - - - - G5 - - - - - - -'],
+          bass: [half('C2', 'G2'), half('F2', 'C3'), half('D2', 'A2'), half('G2', 'D3'),
+            half('E2', 'B2'), half('C2', 'G2'), half('F2', 'C3'), 'C2 - - - - - - - G2 - - - - - - -'],
+          drum: [D.quiet, D.quiet, D.quiet, D.sparse2, D.light, D.light, D.light, D.fill],
+        },
+      },
+    };
+  }
+
   // ---- Round 5（audio5）----
   // ultimate_loop：必殺期間的 2 小節高張力 loop（A 小調、BPM 180、十六分驅動 + 雙倍鼓）
   //   素材 A / B 各 2 小節，order 交替 8 次 → 16 小節，聽感仍是「2 小節一循環」的緊迫感

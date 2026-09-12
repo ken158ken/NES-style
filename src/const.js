@@ -111,6 +111,17 @@ window.KB = window.KB || {};
     w: '#ffffff', e: '#e4e4ff', p: '#f090d8', P: '#c060a0', s: '#8890b8', S: '#565c88', x: '#303030',
   };
 
+  // dream 夢幻迴廊（W7）：粉紫 / 金 / 深藍的夢境色系（雲朵石 + 星屑邊）
+  // m 雲石中間色、M 雲石暗、d 最深（深藍夜）、l 雲石亮、L 高光、k 輪廓、
+  // p 夢粉、P 粉暗、v 夢紫、V 紫暗、y 星屑金、Y 金暗、c 夢青光、C 青暗、
+  // b 深藍、B 更深藍、w 白、e 米白、s/S 灰紫
+  KB.PAL.dream = {
+    m: '#9c7ad0', M: '#6a4aa0', d: '#2a1c5c', l: '#c4a4ec', L: '#eedcff', k: '#150c34',
+    p: '#ff9ede', P: '#c8619e', v: '#b672f0', V: '#5a2c9c', y: '#ffd85c', Y: '#c08a1e',
+    c: '#7ce4ff', C: '#2a86c0', b: '#2c3a8c', B: '#161d54', w: '#ffffff', e: '#f4e8ff',
+    s: '#9a9ad0', S: '#5a5a92', x: '#303030',
+  };
+
   // UI
   KB.PAL.ui = {
     w: '#ffffff', k: '#202020', r: '#e83030', R: '#a01818', y: '#f8e040', Y: '#d0a000',
@@ -123,6 +134,6 @@ window.KB = window.KB || {};
   KB.ABILITY_NAMES = { fire: '火焰', sword: '劍', beam: '光束', cutter: '刀刃', spark: '電擊', stone: '石頭', ice: '冰凍', hammer: '鐵鎚' };
   KB.ABILITY_HUD = { fire: 'FIRE', sword: 'SWORD', beam: 'BEAM', cutter: 'CUTTER', spark: 'SPARK', stone: 'STONE', ice: 'ICE', hammer: 'HAMMER' };
 
-  KB.THEMES = ['green', 'castle', 'island', 'cloud', 'dedede', 'space'];
-  KB.THEME_NAMES = { green: '翠綠草原', castle: '幽靜古堡', island: '漂浮群島', cloud: '泡泡雲海', dedede: '迪迪迪城', space: '星之彼端' };
+  KB.THEMES = ['green', 'castle', 'island', 'cloud', 'dedede', 'space', 'dream'];
+  KB.THEME_NAMES = { green: '翠綠草原', castle: '幽靜古堡', island: '漂浮群島', cloud: '泡泡雲海', dedede: '迪迪迪城', space: '星之彼端', dream: '夢幻迴廊' };
 })();

@@ -240,14 +240,14 @@ def main():
         bossPhase = 0; bossMinHp = None; bossMaxHp = 0   # 魔王戰量測：整場（含死亡重來）魔王掉到的最低血量
         spikeJump = 0   # R4：看到前方尖刺後的連續跳躍幀數
         shots_taken = 0; roomFrames = 0; maxX = {}; starChase = 0; starBlock = 0; bsChase = 0; bsBlock = 0
-        essChase = 0; essBlock = 0; mbStuck = 0; mbLastX = None; swChase = 0; swBlock = 0
+        essChase = 0; essBlock = 0; mbStuck = 0; mbLastX = None; swChase = 0; swBlock = 0; swStuck = 0; swBest = 1e9; swLeft = -1
         while frames < a.maxframes:
             s = st(); g = s['game']; pl = s['player']
             if g is None or pl is None: break
             if s['scene'] != 'GameScene': print(f'scene changed to {s["scene"]} at frame {frames}'); shot('scene_' + s['scene']); break
             if g['room'] != lastRoom:
                 lastRoom = g['room']; rooms_seen.append(g['room']); roomFrames = 0; stuck = 0; last_x = None; dir_ = 1
-                essChase = 0; essBlock = 0; mbStuck = 0; mbLastX = None; swChase = 0; swBlock = 0; spikeJump = 0
+                essChase = 0; essBlock = 0; mbStuck = 0; mbLastX = None; swChase = 0; swBlock = 0; swStuck = 0; swBest = 1e9; swLeft = -1; spikeJump = 0
                 print(f'[room {g["room"]}] enter at frame {frames}, x={pl["x"]}, y={pl["y"]}, ents={g["ents"]}')
                 shot(f'room{g["room"]}_enter')
             if a.godmode:
@@ -305,20 +305,41 @@ def main():
             # 出口被鎖（夢之開關）：Round 7 的 w7 r2 —— 走到還沒按的那一顆，站定揮一下
             if locked_doors():
                 sw = dreamswitch_next()
+                # **有沒按完的開關就由這裡全權接管**（不讓下面的中魔王分支把機器人往牆上推）。
+                # 關鍵是「離很遠的時候只在地面走、不要漂」：w7 r2 的迷宮隔牆只擋住上半部（rows 1~6），
+                # 地面那一層是通的；原本一路漂著往目標飛，會整隻卡死在半空的牆前面。
                 if sw:
                     if swBlock > 0: swBlock -= 2
                     if swBlock <= 0:
                         swChase += 2
-                        if swChase > 2600: swChase = 0; swBlock = 600
+                        if swChase > 12000: swChase = 0; swBlock = 400     # 真的過不去才短暫放手（4 顆開關 + 隔牆，實測要 ~4000 幀）
                         else:
+                            # 卡住偵測：**用「有沒有更靠近目標」判斷**，不是「位置有沒有動」——
+                            # 站在牆前面走走停停（idle ↔ slide 會抖 1.8px）用位置判斷永遠不算卡住。
+                            if swLeft != sw['left']: swLeft = sw['left']; swBest = 1e9; swStuck = 0
+                            dist = abs(sw['dx']) + abs(sw['dy']) * 0.5
+                            if dist < swBest - 2: swBest = dist; swStuck = max(0, swStuck - 3)
+                            else: swStuck += 1
+                            toward = 'right' if sw['dx'] > 0 else 'left'
                             keys = {}
-                            if abs(sw['dx']) > 10: keys['right' if sw['dx'] > 0 else 'left'] = True
-                            # 開關多半在單向平台上 → 需要漂浮上去
-                            if sw['dy'] < -10 or (abs(sw['dx']) <= 10 and sw['dy'] < -4): keys['jump'] = (frames % 8) < 3
-                            if abs(sw['dx']) <= 14 and abs(sw['dy']) <= 14: keys['attack'] = (frames % 12) < 4
+                            if abs(sw['dx']) > 12: keys[toward] = True
+                            # 只有走到開關正下方（水平 60px 內）才往上漂，避免在隔牆前面越飄越高
+                            if sw['dy'] < -6 and abs(sw['dx']) < 60: keys['jump'] = (frames % 8) < 3
+                            # 開關在下面 → 「↓＋跳」穿過腳下的單向平台
+                            if sw['dy'] > 12 and pl['onGround']: keys['down'] = True; keys['jump'] = (frames % 12) < 2
+                            if abs(sw['dx']) <= 16 and abs(sw['dy']) <= 16: keys['attack'] = (frames % 12) < 4
+                            if swStuck > 25:
+                                # 卡住：A ↓+跳 穿過單向平台（站在平台上被隔牆擋住時唯一的出路）→
+                                #      B 漂浮越過 → C 打掉擋路的方塊 → D 往反方向繞
+                                ph = (swStuck - 25) % 300
+                                if ph < 50: keys = {toward: True, 'down': True, 'jump': (frames % 12) < 2}
+                                elif ph < 180: keys = {toward: True, 'jump': (frames % 10) < 3}
+                                elif ph < 230: keys = {toward: True, 'attack': (frames % 16) < 2}
+                                else: keys = {('left' if sw['dx'] > 0 else 'right'): True}
                             if falling(pl): keys['jump'] = (frames % 4) < 2
                             press(keys); step(2); frames += 2; continue
-                else: swChase = 0
+                else:
+                    swChase = 0; swStuck = 0; swBest = 1e9; swLeft = -1
             # 出口被鎖（中魔王門鎖）：先去把中魔王打倒
             if locked_doors() and not any_door_ahead():
                 # 空手時先去踩能力台座（中魔王要有武器才打得倒）

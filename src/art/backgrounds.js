@@ -344,6 +344,101 @@
   };
 
   // ============================================================================
+  // dream 夢幻迴廊（W7）：層層漸層 + 飄浮的「過往世界剪影」緩慢流動 + 閃爍星屑
+  // 剪影由遠到近三層（視差 0.03 / 0.08 / 0.16），每層自己也會慢慢往左飄；
+  // 垂直房支援：每一層的 y 都夾在畫面內（camY 很大時不會露出底色或整片飄出畫面）
+  // ============================================================================
+  const DR = {
+    a: '#241456', b: '#33206e', c: '#4a3092', d: '#1a0f42', e: '#6a48c0',
+    p: '#7a3a8c', P: '#a85ab0', y: '#ffd85c', w: '#ffffff', v: '#b672f0', g: '#3c6a8c', n: '#12082e',
+  };
+  // ---- 過往世界的剪影 ----
+  // 1 草原大樹 / 2 城堡塔 / 3 漂浮島 / 4 雲 / 5 城堡 / 6 星球（帶環）
+  function silhouette(p, kind, cx, cy, s, col, lit) {
+    const R = (x, y, w, h) => p.rect(Math.round(cx + x * s), Math.round(cy + y * s), Math.max(1, Math.round(w * s)), Math.max(1, Math.round(h * s)), col);
+    const C = (x, y, r) => p.disc(Math.round(cx + x * s), Math.round(cy + y * s), Math.max(1, Math.round(r * s)), col);
+    const E = (x, y, rx, ry) => p.ellipse(Math.round(cx + x * s), Math.round(cy + y * s), Math.max(1, Math.round(rx * s)), Math.max(1, Math.round(ry * s)), col);
+    if (kind === 1) {            // 草原大樹
+      R(-2, 0, 4, 12); C(0, -6, 9); C(-7, -2, 6); C(7, -2, 6); C(0, -12, 6);
+      if (lit) { p.disc(Math.round(cx - 5 * s), Math.round(cy - 9 * s), Math.max(1, Math.round(3 * s)), lit); }
+    } else if (kind === 2) {     // 城堡塔
+      R(-5, -14, 10, 26);
+      for (let i = -5; i <= 3; i += 4) R(i, -17, 2, 3);          // 城垛
+      for (let i = 0; i < 7; i++) R(-1 - i * 0.6, -24 + i, 2 + i * 1.2, 1);   // 錐形屋頂
+      if (lit) p.rect(Math.round(cx - 2 * s), Math.round(cy - 8 * s), Math.max(1, Math.round(3 * s)), Math.max(1, Math.round(4 * s)), lit);
+    } else if (kind === 3) {     // 漂浮島
+      E(0, 0, 14, 4);
+      for (let i = 0; i < 12; i++) R(-9 + i * 0.72, 2 + i, 18 - i * 1.45, 1);  // 倒錐
+      C(-6, -5, 4); C(4, -4, 3);                                    // 島上的樹
+      if (lit) p.rect(Math.round(cx - 13 * s), Math.round(cy - 3 * s), Math.max(1, Math.round(26 * s)), Math.max(1, Math.round(2 * s)), lit);
+    } else if (kind === 4) {     // 雲
+      p.cloud(cx, cy, Math.max(2, Math.round(7 * s)), col);
+    } else if (kind === 5) {     // 城堡（三塔）
+      R(-16, -8, 32, 20);
+      R(-18, -18, 6, 30); R(12, -18, 6, 30); R(-3, -24, 6, 36);
+      for (let i = 0; i < 5; i++) R(-2.4 - i * 0.5, -29 + i, 5 + i, 1);
+      for (let i = 0; i < 4; i++) { R(-17.4 - i * 0.5, -22 + i, 5 + i, 1); R(12.6 - i * 0.5, -22 + i, 5 + i, 1); }
+      if (lit) { p.rect(Math.round(cx - 1 * s), Math.round(cy - 18 * s), Math.max(1, Math.round(3 * s)), Math.max(1, Math.round(4 * s)), lit); p.rect(Math.round(cx - 16 * s), Math.round(cy - 12 * s), Math.max(1, Math.round(2 * s)), Math.max(1, Math.round(3 * s)), lit); }
+    } else {                     // 星球（帶環）
+      C(0, 0, 11);
+      for (let i = -17; i <= 17; i++) { const yy = Math.round(i * -0.3); p.rect(Math.round(cx + i * s), Math.round(cy + (yy + 4) * s), Math.max(1, Math.round(s)), Math.max(1, Math.round(s)), col); }
+      if (lit) p.disc(Math.round(cx - 4 * s), Math.round(cy - 4 * s), Math.max(1, Math.round(4 * s)), lit);
+    }
+  }
+  // 遠層（小、暗）：6 個剪影排滿 512 寬
+  const drFar = strip('bg_dream_far', DR, 512, 88, p => {
+    const list = [[1, 40, 74, 0.85], [2, 130, 78, 0.8], [3, 222, 52, 0.75], [4, 300, 40, 1.0], [5, 390, 80, 0.7], [6, 470, 34, 0.8]];
+    for (const [k, x, y, s] of list) silhouette(p, k, x, y, s, 'a');
+  });
+  // 近層（大、亮一點、帶窗光）
+  const drNear = strip('bg_dream_near', DR, 512, 104, p => {
+    const list = [[5, 70, 96, 1.15], [3, 200, 60, 1.2], [1, 320, 94, 1.25], [6, 430, 42, 1.1]];
+    for (const [k, x, y, s] of list) silhouette(p, k, x, y, s, 'b', 'p');
+  });
+  // 中層的雲帶（柔和的粉紫雲氣，可平鋪）
+  const drMist = strip('bg_dream_mist', DR, 256, 72, p => {
+    for (const [cx, cy, r, ch] of [[24, 40, 20, 'b'], [86, 26, 24, 'b'], [158, 46, 22, 'b'], [224, 28, 20, 'b'],
+      [30, 44, 11, 'c'], [90, 30, 13, 'c'], [162, 50, 12, 'c'], [228, 32, 10, 'c'],
+      [92, 32, 5, 'e'], [164, 52, 5, 'e']]) p.ellipse(cx, cy, r, Math.round(r * 0.5), ch);
+    for (let i = 0; i < 300; i++) { const x = (i * 79) % 256, y = (i * 47) % 72; if ((x * 5 + y * 11) % 4 === 0) p.px(x, y, '.'); }
+  });
+  const drDust = mkStars(90, 421, 256, 180);    // 星屑（閃爍）
+  const drNearStars = mkStars(30, 913, 256, 170);
+  KB.BG.dream = function (ctx, camX, camY, t) {
+    // 層層漸層：上方深藍夜 → 中段夢紫 → 下緣粉金
+    bands(ctx, 0, VH, ['#0e0a30', '#130d3a', '#181044', '#1e134e', '#261858', '#2f1d66', '#3a2374', '#472a86',
+      '#55308c', '#663792', '#7a4092', '#8e4794', '#a45196', '#b85b98', '#c4629a', '#cf6c9e']);
+    // 最遠的星屑
+    drawStars(ctx, drDust, t, camX * 0.02, '#ffffff', '#4a3a80');
+    // 雲氣（兩層平鋪，反向飄）
+    const my = Math.max(-30, Math.min(VH - 20, 16 - camY * 0.05));
+    tileX(ctx, drMist, camX * 0.05 + t * 1.4, my, 0.55);
+    const my2 = Math.max(-40, Math.min(VH - 16, 96 - camY * 0.09));
+    tileX(ctx, drMist, -camX * 0.09 - t * 2.2, my2, 0.4);
+    // 遠層剪影（往左緩慢流動）
+    const fy = Math.max(-24, Math.min(VH - 40, 58 - camY * 0.06));
+    tileX(ctx, drFar, camX * 0.03 + t * 2.0, fy, 0.75);
+    // 近層剪影（更快一點、更亮）
+    const ny = Math.max(-40, Math.min(VH - 28, 74 - camY * 0.12));
+    tileX(ctx, drNear, camX * 0.08 + t * 3.6, ny, 0.9);
+    // 近景星屑
+    drawStars(ctx, drNearStars, t, camX * 0.16, '#ffeaff', '#6a4aa0');
+    // 飄落的金色星屑（每 1.4 秒一批，斜斜地飄下去）
+    for (let i = 0; i < 10; i++) {
+      const ph = (t * 0.26 + i * 0.1) % 1;
+      const bx = ((i * 97 + Math.floor(t * 0.26 + i * 0.1) * 53) % 256);
+      const x = wrapX(bx + Math.sin(t * 1.6 + i) * 6, camX * 0.12, 256);
+      const y = Math.round(ph * (VH + 20)) - 10;
+      if (y < 0 || y > VH) continue;
+      const a = Math.sin(ph * Math.PI);
+      ctx.save(); ctx.globalAlpha = 0.35 + a * 0.55;
+      KB.rect(ctx, x, y, 1, 1, i % 3 ? '#ffd85c' : '#ffffff');
+      if (i % 4 === 0) { KB.rect(ctx, x - 1, y, 3, 1, '#ffd85c'); KB.rect(ctx, x, y - 1, 1, 3, '#ffd85c'); }
+      ctx.restore();
+    }
+  };
+
+  // ============================================================================
   // title 標題：藍天草地雲朵（動態）
   // ============================================================================
   const tStars = mkStars(14, 5, 256, 56);

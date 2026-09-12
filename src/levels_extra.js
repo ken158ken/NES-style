@@ -202,6 +202,38 @@
       add: [{ t: 'meteorite', x: 12, y: 6 }, { t: 'voidling', x: 17, y: 2 }, { t: 'oneup', x: 19, y: 1 }],
       tiles: [[18,9,'^'], [19,9,'^']],
     },
+    // ---------------- w7 夢幻迴廊（world7 agent 追加）----------------
+    // 混編對象刻意挑 w7 本體沒放的 Round 5 敵人（mimi / pistolo / bigbloom），
+    // 免得 level_check 的「每個世界每種新能力敵人 1~2 隻」在 --extra 下被踩過頭。
+    // r4 是魔王房 → 依慣例不套疊加層。
+    { lv: 'w7', r: 0,
+      add: [{ t: 'mimi', x: 18, y: 9 }, { t: 'starling', x: 44, y: 3 }, { t: 'voidling', x: 76, y: 6 },
+        { t: 'dreameater', x: 84, y: 9 }, { t: 'oneup', x: 50, y: 1 }],
+      tiles: [[62,9,'^'], [63,9,'^']],
+      rm: [[60, 9, 'tomato']],
+    },
+    { lv: 'w7', r: 1,
+      add: [{ t: 'pistolo', x: 18, y: 17 }, { t: 'starling', x: 8, y: 9 }, { t: 'meteorite', x: 24, y: 5 },
+        { t: 'oneup', x: 28, y: 1 }],
+      tiles: [[16,21,'^'], [17,21,'^']],
+      rm: [[18, 17, 'food']],
+    },
+    { lv: 'w7', r: 2,
+      add: [{ t: 'mimi', x: 20, y: 9 }, { t: 'voidling', x: 44, y: 4 }, { t: 'nightlight', x: 32, y: 5 },
+        { t: 'oneup', x: 22, y: 1 }],
+      tiles: [[34,9,'^'], [35,9,'^']],
+      rm: [[34, 6, 'food']],
+    },
+    { lv: 'w7', r: 3,
+      add: [{ t: 'bigbloom', x: 25, y: 9 }, { t: 'starling', x: 50, y: 4 }, { t: 'dreameater', x: 34, y: 9 },
+        { t: 'oneup', x: 20, y: 1 }],
+      tiles: [[12,9,'^'], [13,9,'^']],
+      rm: [[22, 9, 'food']],
+    },
+    { lv: 'w7', r: 5,
+      add: [{ t: 'bigbloom', x: 12, y: 9 }, { t: 'voidling', x: 16, y: 2 }, { t: 'oneup', x: 18, y: 1 }],
+      tiles: [[8,9,'^'], [9,9,'^']],
+    },
   ];
 
   // --------------------------------------------------------------------------
