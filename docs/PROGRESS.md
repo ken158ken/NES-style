@@ -2491,3 +2491,25 @@ R5-7a 的觀察項（gravity ↑+X 文案不一致、圖鑑剪影露出帽子輪
 3. giant 夥伴只放大繪製不放大碰撞框。
 4. 未做：新能力 / 混合能力的分世界強度、Extra 模式關卡差異、Boss Rush 對 32 能力的平衡、非無敵難度量測。
 5. 可再深：更多混合（目前 12 / 理論 C(20,2)）、夥伴可切換 2 人、W7 或 Extra 專屬關卡、能力 Lv4 覺醒招、線上排行（不可行，離線）→ 本機成績板。
+
+---
+# Round 7：覺醒與挑戰（2026-09-12 啟動）
+分工見 docs/TASKS.md Round 7。總控已預留 9 個新檔與 script 標籤（abilities_mix2 在 abilities_mix 後；awaken、records 在 progression 後、ui 前；levels_w7、levels_extra 在 levels 後；bosses_w7 在 bosses_w6 後；art 三檔在 art/world6 後）。
+
+## mix2
+（agent 在此追加）
+
+## awaken
+（agent 在此追加）
+
+## helper2
+（agent 在此追加）
+
+## extra
+（agent 在此追加）
+
+## world7
+（agent 在此追加）
+
+## qa7
+（agent 在此追加）

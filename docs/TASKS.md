@@ -146,3 +146,14 @@
 | world6 | src/levels.js（新增 w6）、src/art/world6.js、src/bosses_w6.js、src/const.js（THEMES）、src/art/backgrounds.js、src/audio.js（space 曲）、tools/level_check.js、tools/boss_test.py | W6「星之彼端」5 房 + 秘密房 + 3 大星星 + 新敵人 3 種 + 魔王「暗影卡比」（複製玩家能力）二階段 |
 | progression | src/progression.js、src/ui.js、src/menu.js、src/game.js、src/arena.js、tools/test_progression.py | 能力等級 Lv1~3（重複取得升級：傷害 / 特效加碼、HUD 星）、連擊計數與結算 Style Rank、成就 20 條與圖鑑成就頁、選關第 6 節點 |
 | qa6（第二波） | docs/QA_REPORT.md | 全系統驗收 |
+
+---
+# Round 7：覺醒與挑戰（2026-09-12）
+| agent | 擁有檔案 | 內容 |
+|---|---|---|
+| mix2 | src/abilities_mix2.js、src/art/kirby_mix2.js、tools/test_mix2.py | 再 12 組混合（總 24），各 3 招 |
+| awaken | src/awaken.js、src/art/kirby_awaken.js、src/progression.js、src/player.js（觸發鉤子）、tools/test_awaken.py | Lv4 覺醒：覺醒量表（連擊 / 命中累積）、滿了按 跳+攻 放覺醒招（20 基本能力各 1 招）、覺醒外觀光暈、HUD 量表 |
+| helper2 | src/helper.js、src/art/helper.js、tools/test_helper.py | 雙夥伴、↑+SELECT 指令（跟隨 / 待命 / 突擊）、夥伴等級隨能力 Lv、夥伴間合體技 |
+| extra | src/levels_extra.js、src/records.js、src/ui.js、src/menu.js、src/arena.js、src/game.js、src/bosses.js（Extra 變體）、src/tilemap.js（BURN_DECO cloud/dedede）、src/art/world.js、tools/test_extra.py | Extra 模式：每世界疊加層（更多敵人 / 新機關 / 尖刺）、魔王 Extra 變體（開場二階段 + 新招）、本機成績板場景（各世界 BEST / RANK / 時間、競技場、成就進度）、選關第 7 節點與解鎖條件 |
+| world7 | src/levels_w7.js、src/art/world7.js、src/bosses_w7.js、src/const.js（theme dream）、src/art/backgrounds.js、src/audio.js、tools/level_check.js、tools/boss_test.py、tools/playthrough.py | W7「夢幻迴廊」：5 房 + 秘密房（6 魔王場地重製混合體 + 夢境機關）+ 真最終魔王「夢魘之核」三階段 + 真結局 |
+| qa7（第二波） | docs/QA_REPORT.md | 全系統驗收 |
