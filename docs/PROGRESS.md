@@ -3782,3 +3782,27 @@ sfx 5 個：`tick`（倒數最後 10 秒**每秒一下**，帶通 4.2k 機械滴
 
 ## qa8
 （agent 在此追加）
+- [09-12 R8-QA8-1] 完成：成就系統驗收（40 條定義無重複 / 4 頁截圖 / 誤觸發回歸：w5 魔王打到 60% 不跳「大王退治」、debug 不自動解鎖 basic8/all20 / 換槽 backfill 靜默 0 toast）。
+  驗證：`shots/agent_qa8/ach/gallery_p1~p4.png`、`gallery_detail_locked.png`、`shots/agent_qa8/t1_ach.py`、`t2_achreg.py`。
+- [09-12 R8-QA8-2] 完成：24 招覺醒混合招驗收（24 張截圖全部 Read、`mix_*`/`awk_*` 音效名 151 個無缺、對 dedede 24 招一致 21/60=35% ≤ 40%）。
+  驗證：`shots/agent_qa8/awaken/awk_<24 招>.png`、`t4_awakenmix.py`、`t4d_boss2.py`。
+  發現：對 w1 威斯比的命中量不穩（同招重跑 0%~40%），見 QA_REPORT R8-P2。
+- [09-12 R8-QA8-3] 完成：存檔槽 / 按鍵重映射驗收（3 槽獨立、複製 / 空槽拒複製 / 刪除當前槽、舊檔遷移 + 保留舊檔 + 不重複遷移、遊玩時間、
+  改綁 jump→KeyQ 後真的按 Q 會跳且 reload 保留、手把欄位 A/B・X/Y・L1/R1・Start、rebindGamepad 生效）。
+  驗證：`shots/agent_qa8/saves/save_select_filled.png`、`save_delete_confirm.png`、`keyconfig.png`、`keyconfig_listen2.png`、`t5_saves.py`、`t5b_migrate.py`、`t6_keyconfig.py`。
+- [09-12 R8-QA8-4] 完成：12 配色驗收（12 色 sheet 全不同、實戰 gold/galaxy/black、HUD 臉同步、未解鎖 `set()` 回 false、設定頁 cycle 生效）。
+  發現：設定頁沒有畫 `KB.SKINS.drawPreview` 預覽（全專案無呼叫）→ QA_REPORT R8-P2。
+  驗證：`shots/agent_qa8/skins/sheet_12skins.png`、`game_gold|galaxy|black.png`、`t7_skins.py`。
+- [09-12 R8-QA8-5] 完成：選單整合驗收（標題 9 項 + 7 列捲動視窗 + 位置條、設定頁 7 項含卡比配色 / 按鍵設定 ›、
+  挑戰 / 說明 / 圖鑑 / 成績板 / 競技場 / 存檔槽 / 設定 全部可開可返回、0 console error）。
+  驗證：`shots/agent_qa8/menu/title_top.png`、`title_scrolled.png`、`settings.png`、`settings_skin_cycled.png`、`open_*.png`、`t8_menu.py`、`t8b_menuflow.py`。
+- [09-12 R8-QA8-6] 完成：挑戰模式驗收（選單 5 項、時間攻擊 HUD 00:05.00 + 死亡不扣命、無傷 CLEAN→失敗結算、
+  塔 1/5/10 層 + 時限層倒數 + 同 seed 同序列、每日 D 1/3 S60912、Boss Rush EXTRA / ALL 7、成績板第 9 頁挑戰、
+  塔通關不寫 cleared、setTempoMul 1.2→離開回 1.0）。驗證：`shots/agent_qa8/ch/*.png`、`t9~t11`、`t16_timed.py`。
+- [09-12 R8-QA8-7] 完成：全套測試 + playthrough + 效能。17 支測試全綠（engine 118、enemy 393、boss ALL、
+  awaken 189、challenge 93、progression 101、saves 67、skins 67、mix 245、mix2 343 …）、boss_test --extra ALL、
+  level_check(±--extra) 0 error、audio_check 全過（151 sfx / 40 music）；playthrough w1~w7 全 cleared deaths=0 missing[]，
+  tower seed1 floors[1,2,3]；效能最重情境 0.391 ms/幀（覺醒演出那輪 1.009）。
+  `enemy_test.py` 不支援 `--extra`（R8-P2-07）。
+- [09-12 R8-QA8-8] 收工：`docs/QA_REPORT.md` 追加「Round 8 驗收」章節（R8-0 結論表 / R8-1 問題列表 P0×0 P1×2 P2×7 /
+  R8-2a~f 各系統明細 / R8-3 測試 / R8-4 效能 / R8-5 重現指令 + 截圖索引）。src 全程唯讀、未 commit、未跑 build.py。

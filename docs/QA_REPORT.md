@@ -1501,3 +1501,277 @@ for a in flamebow frosthammer thundersword flameninja frostninja thundergun \
 - **W7**：`gw7_intro.png`、`gw7_p1/p2/p3.png`（三形態 11 招）、`gw7_morph.png`（兩次形態轉換）、`gw7_death.png`（擊敗 + TRUE END）、`gw7_stars.png`（3 顆大星星）、`w7/r0_a~r5_b.png`（6 房 ×2）、`w7/sw_init|wrong|0~3|unlocked.png`（夢之開關）、`w7/r3_gate_locked|open.png`
 - **全流程 / 效能**：`gflow.png`（13 個畫面）、原始幀在 `flow/`；`gperf.png`、`perf.json`
 - **數據**：`mix2.json`、`awaken.json`、`extra_rooms.json`、`w7_rooms.json`、`perf.json`
+
+---
+
+# Round 8 驗收（qa8 · 2026-09-12）
+
+> 範圍：ach2（成就 40 條 + 選單整合）、awaken-mix（24 招混合覺醒招）、saves-input（3 存檔槽 + 按鍵重映射）、
+> skins（12 配色）、audio8（52 sfx + 3 曲）、challenge（時間攻擊 / 無傷 / 挑戰塔 / 每日 / Boss Rush 變體 / 成績板挑戰頁）。
+> 所有截圖在 `shots/agent_qa8/`，**每一張都用 Read 工具實際看過**。src 全程唯讀，只寫本檔與 `shots/agent_qa8/`。
+> challenge agent 已於 997cf24 交件，本輪一併驗收。
+
+## R8-0. 結論
+
+| 系統 | 結果 | 備註 |
+|---|---|---|
+| **ach2 成就（40 條）** | **OK** | 40 條定義、id / 名稱皆不重複、hint 無空值；成就頁 4 頁 ×10 條、解鎖時間 `MM/DD HH:MM`、詳情條 `UNLOCKED / LOCKED`、頁碼 `n/4`；**誤觸發回歸全過**：w5 魔王打到 60% 不跳「大王退治」（`ach` 為空、toast 佇列 0）、`?debug=1` 不自動解鎖 `basic8` / `all20`（空存檔進標題 120 幀後 0 解鎖）；**換存檔槽 backfill 靜默**（切槽 + `backfill()` + 進關 三個時機 toast 佇列都是 0，成就照樣補上） |
+| **ach2 選單整合** | **OK** | 標題 9 項（新遊戲 / Extra / **挑戰模式** / 操作說明 / 能力圖鑑 / 成績板 / 競技場 / **存檔槽** / 設定），7 列捲動視窗 + 右側位置條 + 上下三角，捲到底 `sel=8 top=2 win=7`；設定頁 7 項（含**卡比配色** / **按鍵設定 ›**）；7 個入口（挑戰 / 說明 / 圖鑑 / 成績板 / 競技場 / 存檔槽 / 設定）**全部可開可返回**、0 console error |
+| **awaken-mix（24 招）** | **OK（1 個命中問題）** | 24 招各 1 張截圖、招名 / 英文名 / 印記 / letterbox / 兩段 worldTint 全部正確、招後回 `idle` 且量表歸 0、0 missing sprite、0 pageerror；`mix_<key>` ×24 與 `awk_<主成分>`、`awk_start` **實測真的被呼叫**（hook `KB.audio.sfx`，0 個 unknown）；**對迪迪迪 24 招一致 21/60 = 35% ≤ 40%**。**但對 W1 威斯比有 10 招是 0 傷害 → R8-P1-02** |
+| **saves-input 存檔槽** | **OK** | 3 槽完全獨立、複製（空槽來源回 `false`）、刪除當前槽會就地清空、舊 `kirbystar_save` 自動遷移到槽 1 且**保留舊檔 + 不重複遷移**、`settings` 全域共用（`KB.save.settings === globals().settings`）、遊玩時間 200 幀 → +3 秒、`fmtTime` `01:05` / `1:02:05`；存檔卡顯示通關 / 星星 / 能力 / 成就 / 時間 / END 徽章，刪除二次確認預設停在「取消」 |
+| **saves-input 按鍵重映射** | **OK** | 11 個 API 全在；改綁 `jump → KeyQ` 後**真的用 playwright 按 Q 會跳**（y 145 → 107.2）且 reload 後保留；`actionOf('KeyQ') === 'jump'`；監聽提示框、移除鍵提示（「已移除 D」）、還原預設、手把欄位（A/B・X/Y・L1/R1・Start）、`rebindGamepad('jump',3) → ['Y']` 全部正確 |
+| **skins 12 配色** | **OK（1 個缺件 + 1 個既有限制）** | 12 色預覽圖全部可辨識且互不相同；`set()` 對未解鎖 / 未知 id 回 `false` 且不改存檔（非 debug 時 `list()` 只有 `pink`）；12 條解鎖條件文字正確；實戰 gold / galaxy / black 換色正確、HUD 右下卡比臉同步、設定頁 cycle 生效（櫻花粉 → 檸檬黃）。**但設定頁沒有畫預覽 → R8-P1-01**；HUD 左下 `ui_ability_*` 仍是粉紅（既有限制 → R8-P2-03） |
+| **audio8** | **OK** | `node tools/audio_check.js` 全部通過（**151 sfx / 40 music / 4 ambient**，節流表 85 項）；24 個 `mix_*` 與 23 個 `awk_*` 名單齊全；實機 hook 確認 24 招真的會播 `mix_<key>`，**0 個 unknown sfx**；`setTempoMul` 在挑戰塔第 7 層 = **1.2**、離開挑戰後自動回 **1.0** |
+| **challenge** | **OK（3 個版面小問題）** | 選單 5 項 + 說明文字 + 各自 BEST；時間攻擊 HUD（`TIME` + `00:05.00`）、死亡不扣命（lives 9 → 9、`deaths=1`、不回選關）；無傷 HUD `NOHIT / CLEAN`、受傷即 `ChallengeResultScene`「被擊中！」；挑戰塔 10 層（同 seed 同序列、異 seed 不同、第 5 / 10 層魔王、修飾橫幅「鏡像 / 一擊必殺 / 隨機能力 / 時限」、HUD `F n/10` + `S1`）；每日（`D 1/3` + `S60912`、`dateKey 20260912`、3 層固定修飾、同日不覆蓋）；Boss Rush `EXTRA` / `ALL 7` 變體（連戰 7 名、`from:'challenge'` 時 SELECT 正確回挑戰選單）；成績板第 9 頁「挑戰」；**挑戰模式不寫 `cleared`**（實測塔第 10 層打死魔王後 `cleared` 仍為空） |
+| **全套測試** | **全綠** | 17 支 `tools/*_test.py` / `test_*.py` + `boss_test --extra` + `level_check`（含 `--extra`）+ `audio_check` **全部 exit 0**；唯一非綠是 `enemy_test.py` 不吃 `--extra` 參數（→ R8-P2-07） |
+| **playthrough** | **OK** | w1~w7 **7 個世界全部 `cleared=True` / `deaths=0` / `missing []` / `bossDamage=100%`**；`--challenge tower --seed 1 --until-floor 3` → `floors_seen=[1,2,3]`、3566 幀、deaths=0 |
+| **效能** | **OK（大量餘裕）** | 最重情境（雙夥伴 + 覺醒混合招 `hammermech` + galaxy 配色 + 10 敵人）300 幀最佳 **117.4 ms = 0.391 ms/幀**，含覺醒演出的那一輪也只有 302.7 ms = **1.01 ms/幀**，用掉 16.7 ms 預算的 6% |
+
+問題統計：**P0 × 0、P1 × 2、P2 × 7**。沒有任何一項阻擋出貨。
+
+## R8-1. 問題列表
+
+| 編號 | 等級 | 位置 | 現象 | 重現 | 截圖 / 數據 | 建議負責人 |
+|---|---|---|---|---|---|---|
+| **R8-P1-01** | P1 | `src/menu.js` `SettingsMenu.draw`（`skin` 那一列） | **設定頁「卡比配色」只有文字、沒有卡比預覽**。skins agent 專門為此做了 `KB.SKINS.drawPreview(ctx,x,y,id)`，但 `grep -rn "drawPreview" src/` 顯示**全專案 0 次呼叫**（只有 `UI.drawPreview` 是另一個東西）。玩家在設定頁把配色從「櫻花粉」切到「星河」，畫面上完全沒有任何顏色回饋，要退出設定、進遊戲才看得到自己選了什麼。Round 8 驗收項目「選單預覽跟隨」等於沒有實作。 | `new KB.SettingsMenu()` → `sel = 5`（卡比配色）→ `tap right` → 截圖，畫面只有「檸檬黃」三個字 | `shots/agent_qa8/menu/settings.png`、`settings_skin.png`、**`settings_skin_cycled.png`**（切成檸檬黃，畫面無任何黃色卡比） | **ach2 / ui-menu**：在該列右側或面板下方加一行 `KB.SKINS.drawPreview(ctx, x, y, ids[i])`（skins 已把錨點做成底部中央，一行就夠） |
+| **R8-P1-02** | P1 | `src/awaken.js`（24 招的 `bigbox()` / `ashoot()` 取景範圍） | **24 招覺醒混合招裡有 10 招對 W1 魔王威斯比是 0 傷害**，而且**任何距離都打不到**。在 w1 r3 打完開場動畫、卡比站在出生點（cx 264）、威斯比在 cx 452 的預設站位下，`thunderblade / stonehammer* / starmage / thundermech / frosthammer / thundersword / thunderdragon / timebeam / gravityblade / hammermech` 一次覺醒扣 **0 / 40 HP**；把卡比直接瞬移到威斯比旁邊（cx 438）再放，結果一樣是 0。重複 4 次取樣：`flamesword` 穩定 6、`hammermech` 穩定 **0、0、0、0**、`stonehammer` 抖動 3/14/9/3。原因是這些招的判定是「以卡比為中心的 288×208 框 + 從卡比身上生出來的投射物」，不是真正的全畫面；威斯比是**固定不動、站在比螢幕寬的房間最右側**的魔王，所以整套演出打在空氣上。**對會走過來的迪迪迪則 24 招全部剛好 21/60 = 35%**，所以只有威斯比（以及任何「站在房間邊緣不動」的魔王）會踩到。`tools/test_awaken.py` 的 `SIM_BOSS` 生在 `7*16 = 112`（就在卡比旁邊），所以 189/189 全綠也驗不出這條。 | `shots/agent_qa8/t17_whispyrep.py`：`goto game w1 r3` → 等 `boss.introducing === false` → `giveAbility(key)` + `abilityLv=4` → `AWAKEN.add(100)` → `startAwaken()` → step 900 → 讀 `boss.hp`。對照組 `t4d_boss2.py w5 5`（迪迪迪）24 招全 35% | `t4_awakenmix.json`、`t4b_range.json`、`t4d_boss2.py` 輸出、**`awaken/awk_hammermech.png`**（效果全在畫面左半，右邊的樹毫髮無傷）、`awk_stonehammer.png`、`awk_thunderdragon.png` | **awaken-mix**：把 `bigbox()` 改成以**房間 / 攝影機**為基準（或直接覆蓋整個房間寬），或在 `finale()` 追加一發真正的全房判定；另建議 `test_awaken.py` 的 SIM boss 多一個「放在房間右側 340px 外」的樣本 |
+| **R8-P2-01** | P2 | `src/arena.js`（`EXTRA` / `ALL 7` 徽章） | **同時開 Extra + 全 7 魔王時，「ALL 7」徽章的右邊框和副標「競技場」的『競』字疊在一起**（徽章右緣 ≈ x108，副標置中從 x104 開始）。只開其中一個變體時不會疊。 | `new KB.ArenaScene({extra:true, all7:true, from:'challenge'})` → step 50 | **`ch/arena_all7.png`**、`ch/_crop_all7_badge.png`（2 倍裁切） | **challenge**：兩個徽章都在時把副標往下移 8px，或把 `ALL 7` 改畫在右上角 |
+| **R8-P2-02** | P2 | `src/arena.js`（選能力畫面底部提示列） | 從挑戰選單進 Boss Rush（`from:'challenge'`）時，底部提示仍然寫 **「SELECT：返回標題」**，但實際按 SELECT 是回**挑戰選單**（行為正確、文字不對）。 | `new KB.ArenaScene({extra:true, from:'challenge'})` → 看底部；按 SELECT → `KB.scene` 變成 `ChallengeScene` | `ch/arena_extra_pick.png`、`ch/arena_all7.png`、`t11_chmisc.py` 的 `arena_back_from_challenge` | **challenge**：`from==='challenge'` 時把提示改成「SELECT：返回挑戰」 |
+| **R8-P2-03** | P2 | `src/art/items_ui.js`（`ui_ability_<key>` 44 張 24×16 圖示） | **HUD 左下、暫停能力卡、能力圖鑑清單的能力圖示永遠是粉紅卡比臉**，不跟配色走。換成「星河」在遊戲中，卡比是深紫、右下的 `ui_kirby_face` 也是深紫，唯獨左下的能力圖示還是粉紅，同一個畫面出現兩種顏色的卡比。圖鑑的大預覽框倒是有跟著換。skins agent 已在自己的 PROGRESS「跨檔需求 2」主動回報過，這裡只是確認現象存在。 | `KB.SKINS.set('galaxy')` → `goto game w1 r0 ability=sword` → 看 HUD 左下 / 按 START 看能力卡 | **`skins/game_galaxy.png`**、`skins/pause_preview_galaxy.png`、`skins/gallery_preview_galaxy.png` | **skins**（skins.js 有現成的 `faceVariant()` 作法）或**總控**決定是否要一起換 |
+| **R8-P2-04** | P2 | `src/awaken.js` `frosthammer`（冰河終焉）的 `FREEZE!` textPop | **「FREEZE!」在全畫面結冰的白底上對比不足，幾乎看不見**（淺灰字 + 白描邊畫在 `#d8f0f4` 左右的背景上）。`SMASH!`（隕炎天崩）、`QUAKE!`（山崩地裂）、`LOCK ON`（軌道終焉鎚）在各自的暗底上都清楚。 | `giveAbility('frosthammer')` + `abilityLv=4` → `startAwaken()` → 第 52 幀截圖 | **`awaken/awk_frosthammer.png`**、`awaken/_crop_frosthammer.png`（3 倍裁切，放大才讀得出 FREEZE!） | **awaken-mix**：`FREEZE!` / `GLACIER!!` 改成深藍字（或加深色外框），或把結冰白幕的 alpha 壓低 |
+| **R8-P2-05** | P2 | `src/challenge.js` `ChallengeResultScene`（失敗標題） | **「CHALLENGE FAILED」剛好佔滿 256px、左右各 0px 邊界**（C 的左緣在 x=0、D 的右緣在 x=255）。沒有被截掉，但和其他畫面的標題（都有 8~16px 邊界）不一致，看起來像是溢出。 | 無傷挑戰 → `KB.player.hurt(1,{})` → step 180 | **`ch/nohit_fail.png`**、`ch/_crop_failtitle.png`（2 倍裁切） | **challenge**：標題字級縮一階，或改成「FAILED」+ 副標 |
+| **R8-P2-06** | P2 | `src/keyconfig.js`（鍵盤欄只顯示 3 個） | **「丟棄能力」（select）預設綁了 4 個鍵（Shift / Shift(右) / L / C），但表格只畫得下 3 個**，畫面上是 `Shift｜Shi…｜L`，第 4 個 `C` 完全看不到；而且第 2 欄的 `ShiftRight` 被截成「Shi…」讀不出左右。玩家看不到 C 也能用，但「還原預設」之後會以為自己弄丟了鍵。saves-input 已在自己的 PROGRESS 列為已知限制。 | `new KB.KeyConfigScene({})` → 看「丟棄能力」那一列 | **`saves/keyconfig.png`**、`saves/keyconfig_listen2.png` | **saves-input**：預設的 `select` 收斂成 3 個鍵，或第 3 欄後面加一個「+1」小標 |
+| **R8-P2-07** | P2 | `tools/enemy_test.py` | **`enemy_test.py` 不支援 `--extra`**（`error: unrecognized arguments: --extra`，exit 2），但 `boss_test.py --extra`、`node tools/level_check.js --extra` 都支援。Round 8 的收工清單要求「engine / enemy / boss（含 --extra）」，照著跑會拿到一支紅的。不影響遊戲，但會讓「全部測試跑一遍」的腳本失敗。 | `.venv/bin/python tools/enemy_test.py --extra` | `shots/agent_qa8/tests/enemy_test_extra.log`、`tests_summary.txt` | **abilities-enemies / 總控**：加一個 `--extra`（套 `KB.applyRoomLayers` 後重跑敵人用例），或把收工清單改成「enemy_test（無 --extra）」 |
+
+### 觀察（不列入問題）
+
+- **挑戰塔裡打死魔王會解鎖一般成就**（實測塔第 10 層打死迪迪迪 → 解鎖 `hp1_boss` 絕地反擊、`nohit_boss` 完美討伐），但**不會**寫 `KB.save.cleared`。成就與通關旗標的分界是刻意的（challenge 明確說「不寫 `cleared` / `playCount` / `best`」），成就那邊沒有明說，兩邊都說得通，留給總控決定。
+- `KB.PROG.backfill()` 只補「由存檔旗標推得」的成就（通關 / 星星 / 秘密房 / Extra / 能力收集那一類），事件型的（覺醒 / 夥伴擊殺 / 連擊）不補——這是設計如此，不是 bug；我一開始餵假存檔只解出 9 條，是我的假欄位名不對。
+- `KB.SKINS` 的配色存在**全域** `settings`（`kirbystar_global`）而不是各存檔槽：槽 1 選黃金、切到槽 2 仍然是黃金。規格沒寫要跟槽走，維持現狀沒問題，但如果之後要做「每個存檔一個造型」就要搬家。
+- `awk_end` 在我 260 幀的取樣視窗內沒有被呼叫到（`awk_start` 與 `awk_<主成分>` 都有）。招式總長超過 260 幀，**不代表沒播**，只是我的視窗太短；未獨立複驗。
+- 挑戰塔「時限」層的 HUD 確認是**倒數**（`01:28.50` 往下跑）＋橫幅寫「時限」；但我用來快轉到最後 10 秒的 hack（改 `challenge.roomFrame`）沒生效，所以 `tick` 每秒一下與 `time_up` 失敗分支**是靠 `tools/test_challenge.py` 93/93 認定的，我沒有獨立複驗**。
+- `KB.CHALLENGE` 的每層計時欄位是 `roomFrame` / `base` / `limit`，不是 `time` / `left`（寫工具踩過）。`KB.input.getBindings()` 回的是 `{keyboard:{}, gamepad:{}}` 兩層，不是扁平的（也踩過一次）。
+- `KB.SAVES.info(n).stars` 只認合法的大星星 id，餵假的 `{a:1,b:1}` 會算 0（不是 bug）。
+
+## R8-2. 各系統驗收明細
+
+### R8-2a. ach2 成就（40 條）
+
+40 條 id 依序：`first_ability basic8 all20 lv3 combo10 nohit_world clear_w5 arena_clear arena_fast stars15 secret5 inhale_boss possess timestop5 mix_first helper elec_water burn10 hp1_boss ultimate mix_master mix24 awaken_first awaken10 awaken_boss lv4_any lv4_five helper_two union helper_kill20 elem_all rank_s clear_w6 clear_w7 extra_all arena6 stars21 secret7 nohit_boss ach20`
+—— **id 無重複、中文名無重複、40 條 hint 全部非空**。
+
+| 回歸項 | 做法 | 結果 |
+|---|---|---|
+| 「大王退治」誤觸發 | `goto game w5 r5` → 等開場動畫結束 → 以真實 `boss.hurt()` 路徑把 60 HP 打到 24（**扣掉 60%**）→ step 120 | `PROG` 已解鎖清單 **`[]`**、`has('clear_w5') === false`、toast + 佇列 **0** |
+| `?debug=1` 自動解鎖 | 清 localStorage → `?debug=1` 進標題 → step 120 | 已解鎖 **`[]`**（`basic8` / `all20` 都沒有）；`PROG.reset()` 後再查也是 `[]` |
+| 換存檔槽補發靜默 | 槽 1 寫 `cleared w1~w5` → 切槽 2 → 切回槽 1 → `backfill()` → 進 w1 r0 step 90 | 三個時機 toast 佇列都是 **0**，而 `clear_w5` 有被補上（槽 2 是空的 → `[]`，切回槽 1 → `['clear_w5']`） |
+| 新成就真的觸發得到 | `flamesword` Lv4 + 滿量表 → `startAwaken()` → step 400 | 一次解出 **5 條**：`first_ability` / `lv3` / `mix_first` / `awaken_first` / `lv4_any` |
+
+成就頁：`achPages === 4`、`achList.length === 40`、標題「達成 20/40」、頁碼「1/4 ~ 4/4」、每列獎盃 + 中文名 + `09/12 19:11` + `CLEAR`／鎖頭、游標列金邊、詳情條已解鎖顯示 hint + 時間、未解鎖顯示 hint + 灰字 `LOCKED`。
+截圖：`ach/gallery_p1.png` ~ `gallery_p4.png`、`gallery_detail_unlocked.png`、`gallery_detail_locked.png`。
+
+### R8-2b. ach2 選單整合
+
+- **TitleMenu**：`['new','extra','challenge','help','gallery','records','arena','saves','settings']`（空存檔所以沒有 `continue`）。
+  `win === 7`；游標移到最後一項時 `sel=8 / top=2`，右側位置條與上方閃爍三角都有畫（`menu/title_scrolled.png`）。
+- **入口開啟 / 返回**（每一項都截圖 `menu/open_<id>.png`）：
+
+| 項目 | 開啟後 | 返回 |
+|---|---|---|
+| 挑戰模式 | `ChallengeScene` | SELECT → `TitleScene` ✓ |
+| 操作說明 | TitleScene 內的說明疊層 | SELECT → 關閉 ✓ |
+| 能力圖鑑 | `TitleMenu.sub` | Z/X → 關閉 ✓ |
+| 成績板 | `RecordsScene` | SELECT → `TitleScene` ✓ |
+| 競技場 | `ArenaScene` | SELECT → `TitleScene` ✓ |
+| 存檔槽 | `SaveSelectScene` | START → `TitleScene` ✓（**淡出約 60~90 幀**，我第一次只等 50 幀誤判成卡住，不是 bug） |
+| 設定 | `TitleMenu.sub` | SELECT → 關閉 ✓ |
+
+- **SettingsMenu**：`['music','sfx','hints','scale','vfx','skin','keyconfig']`（7 項）。
+  卡比配色 `tap right` → `KB.SKINS.current()` 由 `pink` → `yellow`、畫面文字由「櫻花粉」→「檸檬黃」✓（但沒有預覽 → R8-P1-01）。
+  按鍵設定 `tap jump` → `sub` 開啟（暗底 + KeyConfigMenu，底部提示「START 返回設定」）→ `tap start` → `sub` 關閉 ✓。
+  底部提示兩行「←→ 調整　Z 進入」「SELECT 返回　F 全螢幕」都完整可讀。
+- 全程 **0 console error / 0 pageerror / 0 missing sprite**。
+
+### R8-2c. awaken-mix（24 招）
+
+24 張截圖逐張 Read，招名（中文 + 英文）、印記、letterbox、兩段 worldTint、專屬 VFX 全部正確，`awk_*.png` 檔名對應 `KB.AWAKEN.MIX_ORDER`：
+
+| 招 | 中/英名 | 對迪迪迪 | 對威斯比 | 招後狀態 |
+|---|---|---|---|---|
+| flamesword | 炎帝百斬 PYREDGE | 21/60 = 35% | 6/40 | idle / gauge 0 |
+| frostsword | 永凍劍界 CRYEDGE | 35% | 6/40 | ✓ |
+| thunderblade | 雷神一閃 VOLTIAI | 35% | **0** | ✓ |
+| flamegun | 煉獄輪舞 PYROGUN | 35% | 16/40 | ✓ |
+| frostgun | 絕零彈幕 CRYOGUN | 35% | 14/40 | ✓ |
+| thunderbow | 天雷千矢 VOLTBOW | 30% | 14/40 | ✓ |
+| flamehammer | 隕炎天崩 MAGMAUL | 35% | 16/40 | ✓ |
+| stonehammer | 大地終焉 GEOMAUL | 35% | 3~14（抖動） | ✓ |
+| shadowblade | 千影刃陣 UMBRA | 35% | 12/40 | ✓ |
+| starmage | 銀河創世 ASTRAL | 35% | **0** | ✓ |
+| frostdragon | 冰龍神咆哮 CRYWYRM | 35% | 14/40 | ✓ |
+| thundermech | 雷神兵器 VOLTMEK | 35% | **0** | ✓ |
+| flamebow | 鳳凰流星 PYREBOW | 35% | 16/40 | ✓ |
+| frosthammer | 冰河終焉 CRYMAUL | 35% | **0** | ✓ |
+| thundersword | 雷帝百斬 VOLTEDG | 35% | **0** | ✓ |
+| flameninja | 火遁・大焚天 PYRONIN | 35% | 16/40 | ✓ |
+| frostninja | 冰遁・絕零陣 CRYONIN | 35% | 9/40 | ✓ |
+| thundergun | 雷射死亡輪舞 VOLTGUN | 35% | 14/40 | ✓ |
+| stonegiant | 山崩地裂 GOLEM | 35% | 12/40 | ✓ |
+| flamedragon | 太陽龍神 PYRWYRM | 35% | 16/40 | ✓ |
+| thunderdragon | 雷雲龍神 VOLWYRM | 35% | **0** | ✓ |
+| timebeam | 時空崩壞 CHRONOS | 35% | **0** | ✓ |
+| gravityblade | 刃之黑洞 GRAVEDG | 35% | **0** | ✓ |
+| hammermech | 軌道終焉鎚 MEKMAUL | 35% | **0** | ✓ |
+
+- **≤ 40% 全部達標**（最高就是 40%：`flamegun / flamehammer / flamebow / flameninja / flamedragon` 對威斯比 16/40，因為威斯比 `weak:['fire']` 火屬 ×2，畫面上有「弱點！」字樣）。
+- 24 招招後一律 `KB.AWAKEN.active() === false`、`activeT === 0`、`gauge === 0`、`player.state === 'idle'`。
+- 音效實測（hook `KB.audio.sfx`）：24 招**全部**播了 `mix_<mixkey>` 與 `awk_start` 與 `awk_<主成分>`（例：`flamesword → awk_fire`、`frostsword → awk_ice`、`thunderblade → awk_spark`），**0 個不在 `SFX_NAMES` 裡的名字**。
+
+### R8-2d. saves-input
+
+| 項目 | 做法 | 結果 |
+|---|---|---|
+| 3 槽獨立 | 槽 1/2/3 各寫 score 111/222/333 與不同 `cleared` | 逐槽 load 回來完全正確、互不影響 |
+| 複製 | `copy(2,3)` | `true`；槽 3 的 score 變 222、槽 1 不動 |
+| 複製空槽 | `erase(1)` 後 `copy(1,2)` | **`false`**（來源空槽拒絕）✓ |
+| 刪除當前槽 | 目前在槽 3 → `erase(3)` | `isEmpty(3) === true`、`KB.save.score` 就地歸 0、`current()` 仍是 3 ✓ |
+| 舊存檔遷移 | 只放 `kirbystar_save`（cleared w1/w2、score 12345、settings music 0.4）→ reload | 槽 1 拿到 `clears 2 / score 12345`、**舊檔仍在**（`kirbystar_save` 保留）、`globals().migrated === 1` + `migratedFrom === 'kirbystar_save'`、`settings.music === 0.4` 升級成全域；再 reload 不重搬（改寫 score 999 後 reload 仍是 999）✓ |
+| 遊玩時間 | `playTime = 0` → 進 w1 r0 → step 200 | `playTime === 3`（200 幀 ≈ 3.3 秒）✓；`fmtTime(65) = 01:05`、`fmtTime(3725) = 1:02:05` |
+| 改綁真的生效 | `bindings.keyboard.jump = ['KeyQ']` + `saveBindings()` → 進遊戲用 playwright 真的按下 `q` | `player.y` 145 → **107.24**（真的跳了）；`actionOf('KeyQ') === 'jump'`；reload 後 `jump` 仍是 `['KeyQ']` ✓ |
+| 手把 | `buttonNames('jump')` / `buttonName(0)` / `rebindGamepad('jump',3)` | `['A','B']` / `'A'` / `[true, ['Y']]` ✓；表格「手把」欄顯示 ←→↑↓ / A/B / X/Y / L1/R1 / Start |
+
+截圖：`saves/save_select.png`（空槽）、`save_select_filled.png`（通關 3/7、成就 2/40、時間 1:02:05、END 徽章）、`save_submenu.png` / `save_submenu_filled.png`、`save_delete_confirm.png`（預設停「取消」）、`keyconfig.png`、`keyconfig_listen2.png`（「請按下要綁定的按鍵…」）、`keyconfig_listen.png`（X 移除 → 「已移除 D」）。
+
+### R8-2e. skins（12 配色）
+
+| id | 名稱 | 解鎖條件（`unlockCond`） | 非 debug 初始 |
+|---|---|---|---|
+| pink | 櫻花粉 | 一開始就有 | 已解鎖 |
+| yellow | 檸檬黃 | 成就「初次變身」：取得任何一種能力 | 鎖 |
+| blue | 天空藍 | 通關 翠綠草原（W1） | 鎖 |
+| green | 抹茶綠 | 成就「十連擊」 | 鎖 |
+| red | 蘋果紅 | 成就「大王退治」 | 鎖 |
+| white | 雪白 | 成就「密室探險家」：找到 5 個秘密房間 | 鎖 |
+| purple | 葡萄紫 | 成就「能力收藏家」：發現 20 種能力 | 鎖 |
+| orange | 蜜柑橘 | 成就「星星獵人」：收集 15 顆大星星 | 鎖 |
+| black | 暗影黑 | 通關 星之彼端（W6） | 鎖 |
+| gold | 黃金 | 成就「登峰造極」：把任一能力練到 Lv3 | 鎖 |
+| mint | 薄荷 | 成就「競技場霸者」：在競技場打完 5 場魔王 | 鎖 |
+| galaxy | 星河 | 通關 夢幻迴廊（W7） | 鎖 |
+
+- 非 debug + 空存檔：`list()` 只回 `['pink']`；`set('galaxy')` 回 **`false`** 且 `current()` 不變 ✓。
+- `PROG.unlock('first_ability')` 後 `unlocked('yellow') === true`、`set('yellow') === true`、`list()` 變成 `['pink','yellow']` ✓。
+- `?debug=1` 時 12 種全解鎖 ✓。
+- 12 色一次畫出來全部互相可辨識（`skins/sheet_12skins.png`）；HUD 臉 12 種都換得到。
+- 實戰 3 種（`skins/game_gold.png` / `game_galaxy.png` / `game_black.png`）：卡比本體 + 右下 `ui_kirby_face` 都換色，帽子 / 武器 / 場景不動 ✓；左下能力圖示不換（R8-P2-03）。
+
+### R8-2f. challenge
+
+| 項目 | 證據 |
+|---|---|
+| 挑戰選單 | `ch/menu.png`（5 項 + 說明條 + 各自摘要「--:--」「0/7」「今日未挑戰」）、`menu_1~4.png`、`menu_world.png`、`menu_arena.png` |
+| 時間攻擊 | `ch/time_hud.png` / `time_hud2.png`（`TIME` + `00:05.00`，300 幀 = 5.00 秒，計時正確）；死亡 → `lives` 9→**9**、`challenge.deaths` 1、仍在 `GameScene`（不回選關）✓ |
+| 無傷 | `ch/nohit_hud.png`（`NOHIT` + 綠色 `CLEAN`）；`player.hurt(1,{})` → `ChallengeResultScene`「CHALLENGE FAILED / 被擊中！」、`無傷 FAILED`（`ch/nohit_fail.png`）✓ |
+| 挑戰塔 | seed 1 的 10 層計畫（w1→w6 遞增、第 5 層克拉寇 / 第 10 層迪迪迪、每層 1~2 個修飾）；`towerPlan(1,10)` 兩次呼叫完全相同、`towerPlan(2,10)` 不同 ✓；`ch/tower_f1.png`（鏡像：卡比在右、敵人在左）、`tower_f5.png`（一擊必殺：HP 只剩 1 格 + 克拉寇）、`tower_f10.png`（隨機能力 → BLADE 居合 + 迪迪迪）、`tower_timed.png`（時限：HUD `01:28.50` 倒數） |
+| 修飾條件 | `MOD_LIST` 8 種名稱全對：疾走 / 一擊必殺 / 隨機能力 / 封印之口 / 鏡像 / 黑暗 / 倍化 / 時限 |
+| 每日 | `dateKey() === '20260912'`、`dailyPlan()` 固定 `[疾走] [鏡像,黑暗] [一擊必殺+魔王]`、`ch/daily_f1.png`（`D 1/3` + `S60912`）；寫過紀錄後 `dailyRecord()` 讀得回來、選單顯示不再是「今日未挑戰」 |
+| Boss Rush 變體 | `ARENA_OPTS` = normal / extra / all7 / extra_all7；`ch/arena_extra_pick.png`（EXTRA 徽章 + 「生命 1 連戰 6 名魔王」+「Extra 變體：魔王開場即二階段」）、`ch/arena_all7.png`（EXTRA + ALL 7 + 連戰 **7** 名）；`from:'challenge'` → SELECT 回 `ChallengeScene`，無 `from` → 回 `TitleScene` ✓ |
+| 成績板挑戰頁 | `ch/records_challenge.png`（第 **9/9** 頁「挑戰」：各世界時間攻擊 / 無傷 / 無傷最短；挑戰塔最高層 / 最佳 / 通關次數；Boss Rush 變體；每日最近 7 天，今天是黃字 `12`，我注入的 `2F` 顯示在下面） |
+| 不汙染一般進度 | 塔第 10 層打死迪迪迪後 `KB.save.cleared` 仍是 `[]` ✓ |
+| 音樂速度 | 塔第 7 層 `getTempoMul() === 1.2`；離開挑戰（回標題）自動變回 **1.0** ✓ |
+
+## R8-3. 測試與 playthrough
+
+```
+engine_test          118/118 PASS          test_awaken      189/189 PASS
+enemy_test           393/393 PASS          test_challenge    93/93  PASS
+boss_test            ALL PASS (31s)        test_charge       19/19  PASS
+boss_test --extra    ALL PASS (6s)         test_elements     96/96  PASS
+enemy_test --extra   ✗ 不支援此參數         test_extra        53/53  PASS
+level_check          0 error / 1 warn      test_forms       153/153 PASS
+level_check --extra  0 error / 1 warn      test_helper      131/131 PASS
+audio_check          全部通過（151 sfx     test_magic       119/119 PASS
+                     / 40 music / 4 amb）  test_mix         245/245 PASS
+                                           test_mix2        343/343 PASS
+                                           test_progression 101/101 PASS
+                                           test_saves        67/67  PASS
+                                           test_skins        67/67  PASS
+                                           test_weapons     105/105 PASS
+```
+
+playthrough（`--ability sword --godmode`）：
+
+| 世界 | 幀數 | 房間 | deaths | cleared | bossDamage | missing |
+|---|---|---|---|---|---|---|
+| w1 | 5835 | 0~3 | 0 | ✓ | 100% (40/40) | [] |
+| w2 | 10859 | 0~4 | 0 | ✓ | 100% (30/30) | [] |
+| w3 | 7213 | 0~4 | 0 | ✓ | 100% (40/40) | [] |
+| w4 | 6415 | 0~4 | 0 | ✓ | 100% (55/55) | [] |
+| w5 | 8623 | 0~5 | 0 | ✓ | 100% (60/60) | [] |
+| w6 | 8624 | 0~5 | 0 | ✓ | 100% (70/70) | [] |
+| w7 | 9213 | 0~4 | 0 | ✓ | 100% (50/50) | [] |
+| tower（`--challenge tower --seed 1 --until-floor 3`） | 3566 | floors [1,2,3] | 0 | ✓ | — | [] |
+
+## R8-4. 效能（`shots/agent_qa8/t12_perf.py`，每個情境 300 幀 ×3 輪取最佳，含 render）
+
+| 情境 | 3 輪 (ms) | 最佳 | ms/幀 | 實體 / 夥伴 |
+|---|---|---|---|---|
+| baseline w1 r0（粉紅・空手） | 179.6 / 114.4 / 76.1 | 76.1 | **0.254** | 45 / 0 |
+| galaxy 配色 + sword + 8 敵人 | 166.4 / 133.4 / 85.0 | 85.0 | **0.283** | 53 / 0 |
+| 雙夥伴 + galaxy 配色 + 8 敵人 | 249.3 / 193.5 / 133.9 | 133.9 | **0.446** | 55 / 2 |
+| **雙夥伴 + 覺醒混合招(hammermech) + galaxy 配色 + 10 敵人** | **302.7** / 131.2 / 117.4 | 117.4 | **0.391**（含覺醒演出那輪 **1.009**） | 51 / 2 |
+
+16.7 ms 的幀預算只用掉 **1.5% ~ 6%**，配色的重著色是懶生成 + 快取，對幀時間沒有可測影響（+0.03 ms/幀，在雜訊範圍內）。
+
+## R8-5. 重現指令總表
+
+```bash
+cd "/home/ken150ken150/桌面/我的專案/遊戲開發/卡比之星"
+PY=.venv/bin/python
+# 成就：40 條定義 / debug 不自動解鎖
+$PY shots/agent_qa8/t1_ach.py
+# 成就：w5 魔王 60% 誤觸發 + 換槽 backfill 靜默
+$PY shots/agent_qa8/t2_achreg.py
+# 成就頁 4 頁截圖
+$PY shots/agent_qa8/t3_achpage.py
+# 24 招覺醒混合招（截圖 + 對威斯比傷害）
+$PY shots/agent_qa8/t4_awakenmix.py
+# 24 招對迪迪迪（對照組，全 35%）
+$PY shots/agent_qa8/t4d_boss2.py w5 5
+# R8-P1-02 重複取樣（flamesword 6,6,6,6 / hammermech 0,0,0,0）
+$PY shots/agent_qa8/t17_whispyrep.py
+# 存檔槽 / 遷移 / 按鍵重映射
+$PY shots/agent_qa8/t5_saves.py ; $PY shots/agent_qa8/t5b_migrate.py
+$PY shots/agent_qa8/t6_keyconfig.py ; $PY shots/agent_qa8/t6b_saveui.py
+# 12 配色
+$PY shots/agent_qa8/t7_skins.py ; $PY shots/agent_qa8/t14_preview.py
+# 選單整合 / 逐項開關
+$PY shots/agent_qa8/t8_menu.py ; $PY shots/agent_qa8/t8b_menuflow.py ; $PY shots/agent_qa8/t8c_saveback.py
+# 挑戰模式
+$PY shots/agent_qa8/t9_challenge.py ; $PY shots/agent_qa8/t10_tower.py
+$PY shots/agent_qa8/t11_chmisc.py ; $PY shots/agent_qa8/t16_timed.py
+# 覺醒音效實機呼叫
+$PY shots/agent_qa8/t13_sfxcall.py
+# 跨系統（挑戰不寫 cleared / backfill 範圍）
+$PY shots/agent_qa8/t15_cross.py
+# 效能
+$PY shots/agent_qa8/t12_perf.py
+# 全套測試（log 在 shots/agent_qa8/tests/）
+bash -c 'for t in engine_test enemy_test boss_test test_awaken test_challenge test_charge test_elements \
+  test_extra test_forms test_helper test_magic test_mix test_mix2 test_progression test_saves test_skins \
+  test_weapons; do $PY tools/$t.py; done'
+$PY tools/boss_test.py --extra ; node tools/level_check.js ; node tools/level_check.js --extra ; node tools/audio_check.js
+for w in w1 w2 w3 w4 w5 w6 w7; do $PY tools/playthrough.py --level $w --ability sword --godmode; done
+$PY tools/playthrough.py --challenge tower --seed 1 --godmode --until-floor 3
+```
+
+### 截圖索引（`shots/agent_qa8/`）
+
+- **成就**：`ach/gallery_p1~p4.png`、`gallery_detail_unlocked|locked.png`、`w5_boss_60pct.png`、`slot_switch_ingame.png`
+- **覺醒混合招**：`awaken/awk_<24 個 mixkey>.png`、`awaken/_crop_frosthammer.png`
+- **存檔 / 按鍵**：`saves/save_select.png`、`save_select_filled.png`、`save_submenu(_filled).png`、`save_delete_confirm.png`、`keyconfig.png`、`keyconfig_listen.png`、`keyconfig_listen2.png`、`keyconfig_restore.png`
+- **配色**：`skins/sheet_12skins.png`、`game_pink|gold|galaxy|black.png`、`gallery_preview_galaxy.png`、`pause_preview_galaxy.png`、`arena_preview_galaxy.png`
+- **選單**：`menu/title_top.png`、`title_scrolled.png`、`settings.png`、`settings_skin.png`、`settings_skin_cycled.png`、`settings_keyconfig_sub.png`、`settings_after_back.png`、`open_<7 個入口>.png`
+- **挑戰**：`ch/menu.png`、`menu_1~4.png`、`menu_world.png`、`menu_arena.png`、`time_hud(2).png`、`nohit_hud.png`、`nohit_fail.png`、`tower_f1|f5|f10(.b).png`、`tower_timed.png`、`daily_f1.png`、`arena_extra_pick.png`、`arena_all7.png`、`records_challenge.png`、`_crop_all7_badge.png`、`_crop_failtitle.png`
+- **效能**：`perf/skin.png`、`helper2_skin.png`、`all.png`
+- **原始數據 / log**：`t4_awakenmix.json`、`t4b_range.json`、`t8b.json`、`t10.json`、`t13.json`、`tests/*.log`、`tests_summary.txt`、`playthrough_summary.txt`
