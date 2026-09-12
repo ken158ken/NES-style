@@ -220,38 +220,83 @@
   // ======================================================================
   // 能力圖鑑（Round 5：20 能力 → 縮圖列每頁 8 個、多頁；未發現的畫剪影）
   // ======================================================================
+  const ACH_PER_PAGE = 6;
   const GAL_PER_PAGE = 8;
   // 未發現的能力：名稱 / 說明 / 招式全部隱藏（連 hudName 首字都不露），只留剪影與「吸入 ??? 就能獲得」
   const UNKNOWN_CN = '？？？', UNKNOWN_EN = '???';
 
   class AbilityGallery {
-    constructor() { this.i = 0; this.t = 0; this.frame = 0; UI.clearAbilityNew(); }
+    // Round 6：tab 0 = 能力圖鑑、tab 1 = 成就（SELECT 切換）
+    constructor(tab) { this.i = 0; this.t = 0; this.frame = 0; this.tab = tab | 0; this.ap = 0; UI.clearAbilityNew(); }
+    get achList() { return (KB.PROG && KB.PROG.ACH) || []; }
+    get achPages() { return Math.max(1, Math.ceil((this.achList.length || 1) / ACH_PER_PAGE)); }
     get keys() { return UI.abilityKeys(); }
     get pages() { return Math.max(1, Math.ceil((this.keys.length || 1) / GAL_PER_PAGE)); }
     get page() { return Math.floor(this.i / GAL_PER_PAGE); }
     update() {
       this.frame++; this.t += 1 / 60;
-      const inp = KB.input, n = this.keys.length || 1;
+      const inp = KB.input;
+      // SELECT：能力圖鑑 ↔ 成就分頁
+      if (inp.pressed('select')) { this.tab = this.tab ? 0 : 1; sfx('menu'); return null; }
+      if (inp.pressed('start') || inp.pressed('jump') || inp.pressed('attack')) { sfx('menu_back'); return 'back'; }
+      if (this.tab === 1) {
+        const pg = this.achPages;
+        if (inp.pressed('right') || inp.pressed('down')) { this.ap = (this.ap + 1) % pg; sfx('menu'); }
+        if (inp.pressed('left') || inp.pressed('up')) { this.ap = (this.ap - 1 + pg) % pg; sfx('menu'); }
+        return null;
+      }
+      const n = this.keys.length || 1;
       if (inp.pressed('right')) { this.i = (this.i + 1) % n; sfx('menu'); }
       if (inp.pressed('left')) { this.i = (this.i - 1 + n) % n; sfx('menu'); }
       if (inp.pressed('down')) { this.i = Math.min(n - 1, this.i + GAL_PER_PAGE); sfx('menu'); }
       if (inp.pressed('up')) { this.i = Math.max(0, this.i - GAL_PER_PAGE); sfx('menu'); }
-      if (inp.pressed('select') || inp.pressed('start') || inp.pressed('jump') || inp.pressed('attack')) { sfx('menu_back'); return 'back'; }
       return null;
+    }
+    // 分頁標籤列（兩個分頁共用）
+    drawTabs(ctx) {
+      const on = this.tab;
+      T(ctx, '能力圖鑑', 10, 4, { color: on === 0 ? C.yellow : '#67758f', size: 16 });
+      T(ctx, '成就', 80, 4, { color: on === 1 ? C.yellow : '#67758f', size: 16 });
+      KB.rect(ctx, on === 0 ? 10 : 80, 21, on === 0 ? 60 : 32, 1, C.yellow);
+      KB.text(ctx, 'SELECT', 116, 11, { color: '#5c6884' });     // ← 提示：SELECT 切換分頁
+    }
+    // 成就分頁：每頁 7 條，未解鎖 = 灰字 + 提示
+    drawAch(ctx) {
+      const list = this.achList, got = (KB.PROG && KB.PROG.achCount) ? KB.PROG.achCount() : 0;
+      KB.rect(ctx, 0, 0, W, H, 'rgba(0,0,0,0.72)');
+      panel(ctx, 4, 4, 248, 210);
+      this.drawTabs(ctx);
+      T(ctx, '達成 ' + got + '/' + list.length, 242, 8, { color: got >= list.length && list.length ? C.yellow : '#8fa0bc', size: UI.MS_SMALL, align: 'right' });
+      KB.rect(ctx, 14, 23, 228, 1, '#405070');
+      if (!list.length) { fit(ctx, '成就系統尚未載入', 128, 100, 228, { color: C.grey, align: 'center', size: MS() }); return; }
+      // 每列 26px：上列名稱 14px（y..y+14）、下列提示 12px（y+14..y+26），剛好不互相壓到
+      const p0 = this.ap * ACH_PER_PAGE;
+      for (let k = 0; k < ACH_PER_PAGE; k++) {
+        const a = list[p0 + k]; if (!a) break;
+        const y = 27 + k * 28, ok = !!(KB.PROG && KB.PROG.has && KB.PROG.has(a.id));
+        KB.rect(ctx, 12, y - 1, 232, 26, ok ? 'rgba(44,36,80,0.7)' : 'rgba(20,26,44,0.55)');
+        if (KB.PROG && KB.PROG.drawTrophy) KB.PROG.drawTrophy(ctx, 16, y + 8, ok ? C.yellow : '#3c465c');
+        fit(ctx, a.name, 30, y, 110, { color: ok ? C.yellow : '#6c7c98', size: MS() });
+        fit(ctx, a.hint, 30, y + 14, 196, { color: ok ? '#98a8c0' : '#5c6884', size: UI.MS_SMALL });
+        if (ok) KB.text(ctx, 'CLEAR', 240, y + 2, { color: '#80e0a0', align: 'right' });
+        else sprAt(ctx, 'uifb_lock', 234, y + 1, 'tl');
+      }
+      fit(ctx, '←→ 翻頁　SELECT 能力　Z 返回', 113, 199, 202, { color: C.grey, align: 'center', size: MS() });
+      KB.text(ctx, (this.ap + 1) + '/' + this.achPages, 242, 202, { color: C.grey, align: 'right' });
     }
     draw(ctx) {
       // 版面（面板 y 4~214）：標題列 4~23 ／ 卡比預覽 + 名稱 26~60 ／ 說明 62~ ／ 招式表 ~172 ／ 縮圖列 176~196 ／ 提示 199
       // 招式最多 6 列：5 列以上改 12px 字 + 13px 行高，並讓說明降級、風味文字省略，保證不壓到縮圖列。
       const ms = MS();
+      if (this.tab === 1) { this.drawAch(ctx); return; }
       KB.rect(ctx, 0, 0, W, H, 'rgba(0,0,0,0.72)');
       panel(ctx, 4, 4, 248, 210);
       const keys = this.keys, total = Math.max(1, keys.length), key = keys[this.i] || null;
       const seen = UI.isSeen(key), info = UI.abilityInfo(key);
       // 標題列：能力圖鑑 ／ 發現進度 n/20 ／ 目前第幾個
-      T(ctx, '能力圖鑑', 10, 4, { color: C.yellow, size: 16 });
+      this.drawTabs(ctx);
       const sn = UI.seenCount();
-      T(ctx, '發現進度 ' + sn + '/' + total, 90, 8, { color: sn >= total ? C.yellow : '#8fa0bc', size: UI.MS_SMALL });
-      KB.text(ctx, (this.i + 1) + '/' + total, 242, 11, { color: C.grey, align: 'right' });
+      T(ctx, '發現 ' + sn + '/' + total, 242, 8, { color: sn >= total ? C.yellow : '#8fa0bc', size: UI.MS_SMALL, align: 'right' });
       KB.rect(ctx, 14, 23, 228, 1, '#405070');
       // 左：戴帽子的卡比（未發現 → 全黑剪影、不戴帽子）
       KB.rect(ctx, 14, 26, 52, 34, '#101828'); KB.rect(ctx, 15, 27, 50, 32, '#20304c');
@@ -268,6 +313,7 @@
       }
       T(ctx, seen ? info.name : UNKNOWN_CN, 104, 26, { color: seen ? C.yellow : '#7c8ca8', size: 16 });
       KB.text(ctx, seen ? info.en : UNKNOWN_EN, 242, 32, { color: seen ? info.color : '#5c6884', align: 'right' });
+      if (seen && key) this.drawLv(ctx, key);
       if (!seen) {
         // 未發現：說明與招式全部隱藏，只給「去哪裡拿」的提示
         T(ctx, UNKNOWN_CN, 14, 64, { color: '#8fa0bc', size: ms });
@@ -314,8 +360,25 @@
           if (!sprAt(ctx, (d && d.icon) || ('ui_ability_' + k), x + 1, 178, 'tl')) KB.rect(ctx, x + 2, 179, 22, 14, UI.abilityColor(k));
         }
       }
-      fit(ctx, '←→ 選能力　↑↓ 翻頁　Z 返回', 113, 199, 202, { color: C.grey, align: 'center', size: ms });
+      fit(ctx, '←→ 能力　↑↓ 頁　Z 返回', 113, 199, 202, { color: C.grey, align: 'center', size: ms });
       KB.text(ctx, (this.page + 1) + '/' + this.pages, 242, 202, { color: C.grey, align: 'right' });
+    }
+    // 能力等級列（Lv 星 + xp 進度條）：畫在圖示 / 英文名下方的空白列
+    drawLv(ctx, key) {
+      const PG = KB.PROG; if (!PG || !PG.level) return;
+      const lv = PG.level(key), nx = PG.xpNext(key), col = lv >= 3 ? C.yellow : lv >= 2 ? '#80e0ff' : '#98a8c0';
+      KB.text(ctx, 'Lv' + lv, 74, 47, { color: col });
+      if (PG.drawLvStars) PG.drawLvStars(ctx, 100, 48, key);
+      const bx = 122, bw = 120;
+      KB.rect(ctx, bx, 46, bw, 8, '#101828'); KB.rect(ctx, bx + 1, 47, bw - 2, 6, '#2a3450');
+      if (nx.max) {
+        KB.rect(ctx, bx + 1, 47, bw - 2, 6, '#6a5820');
+        KB.text(ctx, 'MAX  xp ' + nx.xp, bx + bw / 2, 47, { color: C.yellow, align: 'center' });
+      } else {
+        const u = Math.max(0, Math.min(1, (nx.xp - nx.from) / Math.max(1, nx.need - nx.from)));
+        KB.rect(ctx, bx + 1, 47, Math.round((bw - 2) * u), 6, '#58c8f8');
+        KB.text(ctx, nx.xp + '/' + nx.need, bx + bw / 2, 47, { color: '#fff', align: 'center', outline: '#101828' });
+      }
     }
   }
   KB.AbilityGallery = AbilityGallery;

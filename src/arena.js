@@ -266,6 +266,8 @@
           KB.save.arena.cleared = true;
           KB.saveGame && KB.saveGame();
         } catch (e) { }
+        // 成就「競技場通關 / 3 分內」（progression）
+        if (KB.PROG && KB.PROG.emit) KB.PROG.emit('arenaClear', { time: this.time });
       }
       this.t = 0; this.frame = 0; this.fade = 1; this.leaving = null;
       this.stars = UI.mkStars(40, 57, 0, 0, W, H);

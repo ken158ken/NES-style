@@ -1859,7 +1859,143 @@ R5-7a 的觀察項（gravity ↑+X 文案不一致、圖鑑剪影露出帽子輪
 （agent 在此追加）
 
 ## progression
-（agent 在此追加）
+> 檔案：`src/progression.js`（新）、`src/ui.js`、`src/menu.js`、`src/game.js`、`src/arena.js`、`tools/test_progression.py`。
+> 截圖：`shots/agent_prog/`。**player.js 一行都沒改**（giveAbility / hurt 走 monkeypatch）。
+
+### KB.PROG API 一覽（其他 agent 照這個介面呼叫；`src/progression.js`）
+> 載入順序 `player.js → game.js → progression.js → ui.js / menu.js / arena.js`；
+> 全部函式在缺 `KB.game` / `KB.VFX` / `KB.save` 時安全 no-op。
+
+| 分類 | 呼叫 | 說明 |
+|---|---|---|
+| 能力等級 | `level(key?)` | 1~3；省略 key＝玩家目前能力 |
+| | `xp(key?)` / `xpNext(key?)` | 累積取得次數 / `{lv, xp, need, from, left, max}` |
+| | `dmgMul(key?)` | 1 / 1.25 / 1.5 |
+| | `partMul(key?)` | 1 / 1.5 / 1.5（已自動包進 `KB.VFX.pn`，能力端不用管） |
+| | `holdMul(key?)` | Lv3 → 0.8（**還沒有人吃**，見下方跨檔需求 1） |
+| | `scaleDmg(dmg, key?)` | `max(dmg, round(dmg × dmgMul))`（四捨五入且不會比原本低） |
+| | `gainAbility(key)` | +1 xp、升級演出（monkeypatch 自動呼叫，一般不用自己叫） |
+| 連擊 | `combo` / `comboMax` / `comboT` / `comboPop` | 目前連擊 / 本關最大 / 剩餘幀 / 彈跳幀 |
+| | `comboColor(n?)` | <5 白 `#ffffff` / ≥5 黃 `#ffe040` / ≥10 紅 `#ff5060` |
+| | `breakCombo()` / `resetCombo()` | 受傷 BREAK（含 textPop）/ 純歸零 |
+| | `update(game)` | 每幀（game.js 已接）：連擊計時、toast、延遲橫幅 |
+| | `beginLevel(game)` | 進關卡重置（game.js `enter` 已接）；`P.run = {levelId, hurts, kills, tsKills}` |
+| 成就 | `ACH`（20 條 `{id, name, hint}`）/ `achTotal()` / `achCount()` / `achDef(id)` | |
+| | `has(id)` / `unlock(id)` | `unlock` 已解鎖時回 false、不重複跳 toast |
+| | `count(name)` / `bump(name, n)` | 跨關累計計數器（存 `KB.save.prog`） |
+| 評價 | `rankData(game)` → `{rank, pts, max, parts[4]}` / `rankOf(game)` | S≥9 / A≥6 / B≥3 / C |
+| | `bestRank(levelId)` / `saveRank(levelId, rank)` | 只升不降（C<B<A<S） |
+| 事件 | `emit(event, data)` / `on(event, fn)` | 見下方事件名單 |
+| 繪製 | `drawHUD(ctx, game)` | 連擊數字 + 成就 toast（ui.js `drawHUD` 末端已接） |
+| | `drawLvStars(ctx, x, y, key)` | 3×3 小星 ×1~3（Lv1 不畫），回傳畫出的寬度 |
+| | `drawTrophy(ctx, x, y, col)` | 8×10 獎盃（純繪圖，不佔精靈表） |
+| 存檔 | `save()` | 回傳 `KB.save` 並補齊 `abilityLv/abilityXp/achievements/rank/secrets/prog` |
+| | `reset()` | 清空全部進度（測試 / 除錯用） |
+
+### 事件名單（`KB.PROG.emit(name, data)`）
+**game.js / arena.js / monkeypatch 已經發的（其他 agent 不用重複呼叫）**
+
+| 事件 | data | 來源 |
+|---|---|---|
+| `kill` | 敵人實體（用到 `.score` / `.cx` / `.y`） | game.js 的 `_killCounted` 迴圈 |
+| `hurt` | `{amount, src}` | `KB.Player.prototype.hurt` monkeypatch |
+| `abilityGet` | `{key, lv, up}` | `KB.Player.prototype.giveAbility` monkeypatch |
+| `levelClear` | `{levelId, game}` | game.js `levelClear()` |
+| `bossDefeated` | `{boss, hp}` | game.js `onBossDefeated()` |
+| `secretRoom` | `{levelId, roomIdx}` | game.js `loadRoom()`（`room.secret`） |
+| `arenaClear` | `{time}`（幀） | arena.js `ArenaResultScene` |
+
+**請各系統自己呼叫的（沒接也不會壞，只是那幾條成就拿不到）**
+
+| 事件 | data | 對應成就 | 負責 agent |
+|---|---|---|---|
+| `mix` | `{key}` | 調合成功（`def.mix` 也會在 `abilityGet` 自動偵測，所以 mix 其實已經自動過關） | mix |
+| `helper` | `{key}` | 好夥伴（`KB.Helper.exists()` 已自動偵測，helper 不用做事） | helper |
+| `inhaleBoss` | `{boss}` | 一口吞下（giant 吸入魔王 / 中魔王時呼叫） | forms |
+| `possess` | `{enemy}` | 鬼上身（ghost 附身成功時呼叫） | forms |
+| `elemKill` | `{kind:'water_spark'}` | 導電高手（電擊在水域擊殺，累計 3） | elements |
+| `burn` | `{kind:'grass'}` | 縱火犯（燒掉草，累計 10） | elements |
+| `bigstar` | `{levelId}` | 星星獵人（不發也會在其他事件時重算 `KB.save.stars`） | levels |
+
+### 成就 20 條（`KB.save.achievements = {id: 解鎖時間}`）
+`first_ability` 初次變身／`basic8` 基本大全（8 基本能力）／`all20` 能力收藏家（發現 20 種）／`lv3` 登峰造極／
+`combo10` 十連擊／`nohit_world` 毫髮無傷／`clear_w5` 大王退治／`arena_clear` 競技場霸者／`arena_fast` 三分速攻／
+`stars15` 星星獵人／`secret5` 密室探險家／`inhale_boss` 一口吞下／`possess` 鬼上身／`timestop5` 時之支配者／
+`mix_first` 調合成功／`helper` 好夥伴／`elec_water` 導電高手／`burn10` 縱火犯／`hp1_boss` 絕地反擊／`extra_clear` 究極挑戰。
+
+### 存檔新欄位
+`KB.save.abilityXp{key:n}`、`abilityLv{key:1~3}`、`achievements{id:time}`、`rank{levelId:'S'|'A'|'B'|'C'}`、
+`secrets{levelId:{roomIdx:1}}`、`prog{tsKills, elecWaterKills, burnGrass, comboBest}`（都在 `KB.PROG.save()` 自動補齊，舊存檔相容）。
+
+### 進度
+- [09-12 R6-PROG-1] 完成：**`src/progression.js` 全套 KB.PROG**（能力等級 / 連擊 / 20 成就 / Style Rank / 事件匯流排）。
+  等級：每次 `giveAbility(key)` +1 xp，**xp 3 → Lv2、xp 8 → Lv3**；`dmgMul` 1 / 1.25 / 1.5 在 game.js 第一階段
+  `b.hurt(KB.PROG.scaleDmg(a.dmg, a.abilityKey), a)` 生效（四捨五入且保證 ≥ 原值）；粒子加成直接包在 `KB.VFX.pn` 外面
+  （畫質縮放仍先生效）。**player.js 沒動**：`giveAbility` / `hurt` 用 `KB.Player.prototype` monkeypatch（`__progPatched` 防重複）。
+  驗證：`tools/test_progression.py`（能力等級 12 項全 PASS）。
+- [09-12 R6-PROG-2] 完成：**連擊系統**。3 秒（180 幀）視窗、受傷立刻 BREAK（`VFX.textPop`「BREAK」）、
+  加分只補「×0.1×combo」那一段（base 分仍由 `Enemy.die` 給）、combo ≥10 時每擊 `game.shake = 2`。
+  HUD 右上（常駐「?」下方 y26）「COMBO xN」：2 倍字，擊殺瞬間 10 幀放大成 3 倍字；<5 白 / ≥5 黃 / ≥10 紅。
+  驗證：`shots/agent_prog/hud_combo7_lv3.png`（黃 x7 + Lv3 星）、`hud_combo12_lv2.png`（紅 x12 放大 + Lv2 星）。
+- [09-12 R6-PROG-3] 完成：**LEVEL UP 演出 + HUD Lv 星 + 圖鑑 Lv/xp 條**。
+  升級當下放 `flash` + `ring` + `sfx('max')`，「LEVEL UP!」橫幅**延後 70 幀**才放——`KB.VFX.banner` 內部會
+  `dropKind('banner')` 只留最新一條，而 `transform` 的能力名稱橫幅是在取得能力後第 2 幀才建立，
+  立刻叫 banner 會被整個蓋掉（實測只看得到「火焰 / FIRE」）。副標用英文 `hudName`（橫幅副標走 8×8 點陣字，中文在 8px 會糊）。
+  HUD：能力圖示正上方（y194）畫 1~3 顆 3×3 小星（Lv1 不畫，Lv3 金色）。
+  驗證：`shots/agent_prog/levelup_banner.png`、`gallery_lv_fire.png`（Lv2 + xp 5/8 藍條）、`gallery_lv_sword_max.png`（Lv3 MAX）。
+- [09-12 R6-PROG-4] 完成：**結算 Style Rank 印章**（ui.js `ResultScene.drawRank`）。
+  評分＝最大 combo（≥15/10/5 → 3/2/1 分）＋無傷（0 次 3 分、≤2 次 1 分）＋時間（<90/150/240 秒 → 3/2/1 分）＋大星星（3/≥1 → 2/1 分），
+  滿分 11 → S≥9 / A≥6 / B≥3 / C；存 `KB.save.rank[levelId]`（只升不降）。演出＝白閃 + 擴散圓環 + 大字 4 倍→2 倍砸下 + `sfx('ultimate')`，
+  破紀錄時前 60 幀白/評價色閃爍。**面板重排**：逐項列距 18→16、分隔線 132→129、TOTAL 138→137、BEST 154→155，空出 y165~190 給評價區
+  （左「STYLE / RANK」、中間 4 項評分細項兩欄 8×8 點陣字、右 cx220 印章）。
+  驗證：`shots/agent_prog/result_rank_s.png`（S）、`result_rank_s_stamp.png`（砸下瞬間）、`result_rank_c.png`（C）。
+- [09-12 R6-PROG-5] 完成：**成就 20 條 + toast + 圖鑑成就分頁**。
+  toast：右上 146×26 卡片（獎盃 + ACHIEVEMENT + 中文名），自右滑入、150 幀後滑出，最多同時 3 張往下堆。
+  圖鑑加分頁：標題列變成「能力圖鑑 / 成就」兩個 tab（**SELECT 切換**，提示字就畫在 tab 旁），Z / ENTER / X 才是離開；
+  成就頁每頁 6 條（20 → 4 頁，←→ 或 ↑↓ 翻頁），每列 26px＝名稱 14px + 提示 12px，未解鎖整列灰字 + 鎖頭、已解鎖金字 + CLEAR。
+  能力頁版面微調：`n/32` 序號移除、「發現 n/N」改靠右，底部提示縮成「←→ 能力　↑↓ 頁　Z 返回」（原本加了 SELECT 提示會被 fit 截成「SELEC…」）。
+  驗證：`shots/agent_prog/ach_toast.png`、`gallery_ach_p1.png` / `p2` / `p3`。
+- [09-12 R6-PROG-6] 完成：**選關第 6 節點**（ui.js）。`UI.LAYOUT.mapNodes` 加 `[238, 56]`，
+  `StageSelectScene` 的節點數＝`clamp(KB.LEVELS.length, 5, mapNodes.length)` → **沒有 w6 時完全不會多出「製作中」的第 6 點**（向下相容）。
+  加 `uifb_node_space`（紫藍）；右上角畫「星空島 + 傳送門」`drawSpaceIsle()`——注意 art 已提供 `KB.BG.map`，
+  `drawMapBg` 實際上不會被呼叫，所以星空島改在 `draw()` 裡畫在任何背景之上。
+  **修掉兩個排版 bug**：① `mapLabelLayout` 右上禁區原本寫 `[200,0,56,32]`，但「SCORE 0000000」右對齊 250 實際從 x=146 起
+  → 改成 `[144,0,112,32]`（5 個節點時剛好沒標籤排到那裡，所以一直沒被發現）；
+  ② 第 6 點可放標籤的位置最少（上是分數列、左是 W4 標籤、下是 W5），照順序排到它時一定 return null 而 fallback 去壓到分數
+  → 有第 6 點時**先排它**再排 W1~W5（5 個節點時順序與結果完全不變）。
+  實測 6 個標籤：W1 `[4,109]` W2 `[53,67]` W3 `[101,101]` W4 `[149,51]` W5 `[195,137]` W6 `[195,75]`，0 重疊 / 0 出界。
+  另：ui5 的「能力 n/20」本來就是讀 `UI.abilityKeys().length`（= `KB.ABILITY_KEYS.length`），mix 上線後自動變 32/32，不用改。
+  驗證：`shots/agent_prog/select_6nodes.png`、`select_6nodes_t.png`、`select_5nodes.png`（暫時移除 w6 的向下相容版）。
+- [09-12 R6-PROG-7] 完成：**helper / arena 接線**。game.js `GameScene.update` 末端加 `KB.Helper.tick(this)`（helper agent 指定、冪等），
+  `KB.drawHUD` 末端加 `KB.Helper.drawHUD(ctx, game)`（helper 用 `/Helper/.test(KB.drawHUD)` 偵測到後會停掉自己的過渡包裝）；
+  arena.js `ArenaResultScene` 全破時 `emit('arenaClear', {time})`。成就「好夥伴」由 `KB.PROG.update` 用 `KB.Helper.exists()` 自動偵測。
+- [09-12 R6-PROG-8] 收工驗證：`tools/test_progression.py` **65/65 PASS**（含「取得同能力 3 次 → Lv2 / dmgMul 1.25」、
+  連擊 180 幀重置與續命、受傷 BREAK（含真的走 `player.hurt`）、**20 條成就全部觸發驗證**、S/C 評價、bestRank 只升不降、
+  選關 5↔6 節點與標籤 0 重疊、圖鑑 SELECT 分頁）；`tools/engine_test.py` **118/118 PASS**；
+  `playthrough.py --level w1 --godmode` 通關 4256 幀 deaths=0 missing[]；`node --check` 於 progression / ui / menu / game / arena 全過；
+  全程 0 console error / pageerror。
+
+### 未完成 / 已知問題（progression）
+1. **Lv3 蓄力時間 ×0.8 沒有接**：`KB.PROG.holdMul(key)` 已備好，但蓄力門檻散在 abilities.js / abilities_weapons / _magic / _forms 各自的
+   `maxHold` 常數裡（`tools/test_charge.py` 還會驗「招式表寫的幀數＝真實門檻」），跨了 4 個 agent 的檔案 → 見跨檔需求 1。
+2. 連擊加分是「額外補 0.1×combo×base」，`Enemy.die` 給的 base 分沒動；`score` 為 0 的敵人（shotzo / gordo）連擊不加分。
+3. 成就 toast 只畫在遊戲 HUD 上；在結算 / 選關 / 標題畫面解鎖的成就（例如 `arena_clear`）不會跳卡片，只會直接記進存檔。
+4. `game.js onBossDefeated()` 裡原本有一行 `for (let i = 0; i < 10; i++) setTimeout(() => { }, 0);`（空的 setTimeout，完全沒有作用），
+   被換成 `emit('bossDefeated')` 那一行了。
+5. 沒有跑 `tools/build.py`（Round 6 還有 qa6 在跑，dist/ 由總控收尾時重建）；未 commit。
+
+### 跨檔需求（給總控 / 其他 agent）
+1. **abilities.js / abilities_weapons.js / abilities_magic.js / abilities_forms.js（各能力 agent）**：
+   Lv3 的「蓄力時間 ×0.8」請在讀蓄力門檻的地方乘上 `KB.PROG ? KB.PROG.holdMul(key) : 1`
+   （建議做在共用的 `startMove` / `holdT >= maxHold` 判斷處，並讓 `tools/test_charge.py` 的門檻檢查改用同一個係數，
+   或乾脆只在 Lv3 時放寬，避免招式表數字對不上）。
+2. **elements.js（elements agent）**：請在「電擊在水域打死敵人」時呼叫 `KB.PROG.emit('elemKill', {kind:'water_spark'})`，
+   在「草 / 可燃物被燒掉」時呼叫 `KB.PROG.emit('burn', {kind:'grass'})`（各累計 3 / 10 條成就）。
+3. **abilities_forms.js（forms agent）**：giant 吸入魔王 / 中魔王時 `KB.PROG.emit('inhaleBoss', {boss})`；
+   ghost 附身成功時 `KB.PROG.emit('possess', {enemy})`。
+4. **levels.js / items.js**：拿到大星星時若能呼叫 `KB.PROG.emit('bigstar', {levelId})` 會更即時（不呼叫也會在下次任何事件時重算）。
+5. **docs/SPEC.md**：存檔格式那一節請補上 `abilityXp / abilityLv / achievements / rank / secrets / prog` 六個新欄位。
+
 
 ## qa6
 （agent 在此追加）

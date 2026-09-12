@@ -31,6 +31,7 @@
     }
     enter() {
       KB.game = this; KB.session = KB.session || {};
+      if (KB.PROG && KB.PROG.beginLevel) KB.PROG.beginLevel(this);   // 連擊 / 本關統計重置（progression）
       const o = this.opts;
       this.loadRoom(o.room || 0, o.x, o.y, true);
       if (o.ability && KB.ABILITIES[o.ability]) { this.player.ability = o.ability; this.player.abilityData = {}; const ad = KB.ABILITIES[o.ability]; try { if (ad.onGet) ad.onGet(this.player); } catch (e) { } }
@@ -42,6 +43,8 @@
     // ---------- 房間 ----------
     loadRoom(idx, sx, sy, first) {
       const room = this.level.rooms[idx]; this.room = room; this.roomIdx = idx;
+      // 成就「找到 5 秘密房」：秘密房間第一次進入時記一筆（progression）
+      if (room && room.secret && KB.PROG && KB.PROG.emit) KB.PROG.emit('secretRoom', { levelId: this.levelId, roomIdx: idx });
       this.map = new KB.TileMap(room.map, room.deco);
       this.theme = room.theme || this.level.theme;
       const keep = this.player;
@@ -116,6 +119,7 @@
       this.clearT = 0; KB.audio.music('clear'); KB.audio.sfx('clear');
       this.player.startDance();
       KB.save.cleared[this.levelId] = true; KB.save.score = Math.max(KB.save.score || 0, this.score); KB.saveGame();
+      if (KB.PROG && KB.PROG.emit) KB.PROG.emit('levelClear', { levelId: this.levelId, game: this });
     }
     // 結算後的去向（KB.ResultScene 結束時呼叫；沒有結算畫面時 clearT 直接呼叫）
     gotoNext() {
@@ -128,7 +132,7 @@
     onBossDefeated() {
       // 魔王死亡：星星噴發、跳舞、下一關
       this.shake = 10; this.freezeT = 20;
-      for (let i = 0; i < 10; i++) setTimeout(() => { }, 0);
+      if (KB.PROG && KB.PROG.emit) KB.PROG.emit('bossDefeated', { boss: this.boss, hp: this.player ? this.player.hp : 0 });
       const bx = this.boss ? this.boss.cx : this.player.cx, by = this.boss ? this.boss.cy : this.player.cy;
       for (let i = 0; i < 12; i++) KB.spawn(new KB.ITEMS.pointstar(bx - 4, by - 4, { pop: true }));
       KB.particles(bx, by, ['#fff', '#ffe040', '#ff8080'], 30, { spread: 4, life: 50 });
@@ -200,7 +204,7 @@
       if (this.timeStopT > 0) this.timeStopT--; if (this.slowMoT > 0) this.slowMoT--;
       this.collisions();
       // 擊敗數（結算用）：每個敵人只計一次
-      for (const e of this.entities) if (e.dead && e.type === 'enemy' && !e._killCounted) { e._killCounted = true; this.kills++; }
+      for (const e of this.entities) if (e.dead && e.type === 'enemy' && !e._killCounted) { e._killCounted = true; this.kills++; if (KB.PROG && KB.PROG.emit) KB.PROG.emit('kill', e); }
       // 移除死亡實體
       this.entities = this.entities.filter(e => !e.dead || e === p);
       this.map.update();
@@ -209,6 +213,8 @@
       for (const tt of this.toasts) tt.t--; this.toasts = this.toasts.filter(tt => tt.t > 0);
       if (this.abilityFlash > 0) this.abilityFlash--;
       if (KB.VFX && KB.VFX.update) KB.VFX.update(this);
+      if (KB.Helper && KB.Helper.tick) KB.Helper.tick(this);   // AI 夥伴每幀維護（helper agent 指定的鉤子，冪等）
+      if (KB.PROG && KB.PROG.update) KB.PROG.update(this);     // 連擊計時 / 成就 toast
       if (this.shake > 0) this.shake--;
       this.updateCamera();
     }
@@ -250,7 +256,8 @@
               if (a.type === 'hitbox') { if (!a.canHit(b)) continue; }
               else { if (a.hitSet.has(b.id)) continue; }
               if (b.type === 'boss' && b.introducing) continue;
-              const ok = b.hurt(a.dmg, a);
+              // 能力等級加成（KB.PROG.dmgMul：Lv1 ×1 / Lv2 ×1.25 / Lv3 ×1.5，四捨五入且不會比原本低）
+              const ok = b.hurt(KB.PROG && KB.PROG.scaleDmg ? KB.PROG.scaleDmg(a.dmg, a.abilityKey) : a.dmg, a);
               if (ok !== false) {
                 if (a.type === 'hitbox') a.markHit(b); else { a.hitSet.add(b.id); if (!a.pierce) { a.dead = true; KB.fx(a.fxHit || 'fx_hit', a.cx, a.cy + 6); } }
                 if (b.type !== 'boss' && a.knock && b.solid) { b.vx = (b.cx < a.cx ? -1 : 1) * a.knock; b.vy = Math.min(b.vy, -1); }

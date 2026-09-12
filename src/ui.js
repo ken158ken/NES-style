@@ -14,7 +14,8 @@
     // nameW：能力名可用寬度（nameX 32 → 血條 hpX 84 之間留 2px），中文超過 3 字自動降 12px / 截斷
     hud: { iconX: 4, iconY: 200, nameX: 30, nameW: 53, rowA: 197, rowB: 207, hpX: 84, hpY: 197, hpGap: 9, right: 251, faceX: 217, faceY: 206, livesY: 210 },
     bossBar: { cx: 111, y: 208, w: 90, h: 10 },     // 置中於 HP 列正下方；ui_boss_bar 90×10（內框 2px）
-    mapNodes: [[30, 142], [80, 100], [128, 134], [176, 84], [226, 118]],
+    // Round 6：第 6 點（W6 星之彼端，右上角）；KB.LEVELS 沒有 w6 時 StageSelectScene 會自動只取前 5 點
+    mapNodes: [[30, 142], [80, 100], [128, 134], [176, 84], [226, 118], [238, 56]],
   };
   const C = { navy: '#101828', panel: '#182038', border: '#f0f0f8', yellow: '#ffe040', pink: '#ffb0d0', grey: '#98a8c0', dark: '#202838', cyan: '#80e0ff' };
   const pad7 = n => String(Math.max(0, Math.floor(n || 0))).padStart(7, '0');
@@ -123,6 +124,7 @@
   const NODE_COL = {
     green: ['#58d048', '#289028', '#98f070'], castle: ['#9098b0', '#585878', '#c8ccd8'], island: ['#f0d880', '#c09848', '#fff4c0'],
     cloud: ['#a0c8f8', '#6888d8', '#e8f0ff'], dedede: ['#d84848', '#902020', '#f09090'], locked: ['#606870', '#383c48', '#808890'],
+    space: ['#8878e8', '#4030a0', '#c8b8ff'],
   };
   for (const k in NODE_COL) { const [g, G, h] = NODE_COL[k]; if (!KB.SPR['uifb_node_' + k]) KB.spriteRecolor('uifb_node', 'uifb_node_' + k, { '#58d048': g, '#289028': G, '#98f070': h }); }
   // 收集星：levels-bosses agent 會設定 KB.save.stars[levelId] = [bool, bool, bool]
@@ -501,10 +503,15 @@
     const X0 = 4, X1 = 250, Y0 = 4, Y1 = 156;
     const hit = (a, b) => a[0] < b[0] + b[2] && b[0] < a[0] + a[2] && a[1] < b[1] + b[3] && b[1] < a[1] + a[3];
     // 不可侵入區：左上標題列、右上生命 / 分數、每個節點（含旗子與卡比）與節點下方的 ★ 列
-    const fixed = [[4, 2, 124, 30], [200, 0, 56, 32]];
+    const fixed = [[4, 2, 124, 30], [144, 0, 112, 32]];
     for (const [x, y] of nodes) { fixed.push([x - 10, y - 14, 27, 22]); fixed.push([x - 12, y + 7, 23, 10]); }
     const out = [];
-    for (let i = 0; i < nodes.length; i++) {
+    // Round 6：第 6 點在右上角，可放的位置最少（上面是分數列、左邊是 W4 標籤、下面是 W5），
+    // 照順序排到它時已經沒位子 → 有第 6 點時先排它，其餘仍照 W1→W5 的順序（5 個節點時順序完全不變）。
+    const order = nodes.map((_, i) => i);
+    if (nodes.length >= 6) order.unshift(order.pop());
+    const placed = {};
+    for (const i of order) {
       const [x, y] = nodes[i], w = widths[i];
       // 候選位置：正上 / 正下 / 左右 / 四個斜角 / 再遠一點，每個再試 5 種水平微調
       const anchors = [
@@ -523,9 +530,9 @@
         if (best) break;
       }
       if (!best) return null;                 // 這個字級 / 樣式排不下 → 交給呼叫端換更窄的版本
-      out.push(best);
+      placed[i] = best; out.push(best);
     }
-    return out;
+    return nodes.map((_, i) => placed[i]);     // 回傳時換回節點順序
   }
   function drawMapBg(ctx, sc) {
     bands(ctx, 0, 72, ['#3c78d8', '#54a0e8', '#78c4f4']);
@@ -541,10 +548,32 @@
       KB.rect(ctx, x - 1, y - 3, 2, 5, '#805020'); KB.circle(ctx, x, y - 6, 5, '#289028'); KB.circle(ctx, x - 1, y - 7, 3, '#40a840');
     }
   }
+  // 星空島：紫黑色空洞 + 旋轉光環 + 幾顆閃爍星（節點會畫在它上面）
+  function drawSpaceIsle(ctx, sc, cx, cy) {
+    const f = sc.frame || 0;
+    KB.circle(ctx, cx, cy, 30, 'rgba(24,12,56,0.55)');
+    KB.circle(ctx, cx, cy, 24, '#181040');
+    KB.circle(ctx, cx, cy, 18, '#2a1c68');
+    const st = sc._spStars || (sc._spStars = mkStars(14, 61, cx - 26, cy - 24, 52, 48));
+    ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, 28, 0, 6.2832); ctx.clip();
+    drawStars(ctx, st, (f / 60));
+    ctx.restore();
+    // 傳送門：兩層旋轉橢圓環
+    for (let i = 0; i < 2; i++) {
+      const r = 13 + i * 5, a = f * (0.05 - i * 0.012), col = i ? '#8878e8' : '#c8b8ff';
+      for (let k = 0; k < 12; k++) {
+        const th = a + k * (6.2832 / 12);
+        KB.rect(ctx, Math.round(cx + Math.cos(th) * r), Math.round(cy + Math.sin(th) * r * 0.55), 1, 1, col);
+      }
+    }
+  }
   class StageSelectScene {
     constructor(index) {
       this.t = 0; this.frame = 0; this.fade = 1; this.leaving = null;
-      this.nodes = UI.LAYOUT.mapNodes; this.paths = buildPaths(this.nodes);
+      // Round 6：節點數 = max(5, 已註冊關卡數)，上限為 LAYOUT.mapNodes 長度 → 沒有 w6 時不會多一個「製作中」的點
+      const all = UI.LAYOUT.mapNodes;
+      this.nodes = all.slice(0, Math.max(5, Math.min(all.length, (KB.LEVELS || []).length)));
+      this.paths = buildPaths(this.nodes);
       let i = Math.max(0, Math.min(this.nodes.length - 1, index | 0));
       while (i > 0 && !this.canEnter(i)) i--;
       this.cur = i; this.target = -1; this.moveT = 0; this.bump = 0; this.bumpDir = 0; this.facing = 1;
@@ -623,6 +652,8 @@
     draw(ctx) {
       const f = this.frame, nodes = this.nodes;
       if (KB.BG && KB.BG.map) KB.BG.map(ctx, 0, 0, this.t); else drawMapBg(ctx, this);
+      // Round 6：右上角的「星空島 + 傳送門」（只有 W6 存在時才畫；畫在任何背景之上，向下相容）
+      if (nodes.length >= 6) drawSpaceIsle(ctx, this, nodes[5][0], nodes[5][1]);
       // 路徑（虛線）
       for (let i = 0; i < this.paths.length; i++) {
         const ok = this.canEnter(i + 1);
@@ -709,6 +740,8 @@
     const cn = key ? ((def && def.name) || KB.ABILITY_NAMES[key] || '') : '普通';
     if (key) UI.markSeen(key);      // 能力圖鑑的「發現」紀錄（player.js 不歸 ui5 管，改由 HUD 記錄）
     if (!sprAt(ctx, iconName, L.iconX, L.iconY, 'tl')) drawAbilityIconFallback(ctx, L.iconX, L.iconY, key, hud);
+    // Round 6：能力等級 Lv 星（3×3 小星 ×1~3，Lv1 不畫）——畫在圖示正上方那一列
+    if (key && KB.PROG && KB.PROG.drawLvStars) KB.PROG.drawLvStars(ctx, L.iconX + 1, HUD_Y + 2, key);
     if (game.abilityFlash > 0) {
       // 剛取得能力：圖示外框黃白閃爍 + 名稱閃爍
       const on = (game.abilityFlash >> 2) & 1, c = on ? '#fff' : C.yellow, x = L.iconX - 2, y = L.iconY - 2;
@@ -743,6 +776,9 @@
       sprAt(ctx, pick('ui_kirby_face', 'uifb_face'), L.faceX, L.faceY, 'tl');
       KB.text(ctx, 'x' + Math.max(0, game.lives | 0), L.right, L.livesY, { color: '#fff', align: 'right' });
     }
+    // Round 6：夥伴 HP（helper agent）／連擊數字 + 成就 toast（progression）
+    if (KB.Helper && KB.Helper.drawHUD) { try { KB.Helper.drawHUD(ctx, game); } catch (e) { } }
+    if (KB.PROG && KB.PROG.drawHUD) KB.PROG.drawHUD(ctx, game);
     drawMuteToast(ctx);
   };
 
@@ -863,6 +899,10 @@
       this.total = score + sc * STAR_BONUS + hp * HP_BONUS;
       this.prevBest = (KB.save && KB.save.best && KB.save.best[this.levelId]) | 0;
       this.newBest = this.total > this.prevBest;
+      // Round 6：Style Rank（最大 combo / 無傷 / 時間 / 大星星 → S A B C；KB.PROG 沒載入時整段不顯示）
+      this.rk = (KB.PROG && KB.PROG.rankData) ? KB.PROG.rankData(g) : null;
+      this.prevRank = (KB.PROG && KB.PROG.bestRank) ? KB.PROG.bestRank(this.levelId) : null;
+      this.stampT = -1;
       this.cur = this.rows.map(() => 0); this.curTotal = 0;
       this.i = 0; this.hold = 0; this.tick = 0; this.done = false; this.saved = false;
       this.t = 0; this.frame = 0; this.fade = 1; this.leaving = null;
@@ -885,6 +925,12 @@
         } catch (e) { }
         if (this.newBest) sfx('bigstar');
       }
+      // 印章演出（大字砸下 + 白閃 + sfx）
+      if (this.rk && this.stampT < 0) {
+        this.stampT = 0;
+        try { if (KB.PROG && KB.PROG.saveRank) KB.PROG.saveRank(this.levelId, this.rk.rank); } catch (e) { }
+        sfx('ultimate');
+      }
     }
     finishAll() {
       for (let i = 0; i < this.rows.length; i++) this.cur[i] = this.rows[i].val;
@@ -900,6 +946,7 @@
     }
     update(dt) {
       this.t += dt; this.frame++;
+      if (this.stampT >= 0) this.stampT++;
       for (const q of this.conf) { q.y += q.vy; q.x += Math.sin(this.t * 2 + q.ph) * 0.3; if (q.y > H) { q.y = -4; q.x = Math.random() * W; } }
       if (stepFade(this)) return;
       const inp = KB.input;
@@ -937,7 +984,7 @@
       panel(ctx, 8, 43, 240, 147);
       // 逐項：已開始滾動的才顯示
       for (let i = 0; i < this.rows.length; i++) {
-        const r = this.rows[i], y = 49 + i * 18;
+        const r = this.rows[i], y = 49 + i * 16;
         if (i > this.i) continue;
         if (r.bm) KB.text(ctx, r.label, 18, y + 3, { color: '#c8d8f0' });
         else {
@@ -957,18 +1004,45 @@
         }
         KB.text(ctx, r.fmt(Math.floor(this.cur[i])), 238, y + 3, { color: r.color, align: 'right' });
       }
-      KB.rect(ctx, 16, 138, 224, 1, '#405070');
+      KB.rect(ctx, 16, 129, 224, 1, '#405070');
       if (this.i >= this.rows.length) {
-        KB.text(ctx, 'TOTAL', 18, 148, { color: C.yellow, outline: '#402000' });
-        bigText(ctx, pad7(Math.floor(this.curTotal)), 238, 142, 2, { color: '#fff', outline: '#203050', align: 'right' });
+        KB.text(ctx, 'TOTAL', 18, 137, { color: C.yellow, outline: '#402000' });
+        bigText(ctx, pad7(Math.floor(this.curTotal)), 238, 131, 2, { color: '#fff', outline: '#203050', align: 'right' });
       }
       if (this.done) {
-        KB.text(ctx, 'BEST', 18, 170, { color: '#98a8c0' });
-        KB.text(ctx, pad7(Math.max(this.prevBest, this.total)), 238, 170, { color: this.newBest ? C.pink : '#c8d8f0', align: 'right' });
-        if (this.newBest && ((f >> 3) & 1)) KB.text(ctx, 'NEW!', 60, 170, { color: C.yellow });
+        KB.text(ctx, 'BEST', 18, 155, { color: '#98a8c0' });
+        KB.text(ctx, pad7(Math.max(this.prevBest, this.total)), 238, 155, { color: this.newBest ? C.pink : '#c8d8f0', align: 'right' });
+        if (this.newBest && ((f >> 3) & 1)) KB.text(ctx, 'NEW!', 60, 155, { color: C.yellow });
+        this.drawRank(ctx);
         if ((f % 60) < 42) fit(ctx, 'Z / ENTER：繼續', 128, 196, 240, { color: '#fff', align: 'center', size: ms });
       } else fit(ctx, 'Z / ENTER：跳過', 128, 196, 240, { color: C.grey, align: 'center', size: ms });
       drawMuteToast(ctx); drawFade(ctx, this);
+    }
+    // Style Rank：左邊是評分細項、右邊是砸下來的印章大字
+    drawRank(ctx) {
+      const rk = this.rk; if (!rk) return;
+      const st = Math.max(0, this.stampT), col = ((KB.PROG && KB.PROG.RANK_COL) || {})[rk.rank] || C.yellow;
+      KB.rect(ctx, 16, 165, 224, 1, '#405070');
+      KB.text(ctx, 'STYLE', 18, 167, { color: '#98a8c0' });
+      KB.text(ctx, 'RANK', 18, 178, { color: '#98a8c0' });
+      // 評分細項（8×8 點陣字兩欄；顏色 = 拿到的分數，灰 = 0 分）
+      const PC = ['#5c6884', '#c8d8f0', '#80e0ff', col];
+      for (let i = 0; i < rk.parts.length; i++) {
+        const q = rk.parts[i], x = 62 + (i & 1) * 74, y = 167 + (i >> 1) * 11, c2 = PC[Math.min(3, q.pt)];
+        KB.text(ctx, q.label, x, y, { color: q.pt > 0 ? '#98a8c0' : '#5c6884' });
+        KB.text(ctx, q.val, x + 66, y, { color: c2, align: 'right' });
+      }
+      // 印章：4 倍 → 2 倍砸下，附擴散圓環與白閃
+      const cx = 220, cy = 176;
+      const sc = st < 3 ? 4 : st < 6 ? 3 : 2;
+      if (st < 18) { const r = 9 + st * 2; ctx.save(); ctx.globalAlpha = Math.max(0, 1 - st / 18); ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(cx, cy, r, 0, 6.2832); ctx.stroke(); ctx.restore(); }
+      KB.circle(ctx, cx, cy, 13, 'rgba(8,14,28,0.8)');
+      for (let k = 0; k < 20; k++) { const th = k * 0.3142; KB.rect(ctx, Math.round(cx + Math.cos(th) * 13), Math.round(cy + Math.sin(th) * 13), 1, 1, col); }
+      // 破了自己的最佳評價 → 前 60 幀在白 / 評價色之間閃爍
+      const beat = 'CBAS'.indexOf(rk.rank) > 'CBAS'.indexOf(this.prevRank || '');
+      const lc = (beat && st < 60 && ((st >> 2) & 1)) ? '#fff' : col;
+      bigText(ctx, rk.rank, cx, cy - sc * 5, sc, { color: lc, outline: '#181c28', align: 'center' });
+      if (st < 4) { ctx.save(); ctx.globalAlpha = 0.6 - st * 0.15; KB.rect(ctx, 0, 0, W, H, '#fff'); ctx.restore(); }
     }
   }
   KB.ResultScene = ResultScene;
