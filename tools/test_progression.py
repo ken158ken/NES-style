@@ -284,13 +284,13 @@ def main():
         # ------------------------------------------------------------------ 5. 選關第 6 節點
         print('-' * 8, '選關第 6 節點')
         # 向下相容：暫時把 w6 拿掉 → 只剩 5 個節點（不會出現「製作中」的第 6 點）
-        n5 = ev("""()=>{ const bak = KB.LEVELS.filter(l => l.id === 'w6');
-          KB.LEVELS = KB.LEVELS.filter(l => l.id !== 'w6');
+        n5 = ev("""()=>{ const all = KB.LEVELS.slice();
+          KB.LEVELS = KB.LEVELS.filter(l => l.id !== 'w6' && l.id !== 'w7');
           const s = new KB.StageSelectScene(0);
           const r = [s.nodes.length, s.labels().rs.length, KB.LEVELS.length];
-          for (const l of bak) KB.LEVELS.push(l);
+          KB.LEVELS = all;   // 還原原本順序（w6 必須留在 index 5）
           return r; }""")
-        check('沒有 w6 時只有 5 個節點（%d 關）' % n5[2], n5[0] == 5 and n5[1] == 5, n5)
+        check('沒有 w6/w7 時只有 5 個節點（%d 關）' % n5[2], n5[0] == 5 and n5[1] == 5, n5)
         total = ev(FAKE_W6)
         check('注入 w6 後 KB.LEVELS 有 6 關', total >= 6, total)
         n6 = ev("""()=>{ const s = new KB.StageSelectScene(0);
@@ -301,9 +301,9 @@ def main():
             if (rs[i][0]<4 || rs[i][0]+rs[i][2]>250 || rs[i][1]<4 || rs[i][1]+18>156) out++; }
           return { n: s.nodes.length, paths: s.paths.length, labels: rs.length, over, out,
                    theme: s.themeOf(5), name: s.nameOf(5), node: s.nodes[5], spr: !!KB.SPR['uifb_node_space'] }; }""")
-        check('選關有 6 個節點', n6['n'] == 6, n6)
-        check('6 個節點 → 5 段虛線路徑', n6['paths'] == 5, n6['paths'])
-        check('6 個關名標籤互不重疊 / 不出界', n6['over'] == 0 and n6['out'] == 0, n6)
+        check('選關 ≥ 6 個節點', n6['n'] >= 6, n6)
+        check('n 個節點 → n-1 段虛線路徑', n6['paths'] == n6['n'] - 1, n6['paths'])
+        check('關名標籤互不重疊 / 不出界', n6['over'] == 0 and n6['out'] == 0, n6)
         check('第 6 點主題 space / 有紫藍節點圖 uifb_node_space', n6['theme'] == 'space' and n6['spr'], n6)
         check('第 6 點在右上角 [238,56]', n6['node'] == [238, 56], n6['node'])
         # 選關畫面真的畫得出來（含星空島）
