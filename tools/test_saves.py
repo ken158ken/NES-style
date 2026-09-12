@@ -174,7 +174,7 @@ def main():
           return { a, b, c }; }""")
         check('槽 1：fire xp 8 → Lv3、成就 2', prog['a'] == [3, 8, 2], prog['a'])
         check('切到槽 2 後 KB.PROG 讀到空進度', prog['b'] == [1, 0, 0], prog['b'])
-        check('切回槽 1 後 KB.PROG 又讀到 Lv3', prog['c'] == [3, 8, 2], prog['c'])
+        check('切回槽 1 後 KB.PROG 又讀到 Lv3（成就可因 backfill 補發 lv3 而 ≥2）', prog['c'][:2] == [3, 8] and prog['c'][2] >= 2, prog['c'])
         st = ev("""()=>{
           KB.SAVES.load(1); KB.UI.settings().vfx = 'low'; KB.UI.saveSettings();
           KB.SAVES.load(2); const a = KB.save.settings.vfx;
