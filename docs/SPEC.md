@@ -206,6 +206,10 @@ KB.LEVELS.push({
 | `playCount` | `{levelId: n}` | 各關通關次數（Round 7 / records） |
 | `bestTime` | `{levelId: 幀數}` | 各關最短通關時間 |
 | `extraCleared` | `{levelId: true}` | Extra 模式通關標記 |
+| `challenge` | `{time{}, nohit{}, nohitTime{}, tower{bestFloor,bestTime,clears}, daily{YYYYMMDD}, arena{variant}}` | 挑戰模式紀錄（Round 8 / challenge） |
+| `settings.skin` | string | 卡比配色 id（Round 8 / skins；設定為全域存於 kirbystar_global） |
+
+存檔槽（Round 8 / saves）：`kirbystar_save_1~3`、目前槽 `kirbystar_slot`、全域 `kirbystar_global`（settings / bindings / slot / migrated）；舊 `kirbystar_save` 於槽 1 為空時遷移。
 `KB.PROG.save()` 會在讀檔後自動補齊上列 Round 6 新欄位（舊存檔相容）；`KB.PROG.reset()` 清空全部進度。
 
 ## 7. 場景（Scene）

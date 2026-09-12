@@ -19,6 +19,7 @@
       // KB.EXTRA_LEVELS：不在選關地圖上的附加關卡（例如競技場休息房，src/arena.js 註冊）
       this.level = KB.LEVELS.find(l => l.id === levelId) || (KB.EXTRA_LEVELS && KB.EXTRA_LEVELS[levelId]) || KB.LEVELS[0];
       this.arena = opts.arena || null;        // 競技場模式（src/arena.js）
+      this.challenge = opts.challenge || null;  // 挑戰模式（src/challenge.js：時間攻擊 / 無傷 / 挑戰塔 / 每日）
       this.kills = opts.kills || 0;           // 擊敗敵人數（結算用）
       this.lives = opts.lives !== undefined ? opts.lives : (KB.session ? KB.session.lives : KB.START_LIVES);
       this.score = opts.score !== undefined ? opts.score : (KB.session ? KB.session.score : 0);
@@ -36,9 +37,15 @@
       this.loadRoom(o.room || 0, o.x, o.y, true);
       if (o.ability && KB.ABILITIES[o.ability]) { this.player.ability = o.ability; this.player.abilityData = {}; const ad = KB.ABILITIES[o.ability]; try { if (ad.onGet) ad.onGet(this.player); } catch (e) { } }
       if (o.hp) this.player.hp = o.hp;
+      // 挑戰模式：opts.ability / opts.hp 都套用完之後再夾一次上限（1HP 修飾條件）
+      if (this.challenge && KB.CHALLENGE && KB.CHALLENGE.onEnter) KB.CHALLENGE.onEnter(this);
       this.fade = 1; this.fadeDir = -1;
     }
-    exit() { KB.audio.music(null); }
+    exit() {
+      KB.audio.music(null);
+      // 挑戰塔的音樂會隨層數加速（audio8 的 setTempoMul）；離開關卡一律還原成 1（下一層會自己再設一次）
+      if (this.challenge) { try { if (KB.audio.setTempoMul) KB.audio.setTempoMul(1); } catch (e) { } }
+    }
 
     // ---------- 房間 ----------
     loadRoom(idx, sx, sy, first) {
@@ -78,6 +85,8 @@
       const mk = room.music || (this.isBossRoom && this.boss ? (this.level.id === 'w5' ? 'finalboss' : 'boss') : this.level.music || this.theme);
       this.playMusic(mk);
       try { if (KB.audio && KB.audio.ambient) KB.audio.ambient(room.ambient || null); } catch (e) { }
+      // 挑戰模式：進房後套用「跑在實體上」的修飾條件（敵人 ×1.3 速度 / 1HP）
+      if (this.challenge && KB.CHALLENGE && KB.CHALLENGE.onRoom) KB.CHALLENGE.onRoom(this);
       if (this.map.w * T < KB.W) { /* 小房間置中 */ }
     }
     spawnDef(e) {
@@ -98,6 +107,8 @@
     useDoor(door) {
       // 競技場：出口門＝進休息房 / 下一戰 / 結算（src/arena.js 的 KB.arenaExit）
       if (door.exit && this.arena && KB.arenaExit) { KB.arenaExit(this); return; }
+      // 挑戰塔：出口門＝直接進下一層（時間攻擊 / 無傷挑戰回 false 走一般過關流程）
+      if (door.exit && this.challenge && KB.CHALLENGE && KB.CHALLENGE.exitDoor && KB.CHALLENGE.exitDoor(this)) return;
       if (door.exit) { this.levelClear(); return; }
       this.fadeTo(() => { const to = door.to; this.loadRoom(to.room, to.x, to.y); });
     }
@@ -115,6 +126,8 @@
 
     // ---------- 死亡 / 過關 ----------
     playerDied() {
+      // 挑戰模式：時間攻擊不扣命（時間繼續跑）；無傷 / 塔 / 每日直接結算
+      if (this.challenge && KB.CHALLENGE && KB.CHALLENGE.onDeath) { if (KB.CHALLENGE.onDeath(this) === 'handled') return; }
       this.lives--;
       if (this.lives < 0 && this.arena && KB.arenaFail) { KB.arenaFail(this); return; }   // 競技場只有 1 條命
       if (this.lives < 0) { KB.session.score = this.score; KB.setScene(KB.GameOverScene ? new KB.GameOverScene(this) : new GameScene(this.levelId, { lives: KB.START_LIVES })); return; }
@@ -128,6 +141,8 @@
       if (this.clearT >= 0) return;
       this.clearT = 0; KB.audio.music('clear'); KB.audio.sfx('clear');
       this.player.startDance();
+      // 挑戰模式（時間攻擊 / 無傷）：不寫 cleared / playCount / best，只記挑戰紀錄
+      if (this.challenge) { if (KB.CHALLENGE && KB.CHALLENGE.onClear) KB.CHALLENGE.onClear(this); return; }
       KB.save.cleared[this.levelId] = true; KB.save.score = Math.max(KB.save.score || 0, this.score);
       // Round 7（extra）：通關次數 / Extra 通關旗標（成績板 KB.RecordsScene 用）
       KB.save.playCount = KB.save.playCount || {};
@@ -208,6 +223,8 @@
         if (this.clearT % 12 === 0 && this.clearT < 120) KB.particles(this.player.cx + (Math.random() - 0.5) * 60, this.player.cy - 20 + (Math.random() - 0.5) * 40, ['#fff', '#ffe040', '#ffb0d0', '#80e0ff'], 4, { spread: 1.5, grav: 0.02, life: 40 });
         if (this.clearT === 220) {
           KB.session.lives = this.lives; KB.session.score = this.score;
+          // 挑戰模式：跳過滾動結算，直接顯示時間與最佳紀錄
+          if (this.challenge && KB.CHALLENGE && KB.CHALLENGE.afterClear) { KB.CHALLENGE.afterClear(this); return; }
           // 過關結算畫面（ui.js 的 KB.ResultScene）→ 結算結束後才進選關 / 結局
           if (KB.ResultScene) { KB.setScene(new KB.ResultScene(this)); return; }
           this.gotoNext();
@@ -238,6 +255,7 @@
       if (KB.VFX && KB.VFX.update) KB.VFX.update(this);
       if (KB.Helper && KB.Helper.tick) KB.Helper.tick(this);   // AI 夥伴每幀維護（helper agent 指定的鉤子，冪等）
       if (KB.PROG && KB.PROG.update) KB.PROG.update(this);     // 連擊計時 / 成就 toast
+      if (this.challenge && KB.CHALLENGE && KB.CHALLENGE.tick) KB.CHALLENGE.tick(this);   // 無傷判定 / 時限 / 禁吸入
       if (this.shake > 0) this.shake--;
       this.updateCamera();
     }
@@ -469,12 +487,16 @@
       }
       ctx.restore();
       // 關卡開場橫幅（WORLD n + 關名，滑入 → 停 → 滑出，不阻擋操作）
-      if (KB.UI && KB.UI.drawLevelBanner) KB.UI.drawLevelBanner(ctx, this);
+      // 挑戰塔 / 每日挑戰：每一層都是「第 0 房」，開場橫幅會和挑戰的「第 n 層 + 修飾條件」橫幅疊在一起 → 不畫
+      const chFloor = this.challenge && (this.challenge.type === 'tower' || this.challenge.type === 'daily');
+      if (KB.UI && KB.UI.drawLevelBanner && !chFloor) KB.UI.drawLevelBanner(ctx, this);
       // 遊戲內「?」提示（進新關卡 toast / 右上角常駐問號）
       if (KB.VFX && KB.VFX.postWorld) KB.VFX.postWorld(ctx, cam, this);
       if (KB.UI && KB.UI.drawGameHint) KB.UI.drawGameHint(ctx, this);
       // HUD
       if (KB.drawHUD) KB.drawHUD(ctx, this); else this.drawHUDFallback(ctx);
+      // 挑戰模式 HUD（計時 mm:ss.ff / 層數 / 修飾條件橫幅）
+      if (this.challenge && KB.CHALLENGE && KB.CHALLENGE.drawHUD) KB.CHALLENGE.drawHUD(ctx, this);
       // 魔王血條
       if (this.boss && !this.boss.dead && this.bossIntroT === 0 && KB.drawBossBar) KB.drawBossBar(ctx, this.boss);
       else if (this.boss && !this.boss.dead && this.bossIntroT === 0) { KB.rect(ctx, 160, 200, 88, 8, '#000'); KB.rect(ctx, 161, 201, Math.round(86 * this.boss.hp / this.boss.maxHp), 6, '#e83030'); }

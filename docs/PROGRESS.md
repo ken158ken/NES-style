@@ -3489,6 +3489,38 @@ R5-7a 的觀察項（gravity ↑+X 文案不一致、圖鑑剪影露出帽子輪
   `LEVEL CLEAR at frame 5853, deaths=0, cleared=True, bossDamage=100%, missing []`；
   `node tools/level_check.js` / `--extra` 皆 0 error / 1 warn（既有）；
   `node --check` 於 challenge / game / arena / records 全過；全程 0 console error / pageerror。
+
+### 未完成 / 已知問題（challenge）
+1. **挑戰塔沒有中途存檔**：中離就從第 1 層重來（與競技場一致）。結算的「重試」會用**同一個 seed** 重跑，
+   所以要練特定一組塔是做得到的。
+2. **鏡像層的機器人**：`tools/playthrough.py` 的 `stuck` 自救分支 `ph = (stuck-25) % 330` 永遠 < 330，
+   最後那條 `else: dir_ *= -1`（反向繞路）其實是死碼。我沒有動它（怕影響其他世界的既有結果），
+   改成在 `--challenge` 模式下「每層開始時先看出口門在左還在右」來決定前進方向。
+   若之後要讓機器人更穩，把那個 `% 330` 改成 `% 400` 就能讓反向分支活過來。
+3. **`--godmode` 會壓過「一擊必殺」修飾**（每幀把 hp 補滿），所以自動跑塔只能驗「走不走得完」，不能驗難度。
+4. `mirror` 修飾對「靠 `a` / `b` 參數描述左右移動範圍」的實體（部分平台 / 巡邏敵）只鏡像了出生點 x，
+   沒有鏡像它的移動範圍參數；實測 w1~w3 的房間都沒問題，但之後若有新的「範圍型」實體要留意。
+5. `double` 修飾在「該來源房有 Extra 疊加層」時會疊得比較兇（Extra 敵人 + 原敵人複製）。
+   若 QA 覺得過頭，把 `doubleEnemies` 裡的複製那一段拿掉即可（只留 Extra 疊加層）。
+6. 挑戰塔的魔王沿用各世界魔王房的背景與音樂鍵；我只換了 `music('tower')`，房間本身的 `room.music` 若有值會蓋掉。
+7. 我沒有動 `src/ui.js` / `src/menu.js` 一個字：**標題選單的「挑戰模式」入口由 ach2 掛**（條件＝`KB.ChallengeScene` 存在）。
+
+### 跨檔需求（challenge → 其他 agent / 總控）
+1. **ach2（`src/menu.js`）**：`KB.ChallengeScene` 可直接 `new KB.ChallengeScene()`（無參數）並 `KB.setScene`，
+   SELECT 會自己回 `KB.TitleScene`。另外新事件 `KB.PROG.emit('challengeClear', {type, ...})` 已就位，
+   `type` = `time / nohit / tower / daily / arena`，可用來做「時間攻擊達人 / 無傷通關 / 登頂挑戰塔 / 每日連續 n 天」等成就；
+   `arenaClear` 也照要求補上了 `beaten / total / variant / extra / all7`。
+2. **audio8**：已接上 `music('challenge' / 'tower' / 'timeattack')`、`KB.audio.setTempoMul(1.0→1.3)`（塔隨層數加速、
+   離開挑戰模式與進選單 / 結算都還原成 1）、`sfx('tick' / 'time_up' / 'floor_clear' / 'nohit_fail' / 'new_record')`。
+   缺曲目 / 缺 sfx 時全部會安靜退回既有曲目，不會變成靜音或噴錯。
+3. **docs/SPEC.md（總控）**：存檔格式那一節請補上
+   `challenge{ time{id:幀}, nohit{id:true}, nohitTime{id:幀}, tower{bestFloor,bestTime,clears}, daily{YYYYMMDD:{floor,time,ok}}, arena{variant:{bestTime,cleared}} }`。
+4. **saves-input**：`KB.save.challenge` 是新的一層，換存檔槽時請一併載入 / 清空（`KB.CHALLENGE.save()` 會自動補齊缺欄位，
+   所以舊槽 / 舊存檔不會壞）。
+5. **qa8**：新的常規檢查指令是 `.venv/bin/python tools/test_challenge.py`（93 項）與
+   `.venv/bin/python tools/playthrough.py --challenge tower --seed 1 --godmode --until-floor 3`。
+6. **levels-bosses / world7**：挑戰塔是從 `KB.LEVELS` 的**非魔王非秘密房**動態抽的，
+   新增世界 / 房間會自動進池；但房間一定要有「非秘密且非上鎖的門」或 `room.exit`，否則會被排除（`CH.normalRooms`）。
 （agent 在此追加）
 
 ## saves-input

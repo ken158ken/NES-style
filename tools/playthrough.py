@@ -167,6 +167,12 @@ def main():
     ap.add_argument('--godmode', action='store_true', help='不會死（hp 固定 + 不會摔死）')
     ap.add_argument('--collect', action='store_true', help='順路去撿大星星（bigstar）')
     ap.add_argument('--extra', action='store_true', help='Extra 模式（KB.session.extra=true：關卡疊加層 + 敵人強化 + HP 3）')
+    # Round 8（challenge）：挑戰模式自動跑
+    ap.add_argument('--challenge', default='', choices=['', 'time', 'nohit', 'tower', 'daily'],
+                    help='挑戰模式（src/challenge.js）：time / nohit 用 --level 指定世界；tower / daily 用 --seed 指定種子')
+    ap.add_argument('--seed', type=int, default=1, help='挑戰塔種子（--challenge tower）')
+    ap.add_argument('--floors', type=int, default=10, help='挑戰塔層數（--challenge tower）')
+    ap.add_argument('--until-floor', type=int, default=0, help='挑戰塔跑到第 N 層就算成功（0 = 跑到結束）')
     ap.add_argument('--boss-gap', type=float, default=14, help='魔王戰保持的距離（魔王框外幾 px；劍的有效射程約 21px）')
     ap.add_argument('--boss-strafe', type=int, default=20, help='魔王戰前後游走的半週期（幀）')
     ap.add_argument('--boss-attack-every', type=int, default=15, help='魔王戰每幾幀揮一次')
@@ -181,7 +187,20 @@ def main():
         pg.goto(INDEX + '?debug=1&mute=1&norun=1')
         pg.wait_for_function('()=>window.__kb && KB.LEVELS')
         pg.evaluate(BOSS_MODEL_JS)
-        pg.evaluate("([l,r,ab,ex])=>__kb.goto('game',{level:l,room:r,ability:ab,nofade:true,extra:ex})", [a.level, a.room, a.ability, bool(a.extra)])
+        if a.challenge:
+            # 挑戰模式：不走 __kb.goto，直接呼叫 KB.CHALLENGE 的入口（場景由 challenge.js 建立）
+            pg.evaluate("""([mode,lvl,seed,floors,ab])=>{
+                const C = KB.CHALLENGE;
+                if (mode === 'tower') C.startTower({ seed: seed, floors: floors });
+                else if (mode === 'daily') C.startDaily({});
+                else if (mode === 'nohit') C.startNohit(lvl);
+                else C.startTime(lvl);
+                if (KB.scene) { KB.scene.fade = 0; KB.scene.fadeDir = 0; }
+                const p = KB.player;
+                if (p && ab && ab !== 'none' && KB.ABILITIES[ab] && !p.ability) p.ability = ab;
+            }""", [a.challenge, a.level, a.seed, a.floors, a.ability])
+        else:
+            pg.evaluate("([l,r,ab,ex])=>__kb.goto('game',{level:l,room:r,ability:ab,nofade:true,extra:ex})", [a.level, a.room, a.ability, bool(a.extra)])
         pg.evaluate("()=>__kb.step(2)")
 
         def st(): return json.loads(pg.evaluate("()=>__kb.state()"))
@@ -241,6 +260,9 @@ def main():
         spikeJump = 0   # R4：看到前方尖刺後的連續跳躍幀數
         shots_taken = 0; roomFrames = 0; maxX = {}; starChase = 0; starBlock = 0; bsChase = 0; bsBlock = 0
         essChase = 0; essBlock = 0; mbStuck = 0; mbLastX = None; swChase = 0; swBlock = 0; swStuck = 0; swBest = 1e9; swLeft = -1
+        lastFloor = -1; floorsSeen = []   # Round 8：挑戰塔的層數進度
+        CH_STATE = ("()=>{const g=KB.game,c=g&&g.challenge;return c?JSON.stringify({floor:c.floor,floors:c.floors,"
+                    "type:c.type,mods:c.mods,time:(c.base|0)+(g.timeAlive|0),failed:!!c.failed}):null}")
         while frames < a.maxframes:
             s = st(); g = s['game']; pl = s['player']
             if g is None or pl is None: break
@@ -250,12 +272,27 @@ def main():
                 essChase = 0; essBlock = 0; mbStuck = 0; mbLastX = None; swChase = 0; swBlock = 0; swStuck = 0; swBest = 1e9; swLeft = -1; spikeJump = 0
                 print(f'[room {g["room"]}] enter at frame {frames}, x={pl["x"]}, y={pl["y"]}, ents={g["ents"]}')
                 shot(f'room{g["room"]}_enter')
+            if a.challenge:
+                raw = pg.evaluate(CH_STATE)
+                ch = json.loads(raw) if raw else None
+                if ch and ch['floor'] != lastFloor:
+                    lastFloor = ch['floor']; floorsSeen.append(ch['floor'])
+                    print(f"[floor {ch['floor']}/{ch['floors']}] mods={','.join(ch['mods'])} at frame {frames} time={ch['time']}")
+                    shot(f"floor{ch['floor']}")
+                    roomFrames = 0; stuck = 0; last_x = None; spikeJump = 0
+                    starChase = 0; starBlock = 0; bsChase = 0; bsBlock = 0; bossSeen = False
+                    # 鏡像層的出口門在左邊 → 先看門在哪一側再決定前進方向
+                    ed = pg.evaluate("()=>{const p=KB.player;const d=KB.game.entities.find(e=>e.type==='door'&&e.exit&&!e.dead);"
+                                     "return d?d.cx-p.cx:null}")
+                    dir_ = -1 if (ed is not None and ed < 0) else 1
+                    if a.until_floor and ch['floor'] >= a.until_floor:
+                        cleared = True; print(f"REACHED FLOOR {ch['floor']} at frame {frames}"); break
             if a.godmode:
                 # hp 固定 + 擋掉落坑死亡（掉出地圖就拉回 checkpoint）+ 掉了的能力補回來
                 # （補能力是為了讓「主路線能不能走完」與「沒武器打不打得贏」兩件事分開測；
                 #   無武器的戰鬥平衡由 tools/boss_test.py 負責。）
-                pg.evaluate("""(ab)=>{const p=KB.player,g=KB.game;p.hp=6;
-                  if(p.fellOut||p.y>g.map.ph+8){const c=g.checkpoint||{x:32,y:32};p.x=c.x;p.y=c.y;p.vx=0;p.vy=0;p.fellOut=false;if(p.setState)p.setState('idle');}
+                pg.evaluate("""(ab)=>{const p=KB.player,g=KB.game;p.hp=Math.max(p.hp,Math.min(6,p.maxHp));
+                  if(p.fellOut||p.y>g.map.ph+8||p.y<-240){const c=g.checkpoint||{x:32,y:32};p.x=c.x;p.y=c.y;p.vx=0;p.vy=0;p.fellOut=false;if(p.setState)p.setState('idle');}
                   if(ab&&ab!=='none'&&!p.ability&&!p.mouth&&KB.ABILITIES[ab]&&p.state!=='dead')p.ability=ab;}""", a.ability)
             if g['clearT'] >= 0:
                 cleared = True; print(f'LEVEL CLEAR at frame {frames}'); shot('clear'); break
@@ -473,6 +510,8 @@ def main():
                 ".map(e=>({n:e.name||e.type,x:Math.round(e.x),y:Math.round(e.y),s:e.state})))"))
         print('---')
         bossPct = (100.0 * (bossMaxHp - bossMinHp) / bossMaxHp) if (bossMaxHp and bossMinHp is not None) else None
+        if a.challenge:
+            print(f'challenge={a.challenge} seed={a.seed} floors_seen={floorsSeen}')
         print(f'level={a.level} frames={frames} rooms={rooms_seen} deaths={deaths} cleared={cleared} boss={s["game"]["boss"] if s["game"] else None} maxX={maxX}')
         # 魔王被打掉幾 %（整場最低血量／最大血量，和 boss_test --curve 同一個定義）
         print(f'bossDamage={bossPct if bossPct is None else round(bossPct)}% (min {bossMinHp} / max {bossMaxHp})')

@@ -10,7 +10,8 @@
 //   extraCleared[id] Extra 模式通關過（game.js levelClear）
 //   arena.bestTime 競技場最佳時間（arena.js）
 //   achievements / seen  成就與能力發現（progression.js / ui.js）
-// 版面：面板 + 分頁（←→ 切換：總覽 → W1 → W2 … → Wn → 總覽）。
+//   challenge     挑戰模式紀錄（Round 8 / challenge.js：time / nohit / tower / daily / arena 變體）
+// 版面：面板 + 分頁（←→ 切換：總覽 → W1 → W2 … → Wn → 挑戰 → 總覽）。
 // 注意：本檔在 index.html 裡載入於 ui.js **之前**，所以 KB.UI 只能在函式裡取（不可在頂層快取）。
 // ============================================================================
 (function () {
@@ -26,6 +27,12 @@
     if (!f && f !== 0) return '--:--';
     const s = Math.floor(f / 60);
     return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+  }
+  // 幀 → mm:ss.ff（挑戰頁的時間攻擊紀錄；與 challenge.js 同一種格式）
+  function mmssff(f) {
+    if (!f) return '--:--.--';
+    if (KB.CHALLENGE && KB.CHALLENGE.mmssff) return KB.CHALLENGE.mmssff(f);
+    return mmss(f);
   }
   const sfx = n => { try { KB.audio && KB.audio.sfx && KB.audio.sfx(n); } catch (e) { } };
   const music = n => { try { KB.audio && KB.audio.music && KB.audio.music(n); } catch (e) { } };
@@ -76,7 +83,9 @@
   class RecordsScene {
     constructor(page) {
       this.t = 0; this.frame = 0; this.fade = 1; this.leaving = null;
-      this.pages = 1 + (KB.LEVELS || []).length;      // 0 = 總覽、1..n = 各世界
+      // 0 = 總覽、1..n = 各世界、最後一頁 = 挑戰（KB.CHALLENGE 存在時才有）
+      this.chPage = KB.CHALLENGE ? 1 + (KB.LEVELS || []).length : -1;
+      this.pages = 1 + (KB.LEVELS || []).length + (KB.CHALLENGE ? 1 : 0);
       this.page = Math.max(0, Math.min(this.pages - 1, page | 0));
     }
     enter() { music('select'); }
@@ -115,10 +124,12 @@
       // 標題列：RECORDS（2 倍點陣字，x 8~120）＋ 成績板（16px，x 128~176）＋ 右上分頁
       UI.bigText(ctx, 'RECORDS', 6, 5, 2, { color: '#fff', outline: '#101830', spacing: 0 });
       T(ctx, '成績板', 136, 5, { color: C.yellow, size: 16, outline: '#101830' });
-      const label = this.page === 0 ? '總覽' : ('W' + this.page);
+      const label = this.page === 0 ? '總覽' : (this.page === this.chPage ? '挑戰' : ('W' + this.page));
       KB.text(ctx, (this.page + 1) + '/' + this.pages, 250, 5, { color: '#c8d8f0', align: 'right', outline: '#101830' });
       T(ctx, label, 250, 15, { color: C.cyan, align: 'right', size: UI.MS_SMALL, outline: '#101830' });
-      if (this.page === 0) this.drawOverview(ctx); else this.drawWorld(ctx, this.page - 1);
+      if (this.page === 0) this.drawOverview(ctx);
+      else if (this.page === this.chPage) this.drawChallenge(ctx);
+      else this.drawWorld(ctx, this.page - 1);
       UI.fitText(ctx, '←→ 切換頁面　Z / SELECT 返回', 128, 206, 240, { color: C.grey, align: 'center', size: UI.MS });
       if (UI.drawMuteToast) UI.drawMuteToast(ctx);
       if (UI.drawFade) UI.drawFade(ctx, this);
@@ -165,6 +176,55 @@
       row(12, 1, '大星星', su.stars + '/' + su.starMax, su.stars >= su.starMax ? C.yellow : '#fff');
       row(col2, 0, '成就', su.ach + '/' + su.achMax, su.ach >= su.achMax ? C.yellow : '#fff');
       row(col2, 1, '能力發現', su.seen + '/' + su.seenMax, (su.seenMax && su.seen >= su.seenMax) ? C.yellow : '#fff');
+    }
+
+    // ---------- 挑戰模式（Round 8 / challenge.js）----------
+    drawChallenge(ctx) {
+      const UI = U(), C = UI.C, T = UI.text, panel = UI.panel;
+      const CH = KB.CHALLENGE; if (!CH) return;
+      const lv = KB.LEVELS || [];
+      // ① 各世界：時間攻擊最佳 + 無傷達成
+      panel(ctx, 6, 32, 244, 96);
+      KB.text(ctx, 'W', 12, 38, { color: '#8fa0bc' });
+      T(ctx, '時間攻擊', 66, 35, { color: '#8fa0bc', size: UI.MS_SMALL });
+      T(ctx, '無傷', 160, 35, { color: '#8fa0bc', size: UI.MS_SMALL });
+      T(ctx, '無傷最短', 200, 35, { color: '#8fa0bc', size: UI.MS_SMALL });
+      KB.rect(ctx, 10, 48, 236, 1, '#405070');
+      const rowH = Math.min(11, Math.floor(74 / Math.max(1, lv.length)));
+      for (let i = 0; i < lv.length; i++) {
+        const id = lv[i].id, y = 52 + i * rowH;
+        const tt = CH.bestTime(id), ok = CH.bestNohit(id), nt = CH.bestNohitTime(id);
+        KB.text(ctx, 'W' + (i + 1), 12, y, { color: (tt || ok) ? C.yellow : '#5c6884' });
+        KB.text(ctx, tt ? mmssff(tt) : '--:--.--', 150, y, { color: tt ? C.cyan : '#5c6884', align: 'right' });
+        if (ok) { KB.rect(ctx, 158, y - 1, 22, 10, '#20402c'); KB.text(ctx, 'OK', 161, y, { color: '#80ffa0' }); }
+        else KB.text(ctx, '--', 162, y, { color: '#5c6884' });
+        KB.text(ctx, nt ? mmss(nt) : '--:--', 246, y, { color: nt ? C.yellow : '#5c6884', align: 'right' });
+      }
+      // ② 挑戰塔 + Boss Rush 變體
+      panel(ctx, 6, 132, 244, 32);
+      const tw = CH.bestTower();
+      T(ctx, '挑戰塔', 12, 136, { color: '#8fa0bc', size: UI.MS_SMALL });
+      KB.text(ctx, (tw.bestFloor | 0) ? (tw.bestFloor + 'F') : '--', 96, 137, { color: (tw.bestFloor | 0) ? C.yellow : '#5c6884', align: 'right' });
+      KB.text(ctx, (tw.bestTime | 0) ? mmss(tw.bestTime) : '--:--', 150, 137, { color: (tw.bestTime | 0) ? C.cyan : '#5c6884', align: 'right' });
+      KB.text(ctx, 'x' + (tw.clears | 0), 180, 137, { color: (tw.clears | 0) ? '#fff' : '#5c6884', align: 'right' });
+      const av = (CH.save().arena) || {};
+      const done = Object.keys(av).filter(k => av[k] && av[k].cleared);
+      T(ctx, 'Boss Rush 變體', 12, 149, { color: '#8fa0bc', size: UI.MS_SMALL });
+      KB.text(ctx, done.length ? done.join(' ') : '--', 246, 150, { color: done.length ? C.pink : '#5c6884', align: 'right' });
+      // ③ 每日挑戰最近 7 天
+      panel(ctx, 6, 168, 244, 32);
+      const rec = CH.dailyRecent(7);
+      const oldest = rec[rec.length - 1];
+      T(ctx, '每日', 12, 170, { color: '#8fa0bc', size: UI.MS_SMALL });
+      // 欄寬只有 28px（放不下 MMDD 4 個字）⇒ 欄位只畫「日」，月份畫在左邊標籤下方
+      T(ctx, oldest.key.slice(4, 6) + '月', 12, 182, { color: '#5c6884', size: UI.MS_SMALL });
+      for (let i = 0; i < rec.length; i++) {
+        const r = rec[rec.length - 1 - i], x = 52 + i * 28;
+        KB.text(ctx, r.key.slice(6), x, 171, { color: r.today ? C.yellow : '#8fa0bc' });
+        const v = r.rec;
+        const txt = !v ? '--' : (v.ok ? 'CLR' : (v.floor | 0) + 'F');
+        KB.text(ctx, txt, x - 4, 184, { color: !v ? '#5c6884' : (v.ok ? '#80ffa0' : '#ffa060') });
+      }
     }
 
     // ---------- 單一世界 ----------

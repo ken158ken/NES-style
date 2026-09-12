@@ -56,11 +56,36 @@
   // R6-P2-02：通關 W6（KB.save.cleared.w6）或 ?debug=1 後，暗影卡比成為最終戰，迪迪迪大王進入隨機池 → 6 名魔王。
   const POOL5 = ['whispywoods', 'lololo', 'kracko', 'metaknight'];
   const POOL6 = ['whispywoods', 'lololo', 'kracko', 'metaknight', 'dedede'];
+  // Round 8（challenge）：全 7 魔王 —— 前 6 名隨機、最後固定夢魘之核（w7）
+  const POOL7 = ['whispywoods', 'lololo', 'kracko', 'metaknight', 'dedede', 'shadowkirby'];
   function shadowUnlocked() { return !!((KB.save && KB.save.cleared && KB.save.cleared.w6) || KB.DEBUG); }
-  function arenaPool() { return shadowUnlocked() ? POOL6 : POOL5; }
-  function arenaLast() { return shadowUnlocked() ? 'shadowkirby' : 'dedede'; }
-  function arenaCount() { return arenaPool().length + 1; }
+  function has7() { return !!(KB.LEVELS || []).some(l => l.boss === 'nightmarecore'); }
+  function arenaPool(o) {
+    if (o && o.all7 && has7()) return POOL7;
+    return shadowUnlocked() ? POOL6 : POOL5;
+  }
+  function arenaLast(o) {
+    if (o && o.all7 && has7()) return 'nightmarecore';
+    return shadowUnlocked() ? 'shadowkirby' : 'dedede';
+  }
+  function arenaCount(o) { return arenaPool(o).length + 1; }
   KB.arenaCount = arenaCount;
+  // Round 8：Boss Rush 變體識別碼（存檔 KB.save.challenge.arena[variant]）
+  function variantKey(o) {
+    o = o || {};
+    const k = (o.extra ? 'extra' : '') + (o.all7 ? (o.extra ? '_all7' : 'all7') : '');
+    return k || 'normal';
+  }
+  KB.arenaVariant = variantKey;
+  function variantRec(o, make) {
+    try {
+      KB.save.challenge = KB.save.challenge || {};
+      const a = KB.save.challenge.arena = KB.save.challenge.arena || {};
+      const k = variantKey(o);
+      if (make) a[k] = a[k] || { bestTime: 0, cleared: false };
+      return a[k] || null;
+    } catch (e) { return null; }
+  }
   function shuffled(a) { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = a[i]; a[i] = a[j]; a[j] = t; } return a; }
   function levelOfBoss(key) { return KB.LEVELS.find(l => l.boss === key) || KB.LEVELS[0]; }
   function bossRoomIdx(level) { const i = level.rooms.findIndex(r => r.bossRoom); return i >= 0 ? i : Math.max(0, level.rooms.length - 1); }
@@ -80,13 +105,16 @@
   KB.arenaOrderLines = orderLines;
   KB.arenaBossName = bossNameOf;
 
-  function newArena(ability) {
+  function newArena(ability, o) {
+    o = o || {};
     return {
-      order: shuffled(arenaPool()).concat([arenaLast()]),
+      order: shuffled(arenaPool(o)).concat([arenaLast(o)]),
       idx: 0, phase: 'boss', tomatoes: 3, base: 0, beaten: 0,
       ability: ability || null, abilityCur: ability || null, hp: KB.MAX_HP, score: 0,
+      opt: { extra: !!o.extra, all7: !!o.all7, from: o.from || null },
     };
   }
+  KB.newArena = newArena;
 
   // 目前為止的總時間（幀）
   function arenaTime(a, game) { return (a.base | 0) + (game ? (game.timeAlive | 0) : 0); }
@@ -162,17 +190,23 @@
   // ======================================================================
   // 選能力畫面（KB.ArenaScene）
   // ======================================================================
-  const bestTime = () => ((KB.save && KB.save.arena && KB.save.arena.bestTime) | 0) || 0;
+  function bestTime(o) {
+    if (o && variantKey(o) !== 'normal') { const r = variantRec(o); return (r && r.bestTime | 0) || 0; }
+    return ((KB.save && KB.save.arena && KB.save.arena.bestTime) | 0) || 0;
+  }
 
   // 縮圖列每頁 9 格（第 1 頁的第 1 格是「無能力」）；20 能力 → 3 頁
   const ARENA_PER_PAGE = 9;
 
   class ArenaScene {
-    constructor() {
+    // Round 8（challenge）：opts = { extra: Extra 變體、all7: 全 7 魔王、from: 'challenge' 時 SELECT 回挑戰選單 }
+    constructor(opts) {
+      this.opt = Object.assign({ extra: false, all7: false, from: null }, opts || {});
       this.keys = [null].concat(KB.ABILITY_KEYS || []);
       this.i = 0; this.t = 0; this.frame = 0; this.fade = 1; this.leaving = null;
       this.stars = UI.mkStars(30, 91, 0, 0, W, 120);
     }
+    back() { return this.opt.from === 'challenge' && KB.ChallengeScene ? new KB.ChallengeScene(4) : new KB.TitleScene(); }
     enter() { music(['arena', 'select']); }
     get key() { return this.keys[this.i]; }
     get pages() { return Math.max(1, Math.ceil(this.keys.length / ARENA_PER_PAGE)); }
@@ -186,11 +220,11 @@
       if (inp.pressed('left')) { this.i = (this.i - 1 + n) % n; sfx('menu'); }
       if (inp.pressed('down')) { this.i = Math.min(n - 1, this.i + ARENA_PER_PAGE); sfx('menu'); }
       if (inp.pressed('up')) { this.i = Math.max(0, this.i - ARENA_PER_PAGE); sfx('menu'); }
-      if (inp.pressed('select')) { sfx('menu_back'); UI.leave(this, () => KB.setScene(new KB.TitleScene())); return; }
+      if (inp.pressed('select')) { sfx('menu_back'); UI.leave(this, () => KB.setScene(this.back())); return; }
       if (inp.pressed('jump') || inp.pressed('attack') || inp.pressed('start')) {
         sfx('select');
-        const k = this.key;
-        UI.leave(this, () => { UI.newSession(0, 0, false); startBattle(newArena(k)); });
+        const k = this.key, o = this.opt;
+        UI.leave(this, () => { UI.newSession(0, 0, !!o.extra); startBattle(newArena(k, o)); });
       }
     }
     draw(ctx) {
@@ -203,8 +237,17 @@
       T(ctx, '競技場', 128, 24, { color: C.yellow, align: 'center', size: 16 });
       // 規則
       panel(ctx, 8, 44, 240, 40, 'rgba(16,12,32,0.86)');
-      fit(ctx, '生命 1　連戰 ' + arenaCount() + ' 名魔王', 128, 47, 230, { color: '#fff', align: 'center', size: ms });
-      fit(ctx, '休息室的番茄整場共用 3 顆', 128, 64, 230, { color: '#c8b8e0', align: 'center', size: ms });
+      fit(ctx, '生命 1　連戰 ' + arenaCount(this.opt) + ' 名魔王', 128, 47, 230, { color: '#fff', align: 'center', size: ms });
+      // Extra 變體的說明在 14px 下會被 fit 截成「…血…」⇒ 這一行降成 12px（其餘情況維持 14px）
+      if (this.opt.extra) fit(ctx, 'Extra 變體：魔王開場即二階段', 128, 65, 230, { color: '#ff9090', align: 'center', size: UI.MS_SMALL });
+      else fit(ctx, '休息室的番茄整場共用 3 顆', 128, 64, 230, { color: '#c8b8e0', align: 'center', size: ms });
+      // Round 8：變體徽章（Extra 紅牌 / 全 7 魔王金牌）
+      {
+        let bx = 12;
+        const badge = (txt, bg, fg) => { const bw = KB.textWidth(txt) + 6; KB.rect(ctx, bx, 30, bw, 11, bg); KB.text(ctx, txt, bx + 3, 32, { color: fg }); bx += bw + 4; };
+        if (this.opt.extra) badge('EXTRA', '#3a1020', '#ff6070');
+        if (this.opt.all7) badge('ALL 7', '#3a3010', '#ffe040');
+      }
       // 選能力
       panel(ctx, 8, 88, 240, 76);
       fit(ctx, '選擇出發能力', 16, 91, 90, { color: '#98a8c0', size: ms });
@@ -245,7 +288,7 @@
         }
       }
       // 最佳時間
-      const bt = bestTime();
+      const bt = bestTime(this.opt);
       KB.text(ctx, 'BEST ' + (bt ? mmss(bt) : '--:--'), 240, 194, { color: bt ? C.yellow : C.grey, align: 'right' });
       fit(ctx, this.pages > 1 ? '←→ ↑↓ 選能力　Z 開始' : '←→ 選能力　Z 開始', 10, 192, 148, { color: '#fff', size: ms });
       fit(ctx, 'SELECT：返回標題', 128, 208, 244, { color: C.grey, align: 'center', size: ms });
@@ -260,18 +303,29 @@
   class ArenaResultScene {
     constructor(arena, win) {
       this.a = arena || newArena(null); this.win = !!win;
+      this.opt = this.a.opt || {};
+      this.variant = variantKey(this.opt);
       this.time = this.a.base | 0;
-      this.prevBest = bestTime();
+      this.prevBest = bestTime(this.opt);
       this.newBest = false;
       if (this.win) {
         try {
           KB.save.arena = KB.save.arena || {};
-          if (!this.prevBest || this.time < this.prevBest) { this.newBest = true; KB.save.arena.bestTime = this.time; }
-          KB.save.arena.cleared = true;
+          if (!this.prevBest || this.time < this.prevBest) this.newBest = true;
+          if (this.variant === 'normal') {
+            if (this.newBest) KB.save.arena.bestTime = this.time;
+            KB.save.arena.cleared = true;
+          } else {
+            // Round 8：Extra / 全 7 魔王變體各自記錄（KB.save.challenge.arena[variant]）
+            const r = variantRec(this.opt, true);
+            if (r) { if (this.newBest) r.bestTime = this.time; r.cleared = true; }
+          }
           KB.saveGame && KB.saveGame();
         } catch (e) { }
         // 成就「競技場通關 / 3 分內」（progression）
-        if (KB.PROG && KB.PROG.emit) KB.PROG.emit('arenaClear', { time: this.time });
+        // ach2 要求：帶上 beaten / total（「六王連霸」成就要判斷連戰幾名）
+        if (KB.PROG && KB.PROG.emit) KB.PROG.emit('arenaClear', { time: this.time, beaten: this.a.beaten | 0, total: this.a.order.length, variant: this.variant, extra: !!this.opt.extra, all7: !!this.opt.all7 });
+        if (KB.CHALLENGE && KB.CHALLENGE.emitClear) KB.CHALLENGE.emitClear({ type: 'arena', variant: this.variant, time: this.time, best: this.newBest, extra: !!this.opt.extra, all7: !!this.opt.all7 });
       }
       this.t = 0; this.frame = 0; this.fade = 1; this.leaving = null;
       this.stars = UI.mkStars(40, 57, 0, 0, W, H);
@@ -284,7 +338,8 @@
       const inp = KB.input;
       if (inp.pressed('jump') || inp.pressed('start') || inp.pressed('attack') || inp.pressed('select')) {
         sfx('select');
-        UI.leave(this, () => { UI.newSession(KB.START_LIVES, 0, false); KB.setScene(new KB.TitleScene()); });
+        const back = this.opt.from === 'challenge' && KB.ChallengeScene ? () => new KB.ChallengeScene(4) : () => new KB.TitleScene();
+        UI.leave(this, () => { UI.newSession(KB.START_LIVES, 0, false); KB.setScene(back()); });
       }
     }
     draw(ctx) {
