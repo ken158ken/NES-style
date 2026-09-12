@@ -243,6 +243,11 @@
         if (inp.down('down') && !this.onGround && map.onLadder(this.cx, this.cy)) { this.startClimb(); return; }
       }
 
+      // Round 7（awaken）：跳 + 攻擊（同幀或 3 幀內先後）且覺醒量表滿 → 覺醒。
+      //   KB.AWAKEN.tryTrigger 只有在「真的發動覺醒」時才回 true；未 Lv4 / 量表沒滿一律回 false，
+      //   所以跳 + 攻擊在平常完全是原本的普通跳躍與普通攻擊（engine_test 的既有行為不受影響）。
+      if (KB.AWAKEN && KB.AWAKEN.tryTrigger && KB.AWAKEN.tryTrigger(this)) return;
+
       // 蹲下 / 滑鏟
       if (this.onGround && inp.down('down') && !this.full) {
         if (this.state !== 'crouch') this.setState('crouch');
@@ -539,6 +544,15 @@
       }
     }
 
+    // ---------- 覺醒（Round 7 awaken；實作在 src/awaken.js）----------
+    /** 發動覺醒：hitstop + 金色演出 + 300 幀覺醒狀態 + 立刻放出該能力的覺醒招 */
+    startAwaken() {
+      if (!KB.AWAKEN || !KB.AWAKEN.start) return false;
+      try { return KB.AWAKEN.start(this) === true; } catch (e) { return false; }
+    }
+    /** 覺醒中？（繪製 / 其他系統可直接讀 p.awakenT） */
+    get awakening() { return !!(KB.AWAKEN && KB.AWAKEN.active && KB.AWAKEN.active()); }
+
     // ---------- 能力攻擊 ----------
     startAttack() {
       const d = this.abilityDef; if (!d) return;
@@ -551,6 +565,8 @@
     updateAttack() {
       const d = this.abilityDef, inp = KB.input;
       if (!d) { this.setState(this.onGround ? 'idle' : 'fall'); return; }
+      // Round 7（awaken）：出招中一樣可以用「跳 + 攻擊」發動覺醒（量表沒滿時不攔截）
+      if (KB.AWAKEN && KB.AWAKEN.tryTrigger && KB.AWAKEN.tryTrigger(this)) return;
       const dirIn = (inp.down('right') ? 1 : 0) - (inp.down('left') ? 1 : 0);
       if (!this.attackLock) {
         if (dirIn) { this.dir = dirIn; this.vx += dirIn * (this.onGround ? P.accel : P.airAccel); }
@@ -963,6 +979,14 @@
         if (a2 && KB.has(a2)) anim = a2;
       }
       if (this.invincibleT > 0) { const hues = ['#ffffff', '#ffe040', '#ff80c0', '#80e0ff']; if ((this.stateT >> 1) & 1) opts.tint = hues[(this.stateT >> 2) % 4]; }
+      // Round 7（awaken）：覺醒中全身金色。無敵糖是「每 2 幀整隻變成單色剪影」，覺醒改成
+      //   「原本的卡比 + 金色釉光脈動（alpha 0.3~0.62）」—— 看得到表情，閃法明顯不同。
+      const awk = !!(KB.AWAKEN && KB.AWAKEN.active && KB.AWAKEN.active());
+      let awkA = 0;
+      if (awk) {
+        opts.tint = undefined;                                  // 蓋掉無敵糖的彩虹閃
+        awkA = 0.46 + Math.sin(this.t * 14) * 0.16;
+      }
       // 落地擠壓：gfx 支援 scaleX/scaleY（anchor=bottom，擠壓以腳底為基準）
       let squash = 0;
       if (this.landT > 0 && ['idle', 'walk', 'run', 'crouch'].indexOf(this.state) >= 0) {
@@ -985,7 +1009,16 @@
       const fsc = this.formScale;
       if (fsc !== 1) { opts.scaleX = (opts.scaleX || 1) * fsc; opts.scaleY = (opts.scaleY || 1) * fsc; }
       if (this.form && this.form.alpha !== undefined && opts.alpha === undefined) opts.alpha = this.form.alpha;
-      if (!(this.form && this.form.hidden)) g.spr(anim, this.cx, this.bottom + bob, opts);
+      // 覺醒光環（畫在本體之後方＝先畫）
+      if (awk && KB.has('fx_awaken_aura')) {
+        const fr = ((this.t * 60 / 5) | 0) % 3;
+        g.spr('fx_awaken_aura', this.cx, this.cy + bob, { frame: fr, fps: 0, alpha: 0.85, scaleX: fsc, scaleY: fsc });
+      }
+      if (!(this.form && this.form.hidden)) {
+        g.spr(anim, this.cx, this.bottom + bob, opts);
+        // 金色釉光：把同一幀用金色剪影半透明疊上去
+        if (awk) g.spr(anim, this.cx, this.bottom + bob, Object.assign({}, opts, { tint: ((this.t * 60) >> 2) & 1 ? '#fffce0' : '#ffe040', alpha: awkA }));
+      }
       // 帽子
       if (this.ability && this.state !== 'stone' && this.state !== 'door' && this.state !== 'dead' && !(this.form && this.form.hidden)) {
         const d = this.abilityDef; const hat = d && d.hat ? d.hat : 'hat_' + this.ability;
@@ -993,9 +1026,18 @@
           const off = KB.HAT_OFFSET[this.state] || (this.full ? KB.HAT_OFFSET.full : KB.HAT_OFFSET.default);
           const ho = d && d.hatOffset && d.hatOffset[this.state] ? d.hatOffset[this.state] : null;
           const ox = ho ? ho[0] : off[0], oy = ho ? ho[1] : off[1];
-          if (oy < 90) g.spr(hat, this.cx + ox * this.dir * fsc, this.y + oy * fsc + bob + Math.round(squash * 18 * fsc),
-            { flip: this.dir < 0, t: this.t, tint: opts.tint, alpha: opts.alpha, scaleX: fsc !== 1 ? fsc : undefined, scaleY: fsc !== 1 ? fsc : undefined });
+          if (oy < 90) {
+            const hx = this.cx + ox * this.dir * fsc, hy2 = this.y + oy * fsc + bob + Math.round(squash * 18 * fsc);
+            const ho2 = { flip: this.dir < 0, t: this.t, tint: opts.tint, alpha: opts.alpha, scaleX: fsc !== 1 ? fsc : undefined, scaleY: fsc !== 1 ? fsc : undefined };
+            g.spr(hat, hx, hy2, ho2);
+            if (awk) g.spr(hat, hx, hy2, Object.assign({}, ho2, { tint: '#ffe040', alpha: awkA }));
+          }
         }
+      }
+      // 覺醒冠冕（帽子上方；沒有帽子時直接戴在頭上）
+      if (awk && KB.has('hat_awaken_crown') && this.state !== 'stone' && this.state !== 'door' && this.state !== 'dead' && !(this.form && this.form.hidden)) {
+        const hy = this.y + bob - (this.ability ? 5 : 0) * fsc;
+        g.spr('hat_awaken_crown', this.cx, hy, { flip: this.dir < 0, t: this.t, scaleX: fsc !== 1 ? fsc : undefined, scaleY: fsc !== 1 ? fsc : undefined });
       }
       if (this.form && this.form.draw) { try { this.form.draw(g, this); } catch (e) { } }
       if (KB.DEBUG && KB.showHitbox) g.rect(this.x, this.y, this.w, this.h, 'rgba(0,255,0,0.3)');

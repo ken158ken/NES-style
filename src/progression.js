@@ -9,7 +9,11 @@
 //   評價       rankOf(game) / rankData(game) / saveRank(levelId, rank) / bestRank(levelId)
 //   事件       emit(event, data) / on(event, fn)  ← 其他系統只要呼叫 emit 就會算成就
 //   關卡       beginLevel(game)（game.js enter 呼叫，重置連擊 / 本關統計）
-//   繪製       drawHUD(ctx, game)（連擊數字 + 成就 toast）/ drawLvStars(ctx, x, y, key)
+//   繪製       drawHUD(ctx, game)（連擊數字 + 成就 toast + KB.AWAKEN 覺醒量表）/ drawLvStars(ctx, x, y, key)
+//
+// ── Round 7（awaken）：等級上限變成 4 ─────────────────────────────────────────
+//   xp 3 → Lv2、8 → Lv3、**15 → Lv4「覺醒」**；dmgMul 1 / 1.25 / 1.5 / **1.75**、partMul 1 / 1.5 / 1.5 / **2**。
+//   Lv4 的 HUD / 圖鑑會畫 4 顆星（第 4 顆是金色覺醒星），覺醒量表與覺醒招在 src/awaken.js（KB.AWAKEN）。
 //
 // ── 事件名單（給 mix / helper / elements / world6 / abilities agent）────────────────────────
 //   KB.PROG.emit('kill',        enemy)                  由 game.js 統一發（不用自己呼叫）
@@ -35,10 +39,12 @@
   // ---------------------------------------------------------------- 存檔欄位
   // KB.save.abilityXp[key] 累積取得次數、abilityLv[key] 快取等級、achievements{id:time}、
   // rank[levelId] 最佳評價、secrets{levelId:roomIdx…} 已找到的秘密房、prog{} 跨關累計計數器。
-  const MAXLV = 3;
-  const XP_NEED = [0, 3, 8];              // 到達 Lv2 需 3 xp、Lv3 需 8 xp
-  const DMG_MUL = [1, 1.25, 1.5];
-  const PART_MUL = [1, 1.5, 1.5];
+  // Round 7（awaken）：第 4 級「覺醒」。xp 15 → Lv4、dmgMul 1.75、粒子 ×2，
+  //   HUD / 圖鑑畫 4 顆星（第 4 顆金色）；覺醒量表與覺醒招見 src/awaken.js（KB.AWAKEN）。
+  const MAXLV = 4;
+  const XP_NEED = [0, 3, 8, 15];          // 到達 Lv2 需 3 xp、Lv3 需 8 xp、Lv4 需 15 xp
+  const DMG_MUL = [1, 1.25, 1.5, 1.75];
+  const PART_MUL = [1, 1.5, 1.5, 2];
 
   function S() {
     const s = KB.save = KB.save || {};
@@ -84,7 +90,7 @@
     return Math.max(d, Math.round(d * m));
   };
   // 蓄力時間 ×0.8（Lv3）：abilities 端若要吃這個加成，請用 KB.PROG.holdMul() 乘上 maxHold
-  P.holdMul = function (key) { return P.level(key) >= 3 ? 0.8 : 1; };
+  P.holdMul = function (key) { return P.level(key) >= 3 ? 0.8 : 1; };   // Lv3 / Lv4 同樣 ×0.8（招式表數字＝Lv1）
 
   // 升級演出：flash + ring + sfx 立刻放；「LEVEL UP!」橫幅要等變身橫幅播完才放
   //   （KB.VFX.banner 內部會 dropKind('banner') 只留最新一條，而 transform 的名稱橫幅是在
@@ -112,7 +118,7 @@
     P.pendingUp = null;
     const v = V(); if (!v) return false;
     // 橫幅一律用金色（能力色太暗時副標會看不清楚；能力色已經在變身橫幅出現過了）
-    try { v.banner('LEVEL UP!', q.name + '  Lv' + q.lv, '#ffe040'); } catch (e) { }
+    try { v.banner(q.lv >= 4 ? 'AWAKEN!' : 'LEVEL UP!', q.name + '  Lv' + q.lv, '#ffe040'); } catch (e) { }
     try { v.flash(q.col, 6, 0.5); } catch (e) { }
     sfx('max');
     return true;
@@ -272,7 +278,7 @@
     const basics = ['fire', 'sword', 'beam', 'cutter', 'spark', 'stone', 'ice', 'hammer'];
     if (basics.every(k => (KB.save.seen || {})[k])) P.unlock('basic8');
     if (seenCount() >= 20) P.unlock('all20');
-    for (const k in s.abilityXp) if (lvOfXp(s.abilityXp[k] | 0) >= MAXLV) { P.unlock('lv3'); break; }
+    for (const k in s.abilityXp) if (lvOfXp(s.abilityXp[k] | 0) >= 3) { P.unlock('lv3'); break; }   // 成就「登峰造極」＝ Lv3（MAXLV 已是 4）
     if (starTotal() >= 15) P.unlock('stars15');
     if (secretTotal() >= 5) P.unlock('secret5');
     if (P.count('tsKills') >= 5) P.unlock('timestop5');
@@ -376,15 +382,28 @@
   };
 
   // ---------------------------------------------------------------- 繪製
-  // HUD 能力圖示旁的 Lv 星（3×3 小星 ×1~3）
+  // HUD 能力圖示旁的 Lv 星（3×3 小星 ×1~4）
+  //   Lv2 白 / Lv3 金 / Lv4 前 3 顆金 + 第 4 顆亮金（每 8 幀閃一次白心）；
+  //   覺醒中（KB.AWAKEN.active()）整排全金閃爍。
   P.drawLvStars = function (ctx, x, y, key) {
     const lv = P.level(key); if (!key || lv <= 1) return 0;
-    const col = lv >= 3 ? '#ffe040' : '#e8f0ff';
+    const aw = !!(KB.AWAKEN && KB.AWAKEN.active && KB.AWAKEN.active());
+    const base = lv >= 3 ? '#ffe040' : '#e8f0ff';
+    const f = (KB.game && KB.game.frame) | 0;
     for (let i = 0; i < lv; i++) {
       const sx = x + i * 4;
+      let col = base;
+      if (i === 3) col = ((f >> 3) & 1) ? '#fffce0' : '#ffb000';   // 第 4 顆＝覺醒星（金色閃爍）
+      if (aw) col = ((f >> 2) & 1) ? '#fffce0' : '#ffe040';
       KB.rect(ctx, sx, y, 3, 3, '#181c28');
       KB.rect(ctx, sx + 1, y, 1, 3, col);
       KB.rect(ctx, sx, y + 1, 3, 1, col);
+      // 覺醒星：四個角補一點光芒 + 白色星心，靜止畫面也一眼認得出來
+      if (i === 3) {
+        KB.rect(ctx, sx + 1, y - 1, 1, 1, col); KB.rect(ctx, sx + 1, y + 3, 1, 1, col);
+        KB.rect(ctx, sx - 1, y + 1, 1, 1, col); KB.rect(ctx, sx + 3, y + 1, 1, 1, col);
+        KB.rect(ctx, sx + 1, y + 1, 1, 1, '#ffffff');
+      }
     }
     return lv * 4;
   };
@@ -426,6 +445,8 @@
       T(ctx, def.name, x + 18, y + 11, { color: '#ffe040', size: (KB.UI && KB.UI.MS) || 14 });
       ctx.restore();
     }
+    // Round 7（awaken）：能力圖示下方的覺醒量表（KB.AWAKEN 未載入時什麼都不畫）
+    if (KB.AWAKEN && KB.AWAKEN.drawGauge) { try { KB.AWAKEN.drawGauge(ctx, game); } catch (e) { } }
   };
   // 小獎盃圖示（8×10，純繪圖，不佔精靈表）
   P.drawTrophy = function (ctx, x, y, col) {

@@ -2573,6 +2573,10 @@ R5-7a 的觀察項（gravity ↑+X 文案不一致、圖鑑剪影露出帽子輪
   回歸 `engine_test 118/118`、`enemy_test 393/393`、`test_progression 68/68`、`test_charge 19/19`、`test_weapons 105/105`、`test_forms 153/153`、`test_helper 131/131`（helper2 擴充後的數字）、
   `node --check` 全檔通過、`playthrough --level w1 --ability sword --godmode` **cleared 5835 幀 deaths=0 missing[]**（與 fix6b 完全相同 → 沒有行為漂移）。
   `test_mix` 243/245，2 個 FAIL 是 **mix2 agent 正在加第二批混合**（`ABILITY_KEYS 44`、`MIX.table 24 組`）造成的既有斷言過時，與覺醒無關。
+- [09-12 R7-AWK-7] 確認（總控提醒）：**與 helper2 的 SELECT 組合鍵零干擾**。player.js 的 `selectHoldT` / `selectLock` 欄位與整段 SELECT 邏輯
+  **一行都沒動**（`KB.Helper.eatSelect(p)` 仍照常清長按計數）；覺醒只看 jump + attack，兩個鉤子分別在「蹲下 / 滑鏟之前」與 `updateAttack` 開頭，
+  而且**只有真的發動覺醒時才 return**（該幀跳過 SELECT 累加、但不會歸零或上鎖）。夥伴的假輸入只在 `KB.Helper.tick` 內生效（player.update 之後），
+  不會走到 `tryTrigger`。驗證：`tools/test_helper.py` **131/131 PASS**（helper2 交件後的版本）。
 
 ### 未完成 / 已知問題（awaken）
 1. **沒有跑 `tools/build.py`、沒有 commit**（Round 7 其他 agent 仍在改 helper.js / ui.js / menu.js / abilities_mix2.js）。
