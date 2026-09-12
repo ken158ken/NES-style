@@ -259,8 +259,9 @@
     o = o || {}; const opts = { t: o.t || 0, flip: !!o.flip };
     if (o.squash) { opts.scaleX = 1.15; opts.scaleY = 0.85; }
     if (o.tint) opts.tint = o.tint;
-    if (name && has(name)) { sprAt(ctx, name, x, y, 'b', opts); return; }
-    if (has('kirby_idle')) { opts.frame = o.frame !== undefined ? o.frame : 0; sprAt(ctx, 'kirby_idle', x, y, 'b', opts); return; }
+    const sk = n => (KB.SKINS && KB.SKINS.spr) ? KB.SKINS.spr(n) : n;   // Round 8：選單卡比跟著配色
+    if (name && has(name)) { sprAt(ctx, sk(name), x, y, 'b', opts); return; }
+    if (has('kirby_idle')) { opts.frame = o.frame !== undefined ? o.frame : 0; sprAt(ctx, sk('kirby_idle'), x, y, 'b', opts); return; }
     KB.circle(ctx, x, y - 8, 8, '#202848'); KB.circle(ctx, x, y - 8, 7, C.pink);
     KB.rect(ctx, x - 8, y - 3, 6, 3, '#e8305c'); KB.rect(ctx, x + 2, y - 3, 6, 3, '#e8305c');
     KB.rect(ctx, x - 3, y - 12, 2, 4, '#202848'); KB.rect(ctx, x + 1, y - 12, 2, 4, '#202848');
