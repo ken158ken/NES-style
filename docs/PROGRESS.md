@@ -1799,7 +1799,58 @@ R5-7a 的觀察項（gravity ↑+X 文案不一致、圖鑑剪影露出帽子輪
 （agent 在此追加）
 
 ## helper
-（agent 在此追加）
+
+擁有檔案：`src/helper.js`、`src/art/helper.js`、`tools/test_helper.py`（**game.js / player.js / ui.js 一行都沒改**）。
+
+### API（其他 agent 照這個介面呼叫）
+| 呼叫 | 說明 |
+|---|---|
+| `KB.Helper.spawn(p)` | 沒有夥伴且 `p.ability` 存在 → 生成夥伴（卡比 `ability=null`、**不掉能力星**）回傳 `true`；已經有夥伴 → 自動轉呼叫 `recall()` 也回傳 `true`；其他情況 `false`（呼叫端可照原本流程丟能力星）。★ mix 的 SELECT 長按鉤子就是呼叫這個 |
+| `KB.Helper.recall(p)` | 吸回：夥伴變回能力星飛向卡比（`ReturnStar`），到達後 `p.giveAbility(key)`；卡比已有能力則落地成 `abilitystar` |
+| `KB.Helper.exists()` / `get()` | 目前有沒有夥伴 / 夥伴實體 |
+| `KB.Helper.clear()` | 移除夥伴（不留能力星） |
+| `KB.Helper.tick(game)` | 每幀維護（換房把夥伴帶到新房間、SELECT 相容路徑）；**同一幀重複呼叫只會生效一次** |
+| `KB.Helper.drawHUD(ctx, game)` | HUD 右側（x158~208, y206）小夥伴臉 + 能力 mini 圖示 + 4 格 HP；**像素等冪**，重複呼叫無副作用 |
+| `KB.Helper.CFG` | `hp4 / followFar40 / followNear24 / teleportDist200 / stuckFrames90 / senseR96 / strikeR40 / leash150 / atkCD90 / holdFrames20 / invuln60 / holdSelect45` |
+
+夥伴實體（`KB.HelperEntity`，`type 'ally'` / `owner 'player'` / `name 'helper'`）**本身就是「假玩家介面」**：實作了 abilities.js 會讀寫的最小玩家欄位（`cx/cy/dir/x/y/w/h/bottom/vx/vy/onGround/hitWall/grav/maxFall/state/stateT/attackTimer/attackLock/attackFps/abilityData/abilityDef/form/possessed/sizeMul/mouth/setState/startAttack/restartAttack/setForm/clearForm/breakArmor/clampToRoom/setCenter/dropAbility`），所以 `KB.ABILITIES[key]` 的 `onGet / onAttack / update / onEnd / onLose` 可以**原封不動重用**。招式期間以 `Helper.callDef()` 包起來：① 把 `KB.input` 換成只會回報 `attack` 的假輸入（hold 型能力按住 20 幀）；② 把 `KB.spawn` 包一層，期間產生的實體全部標上 `e.fromHelper = true` / `e.helperSrc`。判定框沿用 `owner:'player'` → **game.js 的 collisions 直接生效，不需要任何跨檔改動**。
+
+### AI 行為
+- **跟隨**：距離 > 40px 追（1.6 px/f，掉隊 > 110px 或卡比在上方時 2.4 px/f）、< 24px 停；24~40px 之間維持原狀（遲滯，不抖動）。
+- **瞬移**：距離 > 200px 或「想走卻卡住 90 幀」或掉出地圖 → 瞬移到卡比身後 18px + 前後各一團煙（`fx_poof`）。
+- **跳 / 漂浮**：站地時前方有牆 / 有坑 / 目標在上方 14px 以上就跳（CD 12 幀）；空中若目標更高或腳下 44px 內沒有落腳點 → 切成漂浮參數（`floatGrav/floatMaxFall`）每 18 幀拍一次（**無限漂浮**），可越過大坑。水中改用 `swimGrav/swimMaxFall`。
+- **攻擊**：96px 內找最近的 enemy / boss（卡比在 150px 內才追，leash），靠近到 40px 內出招（短射程的火焰也打得到），`Helper.useAbility(target)` 會先面向目標；**每 90 幀最多 1 次**。石頭系能力走專用的 60 幀原地石化判定框（player.js 的 `startStone` 是玩家專屬狀態機）。
+- **HP 4**：自己在 update 檢查 `overlaps` 敵人 / 敵方 proj・hitbox → 扣血、無敵 60 幀閃爍（game.js 的 collisions 只處理玩家，夥伴不靠它）。HP 0 → **變回能力星掉在原地**（卡比可撿回）+ burst + ring + poof。
+- **可被吸回**：`inhalable=true`；因為 player.js 的 `updateInhale` 只拉 enemy / proj / item，夥伴**自己**做吸力與入嘴判定（參數與 player.js 完全相同，含 `sizeMul` / 水中範圍），入嘴時 `p.mouth = {ability:key}` + `setState('full')` + 吸入 hit-stop。
+
+### 進度
+- [09-12 R6-HELP-1] 完成：`src/art/helper.js` —— 小一號（16×16，身體 13px 圓）的淡藍卡比 + 黃腳，`helper_idle(2)/walk(4)/jump/attack(2)/hurt` 與 HUD 用 `ui_helper_face(8×8)`；帽子重用各能力的 `hat_<key>`，繪製時 scale 0.78。驗證：`shots/agent_helper/sheet_helper.png`（精靈總表逐格 Read 確認）。
+- [09-12 R6-HELP-2] 完成：`KB.Helper.spawn / recall / exists / get / clear` 與夥伴實體（假玩家介面 + callDef 重用能力招式）。生成演出＝VFX transform 風格（hitstop 4 + zoom + flash + ring ×2 + 魔法陣 + 22 顆能力色粒子 + `HELPER!` textPop）+ `sfx('clone_summon')`。驗證：`tools/test_helper.py --only spawn` 15/15。
+- [09-12 R6-HELP-3] 完成：跟隨 / 跳坑 / 漂浮 / 瞬移 / 敵人偵測與出招 AI。驗證：`--only follow,attack` 26/26（sword / fire / gunner / mage 四種能力各自打死 waddledee，判定框 owner 全是 'player' 且標記 fromHelper）；截圖 `shots/agent_helper/follow_fight_0*.png`（夥伴搶在卡比前面用劍砍死 waddledee，+200）。
+- [09-12 R6-HELP-4] 完成：HP 4 / 受傷無敵閃爍 / HP0 變能力星 / 卡比吸回 / 長按 SELECT 吸回 / 換房跟上 / 卡比死亡時消失。驗證：`--only damage,recall,select` 26/26；截圖 `shots/agent_helper/spawn_seq_0*.png`（`--script "press select 50; release; step 60" --seq 6:6`）、`recall.png`（吸回後卡比 HUD 變回 FIRE 火焰）。
+- [09-12 R6-HELP-5] 完成：全套測試 `tools/test_helper.py` **67/67 PASS**（6 個階段 + 每階段 no page errors，MISSING SPRITES 空）；回歸 `engine_test.py 118/118`、`enemy_test.py 393/393`、`playthrough.py --level w1 --ability sword --godmode` CLEAR（4256 幀）、`node --check src/*.js src/art/*.js` 全過。
+
+### 跨檔需求
+1. **player.js（mix）— 已接上，但「吸回」那半條路徑進不來**：目前的鉤子是
+   `if (inp.down('select') && this.ability) this.selectHoldT++;`，卡比把能力交給夥伴之後 `this.ability` 是 `null`，
+   所以「已有夥伴時再長按 SELECT 吸回」永遠不會觸發。建議把條件改成
+   `if (inp.down('select') && (this.ability || (KB.Helper && KB.Helper.exists()))) this.selectHoldT++;`
+   並在放開時，`this.ability` 為空但 `KB.Helper.exists()` 時一樣呼叫 `KB.Helper.spawn(this)`（內部會自動轉成 recall）。
+   **在改好之前**，`KB.Helper.pollSelect` 只在「卡比沒有能力 + 夥伴存在」這個組合下自行接手（按滿 45 幀當下觸發吸回），
+   兩邊不會互相重複觸發（`H._acted` 同幀去重）。
+2. **game.js（progression）**：請在 `GameScene.update` 末端加一行 `if (KB.Helper) KB.Helper.tick(this);`。
+   在那之前，helper.js 會在載入後自行包裝 `KB.GameScene.prototype.update`（見檔尾 `install()`，只包一次、tick 同幀去重），
+   正式接上後**不需要移除包裝**，行為完全相同。
+3. **ui.js（progression / ui 系）**：HUD 已經在 `KB.drawHUD` 末端呼叫 `KB.Helper.drawHUD(ctx, game)`（感謝），本檔的 draw 包裝會
+   自動偵測到（`H._uiHud`）而不再補畫。若之後 HUD 重寫，請保留這一行。
+4. **elements agent（僅供知悉）**：夥伴的招式判定框是 `owner:'player'` 且帶 `fromHelper`，元素反應 / 弱點判定若以 owner 分類，夥伴會被視為玩家方（這是刻意的）。
+
+### 已知問題 / 未完成
+- 夥伴不會自己「吸入敵人吐星」，只會用能力招式；無能力的夥伴（把 `ability` 設成 null）只會跟隨。
+- 變身系能力（giant / dragon / mech / ghost）交給夥伴時，`setForm` 只是存起來（沒有 `formUpdate` 每幀鉤子），夥伴不會真的變形，但招式仍可施放；建議關卡不要刻意引導玩家把變身能力交出去。
+- 夥伴在水中只做「浮向卡比」的簡化處理，沒有游泳動畫。
+- 換房是「瞬移到卡比旁」，不是走進門；門的演出只有卡比會播。
+- 夥伴頭上的 4 格小血條一直顯示（沒有淡出），HUD 那份才是主要資訊；若覺得畫面吵可以把 `drawHpBar` 改成受傷後才顯示。
 
 ## elements
 （agent 在此追加）
