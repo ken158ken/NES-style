@@ -3217,7 +3217,57 @@ R5-7a 的觀察項（gravity ↑+X 文案不一致、圖鑑剪影露出帽子輪
 （agent 在此追加）
 
 ## saves-input
-（agent 在此追加）
+> 檔案：`src/saves.js`（KB.SAVES + KB.SaveSelectScene）、`src/keyconfig.js`（KB.KeyConfigScene）、
+> `src/input.js`（綁定存檔 API）、`tools/test_saves.py`。截圖：`shots/agent_saves/`。
+> **game.js / menu.js / ui.js / audio.js 一行都沒改**：`KB.saveGame` 與 `GameScene.prototype.update` 都走 monkeypatch。
+
+### KB.SAVES API（`src/saves.js`；ach2 / qa8 照這個介面呼叫）
+| 呼叫 | 說明 |
+|---|---|
+| `KB.SAVES.current()` | 目前槽 1~3 |
+| `KB.SAVES.list()` | 3 個槽的摘要陣列 `{slot, empty, clears/clearMax, stars/starMax, seen/seenMax, ach/achMax, playTime, savedAt, score, ending, current}` |
+| `KB.SAVES.info(n)` / `isEmpty(n)` / `raw(n)` | 單槽摘要 / 是否空槽 / 原始資料 |
+| `KB.SAVES.load(n)` | 切換到第 n 槽：**就地取代 `KB.save` 內容**（物件參考不變）並讓 `KB.PROG` / `KB.audio` / `UI.settings` 重新讀取 |
+| `KB.SAVES.save()` | 存到目前的槽（`KB.saveGame()` 已改成呼叫這個，簽章不變） |
+| `KB.SAVES.copy(a, b)` / `erase(n)` | 複製（來源空槽回 false）/ 刪除（刪到目前槽會就地清空 `KB.save`） |
+| `KB.SAVES.globals()` / `saveGlobal()` | 全域資料 `{settings, bindings, slot, migrated}`；**`KB.save.settings` 就是 `globals().settings` 同一個物件** |
+| `KB.SAVES.fmtTime(秒)` / `fmtDate(ts)` | `mm:ss` / `h:mm:ss`、`MM/DD HH:MM` |
+| `KB.SAVES.tick(scene)` | 遊玩時間累加（GameScene 已自動掛上，不用自己叫） |
+| `KB.save.playTime` | 累計遊玩秒數（成績板可直接讀） |
+
+**存檔鍵名**：槽＝`kirbystar_save_1` / `_2` / `_3`、目前槽＝`kirbystar_slot`（純數字字串）、
+全域＝`kirbystar_global`（`settings` + `bindings`，**不隨槽**）、舊檔＝`kirbystar_save`（只讀，遷移後保留原檔）。
+
+### 給 ach2 的入口（設定頁「按鍵設定 ›」與「存檔槽」）
+- 場景版：`KB.setScene(new KB.KeyConfigScene({ back: fn }))`、`KB.setScene(new KB.SaveSelectScene({ back: fn, onPick(slot, info){} }))`。
+- **子選單版（SettingsMenu 用）**：`this.sub = KB.KeyConfigMenu()` / `KB.SaveSelectMenu()`，
+  介面與 `AbilityGallery` 一樣是 `update() → 'back' | null` + `draw(ctx)`（自帶半透明底，會蓋滿整個畫面）。
+  子選單版的返回鍵是 **START**（SELECT 在按鍵設定頁＝還原預設、在存檔頁＝開子選單）。
+- `KB.input` 新增：`loadBindings() / saveBindings() / getBindings() / setBindings(o) / actionOf(code) /
+  rebindGamepad(action, idx) / buttonName(i) / buttonNames(action) / gamepadPressed() / captureKey(cb) / isDefaultBindings()`。
+  綁定改動請呼叫 `KB.input.saveBindings()` 才會寫進 `kirbystar_global`（啟動時 input.js 會自動套用）。
+
+- [18:40] 完成：**KB.SAVES 3 存檔槽**（`kirbystar_save_1/2/3` + `kirbystar_slot`）、舊 `kirbystar_save` 自動遷移到槽 1
+  （槽 1 為空才搬、`migrated` 旗標避免重複搬、舊檔保留；舊 `settings` 升級成全域 `kirbystar_global`）。
+  `KB.saveGame()` 改存到目前槽（簽章不變）；`load/copy/erase` 都是**就地改寫 `KB.save`**，其他模組快取的參考不會失效。
+  設定與按鍵綁定全域共用（`KB.save.settings === KB.SAVES.globals().settings`，所以 audio.js 的音量存檔照舊可用）。
+  驗證：`.venv/bin/python tools/test_saves.py`（遷移 / 3 槽獨立 / KB.PROG 重新讀取 共 30 項）。下一步：存檔選擇畫面。
+- [18:50] 完成：**KB.SaveSelectScene**（3 張存檔卡：通關 n/7、大星星 n/21、能力 n/44、成就 n/N、遊玩時間、最後儲存時間；
+  空槽顯示「－ 新遊戲 －」）。Z 選擇＝載入該槽並依進度回標題 / 進選關；SELECT 開子選單（複製到其他檔案 / 刪除），
+  兩者都有二次確認（游標預設停在「取消」）。截圖：`shots/agent_saves/save_select.png`、`copy_confirm.png`。下一步：按鍵重映射。
+- [19:05] 完成：**KB.KeyConfigScene 按鍵重映射**（8 個動作 × 最多 3 個鍵盤鍵 + 手把按鈕；14px 中文、鍵名走 `KB.input.codeName`）。
+  Z 進入監聽 → 按任意鍵（或手把按鈕）綁定；衝突時自動從舊動作移除並提示「X 原本是『攻擊』，已從該動作移除」，
+  但**舊動作只剩 1 個鍵時會拒絕**（避免把暫停鍵弄不見）；X 移除最後一個鍵（至少留 1 個）；SELECT 還原預設（二次確認）；START / Esc 返回。
+  綁定寫進 `kirbystar_global` 並在啟動時由 `input.js` 自動套用。截圖：`keyconfig.png`、`keyconfig_listen.png`、`keyconfig_bound.png`。
+- [19:12] 完成：**遊玩時間**——`GameScene.prototype.update` monkeypatch，每 60 幀 `KB.save.playTime++`（暫停 / 淡出中不算），
+  每 30 秒自動寫回目前槽；`KB.SAVES.fmtTime()` 供成績板 / 存檔卡顯示。
+- [19:20] 收工驗證：`tools/test_saves.py` **67/67 PASS**（含遷移、3 槽獨立、複製 / 刪除二次確認、載入後 KB.PROG 讀到新值、
+  jump→KeyQ 後真的按 Q 會跳且 reload 保留、還原預設、衝突 / 重複 / 最後一個鍵的保護、手把重綁、遊玩時間、兩個畫面可繪製且無 console error）、
+  `tools/engine_test.py` **118/118 PASS**、`node --check` 三個檔全過、`shot.py --scene title / game` 實機無異常。
+  未跑 `tools/build.py`（其他 Round 8 agent 還在寫檔，由總控收尾時重建 dist/）。未 commit。
+  **已知限制**：`select` 預設有 4 個鍵（Shift / Shift(右) / L / C），列表只顯示前 3 個（規格是最多 3 個），重新綁定後會收斂成 3 個；
+  手把欄位最多顯示 2 顆按鈕（欄寬 39px），`rebindGamepad` 會把該動作收斂成單一按鈕。
+
 
 ## skins
 > 檔案：`src/skins.js`（新，全部功能都在這裡）、`src/player.js`（`draw()` 只加 1 行）、`tools/test_skins.py`。

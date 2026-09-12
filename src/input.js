@@ -3,7 +3,9 @@
   const NAMES = ['left', 'right', 'up', 'down', 'jump', 'attack', 'select', 'start'];
 
   // 按鍵綁定（action → KeyboardEvent.code 陣列）；設定頁可透過 KB.input.rebind 修改
-  const BINDINGS = {
+  // DEFAULT_KB / DEFAULT_GP 是出廠預設（resetBindings 用），BINDINGS / GP_BINDINGS 物件本身
+  // 會被其他模組（KB.KeyConfigScene / ui 說明頁）長期持有，所以一律「就地修改」不換物件。
+  const DEFAULT_KB = {
     left: ['ArrowLeft', 'KeyA'],
     right: ['ArrowRight', 'KeyD'],
     up: ['ArrowUp', 'KeyW'],
@@ -13,6 +15,8 @@
     select: ['ShiftLeft', 'ShiftRight', 'KeyL', 'KeyC'],
     start: ['Enter', 'Escape', 'KeyP'],
   };
+  const BINDINGS = {};
+  for (const n in DEFAULT_KB) BINDINGS[n] = DEFAULT_KB[n].slice();
   // code → 顯示名稱（供設定頁 / 說明頁）
   const CODE_NAMES = {
     ArrowLeft: '←', ArrowRight: '→', ArrowUp: '↑', ArrowDown: '↓',
@@ -30,14 +34,20 @@
   }
 
   // 手把（標準配置）：0=A(下) 1=B(右) 2=X(左) 3=Y(上)
-  const GP_BINDINGS = {
+  const DEFAULT_GP = {
     jump: [0, 1],          // A / B
     attack: [2, 3],        // X / Y
     select: [4, 5, 8],     // L / R / Back
     start: [9],            // Start
     left: [14], right: [15], up: [12], down: [13],   // D-pad
   };
+  const GP_BINDINGS = {};
+  for (const n in DEFAULT_GP) GP_BINDINGS[n] = DEFAULT_GP[n].slice();
   const DEADZONE = 0.35;   // 類比搖桿死區
+  // 標準配置按鈕別名（設定頁顯示用；非標準手把就直接顯示 B<n>）
+  const GP_NAMES = ['A', 'B', 'X', 'Y', 'L1', 'R1', 'L2', 'R2', 'Back', 'Start', 'L3', 'R3', '↑', '↓', '←', '→', 'Home'];
+  // 全域設定（按鍵綁定 / 畫面設定）存這裡，不隨存檔槽（多存檔槽見 src/saves.js KB.SAVES）
+  const GLOBAL_KEY = 'kirbystar_global';
 
   let MAP = {};
   function rebuildMap() {
@@ -127,13 +137,97 @@
     keyNames(action) { return (BINDINGS[action] || []).map(codeName); },
     /** 單一 code 的顯示名稱 */
     codeName,
-    /** 還原預設綁定 */
+    /** 還原預設綁定（鍵盤 + 手把）；不會自己存檔，設定頁請接著呼叫 saveBindings() */
     resetBindings() {
-      BINDINGS.left = ['ArrowLeft', 'KeyA']; BINDINGS.right = ['ArrowRight', 'KeyD'];
-      BINDINGS.up = ['ArrowUp', 'KeyW']; BINDINGS.down = ['ArrowDown', 'KeyS'];
-      BINDINGS.jump = ['KeyZ', 'KeyK', 'Space']; BINDINGS.attack = ['KeyX', 'KeyJ'];
-      BINDINGS.select = ['ShiftLeft', 'ShiftRight', 'KeyL', 'KeyC']; BINDINGS.start = ['Enter', 'Escape', 'KeyP'];
+      for (const n of NAMES) { BINDINGS[n] = DEFAULT_KB[n].slice(); GP_BINDINGS[n] = DEFAULT_GP[n].slice(); }
       rebuildMap(); return true;
+    },
+    /** 是否為出廠預設（設定頁顯示「已還原」用） */
+    isDefaultBindings() {
+      return NAMES.every(n => BINDINGS[n].join(',') === DEFAULT_KB[n].join(',')
+        && (GP_BINDINGS[n] || []).join(',') === DEFAULT_GP[n].join(','));
+    },
+    /** 某個 code 目前屬於哪個動作（null = 未綁定）；衝突提示用 */
+    actionOf(code) { return MAP[code] || null; },
+    /** 手把按鈕重新綁定：rebindGamepad('jump', 0)；同樣會解除其他動作佔用 */
+    rebindGamepad(action, index) {
+      if (!GP_BINDINGS[action]) return false;
+      const i = index | 0; if (i < 0 || i > 31) return false;
+      for (const a of NAMES) { if (a !== action) GP_BINDINGS[a] = (GP_BINDINGS[a] || []).filter(b => b !== i); }
+      GP_BINDINGS[action] = [i];
+      return true;
+    },
+    /** 手把按鈕的顯示名稱（標準配置別名） */
+    buttonName(i) { return GP_NAMES[i] || ('B' + i); },
+    /** 某動作的手把按鈕顯示名稱陣列 */
+    buttonNames(action) { return (GP_BINDINGS[action] || []).map(i => GP_NAMES[i] || ('B' + i)); },
+    /** 目前按著的手把按鈕 index 陣列（設定頁監聽用） */
+    gamepadPressed() {
+      const gps = navigator.getGamepads ? navigator.getGamepads() : [];
+      for (const gp of gps) {
+        if (!gp || gp.connected === false) continue;
+        const out = [];
+        for (let i = 0; i < gp.buttons.length; i++) if (gp.buttons[i] && gp.buttons[i].pressed) out.push(i);
+        return out;
+      }
+      return [];
+    },
+    /** 監聽「下一個按下的鍵」：cb(code) 回傳 true 代表接受並停止監聽；回傳取消函式 */
+    captureKey(cb) {
+      const h = e => {
+        if (e.repeat) return;
+        e.preventDefault(); e.stopPropagation();
+        let done = true;
+        try { done = cb(e.code) !== false; } catch (err) { }
+        if (done) stop();
+      };
+      const stop = () => window.removeEventListener('keydown', h, true);
+      window.addEventListener('keydown', h, true);
+      return stop;
+    },
+
+    // ---------- 綁定存檔（全域，不隨存檔槽；localStorage kirbystar_global）----------
+    GLOBAL_KEY,
+    /** 目前綁定的深拷貝：{ keyboard:{action:[code]}, gamepad:{action:[index]} } */
+    getBindings() {
+      const kb = {}, gp = {};
+      for (const n of NAMES) { kb[n] = BINDINGS[n].slice(); gp[n] = (GP_BINDINGS[n] || []).slice(); }
+      return { keyboard: kb, gamepad: gp };
+    },
+    /** 套用一份綁定（缺的動作沿用目前值）；回傳是否有套用任何東西 */
+    setBindings(o) {
+      if (!o || typeof o !== 'object') return false;
+      const kb = o.keyboard || o.BINDINGS || null, gp = o.gamepad || o.GAMEPAD || null;
+      let any = false;
+      if (kb) for (const n of NAMES) {
+        const list = Array.isArray(kb[n]) ? kb[n].filter(c => typeof c === 'string' && c) : null;
+        if (list && list.length) { BINDINGS[n] = list.slice(0, 4); any = true; }
+      }
+      if (gp) for (const n of NAMES) {
+        const list = Array.isArray(gp[n]) ? gp[n].map(v => v | 0).filter(v => v >= 0 && v <= 31) : null;
+        if (list) { GP_BINDINGS[n] = list.slice(0, 4); any = true; }
+      }
+      rebuildMap();
+      return any;
+    },
+    /** 由 localStorage kirbystar_global 讀回綁定並套用（啟動時自動呼叫一次） */
+    loadBindings() {
+      try {
+        const ls = window.localStorage; if (!ls) return false;
+        const raw = ls.getItem(GLOBAL_KEY); if (!raw) return false;
+        const o = JSON.parse(raw); if (!o) return false;
+        return KB.input.setBindings(o.bindings || o);
+      } catch (e) { return false; }
+    },
+    /** 把目前綁定寫回 localStorage kirbystar_global（read-modify-write，不覆蓋 settings） */
+    saveBindings() {
+      try {
+        const ls = window.localStorage; if (!ls) return false;
+        let o = {}; try { o = JSON.parse(ls.getItem(GLOBAL_KEY) || '{}') || {}; } catch (e) { o = {}; }
+        o.bindings = KB.input.getBindings();
+        ls.setItem(GLOBAL_KEY, JSON.stringify(o));
+        return true;
+      } catch (e) { return false; }
     },
 
     // 供 UI 顯示的按鍵說明
@@ -148,4 +242,7 @@
       ['手把', 'A·B 跳　X·Y 攻擊'],
     ],
   };
+
+  // 啟動時套用玩家自訂綁定（localStorage kirbystar_global；沒有就維持預設）
+  try { KB.input.loadBindings(); } catch (e) { }
 })();
