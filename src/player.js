@@ -1,6 +1,9 @@
 // 卡比 —— 玩家狀態機
 (function () {
   const P = KB.PHYS, T = KB.TILE;
+  // Round 6（mix）：SELECT 長按門檻（幀）。按住 ≥ 這個幀數放開 → 呼叫夥伴（KB.Helper.spawn）；
+  //   短於這個幀數 → 維持原本的「丟棄能力」。不動 KB.PHYS（那是 player-feel 的檔案）。
+  const SELECT_HOLD = 45;
   KB.HAT_OFFSET = { default: [0, 0], crouch: [0, -1], slide: [2, 1], full: [0, -1], float: [0, -2],
     inhale: [0, -1], spit: [0, -1], swallow: [0, -1], exhale: [0, -1], dance: [0, -1],
     swim: [2, 1], hurt: [0, 0], climb: [0, 0], attack: [0, 0], ride: [0, -2],
@@ -37,6 +40,8 @@
       this.climbTopT = 0; this.ladderAtkT = 0;
       // Round 5（forms）：整體變身。詳見 setForm()
       this.form = null; this.sizeMul = 1; this.possessed = null;
+      // Round 6（mix）：SELECT 按住幀數（放開時決定「丟棄能力」還是「呼叫夥伴」）
+      this.selectHoldT = 0;
       this.name = 'kirby';
     }
 
@@ -272,8 +277,21 @@
       }
       // 吞下
       if (this.full && inp.pressed('down')) { this.swallow(); return; }
-      // 丟棄能力
-      if (inp.pressed('select') && this.ability) { this.dropAbility(true); }
+      // 丟棄能力 / 長按 select 呼叫夥伴（Round 6：helper agent 實作 KB.Helper）
+      //   短按（放開時 selectHoldT < 45）＝原本的「丟棄能力 → 掉能力星」；
+      //   長按 45 幀以上放開 → KB.Helper.spawn(p)：沒有夥伴就把能力變成夥伴、已經有夥伴就吸回；
+      //   回傳 true 代表夥伴系統接手了，這裡不再丟能力。
+      //   ※ 能力交給夥伴後 this.ability 是 null，所以「有夥伴時」也要繼續累加 selectHoldT（才能長按吸回）。
+      const selOk = !!(this.ability || (KB.Helper && KB.Helper.exists && KB.Helper.exists()));
+      if (inp.down('select') && selOk) this.selectHoldT++;
+      else if (this.selectHoldT > 0) {
+        const held = this.selectHoldT; this.selectHoldT = 0;
+        let toHelper = false;
+        if (held >= SELECT_HOLD) {
+          try { toHelper = !!(KB.Helper && KB.Helper.spawn && KB.Helper.spawn(this) === true); } catch (e) { toHelper = false; }
+        }
+        if (!toHelper && this.ability) this.dropAbility(true);
+      }
 
       const vyPre = this.vy;
       this.physics();
@@ -453,10 +471,25 @@
       const m = this.mouth; this.mouth = null;
       this.setState('swallow');
       if (m && m.ability && KB.ABILITIES[m.ability]) {
+        // Round 6（mix）：持有能力 A 時吞下帶能力 B 的敵人 → 混合能力。
+        //   判斷與演出（KB.VFX.transform + textPop「MIX!」+ sfx('transform')）統一放在 giveAbility()，
+        //   這樣「吞下敵人 / 撿能力星 / 踩能力台座 / 夥伴吸回」四條路徑的行為完全一致；
+        //   沒有組合（或已經是混合能力）時 giveAbility 會照舊單純替換。
         this.giveAbility(m.ability);
       } else KB.audio.sfx('swallow');
     }
     giveAbility(key) {
+      // Round 6（mix）：已經持有能力 A 時又取得能力 B（吞下敵人 / 撿能力星 / 能力台座 / 夥伴吸回）
+      //   → 若 KB.MIX.table 有 [A,B]（無序）就直接變成混合能力；沒有組合就照舊替換。
+      //   混合能力本身 isMix → keyOf 會回 null，所以「吞下第三個」一定是單純替換。
+      //   ※ 函式簽章保持 giveAbility(key) 不變（progression agent 會 monkeypatch 這個方法）。
+      let mixedFrom = null;
+      try {
+        if (KB.MIX && KB.MIX.keyOf) {
+          const mk = KB.MIX.keyOf(this.ability, key);
+          if (mk && KB.ABILITIES[mk]) { mixedFrom = this.ability; key = mk; }
+        }
+      } catch (e) { }
       if (this.ability) this.dropAbility(false);
       this.ability = key; this.abilityData = {};
       KB.audio.sfx('ability');
@@ -473,6 +506,13 @@
         if (!KB.save.seen[key]) { KB.save.seen[key] = true; KB.saveGame(); }
       } catch (e) { }
       const d = KB.ABILITIES[key]; if (d && d.onGet) d.onGet(this);
+      // 混合成功的專屬演出：MIX! + 變身音（KB.VFX.transform 已在上面播過）
+      if (mixedFrom) {
+        KB.audio.sfx('transform');
+        try {
+          if (KB.VFX && KB.VFX.textPop) KB.VFX.textPop(this.cx, this.y - 20, 'MIX!', { color: (d && d.color) || '#ffe040', size: 10, frames: 54, rise: 0.4, outline: '#000' });
+        } catch (e) { }
+      }
     }
     dropAbility(spawnStar) {
       const key = this.ability; if (!key) return;
@@ -480,7 +520,10 @@
       if (this.form) this.clearForm();
       this.ability = null; this.abilityData = {};
       if (this.state === 'attack' || this.state === 'stone') this.setState(this.onGround ? 'idle' : 'fall');
-      if (spawnStar && KB.ITEMS.abilitystar) KB.spawn(new KB.ITEMS.abilitystar(this.cx - 8, this.y - 8, key, -this.dir));
+      // Round 6（mix）：掉落混合能力時，能力星給回「主成分 A」（撿回去只會拿回原本的能力）
+      let starKey = key;
+      try { if (KB.MIX && KB.MIX.isMix(key)) { const ps = KB.MIX.parts(key); if (ps && ps[0]) starKey = ps[0]; } } catch (e) { }
+      if (spawnStar && KB.ITEMS.abilitystar) KB.spawn(new KB.ITEMS.abilitystar(this.cx - 8, this.y - 8, starKey, -this.dir));
     }
 
     // ---------- 能力攻擊 ----------

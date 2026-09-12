@@ -1796,7 +1796,93 @@ R5-7a 的觀察項（gravity ↑+X 文案不一致、圖鑑剪影露出帽子輪
 分工見 docs/TASKS.md Round 6。總控已預留 8 個新檔與 script 標籤（elements.js 在 vfx.js 後；art/kirby_mix.js、art/helper.js、art/world6.js 在 art/kirby_forms.js 後；abilities_mix.js、helper.js 在 abilities_forms.js 後；bosses_w6.js 在 bosses.js 後；progression.js 在 game.js 後）。
 
 ## mix
-（agent 在此追加）
+
+擁有檔案：`src/abilities_mix.js`、`src/art/kirby_mix.js`、`src/player.js`（吞下混合鉤子 / select 長按鉤子）、`tools/test_mix.py`。
+
+### KB.MIX（其他 agent / UI 照這個介面用）
+| 呼叫 | 說明 |
+|---|---|
+| `KB.MIX.table` | `{ 'fire|sword': 'flamesword', ... }`，key 是**排序後**的 `a|b`，共 12 組 |
+| `KB.MIX.keyOf(a, b)` | 無序查表；`a === b`、任一方是混合能力、查無組合 → `null` |
+| `KB.MIX.isMix(key)` | 該 key 是不是混合能力（判斷 `KB.ABILITIES[key].mix`） |
+| `KB.MIX.parts(key)` | 回傳 `[A, B]`（非混合能力回 `null`） |
+- 12 個混合能力 push 進 `KB.ABILITY_KEYS`（**20 → 32**），`KB.ABILITY_NAMES` / `KB.ABILITY_HUD` 同步；
+  `KB.ABILITIES[mixkey].mix = [a, b]`、`.mixEl`（視覺元素）、`.color`、`.transform = true`。
+  HUD 英文名一律 ≤ 7 字（HUD 名稱欄只有 53px，超過會被 `hudLabel` 截字），test_mix 有守這條。
+
+### 組合表（12 組，每組 3 招；招式與成分能力完全不同）
+| mixkey | 成分 | 名稱 | X | 方向鍵 | 按住 50 幀放開 |
+|---|---|---|---|---|---|
+| `flamesword` | fire + sword | 炎劍 PYREDGE | 火焰劍氣三連 | 空中：落下爆炎斬 | 火龍捲 |
+| `frostsword` | ice + sword | 冰劍 CRYEDGE | 冰晶斬・凍結 | ↑：冰柱上挑 | 冰河 |
+| `thunderblade` | spark + blade | 雷刀 VOLTIAI | 雷光一閃（全畫面 lightning） | ↓：雷步瞬移斬 | 雷神 |
+| `flamegun` | fire + gunner | 火焰槍 PYROGUN | 燃燒彈 + 地面火海 | ↓：霰彈火牆 | 火箭砲 |
+| `frostgun` | ice + gunner | 冰彈槍 CRYOGUN | 凍結彈 | ↓：冰霧散彈 | 絕對零度光束 |
+| `thunderbow` | spark + bow | 雷弓 VOLTBOW | 追蹤雷箭 | 空中：箭雨閃電 | 天雷之矢 |
+| `flamehammer` | fire + hammer | 火鎚 MAGMAUL | 爆炎鎚・落地火柱 | 空中：火焰迴旋 | 隕石鎚 |
+| `stonehammer` | stone + hammer | 岩鎚 GEOMAUL | 地裂衝擊波三段 | ↑：岩石投擲（落地彈跳） | 地震 |
+| `shadowblade` | cutter + ninja | 影刃 UMBRA | 三方向迴旋刃 | ↓：影分身刃陣 | 千刃 |
+| `starmage` | beam + mage | 星光法師 ASTRAL | 星光束 | ↑：星雨 | 銀河爆 |
+| `frostdragon` | ice + dragon | 冰龍 CRYWYRM | 冰息凍結 | 空中：冰翼俯衝 | 冰龍彈 |
+| `thundermech` | spark + mech | 雷電機甲 VOLTMEK | 電磁拳 | ↑：雷射飛彈 | EMP 全畫面 |
+
+### player.js 鉤子（只動了這三處 + 一個欄位）
+1. **`giveAbility(key)`（單一真相來源）**：開頭先 `KB.MIX.keyOf(this.ability, key)`，有組合就把 `key` 換成混合 key；
+   結尾播 `sfx('transform')` + `KB.VFX.textPop('MIX!')`（`KB.VFX.transform` 本來就會播）。
+   **函式簽章維持 `giveAbility(key)` 不變**（progression agent 在 `progression.js` monkeypatch 這個方法）。
+   這樣「吞下敵人 / 撿能力星 / 踩能力台座 / 夥伴吸回」四條路徑行為一致。
+   ※ 注意：`player.js` 規則是「持有能力時攻擊鍵＝用招式」，所以**空手吸入 → 含在嘴裡 → 撿到能力 → 按 ↓ 吞下**、
+   以及 **能力台座 `KB.ITEMS.essence`** 是目前遊戲中最直接的混合途徑（essence 不檢查現有能力，直接 `giveAbility`）。
+2. **`swallow()`**：改成單純呼叫 `giveAbility(m.ability)` 並加註解（混合判斷已集中在 giveAbility）。
+3. **`dropAbility(spawnStar)`**：掉落混合能力時，能力星改用**主成分 A**（`KB.MIX.parts(key)[0]`）。
+4. **SELECT 長按鉤子**：新增欄位 `p.selectHoldT`（模組常數 `SELECT_HOLD = 45`，**沒有動 `KB.PHYS`**）。
+   `inp.down('select') && (this.ability || KB.Helper.exists())` → `selectHoldT++`；放開時：
+   `held >= 45` 且 `KB.Helper.spawn(this) === true` → 夥伴系統接手（不丟能力，已有夥伴時 spawn 會自動轉 recall）；
+   否則（短按 / 沒有夥伴系統 / spawn 回傳 false）維持原本的 `dropAbility(true)`。HUD 提示由 helper agent 負責。
+
+### 進度
+- [09-12 R6-MIX-1] 完成：`KB.MIX`（table / keyOf / isMix / parts）+ 註冊流程（ABILITY_KEYS 20→32）+ player.js 三個鉤子；
+  **炎劍 / 冰劍 / 雷刀** 三組共 9 招（含全畫面 lightning 一閃、雷步瞬移斬、冰柱上挑、火龍捲 / 冰河 / 雷神）。
+  驗證：`tools/test_mix.py --only defs,mixflow,star,select`、`shots/agent_mix/contact_1.png`（9 張招式圖）；下一步：槍 / 弓系。
+- [09-12 R6-MIX-2] 完成：**火焰槍 / 冰彈槍 / 雷弓** 9 招（地面火海與冰霧用 `Hitbox.onUpdate` 做持續演出、
+  `KB.MixHoming` 追蹤彈、絕對零度光束 210px 判定、天雷之矢 44×210 落雷柱）。
+  驗證：`tools/test_mix.py --only flamegun,frostgun,thunderbow`、`shots/agent_mix/contact_2.png`；下一步：鎚 / 刃系。
+- [09-12 R6-MIX-3] 完成：**火鎚 / 岩鎚 / 影刃** 9 招（火柱三連、地裂衝擊波三段遞增、`KB.MixOrbit` 四刃環繞、
+  千刃 18 道向心刃 + 收束判定、地震全畫面地面判定 + 岩刺）。
+  驗證：`tools/test_mix.py --only flamehammer,stonehammer,shadowblade`、`shots/agent_mix/contact_3.png`；下一步：法 / 龍 / 機甲。
+- [09-12 R6-MIX-4] 完成：**星光法師 / 冰龍 / 雷電機甲** 9 招（星光束跟隨判定、星雨、銀河爆 230×180、
+  龍息 20→62px 漸長凍結框、冰翼俯衝落地冰柱、電磁拳連鎖閃電、EMP 272×200 全畫面 + 12 道落雷）。
+  驗證：`tools/test_mix.py`（全跑）、`shots/agent_mix/contact_4.png`。
+- [09-12 R6-MIX-5] 完成：美術全套 `src/art/kirby_mix.js`——12 組 `kirby_attack_<key>`（3 幀）+ `_ult`（2 幀）、
+  12 頂 `hat_<key>`（武器底帽 ＋ 元素冠飾疊加 ＋ 依元素重新上色）、`ui_ability_<key>` 24×16（兩個成分圖示斜切合成）
+  與 `_mini` 8×8（對角切半）、30 個投射物（wave / orb / bolt / spike / tornado × 6 元素）。
+  武器用 `{rows, gx, gy}` 握把座標擺放（旋轉時握把一起換算），所以不會出現浮空的手或穿臉的武器。
+  驗證：`shots/agent_mix/sheet_<key>.png`、`sheet_icons.png`、`sheet_mix.png`、`sheet_orbs.png`。
+- [09-12 R6-MIX-6] 完成：`tools/test_mix.py` **226/226 PASS**（12 組定義完整性、12×2 方向的混合流程、
+  真實流程「吸入 bladeknight → 拿 fire → 吞下 → 炎劍」與「踩 sword 能力台座 → 炎劍」、對照組無組合照舊替換、
+  持有混合能力再吞第三個 → 替換、12 組受傷掉星＝主成分 A、select 短按 / 長按 / Helper true / false / 無能力有夥伴、
+  12×3 招「命中 waddledee 會死 + 回到正常狀態 + 招式專屬證據」）。
+  回歸：`engine_test 118/118`、`enemy_test 393/393`、`node --check` 全過、MISSING SPRITES 空、無 pageerror。
+  混合演出連拍：`shots/agent_mix/contact_mixfx.png`（MIX! + 放射光線 + 魔法陣 + ring + 名稱橫幅 + HUD 換成 PYREDGE / 炎劍）。
+
+### 跨檔需求 / 給其他 agent
+1. **progression**：`giveAbility` 收到 A + B 時會把 key 換成混合 key，所以 monkeypatch 裡拿到的 `key` 是「請求的能力」、
+   實際取得的是 `this.ability`（混合 key）。要對混合能力算等級 / 成就，請讀 `p.ability` 而不是參數。
+2. **ui / 圖鑑**：`KB.ABILITY_KEYS` 變 32，未發現時剪影已支援；混合能力的 `def.mix = [a, b]` 可以用來在圖鑑上標「A + B」。
+3. **levels / world6**：混合最自然的取得途徑是**能力台座**（`KB.ITEMS.essence`）——在已經有 A 的房間放一座 B 台座即可。
+   `essence` 是可重複觸發的，站在台座上會每 30 幀再給一次（混合後再踩同一座就會被換成 B，這是規格內的「第三個就替換」）。
+4. **audio**：本區用到 `transform / ultimate / charge_ready / sword / ice / fire / spark / cutter / beam / hammer /
+   gun / shotgun / bow / arrow_rain / shuriken / teleport / rocket_punch / missile / hardblock / dragon_breath / dragon_dash /
+   magic_circle / magic_big`，未定義的名字只會 warn 不會壞。
+
+### 已知問題 / 未完成
+- 混合能力**沒有做敵人**（沒有「給混合能力的敵人」），只能靠「持有 A 時取得 B」產生，這是規格本來的設計。
+- 投射物高度必須讓底部留在地面上方（`KB.Projectile` 的 `solid` 會在 `onGround` 當幀殺掉自己）：
+  劍氣類固定 h 16、冰龍彈放在 `p.cy - 11`。之後若調招式位置請一起注意。
+- `--hitbox` 截圖時判定框的半透明覆蓋會把卡比染成橄欖綠（那是除錯覆蓋，不是精靈顏色）；
+  要看美術請用不加 `--hitbox` 的 `shots/agent_mix/mvc_*.png`。
+- 沒有跑 `tools/build.py`（其他 Round 6 agent 還在改檔，等總控收工再打包）。
+
 
 ## helper
 
