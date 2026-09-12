@@ -259,6 +259,91 @@
   };
 
   // ============================================================================
+  // space 星之彼端（W6）：深空星點閃爍、星雲色帶、遠方行星、偶爾流星劃過
+  // 垂直房支援：所有層的 y 都夾在畫面內（camY 很大時不會整片露出底色 / 飄出畫面）
+  // ============================================================================
+  const SP = {
+    a: '#2a1a5c', b: '#3c2478', c: '#6a3ca8', d: '#1a1040', e: '#4a2c90',
+    n: '#20406c', N: '#2c6090', q: '#8a5ad0', w: '#ffffff', v: '#a862f0', g: '#1e7a90',
+  };
+  // 星雲色帶（256×96，可平鋪）：柔和的紫 / 青色雲氣
+  const spNebula = strip('bg_space_nebula', SP, 256, 96, p => {
+    const puffs = [[20, 30, 20, 'a'], [64, 54, 26, 'a'], [118, 26, 22, 'a'], [176, 58, 28, 'a'], [226, 34, 20, 'a'],
+      [40, 40, 13, 'b'], [80, 60, 16, 'b'], [130, 34, 14, 'b'], [186, 62, 17, 'b'], [234, 40, 12, 'b'],
+      [46, 44, 7, 'c'], [86, 62, 8, 'c'], [134, 38, 7, 'c'], [192, 64, 9, 'c'], [238, 42, 6, 'c'],
+      [88, 64, 3, 'q'], [136, 40, 3, 'q'], [194, 66, 4, 'q']];
+    for (const [cx, cy, r, ch] of puffs) p.ellipse(cx, cy, r, Math.round(r * 0.55), ch);
+    // 鏤空出絲狀質感
+    for (let i = 0; i < 260; i++) {
+      const x = (i * 97) % 256, y = (i * 53) % 96;
+      if ((x * 7 + y * 13) % 5 === 0) p.px(x, y, '.');
+    }
+  });
+  // 遠方的第二層星雲（更暗、更慢）
+  const spDust = strip('bg_space_dust', SP, 256, 72, p => {
+    for (const [cx, cy, r] of [[34, 24, 16], [110, 46, 20], [196, 20, 18], [244, 50, 14]]) p.ellipse(cx, cy, r, Math.round(r * 0.5), 'd');
+    for (const [cx, cy, r] of [[36, 26, 8], [114, 48, 10], [198, 22, 9]]) p.ellipse(cx, cy, r, Math.round(r * 0.5), 'a');
+  });
+  const spFar = mkStars(80, 77, 256, 176);    // 最遠的星（幾乎不動）
+  const spNear = mkStars(34, 131, 256, 168);  // 近一點的星（會視差移動、比較亮）
+  KB.BG.space = function (ctx, camX, camY, t) {
+    bands(ctx, 0, VH, ['#05041a', '#080622', '#0c0a2c', '#100c36', '#140f40', '#180f36', '#140a26']);
+    // 遠景星（視差 0.02，垂直方向只移動一點點 → 垂直房仍然滿版）
+    drawStars(ctx, spFar, t, camX * 0.02, '#ffffff', '#404878');
+    // 星雲色帶（兩層）
+    const dy = Math.max(-40, Math.min(VH - 24, 26 - camY * 0.05));
+    tileX(ctx, spDust, camX * 0.06 + t * 0.6, dy, 0.7);
+    const ny = Math.max(-56, Math.min(VH - 20, 64 - camY * 0.1));
+    tileX(ctx, spNebula, camX * 0.12 + t * 1.2, ny, 0.55);
+    // 遠方行星（視差 0.08）：帶光環的紫色巨行星，y 夾在畫面上半
+    const px0 = wrapX(70, camX * 0.08, 512), pxs = px0 > 340 ? px0 - 512 : px0;
+    const py0 = Math.max(18, Math.min(VH - 34, 54 - camY * 0.08));
+    // 光環：先畫後半圈 → 畫行星 → 再補前半圈（才有「環穿過行星後面」的立體感）
+    const ringHalf = front => {
+      ctx.save(); ctx.globalAlpha = front ? 0.9 : 0.55;
+      for (let k = 0; k <= 120; k++) {
+        const a = (k / 120) * Math.PI * 2;
+        if ((Math.sin(a) > 0) !== front) continue;
+        const rx = Math.round(pxs + Math.cos(a) * 38), ry = Math.round(py0 + 6 + Math.sin(a) * 11 - Math.cos(a) * 5);
+        KB.rect(ctx, rx, ry, 2, 1, k % 5 === 0 ? '#b8bcf4' : '#66e4ff');
+        KB.rect(ctx, rx, ry + 1, 2, 1, '#2c6090');
+      }
+      ctx.restore();
+    };
+    ringHalf(false);
+    KB.circle(ctx, pxs, py0, 27, '#241348');
+    KB.circle(ctx, pxs, py0, 25, '#4a2c90');
+    KB.circle(ctx, pxs - 6, py0 - 6, 16, '#6a3ca8');
+    KB.circle(ctx, pxs - 9, py0 - 9, 7, '#8a5ad0');
+    KB.circle(ctx, pxs + 9, py0 + 7, 6, '#341c66');
+    KB.circle(ctx, pxs + 3, py0 - 11, 4, '#341c66');
+    ringHalf(true);
+    // 第二顆小行星（更近、視差 0.2）
+    const sx0 = wrapX(300, camX * 0.2, 640), sxs = sx0 > 430 ? sx0 - 640 : sx0;
+    const sy0 = Math.max(12, Math.min(VH - 20, 132 - camY * 0.16));
+    KB.circle(ctx, sxs, sy0, 11, '#1e7a90');
+    KB.circle(ctx, sxs - 3, sy0 - 3, 6, '#66e4ff');
+    KB.circle(ctx, sxs + 4, sy0 + 3, 3, '#124a60');
+    // 近景星（視差 0.16，會閃爍）
+    drawStars(ctx, spNear, t, camX * 0.16, '#e8f4ff', '#5a64a0');
+    // 偶爾的流星：每 2.6 秒一顆，斜向劃過 0.55 秒
+    const cyc = 2.6, ph = t % cyc, n = Math.floor(t / cyc);
+    if (ph < 0.55) {
+      const r = rng(n * 2654435761 + 7);
+      const x0 = r() * 300 - 30, y0 = r() * 90, len = 26 + r() * 22, spd = 300 + r() * 160;
+      const k = ph / 0.55, a = Math.sin(k * Math.PI);
+      const hx = x0 + k * spd, hy = y0 + k * spd * 0.45 - camY * 0.04;
+      ctx.save(); ctx.globalAlpha = a;
+      for (let i = 0; i < len; i++) {
+        const f = 1 - i / len;
+        KB.rect(ctx, hx - i, hy - i * 0.45, 1, 1, f > 0.6 ? '#ffffff' : (f > 0.3 ? '#b8bcf4' : '#6a3ca8'));
+      }
+      KB.rect(ctx, hx, hy - 1, 2, 3, '#ffffff'); KB.rect(ctx, hx - 1, hy, 4, 1, '#ffffff');
+      ctx.restore();
+    }
+  };
+
+  // ============================================================================
   // title 標題：藍天草地雲朵（動態）
   // ============================================================================
   const tStars = mkStars(14, 5, 256, 56);

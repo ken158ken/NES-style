@@ -2049,7 +2049,120 @@ R5-7a 的觀察項（gravity ↑+X 文案不一致、圖鑑剪影露出帽子輪
 
 
 ## world6
-（agent 在此追加）
+
+> 檔案：`src/levels.js`（**只新增 w6 的 KB.LEVELS.push**，w1~w5 一格未動）、`src/art/world6.js`、`src/bosses_w6.js`、
+> `src/const.js`（THEMES / THEME_NAMES / PAL.space）、`src/art/backgrounds.js`（新增 `KB.BG.space`）、
+> `src/audio.js`（新增 4 首原創曲）、`tools/level_check.js`、`tools/boss_test.py`、`tools/playthrough.py`。
+> 截圖目錄 `shots/agent_world6/`（自製工具 `pshot.py` 任意主題 / 房間連拍、`bshot.py` 魔王招式連拍）。
+
+- [09-12 W6-1] 完成：**主題美術 space（紫藍色金屬 + 星光邊）**。`const.js` 加 `KB.THEMES` 'space' / `THEME_NAMES` '星之彼端' / `KB.PAL.space`；
+  `art/world6.js` 畫出 10 種磁磚 `tile_space_{top,topL,topR,fill,left,right,bottom,platform,slopeL,slopeR}`
+  （填充＝深紫藍裝甲板＋面板縫＋鉚釘＋青色迴路線；表層＝青白星光邊＋閃點；平台＝懸浮金屬板，上緣星光、下緣青色輝光）
+  與 6 種裝飾 `KB.DECO_CHARS.space = 'cprsgm'`：c 水晶(14×26) / p 星球模型(24×30) / **r 傳送環(20×26, 2 幀＝暗房光源)** / s 星辰(12×12, 2 幀) / g 晶簇(16×12) / m 隕石(20×14)。
+  驗證：`shots/agent_world6/theme_space.png`、`theme_space2.png`、`theme_space3.png`（用 `KB.previewTheme('space')` 疊在 w1 上逐張 Read 檢查磁磚拼接 / 斜坡 / 裝飾）。
+- [09-12 W6-2] 完成：**`KB.BG.space` 多層視差背景**（`art/backgrounds.js`）。由遠到近：深空漸層帶 → 80 顆遠景星（視差 0.02、閃爍）→
+  暗星塵 `bg_space_dust` → 星雲色帶 `bg_space_nebula`（兩層平鋪 + alpha）→ **帶光環的紫色巨行星**（環分前後半圈畫，行星夾在中間才有立體感）→
+  青色小行星（視差 0.2）→ 34 顆近景星 → **每 2.6 秒一顆斜向流星**（含拖尾）。
+  **垂直房支援**：每一層的 y 都夾在畫面內（`Math.max/min`），camY 很大時不會露出底色或整片飄出畫面。
+  驗證：`w6r1.png`（32×24 垂直房，行星 / 星雲 / 星點都在畫面內）。
+- [09-12 W6-3] 完成：**3 種新敵人 + 1 隻中魔王**（類別寫在 `src/bosses_w6.js`、像素圖在 `src/art/world6.js`，沒有碰別人的檔案）。
+
+  | key | 名稱 | 尺寸 | 能力 | 行為 |
+  |---|---|---|---|---|
+  | `meteorite` | 隕石 | 14×14 | 無 | 帶重力往下滾，撞牆 / 落差 > 26px 的落地 → 燒紅 16 幀 → 爆炸（40×36 判定框）→ **回到起點等 70 幀再落一次**（隕石帶的循環危險，不是一次性敵人）|
+  | `starling` | 星靈 | 14×14 | beam | 無重力飄浮追蹤（170px 內），每 90~130 幀朝玩家射一發可吸入的 `proj_starshot` |
+  | `voidling` | 虛空 | 14×16 | ghost | 無重力遊蕩 / 追蹤；每 140~200 幀**隱形 66 幀**（alpha 0，只留紫色殘粒；期間仍打得到也仍會撞傷人）|
+  | `mirrordee` | 鏡子瓦豆（中魔王）| 22×26 | cutter | hp 12。每 60 幀「照鏡子」讀 `KB.player.ability` → 取該能力對應的**第 1 招**的鏡像版（威力較低的單發）；貼身則舉鏡撞人 |
+
+  驗證：`sheet_meteorite.png`、`sheet_ling.png`（星靈 / 虛空）、`w6r1_meteor.png`（實戰）、`w6r4_mirrordee.png`（映出『影劍氣』並射出）。
+- [09-12 W6-4] 完成：**關卡 w6「星之彼端」5 房 + 魔王房 + 秘密房**（`id:'w6', theme:'space', music:'space', boss:'shadowkirby'`）。
+  房間表見下方「w6 房間一覽」。`node tools/level_check.js` → **0 error**。每房截圖 `w6r0~w6r6.png` 已逐張 Read 確認（磁磚拼接 / 背景 / 敵人站位 / 暗房光圈）。
+- [09-12 W6-5] 完成：**魔王「暗影卡比」shadowkirby（HP 70）一階段**。
+  精靈 24×24（黑紫色卡比 + 發光白眼；`shadowkirby_idle/attack/inhale/hurt/float`），**頭上疊一頂玩家能力的帽子（tint 黑 + 紫色描邊）**。
+  能力複製：`copyAbility()` 讀 `KB.player.ability`（null → 'sword'），每 90 幀在 idle 時重新檢查；換能力會放 ring + 粒子 + toast。
+  **6 種通用影子招**（全部自己實作，不透過能力 def.onAttack）：影劍氣 `slash` / 影火球 `fireball` / 影手裡劍 `shuriken` /
+  影雷擊 `thunder`（玩家頭上 30 幀預警後落雷）/ 影黑洞 `blackhole`（在兩人之間放黑洞拉人）/ 影踩踏 `stomp`（高跳砸地 + 左右兩道震波），
+  依 `KB.SHADOW_COPY[能力]` 挑 3 種（20 種能力全部有對應表）。固定招：**瞬移到玩家背後** `warp`、**影之吸入** `inhale`（拉力 1.05px/f < 走路 1.3，走開就掙脫得掉；被吸到就吐出 **2 點傷害** + 大擊退）。
+  **登場：從玩家的影子中升起**（影池擴散 34 幀 → 剪影以 scaleY 拔起 74 幀，外圈紫色光暈 → 第 124 幀白眼睜開 + 閃光 + 震動）。
+  驗證：`boss_intro_00..06.png`（逐張 Read）、`boss_ready.png`、`move_{slash,fireball,shuriken,thunder,blackhole,stomp,warp,inhale}_00..04.png`。
+- [09-12 W6-6] 完成：**暗影卡比二階段（HP < 50%）**。
+  ① `split` → **分裂 2 個影分身 `shadowclone`（各 hp 10，會衝撞與丟影星）**，期間本體 `untouchable`（半透明呼吸）浮在上空＝弱點藏起來；
+  兩隻都倒下（或 900 幀保險上限）才 `dismissClones()` 落地露出弱點。
+  ② 必殺 **「暗星雨」`starrain`**：letterbox + worldTint + **兩處安全區**（地面橢圓光環 + 兩道半透明光柱 + toast「站進光環裡」），
+  46~150 幀期間每 7 幀灑 2 顆 `proj_darkmeteor`（避開安全區 ±26px）；冷卻 420 幀。
+  ③ 音樂切 `shadowboss2`（`enterPhase2` 覆寫，SONGS 沒有時保持原曲）。
+  **擊敗演出**：影子消散（40 顆往上飄的黑紫碎片 + 白閃 + 擴散 ring + 震動）並清掉場上所有敵方投射物；`KB.session.shadowDefeated = true`。
+  驗證：`phase2_00..05.png`（分裂 → 影分身 → 本體半透明）、`starrain_00..05.png`（安全區光環 + 隕石雨）、`boss_death_00..05.png`。
+- [09-12 W6-7] 完成：**4 首原創曲**（`src/audio.js`，格式完全照既有 `song()`；`node tools/audio_check.js` → 全部通過）。
+
+  | key | 調性 / BPM | 說明 |
+  |---|---|---|
+  | `space` | A 多利安 / 118 | 世界主曲。八分琶音（sine）鋪底 + 輕鼓，漂浮神祕又帶嚮往 |
+  | `space2` | F# 小調 / 140 | 第二首「深空迴廊」：方波主旋律 + 切分貝斯，比 space 有推進感（r1 / r2 / r4 使用）|
+  | `shadowboss` | D 小調（含降二級 Eb）/ 170 | 魔王戰：鋸齒主旋律 + 十六分連打貝斯 |
+  | `shadowboss2` | F 小調 / 186 | 二階段：`variation('shadowboss', {semis:3})` + 八分驅動貝斯 + 短促密集鼓 |
+
+- [09-12 W6-8] 完成：**工具**。
+  `tools/level_check.js`：新敵人尺寸表 `W6_ENEMY`（meteorite 14×14 / starling 14×14 / voidling 14×16 / mirrordee 22×26）、
+  `FLY` 加 meteorite / starling / voidling（都不要求下方有地面）、`GROUND` + `MINIBOSS` + `TALL/WIDE` 加 mirrordee、
+  `BOSS.shadowkirby = {w:2,h:2,ground:true}`、`DECO.space = 'cprsgm'`、`DARK_LIGHTS.space = 'r'`、
+  `ABILITY_FROM` 補 starling→beam / voidling→ghost / mirrordee→cutter，並新增「Round 6 world6 新敵人（尺寸表 / 各世界隻數）」統計區。
+  `tools/boss_test.py`：`ROOMS/ORDER/REAL_ROOMS/CURVE_TARGET` 加 shadowkirby、`PHASE2_STATES.shadowkirby = ['split','guard','starrain']`。
+  `tools/playthrough.py`：**修掉「爬垂直房豎井時一邊漂一邊揮劍」的死循環** —— 漂浮中按攻擊＝吐氣（中斷漂浮 + 8 幀不能再漂）、
+  空中揮劍也會把卡比拉下來，所以「門在上方 + 不在地面」時一律不按攻擊；另外對準門（|dx| < 6）就不再左右飄。
+- [09-12 W6-9] 完成：**驗收**。
+  - `node tools/level_check.js` → **0 error / 1 warning**（僅既有的 w2「拉拉拉預設出生點」提示）。
+  - `tools/boss_test.py --boss shadowkirby --runs 4` → **ALL PASS**（idle / intro / fight 4/4 / phase2 / mid）。
+  - `tools/playthrough.py --level wN --ability sword --godmode --maxframes 45000` → **w1~w6 全部 cleared=True、deaths=0、missing sprites 皆空**
+    （w1 5161 / w2 9516 / w3 6428 / w4 7362 / w5 8466 / **w6 6836** 幀；w6 bossDamage=100%）。
+
+### w6 房間一覽
+
+| 房 | 名稱 | 尺寸 | 音樂 / 旗標 | 重點 |
+|---|---|---|---|---|
+| r0 | 星港 | 88×12 | space / wind | 教學房。整片天空鋪滿單向星光平台（漂浮練習）+ 第一顆傳送星 (30,9)→(52,9)；★1 在最高的平台上 |
+| r1 | 隕石帶 | 32×24（垂直）| space2 / cave | 往上爬；**7 顆 meteorite 循環滾落爆炸**（另有 1 顆在 r3）。右側 x=24~30 是淨空豎井（每 4 列一片 '=' 休息平台），左 / 中是收集品支線 |
+| r2 | 暗物質迴廊 | 80×12 | space2 / cave / **dark** | 只看得見身邊 40px，光源是 6 個傳送環裝飾 'r'；**spark 台座**把光圈撐到 96px；右側 `X` 硬磚密室藏 ★2（hammer 台座砸開）|
+| r3 | 星軌 | 96×12 | space / wind | **3 段傳送星**接起斷掉的軌道（斷軌最底列鋪 '=' 安全網，掉下去跳得回來）；中段反重力區（gravity 台座 + 高空平台群）；秘密門 (82,9) |
+| r4 | 鏡之間 | 56×12 | space2 / wind | **中魔王 mirrordee**（複製玩家能力的 1 招）+ `gatekeeper`，打倒才解鎖王座的門 |
+| r5 | 暗影王座 | 28×12 | **shadowboss** | 魔王房。spawn [10,8] / bossPos [17,8] = **112px**（≥96 且 ≤200，登場結束時同框）；exit (7,8) |
+| r6 | 星之搖籃（秘密）| 24×12 | secret | 由 r3 (82,9) 的門進入；★3 + 1UP + 番茄 + ghost 台座 |
+
+### w6 大星星 / 能力台座 / 秘密房
+
+| 項目 | 房 | 座標 | 取得方式 |
+|---|---|---|---|
+| ★ a0 | r0 星港 | (56, 1) | 漂浮到 x=54~58 的最高星光平台上 |
+| ★ a1 | r2 暗物質迴廊 | (63, 9) | 暗房右側 x=59~67 的硬磚密室（用 (30,9) 的 hammer 台座砸開 `X`）|
+| ★ a2 | r6 星之搖籃（秘密房）| (11, 3) | r3 (82,9) 的隱藏門 |
+| 能力台座 ×6 | r0 (18,9) `gunner` / r2 (8,9) `spark`、(30,9) `hammer` / r3 (44,9) `gravity` / r4 (8,9) `blade` / r6 (7,9) `ghost` | — | 其中 **gunner / gravity / blade / ghost 是 Round 5 的新能力** |
+| 中魔王門鎖 | r4 鏡之間 | gatekeeper (52,9) + locked 門 (52,9) | 打倒 mirrordee 才開 |
+
+### 敵人配置（w6）
+- **新敵人**：meteorite ×8（r1 ×7 / r3 ×1）、starling ×7（r0 ×2 / r1 ×2 / r2 ×1 / r3 ×1 / r4 ×1）、voidling ×6（r0 ×1 / r1 ×1 / r2 ×2 / r3 ×1 / r4 ×1）、mirrordee ×1（r4）。
+- **Round 5 新能力敵人混編**：pistolo(r0) / kagedee(r2) / boodee(r2) / gravitron(r3) / drako(r3) / mimi(r4)，每種 1 隻（不超過每世界 2 隻的設計目標）。
+- **既有敵人**：waddledee / waddledoo / brontoburt / cappy / sparky / sirkibble。
+
+### 跨檔需求（world6 → 其他 agent / 總控）
+1. **progression（選關第 6 節點）**：`KB.LEVELS` 已有 `id:'w6'`、`theme:'space'`、`name:'星之彼端'`、`bossName:'暗影卡比'`，
+   `KB.THEME_NAMES.space = '星之彼端'` 也已加好；選關地圖的第 6 個節點座標請自行決定（`KB.UI.LAYOUT.mapNodes` 目前只有 5 組，
+   `KB.BG.map` 會自動依 mapNodes 長度畫陸地）。存檔的 `KB.save.stars.w6` 是長度 3 的布林陣列。
+2. **ui / 結局文案（EndingScene）**：w6 是 `KB.LEVELS` 的最後一關 ⇒ `game.js gotoNext()` 會自動接 `KB.EndingScene`，程式面不需要改。
+   文案建議提到：暗影卡比是「卡比自己的影子」，擊敗後影子消散、星之彼端的光重新亮起。
+   擊敗旗標可讀 `KB.session.shadowDefeated === true`。
+3. **audio**：新增了 `space` / `space2` / `shadowboss` / `shadowboss2` 四首（`KB.audio.SONGS`），沒有動既有曲；
+   用到的 sfx 全部是既有的，並且一律走「沒有這個 sfx 就退回同類舊 sfx」的包裝（`meteor` / `stomp` / `teleport` / `blackhole` / `thunder` / `shuriken` / `clone_summon` / `possess` / `ghost_phase` / `ultimate`）。
+4. **elements**：w6 的新敵人已經自帶元素標籤（meteorite `element:'fire'` weak ice、starling `element:'spark'` weak ice、
+   voidling `element:'ghost'` weak spark、mirrordee `element:'metal'` weak spark），暗影卡比本體沒有屬性弱點（純靠技術），需要調整請直接改 `src/bosses_w6.js`。
+
+### 已知問題 / 未完成（world6）
+- `tools/boss_test.py --runs 3`（全部魔王）目前 `kracko fight=FAIL`（2/3）。**不是這一輪造成的**：
+  w6 只新增檔案 + 只動 `const.js` / `backgrounds.js` / `audio.js` 的新增段落，kracko 的戰鬥完全不經過這些；
+  同一時間 `elements` agent 正在改 `src/bosses.js`（加了 `kracko.weak = ['ice']`）與 `src/entity.js`（屬性倍率），
+  傷害數值改變後 kracko 的第 3 個樣本才開始失敗 → 請由 elements / 總控複驗。
+- 暗星雨的 toast 與其他 toast 同時出現時會疊在一起（`game.js` 把所有 toast 畫在同一個 y）；正常流程不會同時出現，未處理。
+- `tools/build.py` 尚未執行（其他 Round 6 agent 仍在改檔）→ 請總控收尾時統一 build。未 commit。
+
 
 ## progression
 > 檔案：`src/progression.js`（新）、`src/ui.js`、`src/menu.js`、`src/game.js`、`src/arena.js`、`tools/test_progression.py`。

@@ -1775,6 +1775,144 @@
     };
   }
 
+  // ======================================================================
+  // Round 6（world6）：第六世界「星之彼端」與魔王「暗影卡比」
+  // ======================================================================
+  // ---- space：A 多利安調，漂浮、神祕又帶著嚮往的宇宙曲（八分琶音鋪底 + 輕鼓）----
+  {
+    const A1 = 'A5 - - - E6 - - - D6 - - - B5 - - -';
+    SONGS.space = {
+      bpm: 118, loop: true, order: ['A', 'B'], inst: { p1: 'p25', p2: 'sine' }, vol: { p1: 0.18, p2: 0.13, bass: 0.26 },
+      sec: {
+        A: {
+          p1: [A1,
+            'C6 - - - B5 - A5 - G5 - - - E5 - G5 -',
+            'F5 - - - C6 - - - A5 - - - G5 - - -',
+            'E5 - - - - - - - . . D5 E5 G5 - A5 -',
+            A1,
+            'C6 - - - E6 - D6 - B5 - - - A5 - B5 -',
+            'D6 - - - C6 - B5 - A5 - G5 - E5 - D5 -',
+            'A5 - - - - - - - . . . . . . . .'],
+          p2: [arpE('A4', 'E5', 'A5', 'E5'), arpE('C5', 'E5', 'G5', 'E5'), arpE('F4', 'A4', 'C5', 'A4'), arpE('E4', 'G4', 'B4', 'G4'),
+            arpE('A4', 'E5', 'A5', 'E5'), arpE('C5', 'E5', 'A5', 'E5'), arpE('D5', 'F#5', 'A5', 'F#5'), 'A4 - E5 - A5 - - - . . . . . . . .'],
+          bass: [oct('A2', 'E3'), oct('C3', 'G2'), oct('F2', 'C3'), oct('E2', 'B2'),
+            oct('A2', 'E3'), oct('C3', 'G2'), oct('D3', 'A2'), 'A2 - - - E2 - - - A2 - - - . . . .'],
+          drum: [D.soft, D.soft, D.soft, D.sparse2, D.soft, D.soft, D.soft, D.fill],
+        },
+        B: {
+          p1: ['E6 - - - D6 - C6 - B5 - - - C6 - D6 -',
+            'A5 - - - G5 - A5 - C6 - - - - - - -',
+            'F5 - A5 - C6 - E6 - D6 - C6 - A5 - G5 -',
+            'E5 - - - - - - - . . G5 A5 B5 - C6 -',
+            'E6 - - - D6 - C6 - B5 - - - C6 - E6 -',
+            'G6 - - - F#6 - E6 - D6 - - - B5 - D6 -',
+            'C6 - E6 - A6 - - - G6 - E6 - D6 - B5 -',
+            'A5 - - - - - - - . . . . E5 F#5 G5 -'],
+          p2: [arpE('E4', 'G4', 'B4', 'G4'), arpE('F4', 'A4', 'C5', 'A4'), arpE('F4', 'C5', 'F5', 'C5'), arpE('E4', 'B4', 'E5', 'B4'),
+            arpE('E4', 'G4', 'B4', 'G4'), arpE('G4', 'B4', 'D5', 'B4'), arpE('A4', 'C5', 'E5', 'C5'), 'A4 - C5 - E5 - - - . . . . . . . .'],
+          bass: [oct('E2', 'B2'), oct('F2', 'C3'), oct('F2', 'C3'), oct('E2', 'B2'),
+            oct('E2', 'B2'), oct('G2', 'D3'), oct('A2', 'E3'), 'A2 - - - E2 - - - A2 - - - . . . .'],
+          drum: [D.light, D.light, D.light, D.sparse2, D.light, D.light, D.light, D.fill],
+        },
+      },
+    };
+  }
+
+  // ---- space2：同世界的第二首（深空迴廊）。F# 小調、BPM 140，切分貝斯 + 方波主旋律，比 space 有推進感 ----
+  {
+    const A1 = 'F#5 - - A5 C#6 - - - B5 - A5 - F#5 - - -';
+    const B1 = 'C#6 - - E6 A6 - - - G#6 - - E6 C#6 - - -';
+    SONGS.space2 = {
+      bpm: 140, loop: true, order: ['A', 'B'], inst: { p1: 'sq', p2: 'p12' }, vol: { p1: 0.17, p2: 0.11, bass: 0.3 },
+      sec: {
+        A: {
+          p1: [A1,
+            'E5 - - G5 B5 - - - A5 - G5 - E5 - - -',
+            'D5 - F#5 - A5 - D6 - C#6 - - B5 A5 - - -',
+            'B5 - - - C#6 - - - . . F#5 G#5 A5 - B5 -',
+            A1,
+            'E5 - - G5 B5 - - - D6 - C#6 - B5 - A5 -',
+            'G5 - B5 - D6 - - C#6 B5 - A5 - G5 - F#5 -',
+            'F#5 - - - - - - - . . . . C#5 - E5 -'],
+          p2: [cmp('A4', 'C#5'), cmp('G4', 'B4'), cmp('F#4', 'A4'), cmp('G#4', 'B4'),
+            cmp('A4', 'C#5'), cmp('G4', 'B4'), cmp('G4', 'B4'), 'F#4 - A4 - C#5 - - - . . . . . . . .'],
+          bass: [syn('F#2', 'C#3'), syn('E2', 'B2'), syn('D2', 'A2'), syn('C#2', 'G#2'),
+            syn('F#2', 'C#3'), syn('E2', 'B2'), syn('G2', 'D3'), 'F#2 - - . C#3 - - . F#2 - - - . . . .'],
+          drum: [D.basic, D.basic, D.basic, D.fill, D.basic, D.basic, D.basic, D.fill],
+        },
+        B: {
+          p1: [B1,
+            'B5 - - D6 F#6 - - - E6 - - D6 B5 - - -',
+            'A5 - C#6 - E6 - A6 - G#6 - F#6 - E6 - C#6 -',
+            'D6 - - - C#6 - - - B5 - - - - - . .',
+            B1,
+            'D6 - - F#6 A6 - - - G#6 - - F#6 E6 - - -',
+            'C#6 - E6 - A6 - - - G#6 - E6 - C#6 - B5 -',
+            'F#5 - - - - - - - . . . . . . . .'],
+          p2: [cmp('C#5', 'E5'), cmp('B4', 'D5'), cmp('A4', 'C#5'), cmp('B4', 'D5'),
+            cmp('C#5', 'E5'), cmp('B4', 'D5'), cmp('A4', 'C#5'), 'F#4 - A4 - C#5 - - - . . . . . . . .'],
+          bass: [syn('C#3', 'G#2'), syn('B2', 'F#3'), syn('A2', 'E3'), syn('B2', 'F#3'),
+            syn('C#3', 'G#2'), syn('B2', 'F#3'), syn('A2', 'E3'), 'F#2 - - . C#3 - - . F#2 - - - . . . .'],
+          drum: [D.basic, D.basic, D.basic, D.fill, D.basic, D.basic, D.basic, D.fill],
+        },
+      },
+    };
+  }
+
+  // ---- shadowboss：暗影卡比戰。D 小調（降二級 Eb = 拿坡里和弦的陰影感）、BPM 170，鋸齒主旋律 + 十六分貝斯 ----
+  {
+    const A1 = 'D5 - - - F5 - D5 - A5 - - - G#5 - A5 -';
+    const A2 = 'Bb5 - A5 - F5 - D5 - E5 - - - C#5 - E5 -';
+    const B1 = 'D6 - - - C6 - Bb5 - A5 - - - Bb5 - C6 -';
+    const B2 = 'F6 - - - E6 - D6 - C#6 - - - A5 - C#6 -';
+    SONGS.shadowboss = {
+      bpm: 170, loop: true, order: ['A', 'B'], inst: { p1: 'saw', p2: 'p25' }, vol: { p1: 0.15, p2: 0.11, bass: 0.33 },
+      sec: {
+        A: {
+          p1: [A1, A2,
+            'Eb5 - - - G5 - Bb5 - Eb6 - - - D6 - - -',
+            'C#6 - - - A5 - - - E5 - - - C#5 - - -',
+            A1, A2,
+            'Eb6 - - - D6 - C6 - Bb5 - - - A5 - Bb5 -',
+            'A5 - - - E5 - - - D5 - - - . . . .'],
+          p2: [stab('F4', 'A4'), stab('F4', 'A4'), stab('Eb4', 'G4'), stab('E4', 'A4'),
+            stab('F4', 'A4'), stab('F4', 'A4'), stab('Eb4', 'G4'), 'A4 - - - E4 - - - D4 - - - . . . .'],
+          bass: [b16('D2', 'C2'), b16('D2', 'C2'), b16('Eb2', 'D2'), b16('A2', 'G#2'),
+            b16('D2', 'C2'), b16('D2', 'C2'), b16('Eb2', 'D2'), b16('A2', 'A2')],
+          drum: [D.boss, D.boss, D.boss, D.bossF, D.boss, D.boss, D.boss, D.bossF],
+        },
+        B: {
+          p1: [B1, B2,
+            'Bb5 - D6 - F6 - Bb6 - A6 - - - G6 - F6 -',
+            'E6 - - - C#6 - - - A5 - - - - - . .',
+            B1, B2,
+            'G6 - - - F6 - Eb6 - D6 - - - C#6 - D6 -',
+            'D6 - - - A5 - - - D5 - - - . . . .'],
+          p2: [stab('D4', 'F4'), stab('A4', 'C#5'), stab('Bb4', 'D5'), stab('A4', 'C#5'),
+            stab('D4', 'F4'), stab('A4', 'C#5'), stab('Eb4', 'G4'), 'D4 - - - A4 - - - D5 - - - . . . .'],
+          bass: [b16('D2', 'C2'), b16('A2', 'G#2'), b16('Bb2', 'A2'), b16('A2', 'G#2'),
+            b16('D2', 'C2'), b16('A2', 'G#2'), b16('Eb2', 'D2'), b16('D2', 'A2')],
+          drum: [D.boss, D.bossF, D.boss, D.bossF, D.boss, D.bossF, D.boss, D.bossF],
+        },
+      },
+    };
+  }
+
+  // ---- shadowboss2：暗影卡比二階段（BPM +16、升 3 半音 D 小調→F 小調、八分驅動貝斯 + 短促密集鼓）----
+  SONGS.shadowboss2 = variation('shadowboss', {
+    bpm: 186, semis: 3, gain: 1.0, vol: { p1: 0.16, p2: 0.12, bass: 0.35 },
+    bass: {
+      A: [dr8('F2', 'F3'), dr8('F2', 'C3'), dr8('F#2', 'C#3'), dr8('C3', 'B2'),
+        dr8('F2', 'F3'), dr8('F2', 'C3'), dr8('F#2', 'C#3'), dr8('C3', 'C3')],
+      B: [dr8('F2', 'C3'), dr8('C3', 'B2'), dr8('C#3', 'C3'), dr8('C3', 'B2'),
+        dr8('F2', 'C3'), dr8('C3', 'B2'), dr8('F#2', 'C#3'), dr8('F2', 'C3')],
+    },
+    drum: {
+      A: [D.tight, D.tight, D.tight, D.tightF, D.tight, D.tight, D.tight, D.tightF],
+      B: [D.dblH, D.tight, D.dblH, D.tightF, D.dblH, D.tight, D.dblH, D.tightF],
+    },
+  });
+
   // ---- Round 5（audio5）----
   // ultimate_loop：必殺期間的 2 小節高張力 loop（A 小調、BPM 180、十六分驅動 + 雙倍鼓）
   //   素材 A / B 各 2 小節，order 交替 8 次 → 16 小節，聽感仍是「2 小節一循環」的緊迫感

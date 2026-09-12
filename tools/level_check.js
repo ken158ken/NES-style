@@ -14,12 +14,12 @@ const KNOWN = new Set(['#', '=', '*', 'B', 'X', 'I', 'F', '^', '~', 'H', '/', '\
 // 機關磁磚需要的能力，以及可提供該能力的敵人（讓「有機關但拿不到能力」在靜態檢查就抓得到）
 const MECH_NEED = { X: ['hammer', 'stone'], F: ['fire'], I: ['fire'] };
 const ABILITY_FROM = {
-  fire: ['hothead'], ice: ['chilly', 'mrfrosty', 'snowly'], spark: ['sparky'], beam: ['waddledoo'],
-  cutter: ['sirkibble'], sword: ['bladeknight'], hammer: ['bonkers'], stone: ['rocky'],
+  fire: ['hothead'], ice: ['chilly', 'mrfrosty', 'snowly'], spark: ['sparky'], beam: ['waddledoo', 'starling'],
+  cutter: ['sirkibble', 'mirrordee'], sword: ['bladeknight'], hammer: ['bonkers'], stone: ['rocky'],
   // Round 5 的 12 種新能力（武器 / 魔法 / 變身），每種各有一隻專屬敵人
   gunner: ['pistolo'], ninja: ['kagedee'], blade: ['ronin'], bow: ['archerwaddle'],
   mage: ['wizzle'], time: ['tiktok'], gravity: ['gravitron'], clone: ['mimi'],
-  giant: ['bigbloom'], dragon: ['drako'], mech: ['bolt'], ghost: ['boodee'],
+  giant: ['bigbloom'], dragon: ['drako'], mech: ['bolt'], ghost: ['boodee', 'voidling'],
 };
 // Round 5 新能力（用於「新能力敵人統計」）：能力 key → 敵人 key
 const R5_ABILITY = {
@@ -34,28 +34,37 @@ const r5stat = {}, r5ess = {};
 for (const k of Object.keys(R5_ABILITY)) { r5stat[k] = {}; r5ess[k] = {}; }
 const ABILITY_KEYS = new Set(Object.keys(ABILITY_FROM));
 // 暗房的發光裝飾（game.js drawDark）
-const DARK_LIGHTS = { castle: 'r', dedede: 'tc', cloud: 's' };
+const DARK_LIGHTS = { castle: 'r', dedede: 'tc', cloud: 's', space: 'r' };
 const isSolid = ch => !!SOLID[ch];
 const isStand = ch => !!SOLID[ch] || !!SLOPE[ch] || ch === '=';
 
 // 實體分類（與 src/enemies.js 行為一致）
 const GROUND = new Set(['waddledee', 'waddledoo', 'hothead', 'sirkibble', 'sparky', 'rocky', 'chilly', 'bladeknight', 'bonkers', 'mrfrosty', 'poppybros', 'cappy', 'twizzy', 'kabu', 'glunk', 'spikeball', 'snowly', 'rollarmor',
   // Round 5 新能力敵人（地面型）
-  'pistolo', 'kagedee', 'ronin', 'archerwaddle', 'wizzle', 'tiktok', 'mimi', 'bigbloom', 'bolt']);
+  'pistolo', 'kagedee', 'ronin', 'archerwaddle', 'wizzle', 'tiktok', 'mimi', 'bigbloom', 'bolt',
+  // Round 6 世界 6（world6）
+  'mirrordee']);
 // 中魔王（可以解開 gatekeeper 的門鎖）
-const MINIBOSS = new Set(['bonkers', 'mrfrosty', 'rollarmor']);
+const MINIBOSS = new Set(['bonkers', 'mrfrosty', 'rollarmor', 'mirrordee']);
 const WATER = new Set(['squishy', 'glunk']);
 const FLY = new Set(['brontoburt', 'scarfy', 'gordo', 'shotzo', 'dartwing',
   // Round 5 新能力敵人（浮空型，grav 0）
-  'gravitron', 'drako', 'boodee']);
+  'gravitron', 'drako', 'boodee',
+  // Round 6 world6：starling / voidling 無重力；meteorite 帶重力但「從空中落下」，一樣不要求下方有地面
+  'meteorite', 'starling', 'voidling']);
 const ITEMS = new Set(['tomato', 'food', 'oneup', 'candy', 'pointstar', 'bigstar']);
 // 機關類實體（不需要地面、也不算敵人密度）：大星星收集品 / 開關方塊 / 中魔王門鎖
 const GADGET = new Set(['bigstar', 'switchblock', 'gatekeeper', 'essence', 'warpstar']);
 const UNLOCKER = new Set(['switchblock', 'gatekeeper']);   // 可以解開 locked 門的實體
-const TALL = { bonkers: 2, mrfrosty: 2, bladeknight: 2, snowly: 2, rollarmor: 2, wizzle: 2, bolt: 2, bigbloom: 2 };   // 佔用的高度（格）
-const WIDE = { bonkers: 2, mrfrosty: 2, rollarmor: 2, bigbloom: 2 };
-const BOSS = { whispywoods: { w: 3, h: 4, ground: true }, lololo: { w: 2, h: 2, ground: true }, kracko: { w: 4, h: 3, ground: false }, metaknight: { w: 2, h: 2, ground: true }, dedede: { w: 3, h: 4, ground: true } };
-const DECO = { green: 'tbfsgmrw', castle: 'pwrkacb', island: 'purghsb', cloud: 'csrbdm', dedede: 'pkwtscb' };
+// 佔用的高度 / 寬度（格）。Round 6：mirrordee 22×26（2×2）、meteorite 14×14 / starling 14×14 / voidling 14×16（皆 1×1）
+const TALL = { bonkers: 2, mrfrosty: 2, bladeknight: 2, snowly: 2, rollarmor: 2, wizzle: 2, bolt: 2, bigbloom: 2, mirrordee: 2 };
+const WIDE = { bonkers: 2, mrfrosty: 2, rollarmor: 2, bigbloom: 2, mirrordee: 2 };
+const BOSS = { whispywoods: { w: 3, h: 4, ground: true }, lololo: { w: 2, h: 2, ground: true }, kracko: { w: 4, h: 3, ground: false }, metaknight: { w: 2, h: 2, ground: true }, dedede: { w: 3, h: 4, ground: true }, shadowkirby: { w: 2, h: 2, ground: true } };
+const DECO = { green: 'tbfsgmrw', castle: 'pwrkacb', island: 'purghsb', cloud: 'csrbdm', dedede: 'pkwtscb', space: 'cprsgm' };
+// Round 6（world6）新敵人：key → [碰撞框 w, h, 說明]
+const W6_ENEMY = { meteorite: [14, 14, '隕石（滾落 / 落地爆炸，無能力）'], starling: [14, 14, '星靈（飄浮追蹤 + 星彈，beam）'], voidling: [14, 16, '虛空（短暫隱形，ghost）'], mirrordee: [22, 26, '鏡子瓦豆（中魔王，複製 1 招，cutter）'] };
+const w6stat = {};
+for (const k of Object.keys(W6_ENEMY)) w6stat[k] = {};
 
 const only = process.argv.slice(2);
 let errors = 0, warns = 0;
@@ -262,6 +271,7 @@ for (const lv of KB.LEVELS) {
       if (!known) { err(`${tag}: ${what} 未知的實體 key`); return; }
       // Round 5：新能力敵人 / 新能力台座統計
       if (R5_ENEMY[e.t]) r5stat[R5_ENEMY[e.t]][lv.id] = (r5stat[R5_ENEMY[e.t]][lv.id] || 0) + 1;
+      if (W6_ENEMY[e.t]) w6stat[e.t][lv.id] = (w6stat[e.t][lv.id] || 0) + 1;
       if (e.t === 'essence' && r5ess[e.a]) r5ess[e.a][lv.id] = (r5ess[e.a][lv.id] || 0) + 1;
       if (!inMap(e.x, e.y)) { err(`${tag}: ${what} (${e.x},${e.y}) 超出地圖`); return; }
       const ch = get(e.x, e.y);
@@ -368,6 +378,23 @@ for (const lv of KB.LEVELS) {
   const essPerWorld = WORLDS.map(w => Object.keys(R5_ABILITY).reduce((n, k) => n + (r5ess[k][w] || 0), 0));
   console.log('  新能力台座 / 世界：' + WORLDS.map((w, i) => `${w}=${essPerWorld[i]}`).join(' '));
   if (!only.length) WORLDS.forEach((w, i) => { if (essPerWorld[i] < 2) warn(`${w}: 新能力台座只有 ${essPerWorld[i]} 個（設計目標：每個世界 ≥ 2 個）`); });
+}
+
+// ---- Round 6：world6 新敵人統計 + 尺寸表 ----
+{
+  console.log('\n== Round 6 world6 新敵人（尺寸表 / 各世界隻數）');
+  const WORLDS = KB.LEVELS.map(l => l.id).filter(id => !only.length || only.includes(id));
+  console.log('  敵人          尺寸     ' + WORLDS.map(w => w.padEnd(4)).join('') + ' 合計  說明');
+  let totalW6 = 0;
+  for (const k of Object.keys(W6_ENEMY)) {
+    const [ew, eh, desc] = W6_ENEMY[k];
+    const per = WORLDS.map(w => w6stat[k][w] || 0);
+    const total = per.reduce((a, b) => a + b, 0);
+    totalW6 += total;
+    console.log(`  ${k.padEnd(14)}${(ew + '×' + eh).padEnd(9)}` + per.map(n => String(n).padEnd(4)).join('') + ` ${String(total).padEnd(5)} ${desc}`);
+    if (!only.length && total === 0) warn(`world6 新敵人 ${k} 沒有被放進任何關卡`);
+  }
+  console.log('  合計 ' + totalW6 + ' 隻');
 }
 
 console.log(`\n${errors} error(s), ${warns} warning(s)`);

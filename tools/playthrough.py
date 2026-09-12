@@ -378,10 +378,14 @@ def main():
             maxX[g['room']] = max(maxX.get(g['room'], 0), x)
             keys = {'right' if dir_ > 0 else 'left': True}
             d = any_door_ahead()
+            climbing = False
             if d and abs(d['dx']) < 200:
                 dir_ = 1 if d['dx'] > 0 else -1; keys = {'right' if dir_ > 0 else 'left': True}
                 # 門在上方：要「連續點跳」才會持續漂浮（按住只會拍一次），按住 20 幀等於只上升一下就掉回去
-                if d['dy'] < -20: keys['jump'] = (frames % 8) < 2
+                if d['dy'] < -20:
+                    climbing = True
+                    keys['jump'] = (frames % 8) < 2
+                    if abs(d['dx']) < 6: keys.pop('right', None); keys.pop('left', None)   # 已經對準門就別再左右飄
             if stuck > 25:
                 ph = (stuck - 25) % 330
                 if ph < 110: keys['jump'] = (frames % 10) < 3          # A：連按跳 → 漂浮越過
@@ -404,6 +408,10 @@ def main():
             if frames % 45 == 0 and not pl['mouth']: keys['jump'] = True
             if pl['mouth']: keys['attack'] = (frames % 8) < 2
             elif pl['ability'] and frames % 30 < 2: keys['attack'] = True
+            # 爬升中一律不攻擊：漂浮中按攻擊＝吐氣（中斷漂浮 + KB.PHYS.exhaleLock 8 幀不能再漂），
+            # 空中揮劍（迴旋斬）同樣會把卡比從漂浮狀態拉下來。
+            # 「一邊漂上去一邊每 30 幀揮一次劍」等於永遠爬不上垂直房的豎井（w6 r1 實測 45000 幀爬不完）。
+            if (climbing or pl['state'] == 'float') and not pl['onGround']: keys.pop('attack', None)
             if falling(pl): keys['jump'] = (frames % 4) < 2
             press(keys); step(2); frames += 2; roomFrames += 2
             if roomFrames % 600 == 0: shot(f'room{g["room"]}_f{roomFrames}')

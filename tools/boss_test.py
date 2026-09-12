@@ -43,8 +43,10 @@ ROOMS = {
     'kracko': dict(theme='island', map=[E] * 10 + [G, G], spawn=[3, 9], bossPos=[6, 5]),
     'metaknight': dict(theme='cloud', map=[E] * 10 + [G, G], spawn=[3, 9], bossPos=[12, 9]),
     'dedede': dict(theme='dedede', map=[E] * 10 + [G, G], spawn=[2, 9], bossPos=[12, 9]),
+    # Round 6（world6）：暗影卡比。招式範圍大（影雷擊 / 影黑洞 / 暗星雨），測試房與其他魔王同規格。
+    'shadowkirby': dict(theme='space', map=[E] * 10 + [G, G], spawn=[3, 9], bossPos=[12, 9]),
 }
-ORDER = ['whispywoods', 'lololo', 'kracko', 'metaknight', 'dedede']
+ORDER = ['whispywoods', 'lololo', 'kracko', 'metaknight', 'dedede', 'shadowkirby']
 # mid（中距離玩家）不適用的魔王：克拉寇整場飄在離地 58px 的高空，
 # 「站在地上、與魔王保持固定水平距離」的玩家模型既打不到他（迴旋刃是水平飛的）、
 # 也躲不掉貼地橫掃（3.2px/f > 走路 1.3px/f），這是模型限制不是平衡問題；他的近身戰由 fight 測試覆蓋。
@@ -60,6 +62,8 @@ PHASE2_STATES = {
     'kracko': ['storm'],
     'metaknight': ['tornado', 'tricutter'],
     'dedede': ['rampage', 'triplejump'],
+    # 暗影卡比二階段：先分裂出 2 個影分身（split → guard），影分身倒下後才會放必殺「暗星雨」
+    'shadowkirby': ['split', 'guard', 'starrain'],
 }
 
 # 瀏覽器端驅動：整個迴圈在頁面內跑（每幀 evaluate 太慢），回傳統計與事件截圖
@@ -355,7 +359,7 @@ class Session:
 
 
 KB_INTRO_MAX = 160   # bossIntroT 起始 150；probe 允許一點餘裕
-REAL_ROOMS = {'whispywoods': ('w1', 3), 'lololo': ('w2', 4), 'kracko': ('w3', 4), 'metaknight': ('w4', 4), 'dedede': ('w5', 5)}
+REAL_ROOMS = {'whispywoods': ('w1', 3), 'lololo': ('w2', 4), 'kracko': ('w3', 4), 'metaknight': ('w4', 4), 'dedede': ('w5', 5), 'shadowkirby': ('w6', 5)}
 
 
 def fmt(d):
@@ -492,7 +496,7 @@ def run_boss(sess, key, a):
 # ---------- [curve] 難度曲線量測（Round 3 balance-enemies）----------
 # 「sword 不用無敵」的普通玩家機器人在真實魔王房（levels.js）裡，3 條命打完為止，
 # 魔王最多被打掉幾 % 的血。目標曲線 w1 → w5 遞減（越後面的魔王越難）。
-CURVE_TARGET = {'whispywoods': 80, 'lololo': 70, 'kracko': 60, 'metaknight': 50, 'dedede': 40}
+CURVE_TARGET = {'whispywoods': 80, 'lololo': 70, 'kracko': 60, 'metaknight': 50, 'dedede': 40, 'shadowkirby': 35}
 
 
 def run_curve(sess, key, a):
@@ -540,7 +544,7 @@ def run_curves(sess, keys, a):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--boss', default='all', help='whispywoods / lololo / kracko / metaknight / dedede / all')
+    ap.add_argument('--boss', default='all', help='whispywoods / lololo / kracko / metaknight / dedede / shadowkirby / all')
     ap.add_argument('--frames', type=int, default=6000, help='fight 最大幀數')
     ap.add_argument('--runs', type=int, default=3, help='fight 樣本數（每個樣本出生點 / 節拍不同）')
     ap.add_argument('--idle-frames', type=int, default=600)
