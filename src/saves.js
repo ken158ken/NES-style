@@ -83,6 +83,7 @@
     const s = KB.save;
     s.settings = global_().settings;
     try { if (KB.PROG && KB.PROG.save) KB.PROG.save(); } catch (e) { }          // 補齊 Round 6 欄位
+    try { if (KB.PROG && KB.PROG.backfill) KB.PROG.backfill(); } catch (e) { }  // 換槽當下靜默補齊成就（ach2）
     try { if (KB.UI && KB.UI.settings) KB.UI.settings(); } catch (e) { }        // 補齊設定預設值
     try {
       const a = s.settings && s.settings.audio;
