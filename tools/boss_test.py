@@ -4,8 +4,9 @@
 每個魔王注入一個程式化魔王房（KB.LEVELS.push，16×12 一個畫面寬），登場結束後做三種測試並輸出 PASS/FAIL：
   [idle]   卡比站著不動 600 幀：魔王要有移動 / 攻擊（敵方 proj 或 hitbox 出現）、卡比 hp 要減少、不能有 pageerror。
   [fight]  卡比拿劍，「普通玩家」策略最多 N 幀：魔王要死、出現過關門、走進門後 clearT>=0。跑 --runs 個樣本
-           （出生點 / 揮劍節拍不同；魔王 rng 由座標決定，同一樣本是決定性的），**≥ 2/3 樣本贏就 PASS**
-           （fix6：機器人模型對 RNG 序列偏移極敏感，單一樣本連死屬於樣本雜訊；2/3 會標 "(2/3 flaky)"）。
+           （出生點 / 揮劍節拍不同；魔王 rng 由座標決定，同一樣本是決定性的）。
+           判定（fix6b / R6 第 9 項）：**全勝才 PASS**；≥ 2/3 樣本贏＝ **WARN**（黃字，不算 FAIL，但會列在最後的
+           WARNINGS 區）；低於 2/3 才 FAIL。每隻魔王各開一個新的 browser session，樣本之間不會互相污染。
            策略：有劍 → 貼近魔王、每 15 幀揮劍、每 90 幀原地跳；劍掉了 → 去撿能力星；沒劍 → 吸附近的彈藥
            （蘋果 / 箱子 / 雨滴 / 衝擊星 / 小兵）走近吐回去；反射動作：魔王跳到頭上就走開、貼地飛來的攻擊就跳過、
            魔王張嘴吸就往反方向走、沒武器被逼到牆角就往中央鑽。
@@ -304,6 +305,16 @@ def save_png(path, data_url):
     path.write_bytes(base64.b64decode(data_url.split(',', 1)[1]))
 
 
+# fight 為 2/3 的黃字警告（不算 FAIL，但要一眼看得到）
+WARNINGS = []
+_TTY = sys.stdout.isatty()
+
+
+def warn(msg):
+    WARNINGS.append(msg)
+    print(('\033[33m' + msg + '\033[0m') if _TTY else ('WARN ' + msg))
+
+
 class Session:
     def __init__(self, pw, console):
         self.logs = []
@@ -429,17 +440,19 @@ def run_boss(sess, key, a):
         wins += ok
         print(f"[{key}] FIGHT#{r} {'PASS' if ok else 'FAIL'}  (dead={log['final']['bossDead']} deadAt={log['deadAt']} door={log['doorAt']} clear={log['clearAt']} playerDied={log['playerDied']} errors={len(errs)})")
         for e in errs: print('   ', e)
-    # fix6：fight 判定改成「≥ 2/3 樣本獲勝」即 PASS。
-    #   根因不是遊戲退步，而是「普通玩家」機器人模型對 RNG 序列偏移極度敏感 ——
-    #   任何一處多 / 少抽一次亂數（元素倍率演出、特效粒子…）都會讓某一個樣本的機器人連續送死
-    #   （kracko 樣本 2 就是這樣：同一版本只改特效也會重現）。
-    #   全滅才算退步；2/3 標成 flaky 讓人一眼看得出「這是樣本雜訊，不是平衡問題」。
+    # fix6b / R6 第 9 項：判定改回「全勝 PASS」，2/3 降級成 WARN（黃字，不算 FAIL）。
+    #   fix6 為了 kracko 把門檻放寬成 ≥2/3，等於以後 kracko 真的變難也不會被抓到；
+    #   現在每隻魔王各開一個新 session（樣本之間不再互相污染），少贏一場就會明確印出 WARN。
     need = -(-a.runs * 2 // 3)          # ceil(runs * 2/3)
-    fight_ok = wins >= need
-    flaky = fight_ok and wins < a.runs
-    res['fight'] = fight_ok
-    print(f"[{key}] FIGHT  {'PASS' if fight_ok else 'FAIL'}  ({wins}/{a.runs} runs won"
-          f"{f', need {need}' if not fight_ok else ''}){'  (2/3 flaky)' if flaky else ''}")
+    fight_ok = wins == a.runs
+    fight_warn = (not fight_ok) and wins >= need
+    res['fight'] = fight_ok or fight_warn
+    if fight_ok:
+        print(f"[{key}] FIGHT  PASS  ({wins}/{a.runs} runs won)")
+    elif fight_warn:
+        warn(f"[{key}] FIGHT  WARN  ({wins}/{a.runs} runs won, need {a.runs} for PASS)")
+    else:
+        print(f"[{key}] FIGHT  FAIL  ({wins}/{a.runs} runs won, need {need})")
 
     # ---------- [inhale]（威斯比：蘋果可吸入、吐星打傷）----------
     if key == 'whispywoods':
@@ -585,31 +598,40 @@ def main():
     results = {}
     t0 = time.time()
     with sync_playwright() as pw:
-        sess = Session(pw, a.console)
         if a.curve:
             keys = [k for k in keys if k in ROOMS]
+            sess = Session(pw, a.console)
             ok = run_curves(sess, keys, a)
             sess.close()
             print(f'({time.time() - t0:.0f}s)')
             sys.exit(0 if ok else 1)
+        # fix6b / R6 第 9 項：每隻魔王各開一個新的 browser session（跨魔王的 localStorage /
+        # 亂數序列 / KB 狀態都不會互相污染；kracko 那種「樣本 2 連續送死」才能確定是自己的問題）。
         for k in keys:
             if k not in ROOMS:
                 print('unknown boss', k); continue
+            bs = Session(pw, a.console)
             try:
-                results[k] = run_boss(sess, k, a)
+                results[k] = run_boss(bs, k, a)
             except Exception as ex:
                 print(f'[{k}] EXCEPTION {ex!r}')
                 results[k] = {'exception': False}
             if a.console:
-                print('\n'.join(sess.logs)); sess.logs = []
-        sess.close()
+                print('\n'.join(bs.logs)); bs.logs = []
+            bs.close()
     print('\n================ SUMMARY ================')
     all_ok = True
     for k, r in results.items():
         line = '  '.join(f"{t}={'PASS' if ok else 'FAIL'}" for t, ok in r.items())
         all_ok &= all(r.values())
         print(f'{k:12s} {line}')
-    print('ALL', 'PASS' if all_ok else 'FAIL', f'({time.time() - t0:.0f}s)')
+    if WARNINGS:
+        print('---------------- WARNINGS ----------------')
+        for w in WARNINGS:
+            print(('\033[33m' + w + '\033[0m') if _TTY else ('WARN ' + w))
+    print('ALL', 'PASS' if all_ok else 'FAIL',
+          f'({len(WARNINGS)} warning{"s" if len(WARNINGS) != 1 else ""})' if WARNINGS else '',
+          f'({time.time() - t0:.0f}s)')
     sys.exit(0 if all_ok else 1)
 
 

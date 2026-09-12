@@ -2406,3 +2406,88 @@ R5-7a 的觀察項（gravity ↑+X 文案不一致、圖鑑剪影露出帽子輪
 - [09-12 12:45] 完成：**docs/QA_REPORT.md 追加「Round 6 驗收」章節**（結論表、P1×2 / P2×6 / 已修 P1×2 / 觀察 5 條、五系統明細、測試與效能、可燃 deco 全關掃描、重現指令總表、截圖索引）。
   在 HEAD `88a20cf` 覆測：全部 test_* / engine / enemy / boss_test / level_check / audio_check 通過；playthrough w1~w6 與 12 混合能力全 cleared。
   **仍未修**：R6-P1-01（能力台座把混合能力降級回成分 B，`src/items.js`）、R6-P1-04（暗星雨 toast 疊字，`src/bosses_w6.js` + game.js toast）。
+
+## fix6b
+> Round 6 收尾修正（qa6 剩餘的 R6-P1-01 / R6-P1-04 / R6-P2-01~06 + boss_test 改判定）。唯一改 src 的 agent，截圖 `shots/agent_fix6b/`。未 commit。
+
+- [fix6b-1] **R6-P1-01 能力台座把混合能力降級**（`src/items.js`）：`essence` 加 `armed` 旗標與 `hasEssence(key)` ——
+  ① 目前能力是「含本座成分的混合能力」（`KB.MIX.parts(p.ability)` 含台座 key）或就是本座能力 → 不給；
+  ② 一次進入只觸發一次，**必須離開台座範圍（`overlaps` 為 false）才會重新上膛**，30 幀冷卻保留。
+  驗證：`tools/test_mix.py` **245/245**（新增 4 項：站 200 幀不降級 / 台座不消失且 armed 已關 / 離開再進來會再給 / sword+fire 反向組合 160 幀後仍是 flamesword）。
+- [fix6b-2] **R6-P1-04 暗星雨提示與分身 toast 疊字**（`src/game.js` + `src/bosses_w6.js` + `src/vfx.js`）：
+  `game.toast()` 改成同時最多 1 條（新 toast 把舊的縮成 6 幀淡出），繪製只畫最新那一條並帶 alpha 淡出 ⇒ 永遠不會兩行疊在同一個 y；
+  暗星雨的閃避提示改走 `KB.VFX.banner('暗星雨','站進光環裡！','#a862f0')` 不走 toast。
+  另外 `V.banner` 的副標若含中文改用 `KB.UI.text` 12px（原本 8px 中文會變細線看不清楚），ASCII 副標維持原樣。
+  驗證：`shots/agent_fix6b/p2_starrain_b.png`（橫幅「暗星雨 / 站進光環裡！」清晰、無疊字）、`toast_one.png`（連下 3 條 toast 只顯示最新 1 條）。
+- [fix6b-3] **R6-P2-01 COMBO 壓開場橫幅**（`src/progression.js` `P.drawHUD`）：`KB.UI.bannerBottom(game) > 0` 時 COMBO 卡片的 `by` 改成 `bb + 6`。
+  驗證：`shots/agent_fix6b/combo_banner.png`（WORLD 1 的「1」完整可見，COMBO x7 在橫幅下方）、`combo_nobanner.png`（橫幅結束後回到 y=26）。
+- [fix6b-4] **R6-P2-02 競技場加入暗影卡比**（`src/arena.js`）：`POOL5/POOL6` + `shadowUnlocked()`（`KB.save.cleared.w6` 或 `KB.DEBUG`）——
+  已通關 W6 → 隨機池 5 名（含迪迪迪）+ 壓軸固定 `shadowkirby` = **6 名**；否則維持原本 5 名。
+  面板字改成 `連戰 arenaCount() 名魔王`；`orderLines` 改成純「每行 ceil(n/2) 上限 3」並用 `fitText` 自動縮字（6 名＝兩行各 3，不會被裁）。
+  HUD `ARENA n/總數` 本來就吃 `a.order.length`（只修註解）。對外補 `KB.arenaCount / KB.arenaOrderLines` 供工具驗證。
+  驗證：無 debug 時 `arenaCount()` locked=5 / unlocked=6；`shots/agent_fix6b/arena_select.png`（連戰 6 名魔王）、`arena_result6.png`（6 名兩行各 3）、`arena_hud6.png`（ARENA 1/6）。
+- [fix6b-5] **R6-P2-03 元素可玩點**（`src/levels.js` 新增 `ELEM6B` 疊加層，格式同 ELEM6，只動 tiles / deco / add）：
+  每個世界再加 2 處 —— 可燃主題加「連續草 + 火源」，castle / cloud / dedede 只加木箱（BURN_DECO 沒有植被）。
+  w1 r1 草 x42~48（7 格，旁邊就是既有的 fire 台座 (50,9)）＋ w1 r2 木箱小倉 (44,9)；
+  w2 r0 (62,9) / w2 r2 (46,9) 木箱小倉（都貼著走廊火把）；
+  w3 r1 海草 x54~59（fire 台座 (60,9) 旁）＋ 大水池左岸 `essence(spark)` (5,9)（整池放電）＋ w3 r3 木箱小倉 (27,9)；
+  w4 r0 (40,9) / w4 r2 (30,9)；w5 r1 (30,9) / w5 r3 (47,9)；w6 r3 晶簇 x81~87 ＋ `essence(fire)` (79,9) ＋ w6 r2 木箱小倉 (43,9)。
+  「木箱小倉」＝ `crate(x,y)`：(x-1,y)(x+1,y)(x,y-1) 三個 `W`，中間地板格放 1 份 `food`；只有 1 格高，燒 / 砸任一面都拿得到，不會擋住主線。
+  驗證：`node tools/level_check.js` **0 error / 1 warning**（既有的 w2 提示）；`playthrough w1~w6 --godmode` 全部 cleared / deaths=0；
+  `shots/agent_fix6b/w1r1_grass_burn.png`（7 格連燒）、`w1r2_crate.png` / `w1r2_crate_open.png`、`w2r0_crate.png`、`w3r1_grass_burn.png`、`w3r1_spark.png`、`w6r3_grass_burn.png`。
+- [fix6b-6] **R6-P2-04 暗影卡比對比**（`src/art/world6.js` + `src/bosses_w6.js`）：新增 `rimOut()` 外描邊工具 ——
+  黑描邊外再加 1px 淡紫描邊 `L=#b090ff`；眼睛改成「外圈整圈純白 + 中間 1px 瞳孔」；身體加 2 個高光點 `Q=#c8a8ff`；
+  `ShadowKirby.draw` 掛上常駐 `KB.VFX.aura(this, { r:14, color:'#b090ff', frames:120, pulse:π/24 })`，`t >= 60` 時回捲 48 幀（＝脈動整數週期）所以不會淡出也不會跳格。
+  驗證：`shots/agent_fix6b/sheet_shadow.png`（精靈總表）、`boss5_x3.png` / `boss5_x1.png`（1× 也看得出輪廓與光環）。
+- [fix6b-7] **R6-P2-05 變身系能力交給夥伴**（`src/helper.js`）：新增 `SIMPLE` 表（只對 `def.transform` 生效）——
+  `giant` 夥伴放大 1.5 倍（`scaleMul`，帽子同步縮放）＋ 自製簡化踩踏 `simpleStomp()`（原地小跳、**不帶 vx 往前衝**，落地放雙向 `stompWave()` dmg 5 判定框）；
+  `dragon` 飛行跟隨（沒有鎖定敵人時空中一律漂浮）＋ 強制走地面招 `breath`；`mech` → `fist`；`ghost` → `wail`（用 `abilityData.next`，`pickMode` 會優先吃）；
+  未知的變身能力 → 退化 `spitStar()`（dmg 2 吐星），保證每 90 幀能造成傷害。招式產生的判定框都用 `callDef` 包住，生成當下就帶 `fromHelper`。
+  根因：夥伴的 `setForm` 只是存起來不會真的變形 ⇒ giant 的地面 X 會帶著 vx 跳 46 幀、落地前就撞進敵人吃接觸傷害（實測 0 判定框）；
+  ghost 取得時 `form.noclip = true` ⇒ 地面 X 永遠被判成「穿牆開關」，完全沒有判定框。
+  驗證：`tools/test_helper.py` **76/76**（新增 9 項：giant / dragon / mech / ghost 各「簡化招能殺 waddledee」+「判定框 owner player」，以及 giant 夥伴 scaleMul=1.5）；
+  `shots/agent_fix6b/helper_giant.png` / `helper_giant_stomp.png` / `helper_ghost.png`。
+- [fix6b-8] **R6-P2-06 結局標題壓到月亮**（`src/ui.js` `EndingScene.draw`）：月亮從右上 (214,30) 移到左側 (26,102)（y 91~113，
+  在最後一行文字與遠景山丘之間的空白帶）——16px 中文標題幾乎佔滿整列，移到「左上」一樣會被壓到，所以改放左側偏下。
+  驗證：`shots/agent_fix6b/ending_shadow2.png`（暗影結局）、`ending_shadow.png`（和平結局），兩種文案都不碰到月亮。
+- [fix6b-9] **boss_test 每魔王一個 session + fight 判定改回全勝**（`tools/boss_test.py`）：
+  `main()` 改成每隻魔王各 `Session(pw, …)` 再 `close()`（localStorage / KB 狀態 / 亂數序列不再跨魔王污染）；
+  fight 判定：**全勝 = PASS**、`>= ceil(runs×2/3)` = **WARN**（黃字 `\033[33m`，`res['fight']` 仍算通過，不影響 ALL PASS），低於 2/3 才 FAIL；
+  結尾多一段 `---- WARNINGS ----` 把所有 WARN 重印一次。
+  驗證：`tools/boss_test.py --runs 3` → **ALL PASS（1 warning）**，`WARN [kracko] FIGHT WARN (2/3 runs won, need 3 for PASS)` ——
+  換 session 後 kracko 仍是 2/3，確認是機器人模型本身的問題而不是跨魔王污染，而且現在「真的變難」會立刻以黃字浮出來。
+- [fix6b-10] 收工全套回歸（全部 PASS）：
+  `engine_test 118/118`、`enemy_test 393/393`、`test_weapons 105/105`、`test_magic 119/119`、`test_forms 153/153`、`test_charge 19/19`、
+  `test_mix 245/245`、`test_helper 76/76`、`test_elements 96/96`、`test_progression 68/68`、
+  `node tools/level_check.js` 0 error / 1 warning、`node tools/audio_check.js` 全部通過、`node --check` 全檔通過、
+  `tools/boss_test.py --runs 3` ALL PASS（kracko WARN 2/3）、
+  `playthrough.py --level w1~w6 --ability sword --godmode` 全部 cleared=True / deaths=0 / missing sprites=[]
+  （w1 5835 / w2 5761 / w3 6945 / w4 6329 / w5 8703 / w6 6175 幀）；`tools/build.py` 重新打包 `dist/卡比之星.html`（1400 KB）。
+
+### 未完成 / 已知問題（fix6b）
+1. **kracko fight 仍是 2/3（現在是 WARN 不是 FAIL）**。每魔王獨立 session 之後樣本 #2 依舊失敗，數值與 fix6 時完全相同 ⇒
+   根因確定是 boss_test「普通玩家」機器人模型對飛行魔王的策略不足（對空 / 閃避雲雨），不是平衡退步。要真的修必須改機器人策略。
+2. 木箱小倉（`crate()`）是**軟阻擋**：左右兩個 `W` 只有 1 格高，玩家跳得過去，只是拿不到中間那格的補給（要燒 / 砸）。刻意如此，不會卡關。
+3. `w4 / w5`（cloud / dedede）`TileMap.BURN_DECO` 是空字串 ⇒ 那兩個世界仍然**沒有可燃植被**，只能玩木箱；
+   若之後想補「連續草」必須先在 `tilemap.js` 給那兩個主題定義可燃 deco 字元（跨檔，本輪沒動）。
+4. giant 夥伴只是「畫得比較大」（`scaleMul`），碰撞框仍是 12×13 —— 放大碰撞框會讓夥伴在 1 格縫隙卡住，刻意不動。
+5. `abilities_mix.js` 的蓄力門檻仍然不吃 `holdMul`（fix6 的第 4 點，本輪同樣沒交辦）。
+
+---
+# Round 6 總結（總控，2026-09-12）— 系統深度完成
+最終驗證：`node --check` 全過、`level_check` 0 error、`audio_check` 全過、`engine` 118、`enemy` 393、`boss_test --runs 3` ALL PASS（kracko 2/3 WARN＝機器人策略）、`test_weapons` 105、`test_magic` 119、`test_forms` 153、`test_charge` 19、`test_mix` 245、`test_helper` 76、`test_elements` 96、`test_progression` 68、`playthrough w1~w6 --godmode` 全 cleared、build 1400KB。
+
+## 成果
+- **混合能力**：12 種（炎劍 / 冰劍 / 雷刀 / 火焰槍 / 冰彈槍 / 雷弓 / 火鎚 / 岩鎚 / 影刃 / 星光法師 / 冰龍 / 雷電機甲）共 36 招；途徑：能力台座、撿能力星、**丟能力星砸帶能力的敵人**。能力總數 32。
+- **夥伴系統**：長按 SELECT 把能力變成 AI 夥伴（跟隨、跳坑、漂浮、用該能力攻擊、HP 4、可吸回），變身系有簡化版。
+- **元素反應**：火燒草蔓延 / 木箱 / 冰面 / 電擊水域 / 風吹熄；燃燒鏈、麻痺；敵人 / 中魔王 / 魔王屬性弱點 ×2 與抗性；每世界至少 2 處可玩點。
+- **第六世界「星之彼端」**：7 房、3 大星星、6 台座、3 新敵人、中魔王鏡像迪、魔王暗影卡比（複製玩家能力 6 種影招、瞬移、吸入；二階段分身 + 暗星雨）、4 首新曲、專屬結局文案；競技場通關 w6 後改為 6 連戰。
+- **進度系統**：能力 Lv1~3（重複取得升級、傷害 ×1.25 / ×1.5、Lv3 蓄力 ×0.8、粒子加碼）、連擊與 Style Rank S/A/B/C、20 條成就與圖鑑成就頁、選關第 6 節點。
+- 週邊修正：toast 單條、成就 toast 排隊避讓、VFX 獨立 RNG、boss_test 每魔王獨立 session + WARN 機制、SPEC 存檔格式。
+
+## 已知問題 / 下一輪建議
+1. kracko 戰鬥機器人 2/3（策略問題），可改 boss_test 機器人對飛行魔王的追擊邏輯。
+2. w4 / w5 主題無可燃植被（TileMap.BURN_DECO 空），只有木箱可玩火。
+3. giant 夥伴只放大繪製不放大碰撞框。
+4. 未做：新能力 / 混合能力的分世界強度、Extra 模式關卡差異、Boss Rush 對 32 能力的平衡、非無敵難度量測。
+5. 可再深：更多混合（目前 12 / 理論 C(20,2)）、夥伴可切換 2 人、W7 或 Extra 專屬關卡、能力 Lv4 覺醒招、線上排行（不可行，離線）→ 本機成績板。

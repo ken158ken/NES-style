@@ -290,7 +290,18 @@
   const SK = Object.assign({}, P, {
     k: '#080410', b: '#2c1a4a', B: '#180c2a', h: '#503080', H: '#6a44a4',
     w: '#ffffff', e: '#d8c8ff', r: '#5e1848', R: '#38102c', v: '#a862f0', c: '#66e4ff', y: '#ffe878',
+    L: '#b090ff',   // R6-P2-04：1px 淡紫描邊（space 背景下拉開對比）
+    Q: '#c8a8ff',   // R6-P2-04：身體高光點
   });
+  // 外描邊：透明且四鄰有實心像素 → 塗成 ch（outline() 是內描邊，這個是外面再加一圈）
+  function rimOut(g, ch) {
+    const h = g.length, w = g[0].length, src = g.map(r => r.slice());
+    const on = (x, y) => x >= 0 && y >= 0 && x < w && y < h && src[y][x] !== '.';
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      if (src[y][x] !== '.') continue;
+      if (on(x - 1, y) || on(x + 1, y) || on(x, y - 1) || on(x, y + 1)) g[y][x] = ch;
+    }
+  }
   // 24×24 的卡比剪影（黑紫色、白眼）
   function shadow(o) {
     o = o || {};
@@ -314,14 +325,17 @@
     for (const [fx, fy] of fb) ellipse(g, fx, fy + by, 4, 2, 'r');
     for (const [fx, fy] of fb) ellipse(g, fx - 1, fy - 1 + by, 2, 1, 'R');
     outline(g, 'k');
-    // 白眼（發亮）
+    // R6-P2-04：黑描邊外再加 1px 淡紫描邊，讓黑紫身體在紫色星雲背景前有輪廓
+    rimOut(g, 'L');
+    // R6-P2-04：身體 2 個高光點（左上受光側）
+    px(g, 7, 6 + by, 'Q'); px(g, 9, 4 + by, 'Q');
+    // 白眼（發亮）：外圈整圈純白 + 中間瞳孔，1× 也看得出眼形
     const ey = (o.eyeY !== undefined ? o.eyeY : 8) + by;
     const shut = !!o.shut;
     for (const ex of [9, 15]) {
       if (shut) { rect(g, ex, ey + 2, 3, 1, 'w'); continue; }
-      rect(g, ex, ey, 3, 5, 'w');
-      px(g, ex + 1, ey, 'e'); px(g, ex + 1, ey + 4, 'e');
-      if (o.glare) { px(g, ex, ey + 1, 'v'); px(g, ex + 2, ey + 3, 'v'); }
+      rect(g, ex, ey, 3, 5, 'w');                      // 外圈白
+      rect(g, ex + 1, ey + 1, 1, 3, o.glare ? 'v' : 'e');   // 瞳孔
     }
     // 嘴
     if (o.mouth === 'open') { ellipse(g, 12, ey + 7, 3, 2, 'R'); px(g, 12, ey + 6, 'r'); }

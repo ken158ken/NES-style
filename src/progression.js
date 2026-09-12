@@ -397,7 +397,9 @@
       const sc = P.comboPop > 4 ? 3 : 2;
       const col = P.comboColor(), txt = 'x' + P.combo, sub = 'COMBO';
       const tw = KB.textWidth(txt) * sc, sw = KB.textWidth(sub);
-      const bh = sc * 10 + 4, by = 26, nx = 248, sx = nx - tw - 4;
+      // R6-P2-01：開場「WORLD n」橫幅播放中時把 COMBO 讓到橫幅底部下方，別把關卡編號蓋掉
+      const bb = (KB.UI && KB.UI.bannerBottom) ? KB.UI.bannerBottom(game) : 0;
+      const bh = sc * 10 + 4, by = bb > 0 ? bb + 6 : 26, nx = 248, sx = nx - tw - 4;
       ctx.save();
       ctx.globalAlpha = Math.min(1, P.comboT / 20);
       KB.rect(ctx, sx - sw - 5, by, sw + tw + 11, bh, 'rgba(8,14,28,0.55)');

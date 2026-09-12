@@ -2129,6 +2129,66 @@
   }
 
   // ---------------------------------------------------------------------
+  // Round 6 元素層 第二波（fix6b / R6-P2-03）—— 每個世界至少再多 2 處「玩得到元素」的地方
+  //   ① 連續 5~8 格可燃 deco（一定要連續才看得出「往兩側各蔓延 3 格」），旁邊放 essence(fire) 或火系敵人
+  //      —— 只有 BURN_DECO 有植被的主題做得到：green 'gfbm' / island 'g' / space（未列 → 預設 'gf'）。
+  //         castle 只有蜘蛛網 'b'、cloud / dedede 完全沒有可燃 deco ⇒ 那三個世界改成只放木箱。
+  //   ② 木箱小倉（3 個 W）：左右各 1 個、頭頂 1 個，把一份補給關在中間的地板格裡
+  //      —— 燒掉（火）／砸掉（鎚・石頭）任一面都能拿到；只有 1 格高，不會擋住主要路線。
+  // 格式同上面的 ELEM6（tiles / deco / add，不動原本的地圖字串）。
+  // ---------------------------------------------------------------------
+  const gRun = (y, x0, x1, ch) => { const a = []; for (let x = x0; x <= x1; x++) a.push([x, y, ch || 'g']); return a; };
+  // 木箱小倉：中心 (x,y) 放寶物，(x-1,y) (x+1,y) (x,y-1) 放木箱
+  const crate = (x, y, item) => ({
+    tiles: [[x - 1, y, 'W'], [x + 1, y, 'W'], [x, y - 1, 'W']],
+    add: [{ t: item || 'food', x, y }],
+  });
+  const ELEM6B = [
+    // ---- w1 翠綠草原（green：草 'g' 會燒）----
+    // r1 星星森林：(50,9) 本來就有 fire 台座 → 左邊鋪 7 格連續草，點一次就能看到整條燒起來
+    { lv: 'w1', r: 1, deco: gRun(9, 42, 48) },
+    // r2 大樹前庭：平坦草地上的木箱小倉
+    Object.assign({ lv: 'w1', r: 2 }, crate(44, 9)),
+
+    // ---- w2 幽靜古堡（castle：只有蜘蛛網會燒 → 依交辦只放木箱，擺在火把旁邊）----
+    Object.assign({ lv: 'w2', r: 0 }, crate(62, 9)),   // 走廊火把 'r'(x=68) 旁
+    Object.assign({ lv: 'w2', r: 2 }, crate(46, 9)),   // 炸彈迴廊的火把旁
+
+    // ---- w3 漂浮群島（island：海草 'g' 會燒）----
+    // r1 珊瑚洞窟：(60,9) 是 fire 台座 → 左邊 6 格連續海草；另外在大水池左岸放 spark 台座（整池放電）
+    { lv: 'w3', r: 1, deco: gRun(9, 54, 59), add: [{ t: 'essence', x: 5, y: 9, a: 'spark' }] },
+    Object.assign({ lv: 'w3', r: 3 }, crate(27, 9)),
+
+    // ---- w4 泡泡雲海（cloud：沒有可燃 deco → 只放木箱）----
+    Object.assign({ lv: 'w4', r: 0 }, crate(40, 9)),
+    Object.assign({ lv: 'w4', r: 2 }, crate(30, 9)),
+
+    // ---- w5 迪迪迪城（dedede：沒有可燃 deco → 只放木箱）----
+    Object.assign({ lv: 'w5', r: 1 }, crate(30, 9)),
+    Object.assign({ lv: 'w5', r: 3 }, crate(47, 9)),
+
+    // ---- w6 星之彼端（space 未列在 BURN_DECO → 預設 'gf'，晶簇 'g' 會燒）----
+    // r3 星軌：7 格連續晶簇 + 旁邊一座 fire 台座
+    { lv: 'w6', r: 3, deco: gRun(9, 81, 87), add: [{ t: 'essence', x: 79, y: 9, a: 'fire' }] },
+    Object.assign({ lv: 'w6', r: 2 }, crate(43, 9)),
+  ];
+  for (const m of ELEM6B) {
+    const lv = KB.LEVELS.find(l => l.id === m.lv); if (!lv) continue;
+    const room = lv.rooms[m.r]; if (!room) continue;
+    if (m.tiles && m.tiles.length) {
+      const g = room.map.map(r => r.split(''));
+      for (const [x, y, ch] of m.tiles) if (g[y] && x >= 0 && x < g[y].length) g[y][x] = ch;
+      room.map = g.map(r => r.join(''));
+    }
+    if (m.deco && m.deco.length && room.deco) {
+      const g = room.deco.map(r => r.split(''));
+      for (const [x, y, ch] of m.deco) if (g[y] && x >= 0 && x < g[y].length) g[y][x] = ch;
+      room.deco = g.map(r => r.join(''));
+    }
+    if (m.add && m.add.length) room.entities = (room.entities || []).concat(m.add);
+  }
+
+  // ---------------------------------------------------------------------
   // audio2 接線：每世界後半房間（r ≥ 2，魔王房 / 秘密房除外）改用第二首曲；房間環境音
   // ---------------------------------------------------------------------
   const SECOND_SONG = { w1: 'green2', w2: 'castle2', w3: 'island2', w4: 'cloud2', w5: 'dedede2' };

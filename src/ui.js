@@ -766,7 +766,7 @@
     }
     // 右：上列分數、下列生命（卡比臉 + xN）
     if (game.arena) {
-      // 競技場：上列 ARENA n/5、下列計時，右下角換成剩餘番茄數
+      // 競技場：上列 ARENA n/總數（5 或 6，見 arena.js）、下列計時，右下角換成剩餘番茄數
       const a = game.arena, n = Math.min(a.order.length, (a.idx | 0) + (a.phase === 'rest' ? 2 : 1));
       KB.text(ctx, 'ARENA ' + n + '/' + a.order.length, L.right, L.rowA, { color: C.yellow, align: 'right' });
       KB.text(ctx, mmss((a.base | 0) + (game.timeAlive | 0)), 210, L.rowB, { color: C.cyan, align: 'right' });   // 魔王血條佔 x 66~156，計時靠右放
@@ -1140,7 +1140,9 @@
       const t = this.t, f = this.frame;
       bands(ctx, 0, 150, ['#0c1430', '#141c48', '#1c2860', '#243878', '#2c4890']);
       drawStars(ctx, this.stars, t);
-      KB.circle(ctx, 214, 30, 11, '#fff8d0'); KB.circle(ctx, 210, 28, 3, '#e8e0b0'); KB.circle(ctx, 218, 34, 2, '#e8e0b0');
+      // R6-P2-06：月亮原本在右上 (214,30)，會被結局標題（16px 中文幾乎佔滿整列）壓過去；
+      // 移到左側偏下的空白帶（y 91~113：在最後一行文字與遠景山丘之間），兩種結局的文字都不會碰到。
+      KB.circle(ctx, 26, 102, 11, '#fff8d0'); KB.circle(ctx, 22, 100, 3, '#e8e0b0'); KB.circle(ctx, 30, 106, 2, '#e8e0b0');
       KB.circle(ctx, 30, 160, 44, '#1c4830'); KB.circle(ctx, 120, 166, 56, '#1c4830'); KB.circle(ctx, 220, 162, 46, '#1c4830');
       KB.rect(ctx, 0, 146, W, 4, '#3a8848'); KB.rect(ctx, 0, 150, W, 74, '#2a6838'); KB.rect(ctx, 0, 176, W, 48, '#204c2c');
       for (let x = 4; x < W; x += 17) { const c = (x / 17 | 0) % 3; KB.rect(ctx, x, 142 + (x % 5), 1, 4, '#58a860'); KB.rect(ctx, x - 1, 141 + (x % 5), 3, 2, c === 0 ? '#ffd0e0' : c === 1 ? '#ffe878' : '#a0d8ff'); }

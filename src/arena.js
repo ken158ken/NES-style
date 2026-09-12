@@ -1,5 +1,6 @@
 // 競技場（Boss Rush）—— agent: ui-flow
 // 規格見 docs/DESIGN_REFERENCE.md 5.2：1 條命、自選 1 能力、連戰 5 名魔王（最後固定迪迪迪大王）、
+// R6-P2-02：通關 W6 後變成 6 名（迪迪迪進隨機池，最後固定暗影卡比）。
 // 每戰之間進休息室，整場只有 3 顆番茄；最佳時間存 KB.save.arena.bestTime。
 //
 // 流程：KB.ArenaScene（選能力）
@@ -50,10 +51,16 @@
   };
 
   // ======================================================================
-  // 對戰順序：前 4 名隨機，最後固定迪迪迪大王
+  // 對戰順序：前 N 名隨機，最後固定壓軸魔王（未通關 w6＝迪迪迪大王 / 已通關＝暗影卡比）
   // ======================================================================
-  const POOL = ['whispywoods', 'lololo', 'kracko', 'metaknight'];
-  const LAST = 'dedede';
+  // R6-P2-02：通關 W6（KB.save.cleared.w6）或 ?debug=1 後，暗影卡比成為最終戰，迪迪迪大王進入隨機池 → 6 名魔王。
+  const POOL5 = ['whispywoods', 'lololo', 'kracko', 'metaknight'];
+  const POOL6 = ['whispywoods', 'lololo', 'kracko', 'metaknight', 'dedede'];
+  function shadowUnlocked() { return !!((KB.save && KB.save.cleared && KB.save.cleared.w6) || KB.DEBUG); }
+  function arenaPool() { return shadowUnlocked() ? POOL6 : POOL5; }
+  function arenaLast() { return shadowUnlocked() ? 'shadowkirby' : 'dedede'; }
+  function arenaCount() { return arenaPool().length + 1; }
+  KB.arenaCount = arenaCount;
   function shuffled(a) { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = a[i]; a[i] = a[j]; a[j] = t; } return a; }
   function levelOfBoss(key) { return KB.LEVELS.find(l => l.boss === key) || KB.LEVELS[0]; }
   function bossRoomIdx(level) { const i = level.rooms.findIndex(r => r.bossRoom); return i >= 0 ? i : Math.max(0, level.rooms.length - 1); }
@@ -61,24 +68,21 @@
   // 結算的「對戰順序」排版：只在名字之間（「→」處）換行，中文名絕不斷在字中間。
   // 每行最多 PER_LINE 個名字，且以 UI.textWidth 量寬，放不下就提早換行；固定輸出 ≤ 2 行（多的併到第 2 行）。
   const ARROW = '→', PER_LINE = 3;
-  function orderLines(names, maxw, o) {
-    const lines = []; let cur = [];
-    const wOf = arr => UI.textWidth(arr.join(ARROW) + (lines.length === 0 && arr.length ? ARROW : ''), o);
-    for (const nm of names) {
-      const next = cur.concat([nm]);
-      if (cur.length && (next.length > PER_LINE || wOf(next) > maxw)) { lines.push(cur); cur = [nm]; }
-      else cur = next;
-    }
-    if (cur.length) lines.push(cur);
-    // 固定兩行：多出來的名字併回第 2 行（正常 5 名魔王只會產生 2 行）
+  function orderLines(names) {
+    const n = names.length;
+    const per = Math.max(1, Math.min(PER_LINE, Math.ceil(n / 2)));   // 5 名 → 3/2、6 名 → 3/3
+    const lines = [];
+    for (let i = 0; i < n; i += per) lines.push(names.slice(i, i + per));
+    // 固定兩行：多出來的名字併回第 2 行（5 / 6 名魔王都只會產生 2 行）
     while (lines.length > 2) lines[1] = lines[1].concat(lines.splice(2, 1)[0]);
     return lines.map((arr, i) => arr.join(ARROW) + (i < lines.length - 1 ? ARROW : ''));
   }
+  KB.arenaOrderLines = orderLines;
   KB.arenaBossName = bossNameOf;
 
   function newArena(ability) {
     return {
-      order: shuffled(POOL).concat([LAST]),
+      order: shuffled(arenaPool()).concat([arenaLast()]),
       idx: 0, phase: 'boss', tomatoes: 3, base: 0, beaten: 0,
       ability: ability || null, abilityCur: ability || null, hp: KB.MAX_HP, score: 0,
     };
@@ -199,7 +203,7 @@
       T(ctx, '競技場', 128, 24, { color: C.yellow, align: 'center', size: 16 });
       // 規則
       panel(ctx, 8, 44, 240, 40, 'rgba(16,12,32,0.86)');
-      fit(ctx, '生命 1　連戰 5 名魔王', 128, 47, 230, { color: '#fff', align: 'center', size: ms });
+      fit(ctx, '生命 1　連戰 ' + arenaCount() + ' 名魔王', 128, 47, 230, { color: '#fff', align: 'center', size: ms });
       fit(ctx, '休息室的番茄整場共用 3 顆', 128, 64, 230, { color: '#c8b8e0', align: 'center', size: ms });
       // 選能力
       panel(ctx, 8, 88, 240, 76);
@@ -305,8 +309,9 @@
       }
       if (this.newBest && ((f >> 3) & 1)) KB.text(ctx, 'NEW RECORD!', 128, 162, { color: C.yellow, align: 'center' });
       // 這次的對戰順序：固定兩行、每行最多 3 個名字，只在「→」處換行（中文名不會斷在字中間）
-      const ol = orderLines(a.order.map(k => bossNameOf(k)), 240, { size: 12 });
-      for (let i = 0; i < ol.length; i++) T(ctx, ol[i], 128, 170 + i * 14, { color: '#7c8ca8', align: 'center', size: 12 });
+      const ol = orderLines(a.order.map(k => bossNameOf(k)));
+      // 6 名魔王時單行會比 240px 寬 → 用 fitText 自動縮字（絕不會被裁掉）
+      for (let i = 0; i < ol.length; i++) fit(ctx, ol[i], 128, 170 + i * 14, 240, { color: '#7c8ca8', align: 'center', size: 12 });
       if ((f % 60) < 42) fit(ctx, 'Z / ENTER：回到標題', 128, 202, 244, { color: '#fff', align: 'center', size: ms });
       UI.drawMuteToast(ctx); UI.drawFade(ctx, this);
     }

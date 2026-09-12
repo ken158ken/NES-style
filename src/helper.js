@@ -47,6 +47,27 @@
     hatScale: 0.78,        // 帽子縮小倍率（夥伴比卡比小一號）
   };
 
+  // ---------------------------------------------------------------------------
+  // R6-P2-05：變身系能力（def.transform = true：giant / dragon / mech / ghost）的「簡化版」
+  // ---------------------------------------------------------------------------
+  // 夥伴的 setForm() 只是把 form 存起來、不會真的變形，所以玩家版招式有兩種失效方式：
+  //   giant  地面 X＝踩踏，會帶著 vx 往前跳 46 幀 → 還沒落地就撞進敵人吃接觸傷害（實測 0 判定框、打不死瓦豆）
+  //   ghost  取得時 form.noclip = true ⇒ 地面 X 永遠被判成「穿牆開關」，完全沒有判定框
+  //   dragon / mech 的地面 X（龍息 / 火箭拳）實測本來就能用，只要「指定走地面招」就穩定。
+  // 因此：giant 用 helper.js 自己的簡化踩踏（原地小跳 + 落地雙向衝擊波，不往前衝），
+  //       ghost / dragon / mech 用 abilityData.next 強制指定招式（abilities_forms.js 的 pickMode 會優先吃 next）。
+  const SIMPLE = {
+    giant: { scale: 1.5, own: 'stomp' },   // 放大 1.5 倍 + 踩踏
+    dragon: { fly: true, next: 'breath' },  // 飛行跟隨 + 龍息
+    mech: { next: 'fist' },                 // 火箭拳
+    ghost: { next: 'wail' },                // 哀嚎
+  };
+  const simpleOf = key => {
+    const d = key && KB.ABILITIES && KB.ABILITIES[key];
+    if (!d || !d.transform) return null;
+    return SIMPLE[key] || { fallback: true };     // 未知的變身能力 → 退化成吐星（保證每 90 幀有傷害）
+  };
+
   const sfx = (n, fb) => {
     try {
       if (!KB.audio || !KB.audio.sfx) return;
@@ -79,6 +100,8 @@
 
       // ---- 假玩家介面（abilities.js 會讀 / 寫這些欄位）----
       this.ability = key; this.abilityData = {};
+      this.simple = simpleOf(key);                       // 變身系 → 簡化版設定（見 SIMPLE）
+      this.scaleMul = (this.simple && this.simple.scale) || 1;
       this.state = 'idle'; this.stateT = 0;
       this.attackTimer = 0; this.attackLock = false; this.attackFps = 12;
       this.form = null; this.possessed = null; this.sizeMul = 1; this.mouth = null;
@@ -117,7 +140,7 @@
         this.killStone();
       }
       this.state = s; this.stateT = 0;
-      if (s !== 'attack') { this.attackLock = false; this.attackTimer = 0; }
+      if (s !== 'attack') { this.attackLock = false; this.attackTimer = 0; this.simpleMove = null; }
     }
     startAttack() {
       const d = this.abilityDef; if (!d) return;
@@ -165,6 +188,14 @@
       const d = this.abilityDef;
       if (!d || this.dead || this.state === 'attack' || this.state === 'hurt') return false;
       if (target) this.dir = target.cx < this.cx ? -1 : 1;
+      // R6-P2-05：變身系能力走簡化版
+      const sp = this.simple;
+      if (sp) {
+        this.atkCool = CFG.atkCD;
+        if (sp.own === 'stomp') { this.simpleStomp(); return this.state === 'attack'; }
+        if (sp.fallback) { this.spitStar(); return this.state === 'attack'; }
+        if (sp.next) this.abilityData.next = sp.next;    // pickMode 會優先吃 abilityData.next
+      }
       this.keys.attack = true;
       this.holdT = d.hold ? CFG.holdFrames : 0;
       this.startAttack();
@@ -172,8 +203,65 @@
       return this.state === 'attack';
     }
 
+    /** 簡化版踩踏（giant）：原地小跳（不往前衝，避免撞進敵人）→ 落地雙向衝擊波 */
+    simpleStomp() {
+      this.setState('attack');
+      this.attackTimer = 40; this.attackLock = true; this.attackFps = 8;
+      this.simpleMove = 'stomp'; this.simpleT = 0; this.simpleDone = false;
+      this.vx = 0; this.vy = -2.6; this.onGround = false;
+      sfx('giant_roar', 'stomp');
+      V('afterimage', this, { frames: 26, every: 3, color: '#ffd080', alpha: 0.4 });
+      KB.particles(this.cx, this.bottom, ['#f0e0c0', '#ffffff'], 6, { spread: 1.6, life: 18, up: 0.8 });
+    }
+
+    /** 落地雙向衝擊波（夥伴版 groundWave；判定框 owner 'player' + fromHelper） */
+    stompWave() {
+      const g = KB.game;
+      if (g) { g.shake = Math.max(g.shake || 0, 6); g.freezeT = Math.max(g.freezeT || 0, 3); }
+      sfx('stomp', 'block');
+      for (const s of [-1, 1]) {
+        // 用 callDef 包住 → KB.spawn 的包裝會在生成當下就標上 fromHelper（測試 / 統計抓得到）
+        this.callDef(() => KB.hitbox({
+          x: this.cx + (s > 0 ? 2 : -2 - 40), y: this.bottom - 16, w: 40, h: 18, dmg: 5, owner: 'player',
+          type: 'hammer', life: 12, rehit: 0, pierce: true, knock: 3, breakBlocks: true,
+        }));
+        V('shockwave', this.cx + s * 4, this.bottom, { dir: s, speed: 3.4, w: 12, h: 14, frames: 20, color: '#f0e0c0' });
+        KB.particles(this.cx + s * 8, this.bottom, ['#f0e0c0', '#ffffff'], 6, { spread: 2, vx: s * 1.6, up: 1.1, life: 20 });
+      }
+      V('ring', this.cx, this.bottom - 2, { r0: 5, r1: 48, frames: 18, color: '#f0e0c0', width: 2 });
+    }
+
+    /** 退化招式：吐星（dmg 2）—— 任何簡化版都接不上時的保底，確保每 90 幀能造成傷害 */
+    spitStar() {
+      this.setState('attack');
+      this.attackTimer = 20; this.attackLock = true; this.attackFps = 12;
+      this.simpleMove = 'spit'; this.simpleT = 0; this.simpleDone = false;
+      this.callDef(() => KB.shoot && KB.shoot({
+        spr: KB.has('proj_star') ? 'proj_star' : 'proj_starshot', x: this.cx + this.dir * 8, y: this.cy,
+        vx: this.dir * 4, vy: 0, dmg: 2, owner: 'player', life: 60, w: 10, h: 10, grav: 0,
+        solid: true, type: 'star', rotSpeed: 0.4,
+      }));
+      sfx('spit', 'shoot');
+    }
+
+    /** 簡化版招式每幀推進（對應 updateAbility，但完全不碰 KB.ABILITIES） */
+    updateSimple() {
+      this.simpleT++;
+      if (this.simpleMove === 'stomp') {
+        this.vx *= 0.7;
+        if (!this.simpleDone && ((this.onGround && this.simpleT > 4) || this.simpleT > 34)) {
+          this.simpleDone = true;
+          this.stompWave();
+          this.attackTimer = Math.min(this.attackTimer, 12);
+        }
+      }
+      this.attackTimer--;
+      if (this.attackTimer <= 0) { this.simpleMove = null; this.setState(this.onGround ? 'idle' : 'fall'); }
+    }
+
     /** 攻擊狀態每幀推進（對應 player.updateAttack，扣掉方向鍵 / 跳躍那段） */
     updateAbility() {
+      if (this.simpleMove) { this.updateSimple(); return; }
       const d = this.abilityDef;
       if (!d) { this.setState(this.onGround ? 'idle' : 'fall'); return; }
       if (this.stoneMode > 0) {
@@ -272,7 +360,9 @@
         }
       } else {
         const ground = KB.physics.groundWithin(map, this, 44);
-        const need = tdy < -6 || (!ground && this.vy > 0.2);
+        // R6-P2-05：dragon 夥伴＝飛行跟隨（空中一律漂浮，跟著卡比的高度走；追敵時照常落地才打得到）
+        const fly = !!(this.simple && this.simple.fly) && !this.foe;
+        const need = fly || tdy < -6 || (!ground && this.vy > 0.2);
         if (need) {
           this.floatT++;
           this.grav = P.floatGrav; this.maxFall = P.floatMaxFall;
@@ -446,11 +536,14 @@
       const wob = this.beingInhaled ? (Math.floor(this.t * 60 / 4) % 2 ? 2 : -2) : 0;
       const opts = { flip: this.dir < 0, fps, t: this.stateT / 60 };
       if (this.state === 'idle') opts.frame = (this.stateT % 200) > 190 ? 1 : 0;
+      const sm = this.scaleMul || 1;                                  // R6-P2-05：giant 夥伴放大 1.5 倍
+      if (sm !== 1) { opts.scaleX = sm; opts.scaleY = sm; }
       g.spr(KB.has(anim) ? anim : 'helper_idle', this.cx + wob, this.bottom, opts);
       // 能力帽子（重用 hat_<key>，縮到 0.78 倍）
       const d = this.abilityDef, hat = (d && d.hat) || ('hat_' + this.ability);
       if (this.ability && KB.has(hat)) {
-        g.spr(hat, this.cx + wob, this.y + 1, { flip: this.dir < 0, t: this.t, scaleX: CFG.hatScale, scaleY: CFG.hatScale });
+        const hs = CFG.hatScale * sm;
+        g.spr(hat, this.cx + wob, this.y + 1 - Math.round((sm - 1) * this.h), { flip: this.dir < 0, t: this.t, scaleX: hs, scaleY: hs });
       }
       this.drawHpBar(g, wob);
       if (KB.DEBUG && KB.showHitbox) g.rect(this.x, this.y, this.w, this.h, 'rgba(0,200,255,0.3)');

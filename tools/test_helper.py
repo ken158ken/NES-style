@@ -31,6 +31,8 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 INDEX = (ROOT / 'index.html').as_uri()
 SHOTS = ROOT / 'shots' / 'agent_helper'
 ATTACK_KEYS = ['sword', 'fire', 'gunner', 'mage']
+# R6-P2-05：變身系能力（def.transform）交給夥伴 → 簡化版招式
+TRANSFORM_KEYS = ['giant', 'dragon', 'mech', 'ghost']
 
 
 # ---------------------------------------------------------------------------
@@ -253,6 +255,37 @@ def phase_attack(h):
         e = hs(h)
         check(n + 'helper survives and keeps the ability', e['exists'] and e['ability'] == key, e)
         shot(h, 'attack_' + key)
+    # --- R6-P2-05：變身系能力（giant / dragon / mech / ghost）的簡化版也要能打死敵人 ---
+    for key in TRANSFORM_KEYS:
+        n = 'transform %s: ' % key
+        if not h.ev("(k)=>!!(KB.ABILITIES[k]&&KB.ABILITIES[k].transform)", key):
+            check(n + 'ability exists and is a transform', False, key)
+            continue
+        h.goto(3, 9, ability=key)
+        install_recorder(h)
+        h.ev("()=>{KB.player.invuln=1e9;}")
+        spawn_helper(h, key)
+        step(h, 10)
+        helper_boxes(h, reset=True)
+        dummy(h, 7)
+        killed = False
+        for _ in range(24):
+            step(h, 10)
+            t = target(h)
+            if t is None or t['dead'] or t['hp'] < 2:
+                killed = True
+                break
+        boxes = helper_boxes(h)
+        check(n + 'helper kills waddledee with the simplified move', killed,
+              dict(target=target(h), helper=hs(h), boxes=len(boxes)))
+        check(n + "helper made owner 'player' hitboxes / projectiles",
+              bool(boxes) and set(b['owner'] for b in boxes) == {'player'}, boxes[:3])
+    # giant 夥伴放大 1.5 倍
+    h.goto(3, 9, ability='giant')
+    spawn_helper(h, 'giant')
+    sc = h.ev("()=>{const e=KB.Helper.get(); return e ? (e.scaleMul || 1) : 0;}")
+    check('transform giant: helper is drawn 1.5x bigger', sc == 1.5, sc)
+
     # --- 攻擊冷卻：90 幀最多 1 次 ---
     n = 'attack cd: '
     h.goto(3, 9, ability='sword')

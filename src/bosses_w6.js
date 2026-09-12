@@ -408,6 +408,7 @@
   const MOVE_NAME = { slash: '影劍氣', fireball: '影火球', shuriken: '影手裡劍', thunder: '影雷擊', blackhole: '影黑洞', stomp: '影踩踏' };
   const RISE_POOL = 34, RISE_UP = 108, RISE_EYE = 124;   // 登場時序（總長 KB.BOSS_INTRO=150）
 
+  const AURA_PULSE = Math.PI / 24;   // 光環脈動：週期剛好 48 幀（配合常駐回捲）
   class ShadowKirby extends KB.Boss {
     constructor(x, y) {
       super(x, y);
@@ -757,7 +758,10 @@
             this.safeX = [clamp(base - 64 + this.rng() * 24, 28, w - 28), clamp(base + 64 - this.rng() * 24, 28, w - 28)];
             V('letterbox', 170); V('worldTint', '#2c1a4a', 0.3, 160);
             sfx('ultimate', 'charge');
-            if (KB.game) { KB.game.toast('暗星雨！站進光環裡！'); KB.game.shake = Math.max(KB.game.shake || 0, 5); }
+            // R6-P1-04：閃避提示改走橫幅（不走 toast）—— 分身 toast 不會再把它疊成亂碼。
+            if (KB.VFX && KB.VFX.banner) KB.VFX.banner('暗星雨', '站進光環裡！', '#a862f0');
+            else if (KB.game) KB.game.toast('暗星雨！站進光環裡！');
+            if (KB.game) KB.game.shake = Math.max(KB.game.shake || 0, 5);
           }
           // 安全區提示環
           if (this.stateT < 46 && this.stateT % 12 === 0)
@@ -826,6 +830,11 @@
     draw(g) {
       if (this.introducing) { this.drawIntro(g); return; }
       if (this.hidden) return;
+      // R6-P2-04：常駐淡紫光環（半徑 14）—— 黑紫身體在 space 星雲背景前才看得出位置
+      if (KB.VFX && KB.VFX.aura) {
+        if (!this.auraFx || this.auraFx.dead) this.auraFx = KB.VFX.aura(this, { r: 14, color: '#b090ff', frames: 120, pulse: AURA_PULSE });
+        else if (this.auraFx.t >= 60) this.auraFx.t -= 48;   // 常駐：在淡出前回捲（48 幀＝脈動整數週期，不會跳格）
+      }
       // 暗星雨的安全區光環（畫在地面上）
       if (this.state === 'starrain' && this.stateT < 170) {
         const pulse = 0.5 + 0.5 * Math.sin(this.t * 7);

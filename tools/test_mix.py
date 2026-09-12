@@ -240,6 +240,50 @@ def phase_mixflow(h):
     }""")
     h.run(20, 10)
     check('真實流程: 持有 fire 時踩 sword 能力台座 → flamesword', got == 'flamesword', got)
+    # R6-P1-01：站在台座上不放（超過 30 幀冷卻）不可以被降級回成分 B
+    stay = h.ev("""()=>{
+      const p = KB.player;
+      const out = [];
+      for (let i = 0; i < 5; i++) { for (let k = 0; k < 40; k++) __kb.step(1); out.push(p.ability); }
+      return out;
+    }""")
+    check('R6-P1-01: 站在 sword 台座上 200 幀，flamesword 不會被降級回 sword',
+          all(a == 'flamesword' for a in stay), stay)
+    # 台座本身還在（不是靠銷毀來擋）、armed 已經在觸發時關掉
+    st = h.ev("""()=>{
+      const e = KB.game.entities.find(x => x.name === 'essence');
+      return e ? { alive: !e.dead, armed: !!e.armed } : null;
+    }""")
+    check('R6-P1-01: 台座沒有消失、armed 已關（必須離開再進來才會再次觸發）',
+          st is not None and st['alive'] and st['armed'] is False, st)
+    # 離開台座 → 丟掉能力 → 再回來 → 台座重新給能力（armed 重新上膛）
+    again = h.ev("""()=>{
+      const p = KB.player, e = KB.game.entities.find(x => x.name === 'essence');
+      if (!e) return null;
+      const ex = e.cx;
+      p.x = ex + 120; p.y = e.y;                      // 走遠 → armed 重新上膛
+      for (let i = 0; i < 6; i++) __kb.step(1);
+      const armedAway = !!e.armed;
+      p.ability = null; p.abilityData = {};
+      p.x = e.x; p.y = e.y;                            // 回到台座
+      for (let i = 0; i < 6; i++) __kb.step(1);
+      return { armedAway, ability: p.ability };
+    }""")
+    check('R6-P1-01: 離開台座範圍 → armed 重新上膛 → 再踩上去會再給一次能力',
+          again is not None and again['armedAway'] and again['ability'] == 'sword', again)
+    # 反過來：成分順序相反（持有 sword 踩 fire 台座 → flamesword，之後也不會被降級成 fire）
+    h.goto(3, 9, ability='sword')
+    h.run(4, 4)
+    rev = h.ev("""()=>{
+      const p = KB.player;
+      KB.spawn(new KB.ITEMS.essence(p.x, p.y, 'fire'));
+      for (let i = 0; i < 10; i++) __kb.step(1);
+      const mixed = p.ability;
+      for (let i = 0; i < 160; i++) __kb.step(1);
+      return [mixed, p.ability];
+    }""")
+    check('R6-P1-01: sword + fire 台座 → flamesword，且 160 幀後仍是 flamesword',
+          rev == ['flamesword', 'flamesword'], rev)
     # 對照：沒有組合的台座就照舊替換
     h.goto(3, 9, ability='fire')
     h.run(4, 4)

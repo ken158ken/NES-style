@@ -729,7 +729,13 @@
         ctx.scale(k, k);
         const T = (KB.UI && KB.UI.text) ? KB.UI.text : KB.text;
         if (this.name) T(ctx, this.name, 0, -14, { color: '#ffffff', align: 'center', size: 16, outline: '#201018' });
-        if (this.sub) KB.text(ctx, this.sub, 0, 5, { color, align: 'center', outline: '#201018' });
+        // 副標：ASCII（能力 HUD 名）維持原本的 8×8 點陣字；中文改走 UI.text 12px，
+        // 否則 8px 中文會被畫成一排細線看不清楚（R6-P1-04 的暗星雨提示就是中文）。
+        if (this.sub) {
+          if (/[^\x00-\x7F]/.test(this.sub) && KB.UI && KB.UI.text)
+            KB.UI.text(ctx, this.sub, 0, 4, { color, align: 'center', size: 12, outline: '#201018' });
+          else KB.text(ctx, this.sub, 0, 5, { color, align: 'center', outline: '#201018' });
+        }
         ctx.restore();
       },
     });

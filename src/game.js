@@ -101,7 +101,13 @@
 
     // ---------- 分數 / 提示 ----------
     addScore(n, x, y) { if (!n) return; this.score += n; if (x !== undefined) this.popups.push({ x, y, n, t: 40 }); }
-    toast(msg) { this.toasts.push({ msg, t: 90 }); }
+    // R6-P1-04：同時最多 1 條 toast —— 新 toast 取代舊的（舊的立即淡出），
+    // 否則兩行字畫在同一個 y 會疊成無法辨識的亂碼（例：暗星雨提示 + 分身提示）。
+    toast(msg) {
+      for (const tt of this.toasts) if (tt.t > 6) tt.t = 6;      // 舊的立即淡出
+      this.toasts.push({ msg, t: 90 });
+      if (this.toasts.length > 4) this.toasts.splice(0, this.toasts.length - 4);
+    }
 
     // ---------- 死亡 / 過關 ----------
     playerDied() {
@@ -451,7 +457,14 @@
       // 提示（R2-P2-13：開場橫幅顯示期間 toast 讓到橫幅下方，兩行字才不會互相蓋掉）
       const bb = (KB.UI && KB.UI.bannerBottom) ? KB.UI.bannerBottom(this) : 0;
       const toastY = bb ? bb + 4 : 40;
-      for (const tt of this.toasts) (KB.UI && KB.UI.text ? KB.UI.text : KB.text)(ctx, tt.msg, KB.W / 2, toastY, { color: '#fff', align: 'center', outline: '#000' });
+      // R6-P1-04：只畫最新的那一條（舊的已在 toast() 裡被縮短成 6 幀淡出），永遠不會兩行疊在同一列。
+      const tt = this.toasts.length ? this.toasts[this.toasts.length - 1] : null;
+      if (tt) {
+        const a = tt.t < 10 ? tt.t / 10 : 1;
+        const oa = ctx.globalAlpha; if (a < 1) ctx.globalAlpha = oa * a;
+        (KB.UI && KB.UI.text ? KB.UI.text : KB.text)(ctx, tt.msg, KB.W / 2, toastY, { color: '#fff', align: 'center', outline: '#000' });
+        ctx.globalAlpha = oa;
+      }
       if (this.paused) {
         if (this.pauseMenu) this.pauseMenu.draw(ctx, this);
         else if (KB.drawPause) KB.drawPause(ctx, this);

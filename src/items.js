@@ -199,15 +199,30 @@
       this.ability = (key && KB.ABILITIES && KB.ABILITIES[key]) ? key : 'fire';
       this.w = 14; this.h = 16; this.z = 1; this.score = 0; this.bob = false;
       this.cool = 0; this.inhalable = false; this.hurtsPlayer = false;
+      this.armed = true;               // 必須離開台座範圍再進來才會再次觸發
+    }
+    // 目前能力已經「包含」本台座的成分 → 不該再給（否則混合能力會被降級回成分 B）
+    hasEssence(key) {
+      if (!key) return false;
+      if (key === this.ability) return true;
+      try {
+        if (KB.MIX && KB.MIX.parts) {
+          const ps = KB.MIX.parts(key);
+          if (ps && ps.indexOf(this.ability) >= 0) return true;
+        }
+      } catch (e) { }
+      return false;
     }
     update(dt) {
       this.baseUpdate(dt);
       if (this.cool > 0) this.cool--;
       const p = KB.player;
-      if (!p || p.dead || p.state === 'dead' || this.cool > 0) return;
-      if (!this.overlaps(p)) return;
+      if (!p || p.dead || p.state === 'dead') return;
+      if (!this.overlaps(p)) { this.armed = true; return; }   // 離開範圍 → 重新上膛
+      if (this.cool > 0 || !this.armed) return;
+      this.armed = false;              // 同一次進入只觸發一次
       this.cool = 30;
-      if (p.ability === this.ability) return;
+      if (this.hasEssence(p.ability)) return;
       const d = KB.ABILITIES[this.ability], col = (d && d.color) || '#ffe040';
       KB.audio.sfx('essence');       // audio2 提供的台座啟動音（giveAbility 另有 'ability' jingle）
       KB.particles(this.cx, this.bottom - 12, ['#ffffff', col], 16, { spread: 2.5, life: 26 });
