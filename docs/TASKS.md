@@ -135,3 +135,14 @@
 | ui5 | src/menu.js、src/arena.js、src/ui.js | 圖鑑 / 競技場選能力分頁（20 能力）、暫停卡 5 列招式、HUD 新能力、變身名稱橫幅 |
 | levels5（第二波） | src/levels.js、src/items.js | 12 種新敵人放進 5 世界 + 能力台座 |
 | qa5（第三波） | docs/QA_REPORT.md | 全能力截圖驗收 |
+
+---
+# Round 6：系統深度（2026-09-12）— 混合能力 / 夥伴 / 元素反應 / 第六世界 / 進度系統
+| agent | 擁有檔案 | 內容 |
+|---|---|---|
+| mix | src/abilities_mix.js、src/art/kirby_mix.js、src/player.js（吞下混合鉤子、select 長按鉤子）、tools/test_mix.py | 持有能力 A 時吞下能力 B → 混合能力（12 組合，各 3 招） |
+| helper | src/helper.js、src/art/helper.js、tools/test_helper.py | 長按 select 把能力變成 AI 夥伴（使用該能力招式、可吸回、HP 與 HUD） |
+| elements | src/elements.js、src/tilemap.js、src/entity.js、src/enemies*.js（僅加屬性標籤）、src/bosses.js（弱點）、src/art/world.js、tools/test_elements.py | 火燒草 / 木箱、冰凍水面可走、電擊水域、火融冰；敵人屬性弱點 ×2 / 抗性 ×0.5；魔王弱點 |
+| world6 | src/levels.js（新增 w6）、src/art/world6.js、src/bosses_w6.js、src/const.js（THEMES）、src/art/backgrounds.js、src/audio.js（space 曲）、tools/level_check.js、tools/boss_test.py | W6「星之彼端」5 房 + 秘密房 + 3 大星星 + 新敵人 3 種 + 魔王「暗影卡比」（複製玩家能力）二階段 |
+| progression | src/progression.js、src/ui.js、src/menu.js、src/game.js、src/arena.js、tools/test_progression.py | 能力等級 Lv1~3（重複取得升級：傷害 / 特效加碼、HUD 星）、連擊計數與結算 Style Rank、成就 20 條與圖鑑成就頁、選關第 6 節點 |
+| qa6（第二波） | docs/QA_REPORT.md | 全系統驗收 |

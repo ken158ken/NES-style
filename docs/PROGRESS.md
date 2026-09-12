@@ -1790,3 +1790,25 @@ R5-7a 的觀察項（gravity ↑+X 文案不一致、圖鑑剪影露出帽子輪
 2. R5-P2-10：變身時「黑邊 + 變身橫幅 + WORLD 橫幅」同框（無重疊但畫面擁擠）；可讓開場橫幅期間延後變身橫幅。
 3. 時間能力的回溯冷卻 240 幀未寫進招式表；巨大化改為裝甲 3 次（難度下降）；忍者貼牆滑行手感偏黏，可再調。
 4. 未做：新能力的分世界強度（新敵人皆 tier 3 行為）、Extra 模式關卡差異、競技場對 20 能力的平衡測試、非無敵難度量測（使用者表示目前難度剛好）。
+
+---
+# Round 6：系統深度（2026-09-12 啟動）
+分工見 docs/TASKS.md Round 6。總控已預留 8 個新檔與 script 標籤（elements.js 在 vfx.js 後；art/kirby_mix.js、art/helper.js、art/world6.js 在 art/kirby_forms.js 後；abilities_mix.js、helper.js 在 abilities_forms.js 後；bosses_w6.js 在 bosses.js 後；progression.js 在 game.js 後）。
+
+## mix
+（agent 在此追加）
+
+## helper
+（agent 在此追加）
+
+## elements
+（agent 在此追加）
+
+## world6
+（agent 在此追加）
+
+## progression
+（agent 在此追加）
+
+## qa6
+（agent 在此追加）
