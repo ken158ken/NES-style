@@ -1165,3 +1165,339 @@ for a in flamesword frostsword thunderblade flamegun frostgun thunderbow flameha
 - `goverlap.png` —— R6-P1-04（暗星雨疊字）與 R6-P2-01（COMBO 壓橫幅）
 - `perf_triple.png` / `perf_w6boss.png` —— 效能情境
 - `mix.json` / `helper.json` —— 逐幀量測數據
+
+---
+
+# Round 7 驗收（qa7 · 2026-09-12）
+
+> 範圍：mix2（第二批 12 組混合）、awaken（Lv4 覺醒 + 20 招）、helper2（雙夥伴 / 指令 / 合體技）、
+> extra（Extra 疊加層 / 魔王變體 / 成績板 / 第 7 節點）、world7（夢幻迴廊 + 夢魘之核三階段 + 真結局）。
+> 所有截圖在 `shots/agent_qa7/`，**每一張都用 Read 工具實際看過**。src 全程唯讀。
+
+## R7-0. 結論
+
+| 系統 | 結果 | 備註 |
+|---|---|---|
+| **mix2**（12 組 × 3 招） | **OK** | 36 招全部出得來、招後回 idle 保有能力、VFX 歸 0、0 missing / 0 pageerror；`ABILITY_KEYS 44` / `MIX.table 24`；HUD 英文名全部 ≤ 7 字；暫停卡 12 張 + 圖鑑 6 頁（44/44）中文可讀 |
+| **awaken**（Lv4 + 20 招） | **OK（但嚴重過強）** | 機制全對：Lv4 四星 / 量表 0→100 / 未 Lv4 與量表未滿都不觸發 / 20 招全部命中並秒殺雜兵 / 覺醒中無敵 300 幀 / 結束歸 0。**但一次覺醒可以打死一整隻魔王 → R7-P1-01** |
+| **helper2**（雙夥伴） | **OK（1 個顯示問題）** | 雙夥伴 / 三指令 / 合體技 / 走門淡入淡出 / 死亡歸隊全部正確；**兩人的指令文字疊成亂碼 → R7-P1-03** |
+| **extra** | **OK** | w1~w7 **全 7 世界 36 個非魔王房**都有疊加層、6 魔王開場二階段 + 新招、成績板 8 頁、第 7 節點鎖 / 解鎖、EXTRA 紅牌、w4 / w5 燒草全部正確 |
+| **world7** | **OK** | 6 房 / 3 大星星 / 夢之開關順序 / 六王試煉鎖門 / 夢魘之核三形態 11 招 / 兩次形態轉換 / 擊敗 + TRUE END（音樂 key 確認為 `trueend`）全部通過 |
+| **全流程** | **OK** | 標題 → 成績板 → 選關（7 節點）→ W7 → 魔王 → 真結局，13 個畫面 0 error / 0 missing |
+| **測試** | **1 支紅** | `test_progression 63/68`（5 條過時斷言）→ R7-P1-02；其餘 12 支測試 + 3 支檢查工具全綠 |
+| **效能** | **OK（大量餘裕）** | 最重情境（雙夥伴 + 覺醒招 + 燃燒草 + 10 敵人）300 幀 313 ms ＝ **1.04 ms/幀**，只用掉 16.7 ms 預算的 6% |
+
+問題統計：**P0 × 0、P1 × 3、P2 × 8**。沒有任何一項阻擋出貨，但 **R7-P1-01（覺醒一招秒魔王）會直接毀掉 Round 7 的難度設計**，建議優先處理。
+
+## R7-1. 問題列表
+
+| 編號 | 等級 | 位置 | 現象 | 重現 | 截圖 / 數據 | 建議負責人 |
+|---|---|---|---|---|---|---|
+| **R7-P1-01** | P1 | `src/awaken.js` `A.moves`（20 招的 `n × dmg`） | **一次覺醒 ≒ 一隻魔王**。迪迪迪大王（60 HP、W5 王）20 個樣本中 **18 個成功發動、其中 17 個一次覺醒直接打死（100% 血量）**，剩下 gunner 55% / time 70%；玩家在這 300 幀還是無敵的。真最終魔王更誇張：**夢魘之核三個形態各被「一次覺醒」整條清空**（P1 40→換形態、P2 40→換形態、P3 50→死亡），等於 3 次覺醒通關真最終戰。而量表**只要 8 次連擊就能充滿**（實測 0→6→14→24→36→50→66→84→100），Lv4 之後幾乎是常駐技。awaken agent 自述「總傷害 42~80、對魔王偏強」，實測比自述還強一階。 | `awkdmg3.py` / `awkdmg4.py`（見 R7-7）：`goto w5 r5` → `abilityXp=15` → `AWAKEN.gauge=MAX` → `press jump,attack 3` → step 320 → 讀 `boss.hp` | `awkdmg` 20 行輸出（報告 R7-2c）、`gawk_moves1~4.png` | **awaken**：把 20 招的段數 × 傷害砍到「對魔王 ≈ 25~35%」（例如整體 ×0.4），或對 `type==='boss'` 另乘一個 `bossMul`；判定與演出完全不用動 |
+| **R7-P1-02** | P1 | `tools/test_progression.py:44,304,305,307,312` | **`test_progression` 因為 w7 上線而紅：63/68**。5 條斷言寫死「6 關 / 6 個節點 / 5 段路徑 / 第 6 點主題 space」，w7 進 `KB.LEVELS` 之後全部不成立（實測 `n=7, paths=6, labels=7, over=0, out=0, theme='dream'`）。**選關畫面本身是對的**（7 標籤 0 重疊 0 出界、游標正確停在可進入的最後一關 index 5），純粹是測試過時 —— 但它會讓「收工前跑全部測試」永遠是紅的，掩蓋真正的退步。與 mix2 回報過的 `test_mix.py` 是同一類問題（那兩條已經被改成不等式、現在 245/245 全過）。 | `.venv/bin/python tools/test_progression.py` | `/tmp/.../tests/test_progression.log` | **總控 / progression**：把 `== 6` / `== 5` / `theme === 'space'` 改成「注入的假 w6 是第 6 關」的相對寫法，或直接改成 `>=` |
+| **R7-P1-03** | P1 | `src/helper.js:819`（`setMode` 的 `V('textPop', h.cx, h.y - 18, m.hud, …)`） | **兩個夥伴的指令文字疊成亂碼**。`setMode` 對**每一個**夥伴各發一次 textPop，而兩人只差 14px、文字寬 40+px 且置中 → 疊出「FOLLOWOWW」「STAYAY」「ASSAUULT」。每次按 ↑+SELECT 都 100% 重現（雙夥伴是 helper2 的主打功能，所以是常態畫面）。頭上的模式小圖示有做「第 2 人往上 5px」，但 textPop 沒有跟著錯開。 | `t3_helper.py`：生兩個夥伴 → `press up,select 3` → step 16 → 截圖 | **`ghelp_modes.png`（第 1 列 3 張）**、`helper/croppop_mode_assault.png`（4 倍放大） | **helper2**：只對 `list[0]` 發 textPop（模式是兩人共用的），或第 2 人的 y 再 −10px |
+| **R7-P2-01** | P2 | `src/ui.js` `EndingScene`（真結局版面） | **TRUE END 版面「FINAL SCORE 0030320」與「ALL CLEAR」兩行重疊**，字互相穿插。真結局比一般結局多了 2 行文案 + 2 行收集度，把 FINAL SCORE 往下推進了 ALL CLEAR 的位置。 | `__kb.goto('ending')` 前設 `KB.session.trueEnd=true` → step 590 | **`extra/zoom_trueend_overlap.png`（3 倍裁切）**、`gextra_trueend.png`（最後一格）、`gflow.png`（最後一格） | **ui-menu / extra**：真結局時把收集度那兩行收成一行，或 FINAL SCORE 與 ALL CLEAR 之間多留 4px |
+| **R7-P2-02** | P2 | `src/ui.js` `drawHUD` | **遊戲中完全看不出自己在 Extra 模式**。HUD 的難度欄仍然寫「NORMAL／普通」，唯一的 EXTRA 標示只在選關畫面（`ui.js:728`）。玩家從選關進關之後就沒有任何提示，而 Extra 的差異（HP 6→3、敵人 +3~5、多出尖刺）全都是「被打了才知道」。 | `?extra=1` → `goto game w1 r0` → 看 HUD | `gextra_rooms1/2.png`（右欄每一張的 HUD 都寫 NORMAL） | **ui-menu / extra**：難度欄在 `KB.extraOn()` 時改成紅字「EXTRA」，或在能力名旁掛一個小 EX 徽章 |
+| **R7-P2-03** | P2 | `src/progression.js` `drawHUD`（COMBO）＋ `src/ui.js` 關卡橫幅 | **R6-P2-01 未修、Round 7 更容易踩**：COMBO 計數還是會壓在開場「WORLD n」橫幅上。Round 7 的覺醒量表要靠連擊充能、mix2 的蓄力必殺一次清一片，進房 3 秒內就跳到 COMBO ×24 是常態。 | 進 w1 r0 → 連續攻擊 → 看橫幅右端 | `gawk_trigger.png`（第 1 列第 3 格，「WORLD 1」的 1 被壓住）、`gmix2_hammermech.png` | **progression**（橫幅播放中把 COMBO 往下移，或橫幅結束後才畫） |
+| **R7-P2-04** | P2 | `src/helper.js:1051`（`drawHUD` 的 `KB.drawSpr(ctx, icon, x+13, y+4)`） | **夥伴 HUD 的能力 mini 圖示上緣超出面板 3px**，會戳出面板頂線、也會蓋到「合體技就緒」的金色框線（8×8 置中畫在 y+4，面板頂在 y0=205，第 0 列的圖示等於 202~210）。 | 生兩個夥伴 → 4 倍裁 HUD x150~256 / y188~224 | **`helper/crophud_duo_hud.png`** | **helper2**：圖示改畫在 `y + 5`（或面板往上 2px） |
+| **R7-P2-05** | P2 | `src/awaken.js` `tryTrigger` ＋ 變身系（`src/forms.js`） | **變身系（giant / dragon / mech / ghost）在「變身演出」的約 60 幀內按 跳+攻 完全沒有反應**，量表滿了也一樣，而且沒有任何提示（不是消耗掉，是整個吃掉輸入）。演出結束後就正常。第一次測 20 招時就是被這個絆倒（4 招誤判為不會觸發）。 | `giveAbility('giant')` → 立刻 `AWAKEN.gauge=MAX` → `press jump,attack 2` → `AWAKEN.active()` 為 false；改成 step 60 之後再按就 true | `awaken/form_giant.png`、本報告 R7-2b | **awaken**：變身演出期間量表滿了就把 HUD 量表壓暗 / 不要閃「覺醒 READY」，或把這 60 幀的輸入存成 buffer |
+| **R7-P2-06** | P2 | `src/ui.js` `StageSelectScene.draw`（底部提示列） | 游標停在**鎖定**的第 7 節點時，底部提示列仍然寫「Z 進入」，但按 Z 進不去（正確行為）。資訊列已經有鎖頭 + 「集齊 15 顆大星星」，提示列沒有跟著變。 | `KB.UI.unlockAll=false` + 12 顆星 → 選關 → 游標右移到第 7 點 | `extra/select_w7_locked_cursor.png` | **ui-menu**：鎖定時把「Z 進入」改成灰字或「未解鎖」 |
+| **R7-P2-07** | P2 | `src/helper.js`（assault 模式） | **突擊模式的清怪效率偏低**：兩個夥伴（sword + fire、Lv1）在 200 幀內追到 150px 外的敵群，但 12 隻只殺掉 1 隻。追擊移動是對的（x 從 34/20 → 149），攻擊頻率跟不上。 | `t3_helper.py` 的 assault 段（`setMode('assault')` → spawn 3 隻在 150px 外 → step 200） | `ghelp_modes.png`（第 2 列第 2 格） | **helper2**：突擊模式把 `atkCDFrames` 再打 7~8 折，或允許移動中出招 |
+| **R7-P2-08** | P2 | `src/bosses.js`（克拉寇） | `tools/boss_test.py --runs 3` 的唯一 WARNING 仍是 `kracko FIGHT 2/3`（第 2 個樣本 `playerDied=4` 打不贏）。**Round 6 就有、不是本輪造成的**，但已經連續三輪出現在 SUMMARY 裡。 | `.venv/bin/python tools/boss_test.py --runs 3` | `/tmp/.../play/boss.log` | **levels-bosses**：克拉寇的落雷 / 俯衝密度或機器人策略擇一調整 |
+
+### 觀察（不列入問題）
+
+- **覺醒 Lv4 升級橫幅叫「AWAKEN!」，和真正的覺醒發動橫幅（金色 + 招名）撞名**。用「xp 14 → 打一下升 Lv4 → 連擊到滿 → 發動」的真實流程實測，升級橫幅在第 6 次連擊前就散掉了，**兩者不會真的疊在一起**（`gawk_clash.png`）。只有用測試 hack（同一幀給 Lv4 + 滿量表）才會疊，例如 `gawk_moves1~4.png` 第 2 欄那些糊掉的字。
+- mix2 自述的「暫停卡中文一個字一行」在本機 **沒有重現**：12 張暫停卡（3 倍）中文全部橫排可讀（`mix2/pause_*.png`）。
+- awaken 自述的「圖鑑 Lv4 會沿用 Lv3 黃色條」實際上**看起來是對的**：Lv4 是金色滿格 + 「MAX xp 15」，跟 Lv1~Lv3 的進度條分得出來（`awaken/codex_lvbars.png`）。
+- 覺醒量表**只有 Lv4 才累積**已驗證：xp 0（Lv1）/ xp 8（Lv3）打 5 輪敵人量表都是 0，xp 15（Lv4）同樣打法是 50。
+- 夢魘之核的護盾碎片是 `phase === 1` 專屬（`get shieldUp`），二 / 三形態不會殘留擋刀 —— 我一開始用 `s.dead` 誤判成「碎片永遠是 4 片」，實際要看 `s.alive`。
+- `KB.game` 的地圖欄位是 **`game.map`** 不是 `game.tilemap`（寫工具踩過一次）。
+- `KB.save.abilityXp[k] = 15` 之後再 `giveAbility(k)` 會多加 1 xp（變 16），不影響 Lv4 判定。
+- 成績板的「競技場最佳」在只寫 `KB.save.arena = {best: n}` 時顯示 `--:--`，我沒有去追它真正吃哪個欄位，**不列為問題**（可能是我造的假存檔格式不對）。
+
+## R7-2. 各系統驗收明細
+
+### R7-2a. mix2（第二批 12 組混合能力）
+
+36 招連拍（每招 5 幀 × 每幀 5 步）＋ 招後 240 幀殘留檢查，**全部 0 missing / 0 pageerror / 招後回 `idle` 且能力保留 / `KB.VFX.list` 歸 0**。
+
+| mixkey | X | 方向 / 空中 | 蓄力 50 放開 | 判定證據 |
+|---|---|---|---|---|
+| flamebow 焰弓 | 火箭 | 空中火雨（落地火海） | 鳳凰箭 | hb 1→0、proj 1；空中 hb 3→9（火海逐格鋪開） |
+| frosthammer 冰鎚 | 凍地衝擊 | ↓ 冰柱群 ×5 | 冰河期（全畫面白） | proj 3~6、蓄力後整畫面白閃 |
+| thundersword 雷劍 | 帶電斬 ×2 | 空中雷擊落下斬 | 雷神劍 | 敵人被麻痺（白色 BOLT!） |
+| flameninja 火忍 | 火遁手裡劍 ×3 | ↓ 替身爆（「替身!」+ 原地引爆） | 火遁大炎 | proj 2、替身橫幅 + 雙段爆 |
+| frostninja 冰忍 | 冰針三連 | ↓ 冰鏡瞬移（碎鏡冰片） | 吹雪 | proj 1→3、瞬移後留冰鏡 |
+| thundergun 雷槍 | 電擊彈（鎖鏈跳） | ↓ 電網霰彈 ×7 | 雷射砲 | proj 5、COMBO ×2 |
+| stonegiant 岩巨人 | 岩拳 + 踩踏（STOMP!） | ↓ 滾石衝撞 | 山崩（落石 7 顆） | hb 1~2、蓄力 proj 1→5 |
+| flamedragon 炎龍 | 炎息加強 | 空中炎翼衝 | 太陽炎 | hb 3（龍息框逐幀拉長） |
+| thunderdragon 雷龍 | 雷息 | 空中雷翼俯衝（雙落雷柱） | 雷雲 | hb 3→1、蓄力 hb 2 |
+| timebeam 時光束 | 凍結光束 | ↑ 時間裂縫 ×3 | 時停爆（TIME STOP → 白閃） | hb 2→3 + proj 3；蓄力在第 42~56 幀才出判定（先定格 200 幀） |
+| gravityblade 重力刃 | 軌道刃 ×4 環繞 | ↓ 引力回收刃 | 刃之奇點 | proj 固定 4（Mix2Orbit 半徑外擴） |
+| hammermech 鎚機甲 | 火箭鎚（ROCKET!） | ↑ 飛彈鎚 ×2 | 軌道砲鎚（ORBITAL!） | 蓄力在第 28~70 幀落砲柱、殺掉敵人（en 9→8） |
+
+- **暫停卡**：12 張全部正確（名稱 / HUD 英文名 / 風味文字 / 3 行招式表），中文橫排可讀。
+- **圖鑑**：6 頁、`發現 44/44`，mix2 的 12 組都有專屬 24×16 圖示 + 8×8 mini、招式表與暫停卡一致。
+- **API**：`KB.ABILITY_KEYS.length = 44`、`Object.keys(KB.MIX.table).length = 24`、HUD 英文名沒有一個超過 7 字。
+
+### R7-2b. awaken（Lv4 覺醒）
+
+| 項目 | 結果 |
+|---|---|
+| Lv4 四星 | ✅ 第 4 顆是金色光芒星（`awaken/crop_lv4_stars.png`），與 Lv1 對照明顯不同 |
+| 量表累積 | ✅ 命中 +6、連擊遞增（0→6→14→24→36→50→66→84→100，8 次連擊滿） |
+| 受傷 −20 | ✅ 24 → 4 |
+| 只有 Lv4 才累積 | ✅ Lv1 / Lv3 打 5 輪敵人量表恆為 0 |
+| 滿了的提示 | ✅ 「覺醒 READY」textPop + 量表金白閃爍（`awaken/crop_gauge_ready.png`） |
+| 跳+攻 觸發 | ✅ `active()=true`、`activeT` 299→0、`invincibleT` 同步 300 |
+| 未 Lv4 不觸發 | ✅ 量表 100 但 Lv1 → 只出普通攻擊（state='attack'），量表不消耗 |
+| 量表未滿不觸發 | ✅ Lv4 + gauge 50 → 只出普通攻擊 |
+| **20 招** | ✅ 全部發動 + 產生判定框 + 第一幀就秒殺 4 隻雜兵（13→9）；0 missing / 0 error |
+| 覺醒中 HUD | ✅ Lv 星整排金色閃爍、量表改顯示剩餘時間並金色脈動、冠冕 + 光環 + 金色釉光（表情看得見） |
+| 結束 | ✅ 300 幀後 `active()=false`、`gauge=0` |
+
+**變身系的 60 幀空窗（R7-P2-05）**：`giveAbility('giant'/'dragon'/'mech'/'ghost')` 之後的變身演出期間 `tryTrigger` 會被呼叫但輸入吃不到，`act` 恆為 false；`step(60)` 之後再按就 100% 成功。20 招的正式驗收是在補了 `step(60)` 之後跑的。
+
+### R7-2c. 覺醒招對魔王的傷害（R7-P1-01 的依據）
+
+迪迪迪大王（W5，60 HP，一般難度）：發動一次覺醒後放置 320 幀（玩家不再按任何鍵），只算覺醒招本身。
+
+```
+fire 60→0(100%)  sword 60→0(100%)  beam 60→0(100%)  cutter 60→0(100%)
+spark 60→0(100%) stone 60→0(100%)  ice 60→0(100%)   hammer 60→0(100%)
+gunner 60→27(55%) ninja 60→0(100%) blade 60→0(100%) bow 60→0(100%)
+mage 60→0(100%)  time 60→18(70%)   gravity 60→0(100%) clone 60→0(100%)
+giant 60→0(100%) mech 60→2(97%)    dragon/ghost = 樣本無效（踩到 R7-P2-05 的變身空窗）
+→ 18 個有效樣本：17 個一次覺醒直接打死，中位數 100%
+```
+
+夢魘之核（W7 真最終魔王，三形態各一條血）：
+
+```
+P1 核心（40 HP，已破盾裸露）  sword/hammer/stone/fire → 4/4 一次覺醒清空 → 進入第 2 形態
+P2 夢魘騎士（40 HP）          sword/hammer/stone/fire → 4/4 一次覺醒清空 → 進入第 3 形態
+P3 終焉之翼（50 HP）          sword/hammer/stone/fire → 4/4 一次覺醒直接擊殺
+```
+
+### R7-2d. helper2（雙夥伴）
+
+| 項目 | 結果 |
+|---|---|
+| 雙夥伴 | ✅ `count()=2`、slot 0/1、能力各自保留（sword + fire）、HUD 兩列 |
+| 指令循環 | ✅ ↑+SELECT → stay → assault → follow（toast「夥伴指令：…」正確） |
+| 待命 | ✅ 卡比走到 x=166，兩夥伴留在 x=34 / 20 完全不跟 |
+| 突擊 | ✅ 追到 150px 外（x 34/20 → 149）；清怪效率偏低（R7-P2-07） |
+| 合體技 | ✅ `canUnion` true → 兩人衝到左右出招 → 敵人 14→11、CD 600→465、CD 期間 `canUnion` false |
+| 走門 | ✅ 淡出 alpha 1→0.8→0.4 → 換房 → 淡入 0.3→1（`ghelp_door.png`） |
+| 死亡重生 | ✅ 夥伴消失（poof）→ 卡比重生（lives 3→2）→「夥伴歸隊！」帶原本能力回來 |
+| 組合鍵不誤丟能力 | ✅ ↑/↓+SELECT 之後卡比的能力沒有被丟成能力星 |
+
+### R7-2e. extra（Extra 模式）
+
+**疊加層全掃描**（`applyRoomLayers(lv, i, room, false/true)` 逐房對照，43 個房間）：
+
+| 世界 | 非魔王房 | 敵人增量 | 尖刺 | 隱藏 1UP | 補給減少 |
+|---|---|---|---|---|---|
+| w1 | 4 | +4 / 房 | +2 格 / 房 | +1 | −4 |
+| w2 | 5 | +4 | +2 | +1 | −7 |
+| w3 | 5 | +4 | +2 | +1 | −7 |
+| w4 | 5 | +4 | +2 | +1 | −6 |
+| w5 | 6 | +4 | +2 | +1 | −8 |
+| w6 | 6 | +4 | +2 | +1 | −5 |
+| **w7** | **5** | **+4~5** | **+2** | **+1** | **−4** |
+| 合計 | **36 房** | **+138 個實體** | **+72 格** | **36 個 `oneup`** | **−41 份** |
+
+- 魔王房（每個世界 1 間）**一律不套疊加層**，符合設計。
+- **w7 也有疊加層**（world7 agent 代為補上），extra agent 自述的「w7 沒有 Extra 疊加層」已經不成立。
+- 實機：`?extra=1` 進 w1~w7 r0，敵人 9→12 / 12→15 / 14→17 / 13→16 / 17→20 / 8→11 / 8→12，HP 一律 6→3。
+
+**6 魔王 Extra 變體**（開場即二階段 + 專屬新招）：
+
+| 魔王 | 一般 phase/HP | Extra phase/HP | 開場橫幅 | 新招 |
+|---|---|---|---|---|
+| 大樹威斯比 | 1 / 40 | **2 / 50** | 威斯比的樹根開始暴走！ | `leafstorm` 龍捲落葉 ✅ |
+| 洛洛洛與拉拉拉 | 1 / 30 | **2 / 38** | 洛洛洛與拉拉拉同時推箱！ | `tribox` 三箱齊推 ✅ |
+| 克拉寇 | 1 / 40 | **2 / 50** | 克拉寇捲起雷雨！ | `tracker` 雷雲追蹤 ✅ |
+| 魅塔騎士 | 1 / 55 | **2 / 69** | 魅塔騎士拔出了真劍！ | `crossslash` 劍氣十字 ✅ |
+| 迪迪迪大王 | 1 / 60 | **2 / 75** | 迪迪迪大王怒了！ | `quake` 巨鎚震盪波（4 道）✅ |
+| 暗影卡比 | 1 / 70 | **2 / 88** | 暗影卡比分裂成四個！ | `split` 分身 **4 隻** ✅ |
+
+**成績板**：8 頁（總覽 + W1~W7）。總覽的 W1~W6 有 BEST / RANK / TIME / STAR / PLAY / EX 徽章，W7 未通關時整列灰線；下方彙總「競技場最佳 / 成就 13/20 / 大星星 18/21 / 能力發現 44/44」。分頁有 EXTRA CLEAR 紅字、4 倍字評價印章 + 獎盃，未通關頁顯示「還沒通關這個世界」。←→ 換頁、Z / SELECT / ENTER / X 都能回標題（實測四個鍵都會離開，只是 leave 轉場要 ~40 幀）。
+
+**第 7 節點**（`KB.UI.unlockAll=false` 下實測）：
+
+| 狀態 | `dreamOpen()` | 節點 | 游標 | 按 Z |
+|---|---|---|---|---|
+| 通關 w6 + **12** 顆星 | false | 畫鎖頭（`extra/zoom_select_w7_locked.png`） | **走得過去**（`canMove(6)=true`） | **進不去**，留在選關（`canEnter(6)=false`） |
+| 通關 w6 + **18** 顆星 | true | 夢之門（粉紫傳送門 + 3 個星格） | 走得過去 | 進得去，資訊列「出發！」 |
+
+資訊列在鎖定時正確顯示鎖頭 + 粉紅「集齊 15 顆大星星」+ `STAR 12/15`。7 個關名標籤 **0 重疊 / 0 出界**。Extra 模式的紅色 `EXTRA` 牌正確掛在「選擇關卡」右邊。
+
+**w4 / w5 可燃植被**：w4 r0 有 `g`×4 + `f`×2（雲草 / 雲花）、w5 r1 有 `v`×6 + `k`×3（地毯邊 / 旗幟）。點火 → `decoFire.size` 同時 4 格燃燒 → 燒完變焦黑，兩處都看得到蔓延。
+
+### R7-2f. world7（夢幻迴廊）
+
+| 房 | 規格 | 實測 | 結果 |
+|---|---|---|---|
+| r0 記憶迴廊 | 104×12 | 104×12、1 門、8 敵、34 item | ✅ |
+| r1 顛倒之塔 | 32×24 垂直 | 32×24、1 門（在 y=1）、9 敵 | ✅ |
+| r2 夢境迷宮 | 80×12 dark | 80×12、`room.dark=true`、**2 門（x=76 locked / x=30 秘密房）**、11 敵、4 個夢之開關 | ✅ |
+| r3 六王試煉 | 56×12 | 56×12、1 門 locked、3 隻中魔王 + gatekeeper、起點 fire+sword 並排台座 | ✅ |
+| r4 醒不來的王座 | 28×14 | 28×14、無門、boss ×1 | ✅ |
+| r5 甜夢（秘密） | 24×12 | 24×12、1 門、15 item（含 1UP / 番茄 / 4 座台座） | ✅ |
+
+- **3 顆大星星**：r0 (93,2) / r2 (69,9) / r5 (11,3) 三顆都在規格位置，實際碰到都會進 `KB.save.stars.w7` 的對應格（`[1,0,0]` / `[0,1,0]` / `[0,0,1]`）並跳「大星星 1/3」。
+- **夢之開關順序**：4 顆的 `order` 是 0/1/2/3、座標 (11,6)(24,5)(36,6)(60,6)。**先打 #2 完全無效**（`pressed` 不變、門仍鎖），依序 0→1→2→3 才在第 4 顆解鎖 x=76 的門。`isNext` 那一顆會發光 + 光暈，符合「摸黑也不會把自己鎖死」的設計。
+- **六王試煉鎖門**：bonkers(14HP) / mrfrosty(12HP) / rollarmor(12HP) + gatekeeper，三隻全倒後 x=52 的門 `locked` 轉 false。
+- **夢魘之核**：登場（王座沉睡 → 夢境粉紅擴散 → 第 92 幀睜眼 → 浮起，橫幅「夢魘之核 / NIGHTMARE CORE」）→ 三形態 **11 個招式全部連拍過**：
+
+| 形態 | HP | 招式 | 連拍結果 |
+|---|---|---|---|
+| ① 核心 | 40 | `fan` / `summon` / `drift` | proj 5 發扇形 ✅ / 橫幅「夢魘之核召喚了食夢獸！」✅ / 漂移 ✅ |
+| | | 護盾 4 片 | ✅ 傷害轉給碎片、**本體 hp 完全不動**，碎片各 3 點，全破 → `bareT=240` |
+| ② 夢魘騎士 | 40 | `slash3` / `warpslash` / `voidhole` / `phantom` | proj 1→3 三道劍氣 ✅ / 消失→背後→hb 1 ✅ / 第 62 幀 hb 1 ✅ / 「幻影・暗影的星雨」proj 6 ✅ |
+| ③ 終焉之翼 | 50 | `featherrain` / `dive` / `eternalnight` / `rest` | letterbox +「羽毛雨 / 站進光環裡！」+ 地面安全區光環 + proj 3→7 ✅ / 俯衝 ✅ / **全畫面壓黑只剩卡比 44px 光圈 +「永夜 ETERNAL NIGHT」** ✅ / rest 後自動接下一招 ✅ |
+
+- **形態轉換**：①→② 與 ②→③ 都是 `changing=true` + state `morph` 約 96 幀（白閃 + 碎片外炸 → 魔法陣 → 聚攏）→ 橫幅「夢魘騎士 / 第 2 形態」「終焉之翼 / 第 3 形態」→ HP 重置為 40 / 50。
+- **擊敗 + TRUE END**：16 道放射光束 + 光環 + 白閃 + 橫幅「夢醒了 / TRUE END」，`KB.session.trueEnd = true`。
+- **音樂 key（用 `KB.audio.status().playing` 實測，`?debug=1&norun=1` 不 mute + `KB.audio.unlock()`）**：
+
+| 時點 | `status().playing` | 判定 |
+|---|---|---|
+| 三形態戰鬥中 | `nightmare` → `nightmare2` | ✅ |
+| **魔王倒下當下** | **`trueend`** | ✅ |
+| `levelClear()`（走進過關門） | `clear` | ⚠️ 會蓋掉 trueend（world7 早就提過的跨檔問題） |
+| ResultScene | `result` | ⚠️ 同上 |
+| **EndingScene（`session.trueEnd`）** | **`trueend`** | ✅ **總控的接線已生效** —— EndingScene 會自己再放一次 |
+| 一般結局（對照組） | `ending` | ✅ 沒有被誤判成真結局 |
+
+### R7-2g. 全流程（`gflow.png`，13 個畫面）
+
+`標題(title)` → `標題選單` → `成績板 1/8(select)` → `成績板 2/8 W1` → `回標題(title)` → `選關 6 節點(select)` →
+`游標到第 7 節點（18 星解鎖 / 出發！）` → `進 W7(dream)` → `魔王房(nightmare)` → `擊敗(trueend)` →
+`過關(clear)` → `真結局(trueend)` → `真結局 ALL CLEAR / TRUE END(trueend)`
+
+全程 **0 console error / 0 pageerror / MISSING SPRITES 空**。
+
+## R7-3. 測試與 playthrough
+
+| 指令 | 結果 |
+|---|---|
+| `tools/test_mix2.py` | **343/343 PASS** |
+| `tools/test_awaken.py` | **75/75 PASS** |
+| `tools/test_helper.py` | **131/131 PASS** |
+| `tools/test_extra.py` | **53/53 PASS** |
+| `tools/test_mix.py` | **245/245 PASS**（mix2 回報的兩條寫死計數已被改成不等式） |
+| `tools/test_progression.py` | **63/68 FAIL** → **R7-P1-02**（5 條「6 關 / 第 6 點 space」過時斷言） |
+| `tools/test_charge.py` | 19/19 PASS |
+| `tools/test_elements.py` | 96/96 PASS |
+| `tools/test_forms.py` | 153/153 PASS |
+| `tools/test_magic.py` | 119/119 PASS |
+| `tools/test_weapons.py` | 105/105 PASS |
+| `tools/engine_test.py` | **118/118 PASS** |
+| `tools/enemy_test.py` | **393/393 PASS** |
+| `node tools/level_check.js` | **0 error / 1 warning**（既有 w2 拉拉拉出生點） |
+| `node tools/level_check.js --extra` | **0 error / 1 warning**（同一則） |
+| `node tools/audio_check.js` | **全部通過**（37 首曲子，w7 新增 5 首都在表內） |
+| `tools/boss_test.py --runs 3` | **ALL PASS（1 warning）** —— warning = `kracko FIGHT 2/3`（R7-P2-08，既有） |
+| `tools/boss_test.py --extra` | **ALL PASS**（6/6） |
+
+**playthrough（`--ability sword --godmode`，全部 `deaths=0` / `missing []`）**
+
+| 關卡 | 一般 | Extra |
+|---|---|---|
+| w1 | cleared 5835 幀 | cleared 6794 幀 |
+| w2 | cleared 5957 幀 | － |
+| w3 | cleared 7128 幀 | cleared 10036 幀 |
+| w4 | cleared 7433 幀 | － |
+| w5 | cleared 8998 幀 | － |
+| w6 | cleared 8794 幀 | cleared 7270 幀 |
+| **w7** | **cleared 9450 幀**（魔王 rest 狀態擊殺） | **cleared 9444 幀**（maxHp 63 ＝ Extra ×1.25） |
+
+**12 個 mix2 能力跑 w1（`--godmode`）：12/12 cleared、deaths=0**
+
+```
+flamebow 5055  frosthammer 5920  thundersword 6786  flameninja 7455
+frostninja 8369  thundergun 4170  stonegiant 7603   flamedragon 6118
+thunderdragon 6128  timebeam 6279  gravityblade 5917  hammermech 7668
+```
+
+extra agent 回報的「`--extra w1` 有 1/4 樣本卡在 r1」在我這次的單一樣本**沒有重現**（6794 幀通關）。
+
+## R7-4. 效能
+
+量法：`for (i<300) __kb.step(1)`（`__kb.step(n)` 每次呼叫都會 `render()`，所以是「update + render」的真實幀成本），同一情境跑 3 次。
+**覺醒 / 燃燒是有時限的效果，只有第 1 次跑涵蓋完整效果**，所以下表取「第 1 次」當最壞值。
+
+| 情境 | 第 1 次 300 幀 | ms/幀 | 佔 16.7ms 預算 |
+|---|---|---|---|
+| baseline w1 r0（空手，45 實體） | 128.4 ms | 0.43 | 2.6% |
+| baseline + 8 敵人 | 100.9 ms | 0.34 | 2.0% |
+| 雙夥伴 + 8 敵人 | 148.3 ms | 0.49 | 3.0% |
+| 覺醒招（百斬星光劍）+ 8 敵人 | 194.0 ms | 0.65 | 3.9% |
+| 燃燒草（全房點火 9 格）+ 8 敵人 | 211.7 ms | 0.71 | 4.2% |
+| **★ 雙夥伴 + 覺醒招 + 燃燒草 + 10 敵人** | **313.2 ms** | **1.04** | **6.3%** |
+| W7 魔王第 3 形態「永夜」 | 265.1 ms | 0.88 | 5.3% |
+
+**結論：最重的情境也只用掉 6% 的幀預算（≈ 960 fps 的理論上限），Round 7 全部新系統疊起來完全沒有效能風險。**
+
+## R7-5. 重現指令總表
+
+```bash
+cd "/home/ken150ken150/桌面/我的專案/遊戲開發/卡比之星"
+PY=.venv/bin/python
+
+# mix2：12 組 × 3 招連拍（→ gmix2_<key>.png）／暫停卡／圖鑑
+$PY shots/agent_qa7/mix2shot.py                    # 全部
+$PY shots/agent_qa7/mix2shot.py --only timebeam --seq 8 --every 14
+$PY shots/agent_qa7/t1_pause_codex.py              # 12 張暫停卡
+$PY shots/agent_qa7/t1b_codex.py                   # 圖鑑 6 頁
+
+# 覺醒
+$PY shots/agent_qa7/t2_awaken.py --only lv4,nolv4  # Lv4 四星 / 量表 / 未 Lv4 不觸發
+$PY shots/agent_qa7/t2_awaken.py --only moves      # 20 招
+$PY shots/agent_qa7/t2b_gauge.py                   # 實戰累積量表
+$PY shots/agent_qa7/t2c_full.py                    # 充滿 → 發動 → 結束
+$PY shots/agent_qa7/t2d_form.py                    # 變身系觸發診斷（R7-P2-05）
+$PY shots/agent_qa7/t2e_bannerclash.py             # 真實流程下橫幅不會疊
+$PY shots/agent_qa7/t2f_ready.py                   # 乾淨情境的 READY 提示
+
+# 夥伴 / Extra / W7 / 全流程 / 效能
+$PY shots/agent_qa7/t3_helper.py                   # 雙夥伴 / 指令 / 合體技 / 走門 / 重生
+$PY shots/agent_qa7/t4_extra.py                    # w1~w7 一般 vs Extra 對照
+$PY shots/agent_qa7/t4c_layers.py                  # 疊加層全房間統計（43 房）
+$PY shots/agent_qa7/t4d_bossx.py                   # 6 魔王 Extra 開場 + 新招
+$PY shots/agent_qa7/t4e_ui.py                      # 成績板 / 第 7 節點 / EXTRA / TRUE END
+$PY shots/agent_qa7/t4f_burn.py                    # w4 / w5 燒草
+$PY shots/agent_qa7/t5_w7.py                       # W7 6 房 ×2
+$PY shots/agent_qa7/t5c_gate.py                    # 夢之開關順序 + 六王試煉
+$PY shots/agent_qa7/t5d_stars.py                   # 3 顆大星星
+$PY shots/agent_qa7/t5e_boss.py --only intro,moves,shield,morph,kill
+$PY shots/agent_qa7/t6_flow.py                     # 全流程（含音樂 key）
+$PY shots/agent_qa7/t7_perf.py                     # 效能
+
+# 拼圖（沿用 qa6 的工具）
+$PY shots/agent_qa6/grid.py --out x.png --cols 5 --labels "第一列|第二列" a.png b.png ...
+
+# 測試
+for t in test_mix2 test_awaken test_helper test_extra test_mix test_progression test_charge \
+         test_elements test_forms test_magic test_weapons engine_test enemy_test; do $PY tools/$t.py; done
+node tools/level_check.js; node tools/level_check.js --extra; node tools/audio_check.js
+$PY tools/boss_test.py --runs 3; $PY tools/boss_test.py --extra
+for w in w1 w2 w3 w4 w5 w6 w7; do $PY tools/playthrough.py --level $w --ability sword --godmode; done
+for w in w1 w3 w6 w7; do $PY tools/playthrough.py --level $w --ability sword --godmode --extra; done
+for a in flamebow frosthammer thundersword flameninja frostninja thundergun \
+         stonegiant flamedragon thunderdragon timebeam gravityblade hammermech; do
+  $PY tools/playthrough.py --level w1 --ability $a --godmode; done
+```
+
+### 截圖索引（`shots/agent_qa7/`）
+
+- **mix2**：`gmix2_<12 個 mixkey>.png`（每張 3 招 × 5 幀）、`gmix2_{timebeam,hammermech,stonegiant}_ultlong.png`（蓄力招長連拍）、原始幀在 `mix2/`；`mix2/pause_*.png` ×12、`mix2/codex_p1~p6.png`、`mix2/codex_<key>.png`
+- **覺醒**：`gawk_moves1~4.png`（20 招 × 6 幀）、`gawk_trigger.png`（發動連拍）、`gawk_ready.png`（READY → 發動）、`gawk_clash.png`（真實流程的橫幅）、`awaken/crop_lv4_stars.png` / `crop_lv1_stars.png` / `crop_gauge_ready.png` / `codex_lvbars.png`、`awaken/nolv4_jumpattack.png`
+- **夥伴**：`ghelp_modes.png`（3 指令 + 待命 / 突擊 / 重生）、`ghelp_union.png`（合體技 8 幀）、`ghelp_door.png`（走門淡入淡出）、`ghelp_death.png`（死亡歸隊）、**`helper/croppop_mode_assault.png`（R7-P1-03 證據）**、**`helper/crophud_duo_hud.png`（R7-P2-04 證據）**
+- **Extra**：`gextra_rooms1/2.png`（w1~w7 一般 ↔ Extra）、`gextra_boss1/2.png`（6 魔王開場 + 新招）、`extra/records_p1~p8.png`、`extra/select_w7_locked|open*.png` 與 `extra/zoom_select_w7_*.png`、`extra/select_extra_title.png`、`gextra_trueend.png` + **`extra/zoom_trueend_overlap.png`（R7-P2-01 證據）**、`gextra_burn.png`
+- **W7**：`gw7_intro.png`、`gw7_p1/p2/p3.png`（三形態 11 招）、`gw7_morph.png`（兩次形態轉換）、`gw7_death.png`（擊敗 + TRUE END）、`gw7_stars.png`（3 顆大星星）、`w7/r0_a~r5_b.png`（6 房 ×2）、`w7/sw_init|wrong|0~3|unlocked.png`（夢之開關）、`w7/r3_gate_locked|open.png`
+- **全流程 / 效能**：`gflow.png`（13 個畫面）、原始幀在 `flow/`；`gperf.png`、`perf.json`
+- **數據**：`mix2.json`、`awaken.json`、`extra_rooms.json`、`w7_rooms.json`、`perf.json`

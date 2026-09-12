@@ -3054,3 +3054,57 @@ R5-7a 的觀察項（gravity ↑+X 文案不一致、圖鑑剪影露出帽子輪
 
 ## qa7
 （agent 在此追加）
+
+- [09-12 QA7-1] 完成：**測試 / playthrough 全批次**。`test_mix2 343/343`、`test_awaken 75/75`、`test_helper 131/131`、
+  `test_extra 53/53`、`test_mix 245/245`、`test_charge 19/19`、`test_elements 96/96`、`test_forms 153/153`、
+  `test_magic 119/119`、`test_weapons 105/105`、`engine_test 118/118`、`enemy_test 393/393` 全 PASS；
+  **`test_progression 63/68`（5 個 FAIL 全是「寫死 6 關 / 第 6 點 space」的過時斷言，w7 上線後必紅）→ R7-P2-01**。
+  `level_check` / `level_check --extra` 皆 0 error 1 warn（既有 w2 拉拉拉）；`audio_check` 全過；
+  `boss_test --runs 3` ALL PASS（1 warning = 既有 kracko fight 2/3）、`boss_test --extra` ALL PASS。
+  playthrough：w1~w7 `--godmode` 全 cleared / deaths=0（5835/5957/7128/7433/8998/8794/**w7 9450**）；
+  `--extra` w1/w3/w6/w7 全 cleared（6794/10036/7270/9444）；12 個 mix2 能力跑 w1 **12/12 cleared**（4170~8369 幀）。
+  驗證：`/tmp/.../tests/*.log`。下一步：mix2 / 覺醒截圖。
+- [09-12 QA7-2] 完成：**mix2 12 組 × 3 招（36 招 ×5 幀）**連拍 + 逐張 Read，全部有判定框 / 投射物、
+  招後回 idle 且保有能力、VFX 歸 0、MISSING SPRITES 空、0 pageerror；`ABILITY_KEYS 44` / `MIX.table 24` /
+  HUD 英文名全部 ≤7 字。暫停卡 12 張 + 圖鑑 6 頁（發現 44/44）皆正常、中文可讀
+  （mix2 自述的「一個字一行」在本機 3 倍截圖下**沒有重現**）。
+  截圖：`shots/agent_qa7/gmix2_<key>.png` ×12、`mix2/pause_*.png`、`mix2/codex_p1~p6.png`。
+- [09-12 QA7-3] 完成：**覺醒系統**。Lv4 四星（第 4 顆金色光芒星）/ 量表 0→100（命中 +6、連擊遞增、
+  受傷 −20 實測 24→4）/ 8 次連擊即可充滿 / 跳+攻觸發（act=True、300 幀、無敵）/ 結束量表歸 0；
+  **未 Lv4 與量表未滿都正確不觸發**（只出普通攻擊）；**20 招全部觸發成功、各自有判定框並秒殺敵人**、
+  0 missing / 0 error。註：**變身系（giant/dragon/mech/ghost）在「變身演出（約 60 幀）」期間按跳+攻不會觸發**，
+  演出結束後正常（R7-P2-04 觀察）。截圖：`gawk_moves1~4.png`、`gawk_trigger.png`、`gawk_ready.png`、
+  `awaken/crop_lv4_stars.png`、`awaken/crop_gauge_ready.png`。下一步：夥伴 / Extra / W7。
+- [09-12 QA7-4] 完成：**夥伴（helper2）**。雙夥伴（slot 0/1、能力各自保留）、三種指令循環（跟隨/待命/突擊，
+  待命實測卡比走到 x=166 而夥伴留在 34/20、突擊追到 150px 外）、合體技（兩人衝到左右放招、CD 600→465、CD 中不可再放、
+  3 隻敵人被清）、走門淡出（alpha 1→0.8→0.4）→ 新房淡入（0.3→1）、卡比死亡 → 夥伴消失 → 重生點「夥伴歸隊！」帶能力回來。
+  **問題：兩個夥伴的指令 textPop 疊在一起變亂碼（FOLLOWOWW / STAYAY / ASSAUULT）→ R7-P1-01**；
+  **HUD 面板的能力 mini 圖示上緣超出面板 3px → R7-P2-05**。
+  截圖：`ghelp_modes.png`、`ghelp_union.png`、`ghelp_door.png`、`ghelp_death.png`、`helper/croppop_mode_assault.png`。
+- [09-12 QA7-5] 完成：**Extra 模式**。w1~w7 **全 7 個世界 36 個非魔王房都有疊加層**
+  （敵人 +3~5、尖刺 +2 格 ×36 房 = 72 格、隱藏 1UP oneup ×36、補給 −41），HP 6→3；
+  6 隻魔王開場即 phase 2 且 maxHp ×1.25（40→50 / 30→38 / 40→50 / 55→69 / 60→75 / 70→88），
+  6 個新招（leafstorm / tribox / tracker / crossslash / quake / split ×4 分身）全部出得來、0 error；
+  成績板 8 頁（總覽 + W1~W7）版面正確、←→ 換頁、Z/SELECT 回標題；
+  第 7 節點 12 星鎖（畫鎖頭 + 「集齊 15 顆大星星」+ STAR 12/15，按 Z 進不去）、18 星解鎖（夢之門）、EXTRA 紅牌；
+  w4 r0 雲草 / w5 r1 地毯邊點火 → 蔓延 4 格 → 焦黑。
+  **問題：TRUE END 版面「FINAL SCORE」與「ALL CLEAR」兩行重疊 → R7-P2-02**；
+  **遊戲中（HUD）完全沒有 Extra 標示，難度欄仍寫 NORMAL 普通 → R7-P2-03**。
+  截圖：`gextra_rooms1/2.png`、`gextra_boss1/2.png`、`extra/records_p1~p8.png`、`extra/zoom_select_w7_locked|open.png`、
+  `extra/select_extra_title.png`、`gextra_trueend.png` / `extra/zoom_trueend_overlap.png`、`gextra_burn.png`。
+- [09-12 QA7-6] 完成：**W7 夢幻迴廊**。6 房尺寸 / 門 / 鎖全部符合規格（r0 104×12、r1 32×24、r2 80×12 dark 兩門其一 locked、
+  r3 56×12 locked、r4 28×14 魔王房、r5 24×12 秘密房）；3 顆大星星 (93,2)/(69,9)/(11,3) 都吃得到（save.stars.w7 正確落位）；
+  夢之開關**順序強制生效**（先打 #2 無效 → 依序 0/1/2/3 才在第 4 顆解鎖 x=76 的門）；
+  六王試煉三隻中魔王（bonkers/mrfrosty/rollarmor）全倒才開門；
+  夢魘之核登場（王座沉睡 → 夢境擴散 → 睜眼）、三形態 **11 個招式全部連拍 0 error 0 missing**、
+  護盾碎片（傷害轉給碎片、本體 hp 不動）、①→②／②→③ 兩次形態轉換（morph 96 幀後換形態、HP 40→40→50）、
+  擊敗演出「夢醒了 / TRUE END」。**音樂：擊敗當下 `KB.audio.status().playing === 'trueend'` ✓**；
+  `levelClear()` 會蓋成 'clear'、ResultScene 'result'，但 **EndingScene（trueEnd）已經會再放一次 'trueend'（總控的接線已生效）**。
+  截圖：`gw7_intro.png`、`gw7_p1/p2/p3.png`、`gw7_morph.png`、`gw7_death.png`、`gw7_stars.png`、`w7/sw_*.png`、`w7/r3_gate_*.png`。
+- [09-12 QA7-7] 完成：**全流程 + 效能 + 報告**。全流程 13 個畫面（標題 → 成績板 → 選關 7 節點 → W7 → 魔王 → 真結局）
+  0 error / 0 missing，音樂鏈 title → select → dream → nightmare → **trueend** → clear → result → **trueend** 正確。
+  效能（`for(i<300) __kb.step(1)`，含 render）：最重情境「雙夥伴 + 覺醒招 + 燃燒草 + 10 敵人」**300 幀 313 ms ＝ 1.04 ms/幀**
+  （只用掉 16.7ms 預算的 6%）；W7 永夜 265 ms。**沒有效能風險**。
+  **補測發現 R7-P1-01（最高優先）：一次覺醒打死一整隻魔王** —— 迪迪迪 60HP 的 18 個有效樣本中 17 個 100% 清空；
+  夢魘之核三形態（40/40/50）各被一次覺醒整條打掉。建議 awaken agent 把 20 招的 `n × dmg` 整體 ×0.4 或對 boss 另乘係數。
+  報告：`docs/QA_REPORT.md`「# Round 7 驗收（qa7）」—— P0×0 / P1×3 / P2×8，含各系統明細、測試表、效能表、重現指令與截圖索引。

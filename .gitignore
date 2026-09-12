@@ -3,3 +3,7 @@ __pycache__/
 shots/review/
 shots/agent_*/
 *.pyc
+shots/boss_*.png
+shots/play/
+shots/engine/
+shots/enemies/
