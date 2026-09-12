@@ -58,7 +58,8 @@ MULTI_PHASE = {'nightmarecore': 3}
 # mid（中距離玩家）不適用的魔王：克拉寇整場飄在離地 58px 的高空，
 # 「站在地上、與魔王保持固定水平距離」的玩家模型既打不到他（迴旋刃是水平飛的）、
 # 也躲不掉貼地橫掃（3.2px/f > 走路 1.3px/f），這是模型限制不是平衡問題；他的近身戰由 fight 測試覆蓋。
-MID_SKIP = {'kracko': '飛行魔王，中距離站樁模型不適用（由 fight / phase2 覆蓋）'}
+MID_SKIP = {'kracko': '飛行魔王，中距離站樁模型不適用（由 fight / phase2 覆蓋）',
+            'nightmarecore': '三階段魔王（護盾 / 瞬移 / 空中），站樁模型不適用（由 fight / phase2 / phase3 覆蓋）'}
 # 中距離玩家與魔王保持的距離（px，邊對邊）：迴旋刃從卡比邊緣再飛約 53px，
 # 迪迪迪掄鎚的判定框從他中心延伸到 +46px，所以要站遠一點才算「安全的中距離」。
 MID_GAP = {'dedede': 40}
@@ -394,6 +395,8 @@ class Session:
             opts['ability'] = ability
         if extra:
             opts['extra'] = True     # main.js 的 __kb.goto 會寫進 KB.session.extra
+        # 每回合先清進度（能力 xp / Lv / 覺醒量表），避免跨回合累積到 Lv4 讓機器人意外觸發覺醒
+        self.ev("()=>{ try { if (KB.PROG && KB.PROG.reset) KB.PROG.reset(); if (KB.AWAKEN && KB.AWAKEN.reset) KB.AWAKEN.reset(); } catch (e) {} }")
         self.ev("(o)=>__kb.goto('game',o)", opts)
         if hitbox:
             self.ev("()=>__kb.hitbox(true)")

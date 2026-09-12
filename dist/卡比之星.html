@@ -23758,6 +23758,9 @@ window.KB = window.KB || {};
     cdByLv: [90, 90, 70, 55], // 夥伴攻擊間隔（同上）
     stayLeash: 56,            // 待命：離崗位最遠 56px（打完會走回崗位）
     assaultR: 200,            // 突擊：偵測半徑（不管離卡比多遠）
+    assaultCD: 0.6,           // 突擊：攻擊間隔 ×0.6（R7-P2-07 清怪效率）
+    assaultSpd: 1.3,          // 突擊：追擊速度 ×1.3
+    assaultFast: 40,          // 突擊：離目標 > 40px 就用跑的
     unionCD: 600,             // 合體技冷卻
     unionDash: 18,            // 衝到玩家兩側的最長幀數
     unionSide: 22,            // 合體技站位（玩家左右各 22px）
@@ -23856,6 +23859,7 @@ window.KB = window.KB || {};
 
       // ---- AI ----
       this.atkCool = 30; this.holdT = 0; this.stuckT = 0; this.lastX = this.x;
+      this.modeFlash = 0;                                // 剛換指令時頭上圖示閃一下
       this.floatT = 0; this.jumpCD = 0; this.mv = 0; this.foe = null; this.stoneMode = 0;
       this.beingInhaled = false; this.inhaleSrc = null;
     }
@@ -23940,7 +23944,7 @@ window.KB = window.KB || {};
       // R6-P2-05：變身系能力走簡化版
       const sp = this.simple;
       if (sp) {
-        this.atkCool = this.atkCDFrames || CFG.atkCD;
+        this.atkCool = this.cdNow();
         if (sp.own === 'stomp') { this.simpleStomp(); return this.state === 'attack'; }
         if (sp.fallback) { this.spitStar(); return this.state === 'attack'; }
         if (sp.next) this.abilityData.next = sp.next;    // pickMode 會優先吃 abilityData.next
@@ -23948,8 +23952,13 @@ window.KB = window.KB || {};
       this.keys.attack = true;
       this.holdT = d.hold ? CFG.holdFrames : 0;
       this.startAttack();
-      this.atkCool = this.atkCDFrames || CFG.atkCD;
+      this.atkCool = this.cdNow();
       return this.state === 'attack';
+    }
+    /** 這一次出招之後的冷卻幀數（突擊模式 ×CFG.assaultCD） */
+    cdNow() {
+      const base = this.atkCDFrames || CFG.atkCD;
+      return H.mode === 'assault' ? Math.max(1, Math.round(base * CFG.assaultCD)) : base;
     }
 
     /** 簡化版踩踏（giant）：原地小跳（不往前衝，避免撞進敵人）→ 落地雙向衝擊波 */
@@ -24091,7 +24100,7 @@ window.KB = window.KB || {};
         } else mv = fdx > 0 ? 1 : -1;      // 還太遠 → 靠近敵人
         // 待命：離崗位太遠就不再追（打完自己走回去）
         if (mode === 'stay' && mv && Math.abs(this.cx + mv * 8 - this.anchorX) > CFG.stayLeash) { mv = 0; tgt = this; }
-        if (mode === 'assault') fast = afd > 72;
+        if (mode === 'assault') fast = afd > CFG.assaultFast;
       } else if (mode === 'stay') {
         // 待命：回崗位站好（8px 內就不動）
         const adx0 = this.cx - this.anchorX;
@@ -24107,7 +24116,8 @@ window.KB = window.KB || {};
         fast = adx > 110 || dy < -40;
       }
       this.mv = mv;
-      const spd = fast ? CFG.run : CFG.walk;
+      // 突擊：追擊移動速度 ×1.3（R7-P2-07）
+      const spd = (fast ? CFG.run : CFG.walk) * (mode === 'assault' && foe ? CFG.assaultSpd : 1);
       if (mv) {
         this.vx += (mv * spd - this.vx) * 0.4;
         if (!foe) this.dir = mv;
@@ -24422,6 +24432,11 @@ window.KB = window.KB || {};
       const m = MODE_BY_ID[H.mode] || MODES[0];
       const hat = this.ability && KB.has((this.abilityDef && this.abilityDef.hat) || ('hat_' + this.ability));
       const x = Math.round(this.cx + (wob || 0)), y = Math.round(this.y - (hat ? 20 : 14) - (this.slot ? 5 : 0));
+      // 剛換指令的 20 幀：圖示外圍閃一圈模式色（取代原本每人一份的 textPop）
+      if (this.modeFlash > 0) {
+        this.modeFlash--;
+        if (this.modeFlash & 2) g.rect(x - 5, y - 5, 10, 10, m.color);
+      }
       if (KB.has(m.icon)) g.spr(m.icon, x, y, this.alpha < 1 ? { alpha: this.alpha } : {});
       else { g.rect(x - 3, y - 3, 6, 6, '#101828'); g.rect(x - 2, y - 2, 4, 4, m.color); }
     }
@@ -24513,8 +24528,13 @@ window.KB = window.KB || {};
       for (const h of H.all()) {
         h.anchorX = h.cx; h.anchorY = h.cy;      // 待命：以「切換當下的位置」為崗位
         h.foe = null; h.mv = 0; h.stuckT = 0;
-        V('textPop', h.cx, h.y - 18, m.hud, { color: m.color, size: 8, frames: 30, rise: 8, outline: '#182038' });
+        h.modeFlash = 20;                        // 頭上的指令圖示閃一下（圖示本身每幀都在畫）
       }
+      // R7-P1-03：模式是兩個夥伴共用的，textPop 只發一次（發在玩家頭上）。
+      // 原本每個夥伴各發一次，兩人只差 14px 而字寬 40+px，會疊成「ASSAUULT」之類的亂碼。
+      const pl = KB.player || (KB.game && KB.game.player);
+      const src = pl || H.get(0);
+      if (src) V('textPop', src.cx, src.y - 18, m.hud, { color: m.color, size: 8, frames: 30, rise: 8, outline: '#182038' });
       const g = KB.game;
       if (!quiet && g && g.toast) g.toast('夥伴指令：' + m.name);
       if (!quiet) sfx('menu', 'jump');
@@ -24746,7 +24766,8 @@ window.KB = window.KB || {};
         else KB.rect(ctx, x, y, 8, 8, '#a8d8f8');
         // 能力小圖示
         const icon = 'ui_ability_' + h.ability + '_mini';
-        if (KB.has(icon)) KB.drawSpr(ctx, icon, x + 13, y + 4, {});
+        // R7-P2-04：mini 圖示錨點是 bottom（8×8），畫在 y+4 會往上戳出面板 3px → 改成 y+8（與小臉同一帶）
+        if (KB.has(icon)) KB.drawSpr(ctx, icon, x + 13, y + 8, {});
         // HP（依等級 4~7 格，寬度固定在面板內）
         const n = Math.max(1, h.maxHp), bw = n >= 6 ? 3 : 4, gap = 1, bx = x + 19;
         for (let k = 0; k < n; k++) {
@@ -33221,7 +33242,12 @@ window.KB = window.KB || {};
     // ---------- 更新 ----------
     update(dt) {
       this.t += dt; this.frame++;
-      if (this.freezeT > 0) { this.freezeT--; return; }
+      // R7-P2-05：停格（變身演出 / hitstop）期間整個 update 直接 return，覺醒的「跳+攻」會被吃掉，
+      // 先讓 KB.AWAKEN 把輸入排隊（量表沒滿 / 未 Lv4 時什麼都不做）。
+      if (this.freezeT > 0) {
+        if (KB.AWAKEN && KB.AWAKEN.bufferInput) { try { KB.AWAKEN.bufferInput(this); } catch (e) { } }
+        this.freezeT--; return;
+      }
       // 淡入淡出
       if (this.fadeDir !== 0) {
         this.fade += this.fadeDir * 0.08;
@@ -33334,7 +33360,14 @@ window.KB = window.KB || {};
               else { if (a.hitSet.has(b.id)) continue; }
               if (b.type === 'boss' && b.introducing) continue;
               // 能力等級加成（KB.PROG.dmgMul：Lv1 ×1 / Lv2 ×1.25 / Lv3 ×1.5，四捨五入且不會比原本低）
-              const ok = b.hurt(KB.PROG && KB.PROG.scaleDmg ? KB.PROG.scaleDmg(a.dmg, a.abilityKey) : a.dmg, a);
+              let dmg = KB.PROG && KB.PROG.scaleDmg ? KB.PROG.scaleDmg(a.dmg, a.abilityKey) : a.dmg;
+              // 覺醒招對魔王的減傷（KB.AWAKEN.BOSS_MUL）；一般敵人與非覺醒攻擊原封不動
+              if (KB.AWAKEN && KB.AWAKEN.scaleForTarget) dmg = KB.AWAKEN.scaleForTarget(dmg, a, b);
+              const hp0 = b.hp;
+              const ok = b.hurt(dmg, a);
+              // 覺醒招對魔王的傷害記帳（被無敵幀擋掉的 ok === false 不算；傷害被轉給護盾 / 同伴時
+              // b.hp 不會變，改用送進去的 dmg，才不會讓上限失效）
+              if (ok !== false && KB.AWAKEN && KB.AWAKEN.noteBossHit) KB.AWAKEN.noteBossHit(a, b, Math.max(hp0 - b.hp, dmg));
               if (ok !== false) {
                 if (a.type === 'hitbox') a.markHit(b); else { a.hitSet.add(b.id); if (!a.pierce) { a.dead = true; KB.fx(a.fxHit || 'fx_hit', a.cx, a.cy + 6); } }
                 if (b.type !== 'boss' && a.knock && b.solid) { b.vx = (b.cx < a.cx ? -1 : 1) * a.knock; b.vy = Math.min(b.vy, -1); }
@@ -34074,12 +34107,14 @@ window.KB = window.KB || {};
 //   等級   lv4(key?)（能力是否 Lv4）/ LV（=4）
 //   狀態   active() / activeT / DUR（=300）/ start(p) / end(p) / cancel()
 //   觸發   tryTrigger(p)（player.js 每幀呼叫；只有「跳+攻 3 幀內」且量表滿才回 true）
+//          bufferInput(game)（game.js 在演出停格 freezeT > 0 時呼叫：把跳+攻排隊，停格結束自動發動）
 //   招式   moves[key] = { name, exec(p) } / moveFor(key) / baseKey(key)（混合能力→主成分 A）/ exec(p, key)
 //   繪製   drawGauge(ctx, game)（progression.drawHUD 內呼叫，畫在能力圖示下方 x4 y218 26×5）
+//   平衡   BOSS_MUL / BOSS_CAP（覺醒招對魔王的減傷與單次覺醒傷害上限）/ scaleForTarget(dmg, atk, target)
 //   雜項   tick(game)（由 KB.PROG.update 包裝自動每幀呼叫）/ reset() / after(frames, fn)
 //
 // ── 規則 ──────────────────────────────────────────────────────────────────────
-//   1. 只有「持有的能力已經是 Lv4」時量表才會累積：命中敵人 +6、連擊每 +1 再 +2（連擊上限 10 → 最多 +26）、
+//   1. 只有「持有的能力已經是 Lv4」時量表才會累積：命中敵人 +4、連擊每 +1 再 +1（連擊上限 10 → 最多 +14）、
 //      受傷 −20（走 KB.PROG 的 'hurt' 事件）。滿 100 → HUD 量表閃爍 + textPop「覺醒 READY」+ sfx('max')。
 //   2. 地面 / 空中同一幀（或 3 幀內先後）按下「跳 + 攻擊」且量表滿 → player.startAwaken()。
 //      量表沒滿 / 能力不是 Lv4 → 完全不攔截，跳與攻擊照原本運作。
@@ -34097,13 +34132,16 @@ window.KB = window.KB || {};
   A.MAX = 100;              // 量表上限
   A.DUR = 300;              // 覺醒狀態幀數
   A.WINDOW = 2;             // 跳 / 攻擊的容許間隔（幀）＝「3 幀內先後按」
-  A.HIT_GAIN = 6;           // 命中敵人
-  A.COMBO_GAIN = 2;         // 連擊每 +1 額外
+  A.PEND = 90;              // 演出停格期間按下的「跳+攻」可以排隊幾幀（R7-P2-05）
+  A.HIT_GAIN = 4;           // 命中敵人
+  A.COMBO_GAIN = 1;         // 連擊每 +1 額外
   A.COMBO_CAP = 10;         // 連擊加成上限（避免一擊灌滿）
   A.HURT_LOSS = 20;         // 被打
   A.SPD = 1.2;              // 覺醒中移動速度
   A.DMG = 1.5;              // 覺醒中傷害
   A.TIME_DMG = 3;           // time 覺醒招：時停期間累積傷害 ×3
+  A.BOSS_MUL = 0.35;        // 覺醒招打在魔王（type==='boss'）身上的傷害倍率（R7-P1-01 平衡）
+  A.BOSS_CAP = 0.35;        // 一次覺醒對同一隻魔王的總傷害上限（佔該形態血量的比例）
   const GOLD = A.GOLD = '#ffe040', GOLD_HI = A.GOLD_HI = '#fffce0', GOLD_LO = A.GOLD_LO = '#ff9800';
 
   // ---------------------------------------------------------------- 狀態
@@ -34114,6 +34152,8 @@ window.KB = window.KB || {};
   A.moveName = '';
   A.wasFull = false;
   A.q = [];                 // 排程（after）
+  A.pending = 0;            // 停格（變身演出）期間排隊中的覺醒：剩餘有效幀數
+  A.bossDmg = {};           // 本次覺醒對各魔王已造成的傷害（entity.id → 累計），start/reset 時清空
   let jF = -999, aF = -999; // 最後一次按下 跳 / 攻擊 的幀
 
   // ---------------------------------------------------------------- 工具
@@ -34164,7 +34204,7 @@ window.KB = window.KB || {};
     if (p) v('ring', p.cx, p.cy, { r0: 6, r1: 34, frames: 16, color: GOLD, width: 2 });
     sfx('max');
   };
-  /** 命中敵人（由 KB.PROG.scaleDmg 的包裝呼叫）：+6，連擊每 +1 再 +2 */
+  /** 命中敵人（由 KB.PROG.scaleDmg 的包裝呼叫）：+4，連擊每 +1 再 +1 */
   A.hit = function () {
     if (A.active() || !A.lv4()) return 0;
     const pg = P(), combo = pg ? Math.min(A.COMBO_CAP, pg.combo | 0) : 0;
@@ -34172,6 +34212,32 @@ window.KB = window.KB || {};
   };
   /** 被打：−20 */
   A.onHurt = function () { if (A.active()) return 0; return A.add(-A.HURT_LOSS); };
+
+  /**
+   * 依「攻擊者 / 目標」再調整傷害（game.js collisions 第一階段呼叫）。
+   * R7-P1-01：覺醒招（awaken 旗標）打在魔王（type === 'boss'）身上一律 ×A.BOSS_MUL，
+   * 且一次覺醒對同一隻魔王的總傷害不超過該形態血量的 BOSS_CAP（＝最多打掉約 35% 血）；
+   * 對一般敵人完全不變。
+   */
+  A.scaleForTarget = function (dmg, atk, target) {
+    const n = +dmg;
+    if (!(n > 0) || !atk || !atk.awaken) return dmg;
+    if (!target || target.type !== 'boss') return dmg;
+    const d = Math.max(1, Math.round(n * A.BOSS_MUL));
+    return Math.max(0, Math.min(d, A.bossLeft(target)));
+  };
+  /** 這次覺醒對 target 還能造成幾點傷害（＝該形態血量 × BOSS_CAP − 已造成） */
+  A.bossLeft = function (target) {
+    const cap = Math.max(1, Math.round((+target.maxHp || +target.hp || 1) * A.BOSS_CAP));
+    return Math.max(0, cap - (A.bossDmg[target.id] || 0));
+  };
+  /** 記帳：只累計「真的扣掉的血」（game.js 在 hurt 前後比對 hp 後呼叫；被無敵幀擋下的不算） */
+  A.noteBossHit = function (atk, target, applied) {
+    const n = +applied;
+    if (!(n > 0) || !atk || !atk.awaken || !target || target.type !== 'boss') return 0;
+    A.bossDmg[target.id] = (A.bossDmg[target.id] || 0) + n;
+    return A.bossDmg[target.id];
+  };
 
   // ---------------------------------------------------------------- 觸發（player.js 每幀呼叫）
   /**
@@ -34193,6 +34259,32 @@ window.KB = window.KB || {};
     return A.start(p) === true;
   };
 
+  /**
+   * R7-P2-05：演出停格（game.freezeT > 0，例如變身 / 取得能力的 hitstop）期間
+   * game.update 會直接 return，player.update → tryTrigger 整段都不會跑，
+   * 「跳+攻」的輸入等於被整個吃掉（量表滿了也沒反應、也沒有任何提示）。
+   * game.js 的 freeze 分支會呼叫這個把輸入排隊：停格結束後由 A.tick 自動發動（最多等 A.PEND 幀）。
+   * 未 Lv4 / 量表沒滿一律不排隊（跳與攻擊照舊）。
+   */
+  A.bufferInput = function (game) {
+    const inp = KB.input; if (!inp || !inp.pressed) return false;
+    const f = frame();
+    if (inp.pressed('jump')) jF = f;
+    if (inp.pressed('attack')) aF = f;
+    if (jF !== f && aF !== f) return false;
+    if (Math.abs(jF - aF) > A.WINDOW) return false;
+    const p = player();
+    if (!p || A.active() || !A.ready() || !A.lv4(p.ability)) return false;
+    jF = aF = -999;
+    if (A.pending > 0) return true;
+    A.pending = A.PEND;
+    // 「覺醒 READY」的字可能還在頭上飄（兩行 12px 字疊在一起會糊成亂碼）→ 先收掉再放新的
+    try { if (KB.VFX && KB.VFX.list) for (const e of KB.VFX.list) if (e && e.text === '覺醒 READY') e.dead = true; } catch (e) { }
+    v('textPop', p.cx, p.y - 18, '變身中…', { color: GOLD, size: 12, frames: 40, rise: 0.3, outline: '#3a2400' });
+    sfx('menu');
+    return true;
+  };
+
   // ---------------------------------------------------------------- 覺醒狀態
   A.start = function (p) {
     p = p || player();
@@ -34202,6 +34294,7 @@ window.KB = window.KB || {};
     A.moveName = mv ? mv.name : '覺醒';
     A.activeT = A.DUR;
     A.q.length = 0;
+    A.bossDmg = {};                 // 每次覺醒重新計算「對魔王的傷害上限」
     p.awakenT = A.DUR;
     p.invincibleT = Math.max(p.invincibleT | 0, A.DUR);
     // 吃掉這一幀的輸入：跳躍緩衝要清掉（否則下一幀會補跳），攻擊狀態先收招
@@ -34272,6 +34365,15 @@ window.KB = window.KB || {};
       for (const j of due) { try { j.fn(player()); } catch (e) { } }
     }
     if (A.timeBonusT > 0) A.timeBonusT--;
+    // 停格期間排隊的覺醒（A.bufferInput）：停格一結束就自動發動
+    if (A.pending > 0) {
+      A.pending--;
+      const pp = player();
+      if (A.canAwaken(pp) && pp.state !== 'dead' && !(game && game.freezeT > 0)) {
+        A.pending = 0;
+        if (pp.startAwaken) pp.startAwaken(); else A.start(pp);
+      }
+    }
     if (A.activeT > 0) {
       const p = player();
       A.activeT--;
@@ -34284,6 +34386,7 @@ window.KB = window.KB || {};
   /** 進關卡 / 測試重置 */
   A.reset = function () {
     A.gauge = 0; A.activeT = 0; A.timeBonusT = 0; A.key = null; A.wasFull = false; A.q.length = 0;
+    A.bossDmg = {};
     jF = aF = -999;
     const p = player(); if (p) p.awakenT = 0;
     return true;
@@ -34354,18 +34457,23 @@ window.KB = window.KB || {};
   };
 
   // ---------- 招式共用零件 ----------
+  /** 覺醒招專用投射物：與 KB.shoot 相同，另外標上 awaken 旗標（對魔王 ×A.BOSS_MUL） */
+  function ashoot(o) { const pr = KB.shoot(o); if (pr) pr.awaken = true; return pr; }
+  A.shoot = ashoot;
   /** 全畫面判定框（預設 288×208，以卡比為中心；不破壞地形） */
   function bigbox(p, o) {
     o = o || {};
     const w = o.w || 288, h = o.h || 208;
     const cx = o.cx === undefined ? p.cx : o.cx, cy = o.cy === undefined ? p.cy : o.cy;
-    return KB.hitbox({
+    const hb = KB.hitbox({
       x: cx - w / 2, y: cy - h / 2, w, h,
       dmg: o.dmg === undefined ? 10 : o.dmg,
       owner: 'player', type: o.type || 'awaken', life: o.life || 4,
       rehit: o.rehit || 0, pierce: true, knock: o.knock === undefined ? 2 : o.knock,
       breakBlocks: !!o.breakBlocks, freeze: !!o.freeze, onHit: o.onHit || null,
     });
+    if (hb) hb.awaken = true;      // R7-P1-01：對魔王的傷害另乘 A.BOSS_MUL（game.js collisions 讀這個旗標）
+    return hb;
   }
   A.bigbox = bigbox;
   /** 攝影機矩形（世界座標）：拿來把特效鋪滿整個畫面 */
@@ -34468,7 +34576,7 @@ window.KB = window.KB || {};
         // 每段 6 把迴旋刃從卡比身上旋出（真投射物，飛出畫面）
         for (let k = 0; k < 6; k++) {
           const a = (k / 6) * TAU + i * 0.4;
-          KB.shoot({
+          ashoot({
             spr: 'proj_cutter', x: q.cx, y: q.cy, vx: Math.cos(a) * 5, vy: Math.sin(a) * 5,
             dmg: 4, owner: 'player', life: 70, grav: 0, pierce: true, solid: false,
             w: 12, h: 12, rotSpeed: 0.5, breakBlocks: false, type: 'cutter',
@@ -34560,7 +34668,7 @@ window.KB = window.KB || {};
       each(q, i) {
         for (let k = 0; k < 12; k++) {
           const a = (k / 12) * TAU + i * 0.26;
-          KB.shoot({
+          ashoot({
             spr: 'proj_bullet', x: q.cx, y: q.cy, vx: Math.cos(a) * 6, vy: Math.sin(a) * 6,
             dmg: 3, owner: 'player', life: 60, grav: 0, pierce: true, solid: false,
             w: 8, h: 8, breakBlocks: false, type: 'bullet',
@@ -34588,7 +34696,7 @@ window.KB = window.KB || {};
           KB.fx('fx_poof', x, y, { life: 12 });
         }
         v('afterimage', q, { frames: 12, color: '#a070ff', every: 1, alpha: 0.55 });
-        if (i % 2 === 0) KB.shoot({ spr: 'proj_shuriken', x: q.cx, y: q.cy, vx: q.dir * 6, vy: rnd(-1.5, 1.5), dmg: 3, owner: 'player', life: 60, grav: 0, pierce: true, solid: false, w: 10, h: 10, rotSpeed: 0.6, breakBlocks: false, type: 'ninja' });
+        if (i % 2 === 0) ashoot({ spr: 'proj_shuriken', x: q.cx, y: q.cy, vx: q.dir * 6, vy: rnd(-1.5, 1.5), dmg: 3, owner: 'player', life: 60, grav: 0, pierce: true, solid: false, w: 10, h: 10, rotSpeed: 0.6, breakBlocks: false, type: 'ninja' });
       },
     });
   });
@@ -34627,7 +34735,7 @@ window.KB = window.KB || {};
         const R = camRect();
         for (let k = 0; k < 4; k++) {
           const x = R.x + rnd(0, R.w);
-          KB.shoot({
+          ashoot({
             spr: 'proj_arrow_meteor', x, y: R.y - 8, vx: rnd(-1.2, 1.2), vy: 7,
             dmg: 4, owner: 'player', life: 80, grav: 0.12, pierce: true, solid: false,
             w: 10, h: 10, breakBlocks: false, type: 'bow', trail: ['#ffe040', '#ff8020'],
@@ -34745,7 +34853,7 @@ window.KB = window.KB || {};
         v('beam', q.cx, q.cy, 1, 320, { width: 34 - i * 2, color: '#ff7040', frames: 16, taper: true });
         v('beam', q.cx, q.cy, -1, 320, { width: 34 - i * 2, color: '#ffb060', frames: 16, taper: true });
         for (let k = 0; k < 3; k++) {
-          KB.shoot({
+          ashoot({
             spr: 'proj_drakofire', x: R.x + rnd(0, R.w), y: R.y - 6, vx: rnd(-1, 1), vy: 6,
             dmg: 4, owner: 'player', life: 70, grav: 0.1, pierce: true, solid: false,
             w: 12, h: 12, breakBlocks: false, type: 'dragon', trail: ['#ffb060', '#ff5010'],
@@ -34765,7 +34873,7 @@ window.KB = window.KB || {};
         const R = camRect();
         for (let k = 0; k < 4; k++) {
           const a = -Math.PI / 2 + rnd(-0.9, 0.9);
-          KB.shoot({
+          ashoot({
             spr: 'proj_missile', x: q.cx + rnd(-10, 10), y: q.cy, vx: Math.cos(a) * 4.5, vy: Math.sin(a) * 4.5,
             dmg: 3, owner: 'player', life: 80, grav: 0.06, pierce: false, solid: false,
             w: 10, h: 8, breakBlocks: false, type: 'mech', trail: ['#ffe040', '#80c8ff'],
@@ -34817,7 +34925,7 @@ window.KB = window.KB || {};
         if (A.active()) d = Math.max(n, Math.round(n * A.DMG));
         if (A.timeBonusT > 0) d = Math.max(d, Math.round(d * A.TIME_DMG));
       }
-      A.hit();                       // 量表：命中敵人 +6（+ 連擊）
+      A.hit();                       // 量表：命中敵人 +4（+ 連擊）
       return d;
     };
     const upd = pg.update;
@@ -35823,7 +35931,12 @@ window.KB = window.KB || {};
       T(ctx, '能力 ' + seenN + '/' + seenAll, 242, 180, {
         color: seenAll && seenN >= seenAll ? C.yellow : '#8fa0bc', align: 'right', size: UI.MS_SMALL,
       });
-      fit(ctx, '←→ 移動　Z 進入　SELECT 回標題', 128, 197, 234, { color: C.grey, align: 'center', size: UI.MS });
+      // R7-P2-06：游標停在鎖定 / 製作中的節點時，不要再寫「Z 進入」（按 Z 進不去）
+      // （解鎖條件本身寫在上方資訊列，這裡只換掉會誤導的「Z 進入」，字數保持塞得下）
+      const hint = ok ? '←→ 移動　Z 進入　SELECT 回標題'
+        : !this.exists(i) ? '←→ 移動　製作中　SELECT 回標題'
+          : '←→ 移動　未解鎖　SELECT 回標題';
+      fit(ctx, hint, 128, 197, 234, { color: C.grey, align: 'center', size: UI.MS });
       drawMuteToast(ctx); drawFade(ctx, this);
     }
   }
@@ -35869,6 +35982,17 @@ window.KB = window.KB || {};
     hudLabel(ctx, hud, L.nameX, L.rowA, L.nameW, flashName ? C.yellow : '#fff');
     // 中文能力名：14px（12px 時「鐵鎚」這種密集字會糊）；4 字以上（元素法師…）自動降 12px 不壓到血條
     fit(ctx, cn, L.nameX, L.rowB, L.nameW, { color: flashName ? '#fff' : '#ffc8dc', size: UI.MS });
+    // R7-P2-02：Extra 模式在能力名列右側掛一塊紅色「EX」小牌（遊戲中唯一的難度提示）
+    if (KB.extraOn && KB.extraOn()) {
+      const mh = p ? p.maxHp : KB.MAX_HP;
+      const bw = KB.textWidth('EX') + 4, bx = L.hpX + mh * L.hpGap + 2;
+      if (bx + bw <= 146) {
+        KB.rect(ctx, bx, L.rowA - 2, bw, 12, '#380010');
+        KB.rect(ctx, bx, L.rowA - 2, bw, 1, '#ff6060'); KB.rect(ctx, bx, L.rowA + 9, bw, 1, '#ff6060');
+        KB.rect(ctx, bx, L.rowA - 2, 1, 12, '#ff6060'); KB.rect(ctx, bx + bw - 1, L.rowA - 2, 1, 12, '#ff6060');
+        KB.text(ctx, 'EX', bx + 2, L.rowA, { color: ((f >> 4) & 1) ? '#ffd0d0' : '#ff4040', outline: '#200008' });
+      }
+    }
     // 中：血量
     const maxHp = p ? p.maxHp : KB.MAX_HP, hp = p ? Math.max(0, p.hp) : 0;
     const hurting = p && p.state !== 'dead' && p.invuln > KB.PHYS.invulnFrames - 30;
@@ -35962,9 +36086,11 @@ window.KB = window.KB || {};
       // 開場音：audio2 指定用 sfx('select')（music('w_intro') 會蓋掉關卡曲，不使用）
       if (ok) sfx('select');
     }
-    if (game.paused || game.clearT >= 0) return;
+    // R7-P2-03：橫幅不顯示的情況一律把 bn.paint 清掉，確保 UI.bannerBottom（COMBO / toast 的讓位依據）
+    // 與「這一幀到底有沒有畫橫幅」永遠一致，不會留下上一幀的殘留而畫出沒被讓位的橫幅。
+    if (game.paused || game.clearT >= 0) { bn.paint = null; return; }
     const age = (game.frame || 0) - bn.start, span = BANNER.slideIn + BANNER.hold + BANNER.slideOut;
-    if (age < 0 || age > span) return;
+    if (age < 0 || age > span) { bn.paint = null; return; }
     // fix5b / R5-P2-09：game.js 的順序是 drawLevelBanner → VFX.postWorld → drawGameHint，
     // 而 worldTint（時停 / 慢動作 / 子彈時間 / 元素風暴）是「視窗層」，會蓋滿 y 0~192、
     // 把先畫好的開場橫幅一起染色到看不清字。所以這裡只記下「這一幀要畫橫幅」，
@@ -36222,13 +36348,15 @@ window.KB = window.KB || {};
       // 沒設也會在 KB.save.cleared.w7 時成立；版面 / 文案在這裡）
       const trueEnd = !!((KB.session && KB.session.trueEnd) || (KB.save && KB.save.cleared && KB.save.cleared.w7));
       this.shadow = shadow; this.trueEnd = trueEnd;
+      // R7-P2-01：真結局比一般結局多 2 行，原本 FINAL SCORE(y92) 會和 ALL CLEAR(y98) 疊在一起；
+      // 整體上移 2~8px，讓 FINAL SCORE(84~92) 與 ALL CLEAR(96~104) 之間留 4px。
       this.lines = trueEnd ? [
-        { s: '夢的盡頭，你把自己找了回來', size: 16, color: '#ffd8f8', y: 8 },
-        { s: '夢幻迴廊的門緩緩闔上', size: 14, color: '#fff', y: 30 },
-        { s: '普普星的夜空，久違地安靜', size: 14, color: '#fff', y: 46 },
-        { s: '能力發現 ' + EndingScene.seenLine() + '　成就 ' + EndingScene.achLine(), size: 12, color: '#c8d8f0', y: 64 },
-        { s: '大星星 ' + EndingScene.starLine() + '　通關次數 ' + EndingScene.playLine(), size: 12, color: '#c8d8f0', y: 78 },
-        { s: 'FINAL SCORE ' + pad7(this.score), size: 8, color: '#fff', y: 92 },
+        { s: '夢的盡頭，你把自己找了回來', size: 16, color: '#ffd8f8', y: 4 },
+        { s: '夢幻迴廊的門緩緩闔上', size: 14, color: '#fff', y: 24 },
+        { s: '普普星的夜空，久違地安靜', size: 14, color: '#fff', y: 40 },
+        { s: '能力發現 ' + EndingScene.seenLine() + '　成就 ' + EndingScene.achLine(), size: 12, color: '#c8d8f0', y: 56 },
+        { s: '大星星 ' + EndingScene.starLine() + '　通關次數 ' + EndingScene.playLine(), size: 12, color: '#c8d8f0', y: 70 },
+        { s: 'FINAL SCORE ' + pad7(this.score), size: 8, color: '#fff', y: 84 },
       ] : shadow ? [
         { s: '影子消散，星之彼端重新亮起', size: 16, color: C.yellow, y: 10 },
         { s: '追到最後才發現，那個影子', size: 14, color: '#fff', y: 32 },
@@ -36292,7 +36420,7 @@ window.KB = window.KB || {};
         if (this.trueEnd) {
           // 真結局：TRUE END（金 / 粉交替的呼吸色 + 上方一行 ALL CLEAR）
           const col = ((f >> 4) & 1) ? '#ffe040' : '#ffb0e8';
-          KB.text(ctx, 'ALL CLEAR', 128, 98, { color: '#c8d8f0', align: 'center', outline: '#101830', spacing: 1 });
+          KB.text(ctx, 'ALL CLEAR', 128, 96, { color: '#c8d8f0', align: 'center', outline: '#101830', spacing: 1 });
           bigText(ctx, 'TRUE END', 128, 108, 2, { color: col, outline: '#301028', align: 'center', spacing: 1 });
         } else {
           bigText(ctx, 'THE END', 128, 108, 2, { color: '#fff', outline: '#101830', align: 'center', spacing: 1 });
@@ -36536,6 +36664,12 @@ window.KB = window.KB || {};
       // PAUSE 標籤（壓在卡片上緣，整塊在畫面內）
       panel(ctx, 100, 2, 56, 14, C.dark, C.border);
       KB.text(ctx, 'PAUSE', 128, 5, { color: C.yellow, align: 'center' });
+      // R7-P2-02：Extra 模式在標題旁再掛一塊紅色「EXTRA」牌
+      if (KB.extraOn && KB.extraOn()) {
+        const ew = KB.textWidth('EXTRA') + 8;
+        panel(ctx, 160, 2, ew, 14, '#380010', '#ff6060');
+        KB.text(ctx, 'EXTRA', 160 + ew / 2, 5, { color: ((f >> 4) & 1) ? '#ff6060' : '#ff2020', align: 'center', outline: '#200008' });
+      }
       // 選單：2 列 × 3 欄
       panel(ctx, 4, 128, 248, 62);
       for (let i = 0; i < PAUSE_ITEMS.length; i++) {

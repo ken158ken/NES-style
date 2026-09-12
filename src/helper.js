@@ -61,6 +61,9 @@
     cdByLv: [90, 90, 70, 55], // 夥伴攻擊間隔（同上）
     stayLeash: 56,            // 待命：離崗位最遠 56px（打完會走回崗位）
     assaultR: 200,            // 突擊：偵測半徑（不管離卡比多遠）
+    assaultCD: 0.6,           // 突擊：攻擊間隔 ×0.6（R7-P2-07 清怪效率）
+    assaultSpd: 1.3,          // 突擊：追擊速度 ×1.3
+    assaultFast: 40,          // 突擊：離目標 > 40px 就用跑的
     unionCD: 600,             // 合體技冷卻
     unionDash: 18,            // 衝到玩家兩側的最長幀數
     unionSide: 22,            // 合體技站位（玩家左右各 22px）
@@ -159,6 +162,7 @@
 
       // ---- AI ----
       this.atkCool = 30; this.holdT = 0; this.stuckT = 0; this.lastX = this.x;
+      this.modeFlash = 0;                                // 剛換指令時頭上圖示閃一下
       this.floatT = 0; this.jumpCD = 0; this.mv = 0; this.foe = null; this.stoneMode = 0;
       this.beingInhaled = false; this.inhaleSrc = null;
     }
@@ -243,7 +247,7 @@
       // R6-P2-05：變身系能力走簡化版
       const sp = this.simple;
       if (sp) {
-        this.atkCool = this.atkCDFrames || CFG.atkCD;
+        this.atkCool = this.cdNow();
         if (sp.own === 'stomp') { this.simpleStomp(); return this.state === 'attack'; }
         if (sp.fallback) { this.spitStar(); return this.state === 'attack'; }
         if (sp.next) this.abilityData.next = sp.next;    // pickMode 會優先吃 abilityData.next
@@ -251,8 +255,13 @@
       this.keys.attack = true;
       this.holdT = d.hold ? CFG.holdFrames : 0;
       this.startAttack();
-      this.atkCool = this.atkCDFrames || CFG.atkCD;
+      this.atkCool = this.cdNow();
       return this.state === 'attack';
+    }
+    /** 這一次出招之後的冷卻幀數（突擊模式 ×CFG.assaultCD） */
+    cdNow() {
+      const base = this.atkCDFrames || CFG.atkCD;
+      return H.mode === 'assault' ? Math.max(1, Math.round(base * CFG.assaultCD)) : base;
     }
 
     /** 簡化版踩踏（giant）：原地小跳（不往前衝，避免撞進敵人）→ 落地雙向衝擊波 */
@@ -394,7 +403,7 @@
         } else mv = fdx > 0 ? 1 : -1;      // 還太遠 → 靠近敵人
         // 待命：離崗位太遠就不再追（打完自己走回去）
         if (mode === 'stay' && mv && Math.abs(this.cx + mv * 8 - this.anchorX) > CFG.stayLeash) { mv = 0; tgt = this; }
-        if (mode === 'assault') fast = afd > 72;
+        if (mode === 'assault') fast = afd > CFG.assaultFast;
       } else if (mode === 'stay') {
         // 待命：回崗位站好（8px 內就不動）
         const adx0 = this.cx - this.anchorX;
@@ -410,7 +419,8 @@
         fast = adx > 110 || dy < -40;
       }
       this.mv = mv;
-      const spd = fast ? CFG.run : CFG.walk;
+      // 突擊：追擊移動速度 ×1.3（R7-P2-07）
+      const spd = (fast ? CFG.run : CFG.walk) * (mode === 'assault' && foe ? CFG.assaultSpd : 1);
       if (mv) {
         this.vx += (mv * spd - this.vx) * 0.4;
         if (!foe) this.dir = mv;
@@ -725,6 +735,11 @@
       const m = MODE_BY_ID[H.mode] || MODES[0];
       const hat = this.ability && KB.has((this.abilityDef && this.abilityDef.hat) || ('hat_' + this.ability));
       const x = Math.round(this.cx + (wob || 0)), y = Math.round(this.y - (hat ? 20 : 14) - (this.slot ? 5 : 0));
+      // 剛換指令的 20 幀：圖示外圍閃一圈模式色（取代原本每人一份的 textPop）
+      if (this.modeFlash > 0) {
+        this.modeFlash--;
+        if (this.modeFlash & 2) g.rect(x - 5, y - 5, 10, 10, m.color);
+      }
       if (KB.has(m.icon)) g.spr(m.icon, x, y, this.alpha < 1 ? { alpha: this.alpha } : {});
       else { g.rect(x - 3, y - 3, 6, 6, '#101828'); g.rect(x - 2, y - 2, 4, 4, m.color); }
     }
@@ -816,8 +831,13 @@
       for (const h of H.all()) {
         h.anchorX = h.cx; h.anchorY = h.cy;      // 待命：以「切換當下的位置」為崗位
         h.foe = null; h.mv = 0; h.stuckT = 0;
-        V('textPop', h.cx, h.y - 18, m.hud, { color: m.color, size: 8, frames: 30, rise: 8, outline: '#182038' });
+        h.modeFlash = 20;                        // 頭上的指令圖示閃一下（圖示本身每幀都在畫）
       }
+      // R7-P1-03：模式是兩個夥伴共用的，textPop 只發一次（發在玩家頭上）。
+      // 原本每個夥伴各發一次，兩人只差 14px 而字寬 40+px，會疊成「ASSAUULT」之類的亂碼。
+      const pl = KB.player || (KB.game && KB.game.player);
+      const src = pl || H.get(0);
+      if (src) V('textPop', src.cx, src.y - 18, m.hud, { color: m.color, size: 8, frames: 30, rise: 8, outline: '#182038' });
       const g = KB.game;
       if (!quiet && g && g.toast) g.toast('夥伴指令：' + m.name);
       if (!quiet) sfx('menu', 'jump');
@@ -1049,7 +1069,8 @@
         else KB.rect(ctx, x, y, 8, 8, '#a8d8f8');
         // 能力小圖示
         const icon = 'ui_ability_' + h.ability + '_mini';
-        if (KB.has(icon)) KB.drawSpr(ctx, icon, x + 13, y + 4, {});
+        // R7-P2-04：mini 圖示錨點是 bottom（8×8），畫在 y+4 會往上戳出面板 3px → 改成 y+8（與小臉同一帶）
+        if (KB.has(icon)) KB.drawSpr(ctx, icon, x + 13, y + 8, {});
         // HP（依等級 4~7 格，寬度固定在面板內）
         const n = Math.max(1, h.maxHp), bw = n >= 6 ? 3 : 4, gap = 1, bx = x + 19;
         for (let k = 0; k < n; k++) {

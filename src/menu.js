@@ -204,6 +204,12 @@
       // PAUSE 標籤（壓在卡片上緣，整塊在畫面內）
       panel(ctx, 100, 2, 56, 14, C.dark, C.border);
       KB.text(ctx, 'PAUSE', 128, 5, { color: C.yellow, align: 'center' });
+      // R7-P2-02：Extra 模式在標題旁再掛一塊紅色「EXTRA」牌
+      if (KB.extraOn && KB.extraOn()) {
+        const ew = KB.textWidth('EXTRA') + 8;
+        panel(ctx, 160, 2, ew, 14, '#380010', '#ff6060');
+        KB.text(ctx, 'EXTRA', 160 + ew / 2, 5, { color: ((f >> 4) & 1) ? '#ff6060' : '#ff2020', align: 'center', outline: '#200008' });
+      }
       // 選單：2 列 × 3 欄
       panel(ctx, 4, 128, 248, 62);
       for (let i = 0; i < PAUSE_ITEMS.length; i++) {

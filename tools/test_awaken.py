@@ -4,14 +4,16 @@ Lv4 覺醒系統驗證（Round 7 / agent: awaken）—— src/awaken.js 的 KB.A
 
 涵蓋：
   1. Lv4：xp 15 → Lv4 / dmgMul 1.75 / partMul 2、xp 14 仍 Lv3、等級上限 4、HUD 4 顆星（drawLvStars 回傳 16）
-  2. 量表：命中 +6、連擊每 +1 再 +2、被打 −20、未 Lv4 不累積、滿 100 → ready + 「覺醒 READY」演出
-  3. 觸發：跳+攻同幀 / 3 幀內先後 → 覺醒；量表沒滿或未 Lv4 → 不攔截（仍是普通跳與普通攻擊）
+  2. 量表：命中 +4、連擊每 +1 再 +1、被打 −20、未 Lv4 不累積、滿 100 → ready + 「覺醒 READY」演出
+  3. 觸發：跳+攻同幀 / 3 幀內先後 → 覺醒；量表沒滿或未 Lv4 → 不攔截（仍是普通跳與普通攻擊）；
+     變身演出（停格）期間的輸入會排隊，演出結束自動發動（R7-P2-05）
   4. 覺醒狀態：300 幀後結束、量表歸 0、期間傷害 ×1.5、移動速度 ×1.2、無敵
   5. 20 種基本能力的覺醒招：各自命中 waddledee 致死；混合能力用主成分 A 的招
+  5b. 覺醒招對魔王減傷（R7-P1-01）：20 招各打 60HP 魔王模擬體，單次覺醒總傷害 ≤ 40%
   6. HUD 量表：畫在能力圖示下方（y218），不與 Lv 星（y194~197）重疊
   7. 全程監看 pageerror / console.error；MISSING SPRITES 必須為空
 
-用法：python tools/test_awaken.py [-v] [--only lv4,gauge,trigger,state,moves,hud]
+用法：python tools/test_awaken.py [-v] [--only lv4,gauge,trigger,state,moves,boss,hud]
 （測試地圖與頁面輔助函式沿用 tools/enemy_test.py 的 Harness / HOOK_JS / TEST_LEVEL）
 """
 import sys, pathlib, argparse
@@ -119,22 +121,30 @@ def phase_gauge(h):
     h.ev(SET_LV, ['sword', 3])
     g = h.ev("()=>{KB.AWAKEN.reset(); for(let i=0;i<5;i++) KB.PROG.scaleDmg(4,'sword'); return KB.AWAKEN.gauge;}")
     check('能力只有 Lv3 → 命中不累積量表', g == 0, g)
-    # Lv4 → 每次命中 +6
+    # Lv4 → 每次命中 +4
     h.ev(SET_LV, ['sword', 4])
     g = h.ev("()=>{KB.AWAKEN.reset(); KB.PROG.resetCombo(); for(let i=0;i<3;i++) KB.PROG.scaleDmg(4,'sword'); return KB.AWAKEN.gauge;}")
-    check('Lv4 命中 3 次 → 量表 18（每次 +6）', g == 18, g)
-    # 連擊加成：combo 5 → 每次 +6+10
+    check('Lv4 命中 3 次 → 量表 12（每次 +4）', g == 12, g)
+    # 連擊加成：combo 5 → 每次 +4+5
     g2 = h.ev("""()=>{ KB.AWAKEN.reset(); KB.PROG.resetCombo();
       for (let i=0;i<5;i++) KB.PROG.emit('kill', {score:0, cx:100, y:100, type:'enemy'});
       const before = KB.AWAKEN.gauge; KB.PROG.scaleDmg(4,'sword');
       return [KB.PROG.combo, before, KB.AWAKEN.gauge]; }""")
-    check('連擊 5 時命中 → +16（6 + 5×2）', g2[2] - g2[1] == 16, g2)
+    check('連擊 5 時命中 → +9（4 + 5×1）', g2[2] - g2[1] == 9, g2)
     # 連擊加成上限
     g3 = h.ev("""()=>{ KB.AWAKEN.reset(); KB.PROG.resetCombo();
       for (let i=0;i<20;i++) KB.PROG.emit('kill', {score:0, cx:100, y:100, type:'enemy'});
       const before = KB.AWAKEN.gauge; KB.PROG.scaleDmg(4,'sword');
       return [KB.PROG.combo, KB.AWAKEN.gauge - before]; }""")
-    check('連擊加成上限 10（+26）', g3[1] == 26, g3)
+    check('連擊加成上限 10（+14）', g3[1] == 14, g3)
+    # 充能節奏（R7-P1-01）：一路連擊也要 10 次以上命中才會充滿
+    pace = h.ev("""()=>{ KB.AWAKEN.reset(); KB.PROG.resetCombo();
+      let n = 0; const seq = [];
+      while (KB.AWAKEN.gauge < KB.AWAKEN.MAX && n < 60) {
+        KB.PROG.emit('kill', {score:0, cx:100, y:100, type:'enemy'});
+        KB.PROG.scaleDmg(4,'sword'); seq.push(KB.AWAKEN.gauge); n++; }
+      return [n, seq]; }""")
+    check('一路連擊命中 ≥ 10 次才充滿量表（原本 8 次）', pace[0] >= 10, pace)
     # 被打 −20
     g4 = h.ev("""()=>{ KB.AWAKEN.reset(); KB.AWAKEN.add(50); const a = KB.AWAKEN.gauge;
       KB.PROG.emit('hurt', {amount:1}); return [a, KB.AWAKEN.gauge]; }""")
@@ -216,6 +226,31 @@ def phase_trigger(h):
       return KB.AWAKEN.active(); }""")
     check('沒有能力時不發動', not r4, r4)
 
+    # R7-P2-05：變身演出（game.freezeT 停格）期間按 跳+攻 → 排隊，演出結束自動發動
+    def give_raw(key):
+        h.goto(3, 9, ability=None, immune=True)
+        h.ev(RESET)
+        h.ev(SET_LV, [key, 4])
+        h.ev("(k)=>{ const p = KB.player; p.ability = null; p.abilityData = {}; if (p.form) p.clearForm(true); p.giveAbility(k); }", key)
+        h.ev(SET_LV, [key, 4])
+    give_raw('giant')
+    h.ev("()=>{ KB.AWAKEN.reset(); KB.AWAKEN.add(100); }")
+    r5 = h.ev("""()=>{ const froze = KB.game.freezeT > 0;
+      __kb.press({jump:true, attack:true}); __kb.step(1); __kb.release();
+      return { froze, pend: KB.AWAKEN.pending, active: KB.AWAKEN.active() }; }""")
+    check('變身演出（停格）中按 跳+攻 → 排隊而不是被吃掉', r5['froze'] and r5['pend'] > 0, r5)
+    h.run(80, 20)
+    s5 = st(h)
+    check('變身演出結束後自動發動覺醒（giant）', s5['active'] and s5['move'] == '天地崩裂', s5)
+    # 量表沒滿 → 停格中不排隊
+    give_raw('giant')
+    h.ev("()=>{ KB.AWAKEN.reset(); KB.AWAKEN.add(50); }")
+    r6 = h.ev("""()=>{ __kb.press({jump:true, attack:true}); __kb.step(1); __kb.release();
+      return { pend: KB.AWAKEN.pending, gauge: KB.AWAKEN.gauge }; }""")
+    check('量表沒滿 → 停格中不排隊（跳與攻擊照舊）', r6['pend'] == 0, r6)
+    h.run(90, 30)
+    check('量表沒滿 → 演出結束也不會自己發動', not st(h)['active'], st(h))
+
 
 # ---------------------------------------------------------------------------
 # 4. 覺醒狀態
@@ -290,6 +325,79 @@ def phase_moves(h, shots=False):
 
 
 # ---------------------------------------------------------------------------
+# 5b. 覺醒招對魔王的傷害上限（R7-P1-01）
+# ---------------------------------------------------------------------------
+# 60 HP 的「魔王模擬體」：直接 new KB.Boss（type==='boss'、Boss.hurt 的 invuln 12 一併生效），
+# 不畫圖、不移動、不會觸發過關演出，只用來量「一次覺醒總共打掉幾點血」。
+SIM_BOSS = """(hp) => {
+  const g = KB.game; if (!g || !KB.Boss) return null;
+  for (const e of g.entities) if (e.type === 'boss' && !e.dead) e.dead = true;
+  const B = new KB.Boss(7 * 16, 144);
+  B.hp = hp; B.maxHp = hp; B.introducing = false; B.started = true;
+  B.displayName = 'SIM'; B.subtitle = 'SIM'; B.solid = false; B.grav = 0;
+  B.hurtsPlayer = false; B.contactDamage = false; B.hidden = true;
+  B.ai = function () { }; B.draw = function () { }; B.drawBody = function () { };
+  B.die = function () { this.dead = true; };
+  KB.spawn(B); window.__simBoss = B;
+  return { hp: B.hp, type: B.type };
+}"""
+SIM_HP = """() => { const B = window.__simBoss; return B ? { hp: Math.max(0, B.hp), maxHp: B.maxHp, dead: !!B.dead } : null; }"""
+
+BOSS_CAP = 0.40          # 一次覺醒最多只能打掉 40% 的血（設計目標 ≈ 35%）
+SIM_HP0 = 60
+
+
+def phase_boss(h):
+    print('-' * 8, '覺醒招對魔王的傷害（R7-P1-01）')
+    mul = h.ev("()=>KB.AWAKEN.BOSS_MUL")
+    check('KB.AWAKEN.BOSS_MUL = 0.35', abs(mul - 0.35) < 1e-9, mul)
+    check('KB.AWAKEN.scaleForTarget / noteBossHit 存在',
+          h.ev("()=>typeof KB.AWAKEN.scaleForTarget === 'function' && typeof KB.AWAKEN.noteBossHit === 'function'"), '')
+    check('KB.AWAKEN.BOSS_CAP = 0.35', abs(h.ev("()=>KB.AWAKEN.BOSS_CAP") - 0.35) < 1e-9, '')
+    # 單筆傷害換算：對魔王 ×0.35、對一般敵人不變、非覺醒攻擊不變
+    r = h.ev("""()=>{
+      const A = KB.AWAKEN;
+      const atk = { awaken: true }, plain = {};
+      const mk = id => ({ type: 'boss', id, hp: 60, maxHp: 60 });
+      A.bossDmg = {};
+      const a = A.scaleForTarget(20, atk, mk(901));          // 對魔王 ×0.35
+      const b = A.scaleForTarget(20, atk, { type: 'enemy', id: 902, hp: 60, maxHp: 60 });
+      const c = A.scaleForTarget(20, plain, mk(903));        // 非覺醒攻擊
+      const d = A.scaleForTarget(2, atk, mk(904));           // 小傷害仍至少 1
+      // 累積上限：同一隻魔王連續挨 10 下也不超過 maxHp × BOSS_CAP（記帳走 noteBossHit）
+      const e = mk(905); let sum = 0;
+      for (let i = 0; i < 10; i++) { const x = A.scaleForTarget(20, atk, e); A.noteBossHit(atk, e, x); sum += x; }
+      A.bossDmg = {};
+      return [a, b, c, d, sum];
+    }""")
+    check('覺醒招對魔王 20 → 7（×0.35）', r[0] == 7, r)
+    check('覺醒招對一般敵人不減傷（20 → 20）', r[1] == 20, r)
+    check('非覺醒攻擊對魔王不減傷（20 → 20）', r[2] == 20, r)
+    check('減傷後至少 1 點', r[3] == 1, r)
+    check('同一次覺醒對 60HP 魔王累積上限 21（60 × 0.35）', r[4] == 21, r)
+    worst = []
+    for key in BASIC20:
+        nm = h.ev("(k)=>KB.AWAKEN.moves[k].name", key)
+        h.goto(3, 9, ability=None, immune=True)
+        h.ev(RESET)
+        h.ev(GIVE, key)
+        h.ev(SET_LV, [key, 4])
+        h.ev("()=>{ KB.AWAKEN.reset(); KB.AWAKEN.add(100); }")
+        h.ev(SIM_BOSS, SIM_HP0)
+        h.ev("()=>{ KB.player.startAwaken(); }")
+        h.run(330, 30)
+        b = h.ev(SIM_HP)
+        lost = SIM_HP0 - b['hp'] if b else 999
+        pct = lost / SIM_HP0
+        worst.append((pct, key))
+        check(f'{key} [{nm}]: 一次覺醒對 60HP 魔王 ≤ 40%（實測 {lost}/{SIM_HP0} = {pct:.0%}）',
+              pct <= BOSS_CAP and not (b and b['dead']), dict(hp=b['hp'] if b else None, lost=lost))
+    worst.sort(reverse=True)
+    print('   最高 5 名：' + ', '.join(f'{k} {p:.0%}' for p, k in worst[:5]))
+    check('沒有任何一招能一次覺醒打死 60HP 魔王', worst[0][0] <= BOSS_CAP, worst[:3])
+
+
+# ---------------------------------------------------------------------------
 # 6. HUD 量表
 # ---------------------------------------------------------------------------
 def phase_hud(h):
@@ -329,7 +437,8 @@ def main():
         pg.evaluate(HOOK_JS)
         h = Harness(pg, a.shots, a.hitbox)
         for name, fn in (('lv4', phase_lv4), ('gauge', phase_gauge), ('trigger', phase_trigger),
-                         ('state', phase_state), ('moves', lambda hh: phase_moves(hh, a.shots)), ('hud', phase_hud)):
+                         ('state', phase_state), ('moves', lambda hh: phase_moves(hh, a.shots)),
+                         ('boss', phase_boss), ('hud', phase_hud)):
             if only and name not in only: continue
             fn(h)
         miss = pg.evaluate("()=>[...KB.missing]")

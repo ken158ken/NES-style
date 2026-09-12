@@ -768,7 +768,12 @@
       T(ctx, '能力 ' + seenN + '/' + seenAll, 242, 180, {
         color: seenAll && seenN >= seenAll ? C.yellow : '#8fa0bc', align: 'right', size: UI.MS_SMALL,
       });
-      fit(ctx, '←→ 移動　Z 進入　SELECT 回標題', 128, 197, 234, { color: C.grey, align: 'center', size: UI.MS });
+      // R7-P2-06：游標停在鎖定 / 製作中的節點時，不要再寫「Z 進入」（按 Z 進不去）
+      // （解鎖條件本身寫在上方資訊列，這裡只換掉會誤導的「Z 進入」，字數保持塞得下）
+      const hint = ok ? '←→ 移動　Z 進入　SELECT 回標題'
+        : !this.exists(i) ? '←→ 移動　製作中　SELECT 回標題'
+          : '←→ 移動　未解鎖　SELECT 回標題';
+      fit(ctx, hint, 128, 197, 234, { color: C.grey, align: 'center', size: UI.MS });
       drawMuteToast(ctx); drawFade(ctx, this);
     }
   }
@@ -814,6 +819,17 @@
     hudLabel(ctx, hud, L.nameX, L.rowA, L.nameW, flashName ? C.yellow : '#fff');
     // 中文能力名：14px（12px 時「鐵鎚」這種密集字會糊）；4 字以上（元素法師…）自動降 12px 不壓到血條
     fit(ctx, cn, L.nameX, L.rowB, L.nameW, { color: flashName ? '#fff' : '#ffc8dc', size: UI.MS });
+    // R7-P2-02：Extra 模式在能力名列右側掛一塊紅色「EX」小牌（遊戲中唯一的難度提示）
+    if (KB.extraOn && KB.extraOn()) {
+      const mh = p ? p.maxHp : KB.MAX_HP;
+      const bw = KB.textWidth('EX') + 4, bx = L.hpX + mh * L.hpGap + 2;
+      if (bx + bw <= 146) {
+        KB.rect(ctx, bx, L.rowA - 2, bw, 12, '#380010');
+        KB.rect(ctx, bx, L.rowA - 2, bw, 1, '#ff6060'); KB.rect(ctx, bx, L.rowA + 9, bw, 1, '#ff6060');
+        KB.rect(ctx, bx, L.rowA - 2, 1, 12, '#ff6060'); KB.rect(ctx, bx + bw - 1, L.rowA - 2, 1, 12, '#ff6060');
+        KB.text(ctx, 'EX', bx + 2, L.rowA, { color: ((f >> 4) & 1) ? '#ffd0d0' : '#ff4040', outline: '#200008' });
+      }
+    }
     // 中：血量
     const maxHp = p ? p.maxHp : KB.MAX_HP, hp = p ? Math.max(0, p.hp) : 0;
     const hurting = p && p.state !== 'dead' && p.invuln > KB.PHYS.invulnFrames - 30;
@@ -907,9 +923,11 @@
       // 開場音：audio2 指定用 sfx('select')（music('w_intro') 會蓋掉關卡曲，不使用）
       if (ok) sfx('select');
     }
-    if (game.paused || game.clearT >= 0) return;
+    // R7-P2-03：橫幅不顯示的情況一律把 bn.paint 清掉，確保 UI.bannerBottom（COMBO / toast 的讓位依據）
+    // 與「這一幀到底有沒有畫橫幅」永遠一致，不會留下上一幀的殘留而畫出沒被讓位的橫幅。
+    if (game.paused || game.clearT >= 0) { bn.paint = null; return; }
     const age = (game.frame || 0) - bn.start, span = BANNER.slideIn + BANNER.hold + BANNER.slideOut;
-    if (age < 0 || age > span) return;
+    if (age < 0 || age > span) { bn.paint = null; return; }
     // fix5b / R5-P2-09：game.js 的順序是 drawLevelBanner → VFX.postWorld → drawGameHint，
     // 而 worldTint（時停 / 慢動作 / 子彈時間 / 元素風暴）是「視窗層」，會蓋滿 y 0~192、
     // 把先畫好的開場橫幅一起染色到看不清字。所以這裡只記下「這一幀要畫橫幅」，
@@ -1167,13 +1185,15 @@
       // 沒設也會在 KB.save.cleared.w7 時成立；版面 / 文案在這裡）
       const trueEnd = !!((KB.session && KB.session.trueEnd) || (KB.save && KB.save.cleared && KB.save.cleared.w7));
       this.shadow = shadow; this.trueEnd = trueEnd;
+      // R7-P2-01：真結局比一般結局多 2 行，原本 FINAL SCORE(y92) 會和 ALL CLEAR(y98) 疊在一起；
+      // 整體上移 2~8px，讓 FINAL SCORE(84~92) 與 ALL CLEAR(96~104) 之間留 4px。
       this.lines = trueEnd ? [
-        { s: '夢的盡頭，你把自己找了回來', size: 16, color: '#ffd8f8', y: 8 },
-        { s: '夢幻迴廊的門緩緩闔上', size: 14, color: '#fff', y: 30 },
-        { s: '普普星的夜空，久違地安靜', size: 14, color: '#fff', y: 46 },
-        { s: '能力發現 ' + EndingScene.seenLine() + '　成就 ' + EndingScene.achLine(), size: 12, color: '#c8d8f0', y: 64 },
-        { s: '大星星 ' + EndingScene.starLine() + '　通關次數 ' + EndingScene.playLine(), size: 12, color: '#c8d8f0', y: 78 },
-        { s: 'FINAL SCORE ' + pad7(this.score), size: 8, color: '#fff', y: 92 },
+        { s: '夢的盡頭，你把自己找了回來', size: 16, color: '#ffd8f8', y: 4 },
+        { s: '夢幻迴廊的門緩緩闔上', size: 14, color: '#fff', y: 24 },
+        { s: '普普星的夜空，久違地安靜', size: 14, color: '#fff', y: 40 },
+        { s: '能力發現 ' + EndingScene.seenLine() + '　成就 ' + EndingScene.achLine(), size: 12, color: '#c8d8f0', y: 56 },
+        { s: '大星星 ' + EndingScene.starLine() + '　通關次數 ' + EndingScene.playLine(), size: 12, color: '#c8d8f0', y: 70 },
+        { s: 'FINAL SCORE ' + pad7(this.score), size: 8, color: '#fff', y: 84 },
       ] : shadow ? [
         { s: '影子消散，星之彼端重新亮起', size: 16, color: C.yellow, y: 10 },
         { s: '追到最後才發現，那個影子', size: 14, color: '#fff', y: 32 },
@@ -1237,7 +1257,7 @@
         if (this.trueEnd) {
           // 真結局：TRUE END（金 / 粉交替的呼吸色 + 上方一行 ALL CLEAR）
           const col = ((f >> 4) & 1) ? '#ffe040' : '#ffb0e8';
-          KB.text(ctx, 'ALL CLEAR', 128, 98, { color: '#c8d8f0', align: 'center', outline: '#101830', spacing: 1 });
+          KB.text(ctx, 'ALL CLEAR', 128, 96, { color: '#c8d8f0', align: 'center', outline: '#101830', spacing: 1 });
           bigText(ctx, 'TRUE END', 128, 108, 2, { color: col, outline: '#301028', align: 'center', spacing: 1 });
         } else {
           bigText(ctx, 'THE END', 128, 108, 2, { color: '#fff', outline: '#101830', align: 'center', spacing: 1 });

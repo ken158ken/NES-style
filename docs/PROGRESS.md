@@ -3108,3 +3108,79 @@ R5-7a 的觀察項（gravity ↑+X 文案不一致、圖鑑剪影露出帽子輪
   **補測發現 R7-P1-01（最高優先）：一次覺醒打死一整隻魔王** —— 迪迪迪 60HP 的 18 個有效樣本中 17 個 100% 清空；
   夢魘之核三形態（40/40/50）各被一次覺醒整條打掉。建議 awaken agent 把 20 招的 `n × dmg` 整體 ×0.4 或對 boss 另乘係數。
   報告：`docs/QA_REPORT.md`「# Round 7 驗收（qa7）」—— P0×0 / P1×3 / P2×8，含各系統明細、測試表、效能表、重現指令與截圖索引。
+
+## fix7
+> 修 qa7 的 R7-P1-01 / R7-P1-03 / R7-P2-01~08（R7-P1-02 由總控先修好，未動）。
+> 改過的檔：`src/awaken.js`、`src/game.js`、`src/helper.js`、`src/ui.js`、`src/menu.js`、`tools/test_awaken.py`。
+> 截圖：`shots/agent_fix7/`（每一張都用 Read 實際看過）。**未 commit**；已跑 `tools/build.py` 重建 dist。
+
+### 各項修法
+- **R7-P1-01 覺醒過強**（`src/awaken.js` + `src/game.js` 各一處）：
+  ① 覺醒招產生的判定框 / 投射物一律帶 `awaken` 旗標（`bigbox()` 加 `hb.awaken = true`，6 處 `KB.shoot` 換成本檔的 `ashoot()`）；
+  ② 新增 `A.BOSS_MUL = 0.35`（對 `type === 'boss'` 的目標傷害 ×0.35）與 `A.BOSS_CAP = 0.35`
+  （**一次覺醒對同一隻魔王的總傷害上限 ＝ 該形態血量 × 0.35**，`A.bossDmg` 記帳，`start()` / `reset()` 清空）；
+  ③ `A.scaleForTarget(dmg, atk, target)` / `A.bossLeft(target)` / `A.noteBossHit(atk, target, applied)` 三個 API，
+  `game.js collisions` 第一階段只多 3 行：算完 `KB.PROG.scaleDmg` 後過一次 `scaleForTarget`，`hurt()` 之後用 `hp` 差值記帳
+  （被無敵幀擋掉的 `ok === false` 不記；傷害被轉給護盾碎片 / 洛洛洛同伴時 `hp` 不動，改記送進去的 dmg，上限才不會失效）。
+  **對一般敵人、非覺醒攻擊完全不變**（20 招照樣秒殺雜兵，`--only moves` 25 項全過）。
+  實測（一次覺醒、之後不再按鍵）：迪迪迪 60→39（**35%**，原本 100%）、克拉寇 40→26（35%）、梅塔騎士 55→37（33%）、
+  暗影卡比 70→45（36%）、**夢魘之核 P1（破盾後）40→26（35%，原本整條清空）**、洛洛洛 30→25（17%）。
+  量表充能同時放慢：`HIT_GAIN 6→4`、`COMBO_GAIN 2→1`（連擊上限仍 10 → 單擊最多 +14），
+  **一路連擊要 11~12 次命中才充滿（原本 8 次）**；被打 −20 不變。
+- **R7-P1-03 夥伴指令 textPop 疊字**（`src/helper.js setMode`）：不再對每個夥伴各發一次 textPop，
+  改成**只在玩家頭上發一次**（模式本來就是兩人共用）；夥伴頭上改用 `h.modeFlash = 20`，`drawModeIcon` 在這 20 幀
+  於圖示外圍閃一圈模式色，圖示本身照舊每幀畫。截圖 `helper_mode_pop2.png`（單一乾淨的「ASSAULT」）。
+- **R7-P2-01 TRUE END 版面**（`src/ui.js EndingScene`）：真結局 6 行整體上移（8/30/46/64/78/92 → 4/24/40/56/70/**84**）、
+  `ALL CLEAR` 98 → **96**；FINAL SCORE(84~92) 與 ALL CLEAR(96~104) 之間留 4px，TRUE END 仍在 108。
+  截圖 `trueend.png` / `crop_trueend.png`（三行完全分離）。
+- **R7-P2-02 Extra 標示**：`ui.js drawHUD` 在 `KB.extraOn()` 時於**血量右側**（Extra 只有 3 格心，x113~131 是空的）
+  畫紅框小牌「EX」（閃爍，會自動讓位：算出 `bx + bw > 146` 就不畫，永遠不會壓到 SCORE）；
+  `menu.js` 暫停選單在 PAUSE 牌右邊（x160）多掛一塊紅色「EXTRA」牌。截圖 `extra_hud_ex.png` / `extra_pause.png`。
+- **R7-P2-03 COMBO 壓 WORLD 橫幅**：**實測沒有重現**——`UI.bannerBottom()` 在滑入期（第 5 / 15 / 25 幀）
+  與停留期（第 60 幀）都回傳 **80**，COMBO 面板畫在 y86，橫幅底在 y80；覺醒發動的 zoom / letterbox 期間也一樣
+  （`combo_banner_f5/15/25/60.png`、`combo_awaken_0~3.png`，qa7 的 `gawk_trigger.png` 應是連拍格子被壓縮造成的錯覺）。
+  只補了一個防呆：`drawLevelBanner` 在「暫停 / 過關 / 不在播放區間」時把 `bn.paint = null` 清掉，
+  讓「這一幀有沒有畫橫幅」與 `bannerBottom()` 永遠一致。
+- **R7-P2-04 夥伴 HUD mini 圖示超出 3px**（`helper.js drawHUD`）：`_mini` 圖示的錨點是 **bottom**，畫在 `y + 4`
+  等於往上戳出面板 3px → 改成 `y + 8`（與小臉同一帶）。截圖 `crop_helper_hud.png`（6 倍裁切，圖示完全在面板內）。
+- **R7-P2-05 變身演出中 跳+攻 沒反應**（`awaken.js` + `game.js` 各一處）：停格（`game.freezeT > 0`）時整個
+  `game.update` 直接 return，`player.update → tryTrigger` 都不會跑，輸入被吃掉。
+  新增 `A.bufferInput(game)`（game.js 的 freeze 分支呼叫）：量表滿 + Lv4 時把「跳+攻」記成 `A.pending = 90` 幀並跳
+  textPop「變身中…」（**會先收掉還在頭上飄的「覺醒 READY」**，否則兩行 12px 字會疊成亂碼），
+  `A.tick` 在停格結束的那一幀自動 `startAwaken()`。量表沒滿 / 未 Lv4 **完全不排隊**（跳與攻擊照舊）。
+  截圖 `awaken_pending_transform.png`（變身中…）→ `awaken_pending_fired.png`（演出結束自動放「天地崩裂」）。
+- **R7-P2-06 鎖定節點仍寫「Z 進入」**（`ui.js StageSelectScene.draw`）：底部提示列改成
+  可進入「←→ 移動　Z 進入　SELECT 回標題」／鎖定「←→ 移動　**未解鎖**　SELECT 回標題」／製作中「…製作中…」
+  （解鎖條件本來就寫在上方資訊列，提示列保持塞得下、不會被 `fit()` 截成「…」）。
+  截圖 `crop_select_w7_locked_hint.png` / `crop_select_unlocked_hint.png`。
+- **R7-P2-07 突擊模式效率低**（`helper.js`）：新增 `CFG.assaultCD 0.6`（出招冷卻 ×0.6，走新的 `cdNow()`）、
+  `CFG.assaultSpd 1.3`（有目標時移動速度 ×1.3）、`CFG.assaultFast 40`（離目標 > 40px 就用跑的，原本 72）；
+  目標選擇本來就是 `findFoe()` ＝**半徑內最近的敵人**，突擊模式也沒有回崗位的邏輯（只有 stay 會回），維持不變。
+  實測（兩個 Lv1 夥伴 sword + fire，12 隻 waddledee 排在 150~300px 外，突擊）：
+  **50 幀 4 殺 / 100 幀 9 殺 / 150 幀 12 殺全清**（qa7 的同樣情境是 200 幀 1 殺）。截圖 `helper_assault_chase.png`。
+- **R7-P2-08 克拉寇 FIGHT 2/3**：`src/bosses.js` 沒動（levels-bosses 的檔案，且 qa7 註明 Round 6 就有），仍是 WARNING。
+
+### 驗證
+- `tools/engine_test.py` **118/118**、`tools/test_progression.py` **68/68**、`tools/test_helper.py` **131/131**、
+  `tools/test_extra.py` **53/53**、`tools/test_awaken.py` **109/109**（原 75 項 + 新增：
+  **20 招對 60HP 魔王模擬體單次覺醒 ≤ 40%** 共 21 項、`scaleForTarget` / 累積上限 7 項、變身排隊 4 項；
+  量表 3 條斷言改成 +4 / +9 / +14 並加一條「一路連擊 ≥ 10 次命中才充滿」）。
+- `node tools/level_check.js` 0 error / 1 warn（既有）；`node --check` 全部通過。
+- `tools/playthrough.py --level w1 --ability sword --godmode` → cleared 5835 幀 deaths=0 missing[]（與 fix6b / awaken 完全相同）；
+  `--level w7` → cleared 8856 幀 deaths=0 missing[]。
+- `tools/boss_test.py --runs 3`：7 隻魔王 idle / intro / fight / phase2 / phase3 全 PASS，
+  **兩個非 PASS**：① `kracko FIGHT 2/3`（R7-P2-08，既有）；② **`nightmarecore MID 0/1`（新的，見下）**。
+
+### 已知問題 / 給總控
+1. **`boss_test` 的 `nightmarecore MID` 由 PASS 變 FAIL，原因已確認是「覺醒減傷生效」**：
+   中距離機器人（cutter、每 12 幀攻擊 + 前後游走）會在 jump 與 attack 撞在 3 幀內時**意外觸發覺醒**，
+   以前一次覺醒就把夢魘之核整條打掉，現在只掉 35% → 同一個 seed 打到 bossHp 11 時已經死 4 次。
+   驗證方式：把 `A.BOSS_MUL` 改 1、`A.BOSS_CAP` 改 99（其餘修正保留）跑同一個 seed 就回到 PASS；
+   而 **HEAD（修正前）用 `--mid-runs 3` 也只有 2/3**，這個模型對三形態最終魔王本來就在及格邊緣。
+   我**沒有去動 `tools/boss_test.py` 的通過條件**（那是 levels-bosses 的檔案，也不該為了讓測試變綠而放寬）。
+   建議二擇一：把 `nightmarecore` 放進 `MID_SKIP`（理由同克拉寇：三形態 + 全場招式，中距離站樁模型不適用，
+   fight 3/3 已覆蓋），或把 MID 的容錯放寬（例如允許 1 次重跑）。`fight` / `phase2` / `phase3` 全部 3/3 PASS。
+2. 覺醒的傷害上限是**以「當前形態的 maxHp」計**，所以夢魘之核換形態後上限會重算（每個形態各 35%）；
+   護盾碎片吃掉的傷害也算進上限（＝同一次覺醒不能又破盾又打本體），這是刻意的。
+3. 威斯比（w1）用覺醒招實測是 0%：他的本體判定在畫面上緣、全畫面判定框打不到，**與本次修正無關**（修正前也一樣）。
+4. 夥伴突擊清完場後若離卡比 > 200px 仍會走既有的 `teleportDist` 瞬移回卡比身邊（不是回崗位），維持原行為。

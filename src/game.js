@@ -162,7 +162,12 @@
     // ---------- 更新 ----------
     update(dt) {
       this.t += dt; this.frame++;
-      if (this.freezeT > 0) { this.freezeT--; return; }
+      // R7-P2-05：停格（變身演出 / hitstop）期間整個 update 直接 return，覺醒的「跳+攻」會被吃掉，
+      // 先讓 KB.AWAKEN 把輸入排隊（量表沒滿 / 未 Lv4 時什麼都不做）。
+      if (this.freezeT > 0) {
+        if (KB.AWAKEN && KB.AWAKEN.bufferInput) { try { KB.AWAKEN.bufferInput(this); } catch (e) { } }
+        this.freezeT--; return;
+      }
       // 淡入淡出
       if (this.fadeDir !== 0) {
         this.fade += this.fadeDir * 0.08;
@@ -275,7 +280,14 @@
               else { if (a.hitSet.has(b.id)) continue; }
               if (b.type === 'boss' && b.introducing) continue;
               // 能力等級加成（KB.PROG.dmgMul：Lv1 ×1 / Lv2 ×1.25 / Lv3 ×1.5，四捨五入且不會比原本低）
-              const ok = b.hurt(KB.PROG && KB.PROG.scaleDmg ? KB.PROG.scaleDmg(a.dmg, a.abilityKey) : a.dmg, a);
+              let dmg = KB.PROG && KB.PROG.scaleDmg ? KB.PROG.scaleDmg(a.dmg, a.abilityKey) : a.dmg;
+              // 覺醒招對魔王的減傷（KB.AWAKEN.BOSS_MUL）；一般敵人與非覺醒攻擊原封不動
+              if (KB.AWAKEN && KB.AWAKEN.scaleForTarget) dmg = KB.AWAKEN.scaleForTarget(dmg, a, b);
+              const hp0 = b.hp;
+              const ok = b.hurt(dmg, a);
+              // 覺醒招對魔王的傷害記帳（被無敵幀擋掉的 ok === false 不算；傷害被轉給護盾 / 同伴時
+              // b.hp 不會變，改用送進去的 dmg，才不會讓上限失效）
+              if (ok !== false && KB.AWAKEN && KB.AWAKEN.noteBossHit) KB.AWAKEN.noteBossHit(a, b, Math.max(hp0 - b.hp, dmg));
               if (ok !== false) {
                 if (a.type === 'hitbox') a.markHit(b); else { a.hitSet.add(b.id); if (!a.pierce) { a.dead = true; KB.fx(a.fxHit || 'fx_hit', a.cx, a.cy + 6); } }
                 if (b.type !== 'boss' && a.knock && b.solid) { b.vx = (b.cx < a.cx ? -1 : 1) * a.knock; b.vy = Math.min(b.vy, -1); }

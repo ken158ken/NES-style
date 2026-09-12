@@ -7,12 +7,14 @@
 //   等級   lv4(key?)（能力是否 Lv4）/ LV（=4）
 //   狀態   active() / activeT / DUR（=300）/ start(p) / end(p) / cancel()
 //   觸發   tryTrigger(p)（player.js 每幀呼叫；只有「跳+攻 3 幀內」且量表滿才回 true）
+//          bufferInput(game)（game.js 在演出停格 freezeT > 0 時呼叫：把跳+攻排隊，停格結束自動發動）
 //   招式   moves[key] = { name, exec(p) } / moveFor(key) / baseKey(key)（混合能力→主成分 A）/ exec(p, key)
 //   繪製   drawGauge(ctx, game)（progression.drawHUD 內呼叫，畫在能力圖示下方 x4 y218 26×5）
+//   平衡   BOSS_MUL / BOSS_CAP（覺醒招對魔王的減傷與單次覺醒傷害上限）/ scaleForTarget(dmg, atk, target)
 //   雜項   tick(game)（由 KB.PROG.update 包裝自動每幀呼叫）/ reset() / after(frames, fn)
 //
 // ── 規則 ──────────────────────────────────────────────────────────────────────
-//   1. 只有「持有的能力已經是 Lv4」時量表才會累積：命中敵人 +6、連擊每 +1 再 +2（連擊上限 10 → 最多 +26）、
+//   1. 只有「持有的能力已經是 Lv4」時量表才會累積：命中敵人 +4、連擊每 +1 再 +1（連擊上限 10 → 最多 +14）、
 //      受傷 −20（走 KB.PROG 的 'hurt' 事件）。滿 100 → HUD 量表閃爍 + textPop「覺醒 READY」+ sfx('max')。
 //   2. 地面 / 空中同一幀（或 3 幀內先後）按下「跳 + 攻擊」且量表滿 → player.startAwaken()。
 //      量表沒滿 / 能力不是 Lv4 → 完全不攔截，跳與攻擊照原本運作。
@@ -30,13 +32,16 @@
   A.MAX = 100;              // 量表上限
   A.DUR = 300;              // 覺醒狀態幀數
   A.WINDOW = 2;             // 跳 / 攻擊的容許間隔（幀）＝「3 幀內先後按」
-  A.HIT_GAIN = 6;           // 命中敵人
-  A.COMBO_GAIN = 2;         // 連擊每 +1 額外
+  A.PEND = 90;              // 演出停格期間按下的「跳+攻」可以排隊幾幀（R7-P2-05）
+  A.HIT_GAIN = 4;           // 命中敵人
+  A.COMBO_GAIN = 1;         // 連擊每 +1 額外
   A.COMBO_CAP = 10;         // 連擊加成上限（避免一擊灌滿）
   A.HURT_LOSS = 20;         // 被打
   A.SPD = 1.2;              // 覺醒中移動速度
   A.DMG = 1.5;              // 覺醒中傷害
   A.TIME_DMG = 3;           // time 覺醒招：時停期間累積傷害 ×3
+  A.BOSS_MUL = 0.35;        // 覺醒招打在魔王（type==='boss'）身上的傷害倍率（R7-P1-01 平衡）
+  A.BOSS_CAP = 0.35;        // 一次覺醒對同一隻魔王的總傷害上限（佔該形態血量的比例）
   const GOLD = A.GOLD = '#ffe040', GOLD_HI = A.GOLD_HI = '#fffce0', GOLD_LO = A.GOLD_LO = '#ff9800';
 
   // ---------------------------------------------------------------- 狀態
@@ -47,6 +52,8 @@
   A.moveName = '';
   A.wasFull = false;
   A.q = [];                 // 排程（after）
+  A.pending = 0;            // 停格（變身演出）期間排隊中的覺醒：剩餘有效幀數
+  A.bossDmg = {};           // 本次覺醒對各魔王已造成的傷害（entity.id → 累計），start/reset 時清空
   let jF = -999, aF = -999; // 最後一次按下 跳 / 攻擊 的幀
 
   // ---------------------------------------------------------------- 工具
@@ -97,7 +104,7 @@
     if (p) v('ring', p.cx, p.cy, { r0: 6, r1: 34, frames: 16, color: GOLD, width: 2 });
     sfx('max');
   };
-  /** 命中敵人（由 KB.PROG.scaleDmg 的包裝呼叫）：+6，連擊每 +1 再 +2 */
+  /** 命中敵人（由 KB.PROG.scaleDmg 的包裝呼叫）：+4，連擊每 +1 再 +1 */
   A.hit = function () {
     if (A.active() || !A.lv4()) return 0;
     const pg = P(), combo = pg ? Math.min(A.COMBO_CAP, pg.combo | 0) : 0;
@@ -105,6 +112,32 @@
   };
   /** 被打：−20 */
   A.onHurt = function () { if (A.active()) return 0; return A.add(-A.HURT_LOSS); };
+
+  /**
+   * 依「攻擊者 / 目標」再調整傷害（game.js collisions 第一階段呼叫）。
+   * R7-P1-01：覺醒招（awaken 旗標）打在魔王（type === 'boss'）身上一律 ×A.BOSS_MUL，
+   * 且一次覺醒對同一隻魔王的總傷害不超過該形態血量的 BOSS_CAP（＝最多打掉約 35% 血）；
+   * 對一般敵人完全不變。
+   */
+  A.scaleForTarget = function (dmg, atk, target) {
+    const n = +dmg;
+    if (!(n > 0) || !atk || !atk.awaken) return dmg;
+    if (!target || target.type !== 'boss') return dmg;
+    const d = Math.max(1, Math.round(n * A.BOSS_MUL));
+    return Math.max(0, Math.min(d, A.bossLeft(target)));
+  };
+  /** 這次覺醒對 target 還能造成幾點傷害（＝該形態血量 × BOSS_CAP − 已造成） */
+  A.bossLeft = function (target) {
+    const cap = Math.max(1, Math.round((+target.maxHp || +target.hp || 1) * A.BOSS_CAP));
+    return Math.max(0, cap - (A.bossDmg[target.id] || 0));
+  };
+  /** 記帳：只累計「真的扣掉的血」（game.js 在 hurt 前後比對 hp 後呼叫；被無敵幀擋下的不算） */
+  A.noteBossHit = function (atk, target, applied) {
+    const n = +applied;
+    if (!(n > 0) || !atk || !atk.awaken || !target || target.type !== 'boss') return 0;
+    A.bossDmg[target.id] = (A.bossDmg[target.id] || 0) + n;
+    return A.bossDmg[target.id];
+  };
 
   // ---------------------------------------------------------------- 觸發（player.js 每幀呼叫）
   /**
@@ -126,6 +159,32 @@
     return A.start(p) === true;
   };
 
+  /**
+   * R7-P2-05：演出停格（game.freezeT > 0，例如變身 / 取得能力的 hitstop）期間
+   * game.update 會直接 return，player.update → tryTrigger 整段都不會跑，
+   * 「跳+攻」的輸入等於被整個吃掉（量表滿了也沒反應、也沒有任何提示）。
+   * game.js 的 freeze 分支會呼叫這個把輸入排隊：停格結束後由 A.tick 自動發動（最多等 A.PEND 幀）。
+   * 未 Lv4 / 量表沒滿一律不排隊（跳與攻擊照舊）。
+   */
+  A.bufferInput = function (game) {
+    const inp = KB.input; if (!inp || !inp.pressed) return false;
+    const f = frame();
+    if (inp.pressed('jump')) jF = f;
+    if (inp.pressed('attack')) aF = f;
+    if (jF !== f && aF !== f) return false;
+    if (Math.abs(jF - aF) > A.WINDOW) return false;
+    const p = player();
+    if (!p || A.active() || !A.ready() || !A.lv4(p.ability)) return false;
+    jF = aF = -999;
+    if (A.pending > 0) return true;
+    A.pending = A.PEND;
+    // 「覺醒 READY」的字可能還在頭上飄（兩行 12px 字疊在一起會糊成亂碼）→ 先收掉再放新的
+    try { if (KB.VFX && KB.VFX.list) for (const e of KB.VFX.list) if (e && e.text === '覺醒 READY') e.dead = true; } catch (e) { }
+    v('textPop', p.cx, p.y - 18, '變身中…', { color: GOLD, size: 12, frames: 40, rise: 0.3, outline: '#3a2400' });
+    sfx('menu');
+    return true;
+  };
+
   // ---------------------------------------------------------------- 覺醒狀態
   A.start = function (p) {
     p = p || player();
@@ -135,6 +194,7 @@
     A.moveName = mv ? mv.name : '覺醒';
     A.activeT = A.DUR;
     A.q.length = 0;
+    A.bossDmg = {};                 // 每次覺醒重新計算「對魔王的傷害上限」
     p.awakenT = A.DUR;
     p.invincibleT = Math.max(p.invincibleT | 0, A.DUR);
     // 吃掉這一幀的輸入：跳躍緩衝要清掉（否則下一幀會補跳），攻擊狀態先收招
@@ -205,6 +265,15 @@
       for (const j of due) { try { j.fn(player()); } catch (e) { } }
     }
     if (A.timeBonusT > 0) A.timeBonusT--;
+    // 停格期間排隊的覺醒（A.bufferInput）：停格一結束就自動發動
+    if (A.pending > 0) {
+      A.pending--;
+      const pp = player();
+      if (A.canAwaken(pp) && pp.state !== 'dead' && !(game && game.freezeT > 0)) {
+        A.pending = 0;
+        if (pp.startAwaken) pp.startAwaken(); else A.start(pp);
+      }
+    }
     if (A.activeT > 0) {
       const p = player();
       A.activeT--;
@@ -217,6 +286,7 @@
   /** 進關卡 / 測試重置 */
   A.reset = function () {
     A.gauge = 0; A.activeT = 0; A.timeBonusT = 0; A.key = null; A.wasFull = false; A.q.length = 0;
+    A.bossDmg = {};
     jF = aF = -999;
     const p = player(); if (p) p.awakenT = 0;
     return true;
@@ -287,18 +357,23 @@
   };
 
   // ---------- 招式共用零件 ----------
+  /** 覺醒招專用投射物：與 KB.shoot 相同，另外標上 awaken 旗標（對魔王 ×A.BOSS_MUL） */
+  function ashoot(o) { const pr = KB.shoot(o); if (pr) pr.awaken = true; return pr; }
+  A.shoot = ashoot;
   /** 全畫面判定框（預設 288×208，以卡比為中心；不破壞地形） */
   function bigbox(p, o) {
     o = o || {};
     const w = o.w || 288, h = o.h || 208;
     const cx = o.cx === undefined ? p.cx : o.cx, cy = o.cy === undefined ? p.cy : o.cy;
-    return KB.hitbox({
+    const hb = KB.hitbox({
       x: cx - w / 2, y: cy - h / 2, w, h,
       dmg: o.dmg === undefined ? 10 : o.dmg,
       owner: 'player', type: o.type || 'awaken', life: o.life || 4,
       rehit: o.rehit || 0, pierce: true, knock: o.knock === undefined ? 2 : o.knock,
       breakBlocks: !!o.breakBlocks, freeze: !!o.freeze, onHit: o.onHit || null,
     });
+    if (hb) hb.awaken = true;      // R7-P1-01：對魔王的傷害另乘 A.BOSS_MUL（game.js collisions 讀這個旗標）
+    return hb;
   }
   A.bigbox = bigbox;
   /** 攝影機矩形（世界座標）：拿來把特效鋪滿整個畫面 */
@@ -401,7 +476,7 @@
         // 每段 6 把迴旋刃從卡比身上旋出（真投射物，飛出畫面）
         for (let k = 0; k < 6; k++) {
           const a = (k / 6) * TAU + i * 0.4;
-          KB.shoot({
+          ashoot({
             spr: 'proj_cutter', x: q.cx, y: q.cy, vx: Math.cos(a) * 5, vy: Math.sin(a) * 5,
             dmg: 4, owner: 'player', life: 70, grav: 0, pierce: true, solid: false,
             w: 12, h: 12, rotSpeed: 0.5, breakBlocks: false, type: 'cutter',
@@ -493,7 +568,7 @@
       each(q, i) {
         for (let k = 0; k < 12; k++) {
           const a = (k / 12) * TAU + i * 0.26;
-          KB.shoot({
+          ashoot({
             spr: 'proj_bullet', x: q.cx, y: q.cy, vx: Math.cos(a) * 6, vy: Math.sin(a) * 6,
             dmg: 3, owner: 'player', life: 60, grav: 0, pierce: true, solid: false,
             w: 8, h: 8, breakBlocks: false, type: 'bullet',
@@ -521,7 +596,7 @@
           KB.fx('fx_poof', x, y, { life: 12 });
         }
         v('afterimage', q, { frames: 12, color: '#a070ff', every: 1, alpha: 0.55 });
-        if (i % 2 === 0) KB.shoot({ spr: 'proj_shuriken', x: q.cx, y: q.cy, vx: q.dir * 6, vy: rnd(-1.5, 1.5), dmg: 3, owner: 'player', life: 60, grav: 0, pierce: true, solid: false, w: 10, h: 10, rotSpeed: 0.6, breakBlocks: false, type: 'ninja' });
+        if (i % 2 === 0) ashoot({ spr: 'proj_shuriken', x: q.cx, y: q.cy, vx: q.dir * 6, vy: rnd(-1.5, 1.5), dmg: 3, owner: 'player', life: 60, grav: 0, pierce: true, solid: false, w: 10, h: 10, rotSpeed: 0.6, breakBlocks: false, type: 'ninja' });
       },
     });
   });
@@ -560,7 +635,7 @@
         const R = camRect();
         for (let k = 0; k < 4; k++) {
           const x = R.x + rnd(0, R.w);
-          KB.shoot({
+          ashoot({
             spr: 'proj_arrow_meteor', x, y: R.y - 8, vx: rnd(-1.2, 1.2), vy: 7,
             dmg: 4, owner: 'player', life: 80, grav: 0.12, pierce: true, solid: false,
             w: 10, h: 10, breakBlocks: false, type: 'bow', trail: ['#ffe040', '#ff8020'],
@@ -678,7 +753,7 @@
         v('beam', q.cx, q.cy, 1, 320, { width: 34 - i * 2, color: '#ff7040', frames: 16, taper: true });
         v('beam', q.cx, q.cy, -1, 320, { width: 34 - i * 2, color: '#ffb060', frames: 16, taper: true });
         for (let k = 0; k < 3; k++) {
-          KB.shoot({
+          ashoot({
             spr: 'proj_drakofire', x: R.x + rnd(0, R.w), y: R.y - 6, vx: rnd(-1, 1), vy: 6,
             dmg: 4, owner: 'player', life: 70, grav: 0.1, pierce: true, solid: false,
             w: 12, h: 12, breakBlocks: false, type: 'dragon', trail: ['#ffb060', '#ff5010'],
@@ -698,7 +773,7 @@
         const R = camRect();
         for (let k = 0; k < 4; k++) {
           const a = -Math.PI / 2 + rnd(-0.9, 0.9);
-          KB.shoot({
+          ashoot({
             spr: 'proj_missile', x: q.cx + rnd(-10, 10), y: q.cy, vx: Math.cos(a) * 4.5, vy: Math.sin(a) * 4.5,
             dmg: 3, owner: 'player', life: 80, grav: 0.06, pierce: false, solid: false,
             w: 10, h: 8, breakBlocks: false, type: 'mech', trail: ['#ffe040', '#80c8ff'],
@@ -750,7 +825,7 @@
         if (A.active()) d = Math.max(n, Math.round(n * A.DMG));
         if (A.timeBonusT > 0) d = Math.max(d, Math.round(d * A.TIME_DMG));
       }
-      A.hit();                       // 量表：命中敵人 +6（+ 連擊）
+      A.hit();                       // 量表：命中敵人 +4（+ 連擊）
       return d;
     };
     const upd = pg.update;
