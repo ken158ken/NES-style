@@ -26,8 +26,7 @@ $PY tools/build.py                          # 打包 dist/卡比之星.html（�
 ## 架構重點
 - 全域命名空間 `KB`，classic script，`index.html` 依序載入（新增檔案要同時加進 `index.html`，`tools/build.py` 會自動內嵌）。
 - 內部解析度 256×224，遊戲區 256×192，HUD 在 y 192~224；固定 60fps，`dt` 視為 1 幀。
-- 文字：ASCII 走 8×8 點陣字（`src/art/font.js`）；中文透過 `KB.UI.text`（ui.js）→ `KB.text`（gfx.js）以系統字轉像素。
-  **已知問題：Linux / 無細明體的機器上 12px 中文會變成細線不可讀**（見 `shots/review/*.png`），修法在 gfx.js `renderTextCanvas`。
+- 文字：ASCII 走 8×8 點陣字（`src/art/font.js`）；中文用 OFL 像素字型（`assets/fonts/`：縫合像素 12px、Unifont 16px 子集）由 gfx.js `KB.loadPixelFonts` 以 FontFace 載入、原生尺寸繪製 + 二值化；載入失敗退回系統黑體放大流程。正文 12px、標題 16px，不要用 14px。dist 由 build.py 把字型 base64 內嵌成 `KB.FONT_DATA`。
 - 場景：`KB.setScene(s)`，s 有 `update(dt) / draw(ctx) / enter / exit`。GameScene 在 game.js，其他在 ui.js。
 - 存檔：`KB.save`（localStorage `kirbystar_save`），`KB.saveGame()`。
 

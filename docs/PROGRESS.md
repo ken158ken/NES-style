@@ -3870,3 +3870,107 @@ Round 8 QA（qa8）問題修正 —— agent: fix8（2026-09-12）。負責 R8-P
 1. 永恆時停覺醒招對魔王只有 25%（時停中無敵幀不遞減）；炎劍對威斯比 40%（部位各吃一份上限）。
 2. 未做：挑戰模式的幽靈最佳線重播、成就獎勵除配色外的其他解鎖（例如標題背景 / 音樂盒）、音樂盒（已解鎖曲目試聽）、關卡編輯器。
 3. 紅白機專案已完成研究（../紅白機遊戲開發），提案 A 可重用本引擎：需要 tools/nes_lint.py（256×240 / 25 色 / 每線 8 精靈 / 5 聲道自律）與換皮流程。
+
+## font
+
+> 目標：把中文從「系統黑體 ×4 超取樣再二值化」換成**真正的像素字型**，並全畫面 review 版面。
+> 截圖：`shots/agent_font/`（`before_*.png` = 舊版、`after_*.png` = 新版，皆 scale 3，共 56 個畫面）。
+
+### 1) 字型資產的重大發現（**請總控知悉**）
+用 fontTools 讀 cmap + 瀏覽器實測（畫「國」與不存在字族比對像素）確認：
+
+| 檔案 | 字數 | CJK 統一漢字 | UPM | 可用性 |
+|---|---|---|---|---|
+| `assets/fonts/fusion12-zh_hant.woff2`（縫合像素字體 12px 比例） | 36,558 | **19,214** | 1200 | ✅ 12px 原生繪製 **0% 抗鋸齒**，完美像素 |
+| `assets/fonts/ark16-zh_tw.woff2`（方舟像素字體 16px 比例） | 3,252 | **僅 97** | 1600 | ❌ 「繼續圖鐵鎚醒競績能力設定」**全部沒有**，只有拉丁 / 假名 / 符號 |
+
+檔案本身沒抓錯（與官方 release `ark-pixel-font-16px-proportional-ttf.woff2-v2026.09.01.zip` 內的
+`ark-pixel-16px-proportional-zh_tw.ttf.woff2` **位元組數完全一致 = 69,300**）——是**方舟像素字體的 16px
+尺寸本身還沒收漢字**（該專案只有 10px / 12px 有完整 CJK）。縫合像素字體也只出到 12px，**目前沒有可用的
+16px 繁中像素字型**。
+
+⇒ 實作採「資料驅動 + 自動退回」：`KB.TEXT_CFG.pixelMap` 照原訂寫成 `[[13,'px12',12],[999,'px16',16]]`，
+但渲染時會用 `KB.FONTS.zh[key]`（啟動時實測）判斷該字型畫不畫得出漢字；畫不出就**整串退回 px12**。
+**所以現在所有中文實際都是 12px**；哪天有 16px 繁中像素字型，只要換掉 `assets/fonts/ark16-zh_tw.woff2`，
+程式一行都不用改，標題就自動變 16px。
+
+### 2) 載入與渲染機制（`src/gfx.js`）
+- `KB.FONTS = { px12:'FusionPixel12', px16:'ArkPixel16', ready, failed, loaded:{}, zh:{} }`
+- `KB.FONT_SRC`（相對路徑，file:// 與 http 都可）／`KB.FONT_DATA`（dist 的 base64 data URI，優先）
+- `KB.loadPixelFonts()`：gfx.js 載入時自動呼叫 → `FontFace.load()` → `document.fonts.add()` →
+  實測漢字覆蓋 → `KB.clearTextCache()`。**完成前的頭幾幀走舊路徑，載好自動重畫**，不用等 `document.fonts.ready`。
+- `renderTextCanvas` / `textMask`：字型就緒時走 `pixelMask()` —— **原生字級 `fillText` + `alpha ≥ 128` 二值化，
+  不放大也不縮小、`bold` 不加粗**；`KB.textWidth` 與快取 key 同步（key 帶 `px<px>@<family>`）。
+- 度量：`pixelMetrics()` 用 `measureText('國H')` 的 `actualBoundingBoxAscent` 算基線，**ink 上緣固定在 `y+2`**
+  （與舊路徑視覺位置一致，版面不用整體位移）；12px 遮罩高 15px。
+- 退路完整保留：載入失敗 → `KB.FONTS.failed = true`，舊的超取樣流程原封不動（實測 `shots/agent_font/fallback_titlemenu.png`，無 console error）。
+- ASCII 8×8 點陣字（`KB.FONT`）路徑**完全不變**（`size === 8` 且全字可用時）。
+- 混排：新增 `KB.TEXT_CFG.mixBitmap`，**預設 `false`** ⇒ 中英混排整段都用像素字型。理由：舊的「中文像素字 +
+  英數 8×8」會在同一畫面出現兩種西文字體（操作說明左欄 Fusion、右欄 8×8，很明顯），改成整段像素字型後
+  「Extra 模式」「Z / SELECT：返回選單」「900 幀後自動縮小」視覺一致。**HUD 的 SCORE / 數字 / CLEAR
+  （`size 8`）仍是 8×8 點陣字**，不受影響。想回舊行為把 `mixBitmap` 設 `true` 即可。
+
+### 3) 字級對應表（已寫進 `docs/SPEC.md` 3.5）
+| 呼叫端寫的 size | pixelMap 查到 | 漢字可用性檢查後 | 實際繪製 |
+|---|---|---|---|
+| 8（純 ASCII） | —（不進像素路徑） | — | 8×8 點陣字 |
+| 8~11（含中文） | px12 / 12 | ok | 12px Fusion（`zhOpts` 會先把 size 提到 12） |
+| 12、13（`UI.MS` / `UI.MS_SMALL`） | px12 / 12 | ok | 12px Fusion |
+| 14 | **已全部改掉，不再使用** | — | — |
+| ≥ 16（標題 / 能力名 / 分頁） | px16 / 16 | ark16 無漢字 → 退回 | 12px Fusion |
+- `UI.MS` 14 → **12**、`UI.MS_SMALL` 12（兩者現在同值，但名字保留，語意不變）。
+- 行高：12px 字 14~15px（緊湊表格 13px）；`menu.js` 說明行高 `ds>=14?15:13` → 固定 14。
+- `src/ui.js` 結局 6 行、`src/helper.js` 的 `textPop size:14`（不在我可改範圍，會自動映射到 12px，外觀正常）。
+
+### 4) 逐畫面 review（畫面 / 問題 / 修法）
+| 畫面 | 問題 | 修法 |
+|---|---|---|
+| 操作說明 1/2 頁 | 左欄（最寬 86px）與右欄（x=100）只剩 1~2px，「Z / K / 空白鍵」頂到「跳躍…」 | `ui.js drawHelp`：右欄 x 100→**106**、DW 146→**138**（左欄 88 不動），兩欄間距 8px |
+| 能力圖鑑 / 成就 分頁標籤 | 底線寬度寫死 60 / 32，12px 字只有 48 / 24 → 底線凸出 | `menu.js drawTabs`：底線寬改用 `TW()` 實測；「成就」x 也改成跟著算 |
+| 成就頁（4 頁） | 解鎖時間（8×8，88px 寬，右緣 198）緊貼 `CLEAR`（200 起）→ 讀成「10:14CLEAR」 | 時間右緣 198→**192**、名稱寬 96→**88** |
+| 挑戰選單 | 英文名（`TIME ATTACK` 88px，x=130）與右側成績重疊（**舊版就有**） | `challenge.js drawMenu`：英文名移到中文名**下一行**（x=28, y+11），右半整塊給成績；列距 23→24、highlight 21→22 |
+| 變身 / 覺醒橫幅 | 副標（12px，ink 6~17）被橫幅下緣的橫線（±16.5）切到 | `vfx.js banner`：主標 -14→**-15**、中文副標 4→**1**、ASCII 副標 5→**4** |
+| 成就 toast | 名稱下緣貼到卡片邊框 | `progression.js`：卡片高 26→**28**、名稱 y+11→**y+12**、`TOAST_Y` 152→**150**、堆疊間距 30→32 |
+| 結局（一般 / 暗影 / TRUE END） | 16px 行改成 12px 後行距忽大忽小；TRUE END 最後一行與 `FINAL SCORE` 只差 1px | `ui.js EndingScene`：三組文案 y 全部重排成 15~16px 等距，`FINAL SCORE` 與 `ALL CLEAR(96)` 留 6px |
+| 成績板 挑戰頁 | 表頭「無傷最短」x=200 + 48px = 248，壓到面板右框 | x 200→**194** |
+| 標題 / 標題選單（含捲動） | 無（字變窄後留白更足） | — |
+| 能力圖鑑（3 招 / 6 招 / 剪影） | 無溢出；說明 2 行 + 風味文字 + 6 招都在界內 | 行高固定 14 |
+| 設定頁 / 按鍵設定 / 綁定 / 還原確認 | 無；`LShift` `RShift` `空白鍵` 現在都塞得下不再截斷 | — |
+| 存檔選擇 / 子選單 / 刪除確認 | 無 | — |
+| 選關（7 節點 + 標籤 + 鎖定） | 無；節點標籤底板隨字寬縮小 | — |
+| 遊戲 HUD（能力中文名 / Lv 星 / 量表 / COMBO / EX） | 無 | — |
+| 暫停能力卡（無能力 / 3 招 / 6 招） | 無 | — |
+| 開場橫幅 / toast | 無 | — |
+| 結算（一般 / W7） | 無 | — |
+| 競技場（選能力 / 結算） | 無；魔王順序兩行在 8~248 內 | — |
+| 挑戰（選世界 / Boss Rush / 時間攻擊 HUD / 塔橫幅 / 失敗） | 只有選單列那項 | 見上 |
+| 成績板 9 頁 / GameOver | 無 | — |
+
+### 5) dist 單檔（`tools/build.py`）
+- 兩個 woff2 以 `data:font/woff2;base64,…` 內嵌成 `KB.FONT_DATA`，插在 `src/gfx.js` 之前；字型缺檔會自動略過。
+- `dist/卡比之星.html` 約 1.9 MB → **3,191 KB**（+1,297 KB base64 字型，符合「約 +1.3MB」的預期）。
+- Playwright 驗證 dist：`document.fonts.check('12px FusionPixel12') = true`、`ArkPixel16 = true`、
+  兩個 FontFace 皆 `loaded`、「繼」確實用像素字型畫、`__kb.missing()` 空、無 console error
+  → `shots/agent_font/after_dist_titlemenu.png`。
+- `說明.md` 新增「字型授權」段（縫合像素字體 / 方舟像素字體，SIL OFL 1.1，含 repo 連結與授權檔路徑）。
+
+### 6) 驗證
+- `engine_test 118/118`、`test_progression 101/101`、`test_saves 67/67`、`test_skins 67/67`、`test_challenge 93/93` 全 PASS。
+- 順帶全跑：`test_awaken 237`、`test_helper 131`、`test_mix 245`、`test_mix2 343`、`test_forms 153`、
+  `test_magic 119`、`test_weapons 105`、`test_elements 96`、`test_extra 53`、`test_charge 19` 全 PASS。
+- `node --check src/*.js` 全過；`node tools/level_check.js` 0 error；`tools/build.py` OK。
+- 56 個畫面全跑：`MISSING SPRITES` 空、`no console errors`。
+- `tools/shot.py` **不需要改**：字型在 gfx.js 解析時就開始載，等 `wait_for_function('__kb && KB.LEVELS')`
+  通過時（後面還有 ~40 個 script 要 parse）早就載完了，實測連拍 3 次都是像素字。
+
+### 7) 未解決 / 給總控
+1. **16px 中文做不到**（字型資產限制，見第 1 節）。想要真正的標題級中文，需要一套 16px 繁中像素字型；
+   目前的 hierarchy 靠顏色 + 描邊維持。相對地，`ark16-zh_tw.woff2` 在 dist 裡佔 ~92 KB base64 但幾乎沒被用到
+   （拉丁走 8×8 / Fusion），總控若想省體積可以拿掉 —— 保留是為了將來換字型時不用改程式。
+2. `src/helper.js:983` 有一個 `textPop size:14`（不在我可改檔案內），會自動映射到 12px，畫面正常，但如果
+   要讓程式碼與 SPEC 3.5「不要留 14」一致，請總控順手改成 12。
+3. `CLAUDE.md` 第 29~30 行的「文字：…系統字轉像素／已知問題：Linux 12px 中文變細線」已經過時
+   （不在我可改檔案內），請總控更新成「中文走 `KB.FONTS` 像素字型，見 SPEC 3.5」。
+4. `shots/agent_font/before_*.png` 全數保留供對照；`fallback_titlemenu.png` 是「字型載入失敗」的退路畫面。
+5. `assets/` 目前是 **untracked**（`git status` 顯示 `?? assets/`，`.gitignore` 沒擋）——請總控 `git add assets/`
+   把兩個 woff2 與 `OFL-fusion.txt` / `OFL-ark.txt` 一起進版控，否則別台機器 clone 後只會拿到退路字型。

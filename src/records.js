@@ -188,7 +188,7 @@
       KB.text(ctx, 'W', 12, 38, { color: '#8fa0bc' });
       T(ctx, '時間攻擊', 66, 35, { color: '#8fa0bc', size: UI.MS_SMALL });
       T(ctx, '無傷', 160, 35, { color: '#8fa0bc', size: UI.MS_SMALL });
-      T(ctx, '無傷最短', 200, 35, { color: '#8fa0bc', size: UI.MS_SMALL });
+      T(ctx, '無傷最短', 194, 35, { color: '#8fa0bc', size: UI.MS_SMALL });
       KB.rect(ctx, 10, 48, 236, 1, '#405070');
       const rowH = Math.min(11, Math.floor(74 / Math.max(1, lv.length)));
       for (let i = 0; i < lv.length; i++) {

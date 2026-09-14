@@ -1,7 +1,7 @@
 // 選單系統（agent: ui-menu）—— 暫停選單 / 標題選單 / 能力圖鑑 / 設定 / 遊戲內「?」提示
 // 依賴 ui.js 匯出的繪圖工具（KB.UI.panel / cursor / sprAt / text …），載入順序：ui.js → menu.js。
 // 版面依 docs/DESIGN_REFERENCE.md 第 2 章：上半＝能力卡（圖示 + 名稱 + 風味文字 + 招式表），下半＝選單。
-// 文字規格：中文一律 ≥ UI.MS（14px），放不下時 UI.fitText 會自動降到 12px 再截斷；所有元素夾在 x = 4~252。
+// 文字規格：中文一律 UI.MS（12px 像素字型），放不下時 UI.fitText 會截斷補「…」；所有元素夾在 x = 4~252。
 (function () {
   'use strict';
   const W = KB.W, H = KB.H, VH = KB.VIEW_H;
@@ -267,9 +267,12 @@
     // 分頁標籤列（兩個分頁共用）
     drawTabs(ctx) {
       const on = this.tab;
-      T(ctx, '能力圖鑑', 10, 4, { color: on === 0 ? C.yellow : '#67758f', size: 16 });
-      T(ctx, '成就', 80, 4, { color: on === 1 ? C.yellow : '#67758f', size: 16 });
-      KB.rect(ctx, on === 0 ? 10 : 80, 21, on === 0 ? 60 : 32, 1, C.yellow);
+      // font agent：底線寬度改用實測字寬（12px 像素字比舊的 14px 黑體窄，寫死 60/32 會凸出去）
+      const t0 = '能力圖鑑', t1 = '成就', w0 = TW(t0, { size: 16 }), w1 = TW(t1, { size: 16 });
+      const x1 = 10 + w0 + 14;
+      T(ctx, t0, 10, 4, { color: on === 0 ? C.yellow : '#67758f', size: 16 });
+      T(ctx, t1, x1, 4, { color: on === 1 ? C.yellow : '#67758f', size: 16 });
+      KB.rect(ctx, on === 0 ? 10 : x1, 21, on === 0 ? w0 : w1, 1, C.yellow);
       KB.text(ctx, 'SELECT', 116, 11, { color: '#5c6884' });     // ← 提示：SELECT 切換分頁
     }
     // 成就分頁（40 條 / 每頁 10 條）：清單只放名稱與狀態，游標那一條的提示與解鎖時間畫在下方詳情條
@@ -290,10 +293,12 @@
         KB.rect(ctx, 12, y - 1, 232, ACH_ROW_H - 1, sel ? 'rgba(72,60,120,0.85)' : (ok ? 'rgba(44,36,80,0.65)' : 'rgba(20,26,44,0.5)'));
         if (sel) { KB.rect(ctx, 12, y - 1, 1, ACH_ROW_H - 1, C.yellow); KB.rect(ctx, 243, y - 1, 1, ACH_ROW_H - 1, C.yellow); }
         if (PG && PG.drawTrophy) PG.drawTrophy(ctx, 16, y + 2, ok ? C.yellow : '#3c465c');
-        fit(ctx, a.name, 30, y, 96, { color: ok ? C.yellow : '#6c7c98', size: MS() });
+        // font agent：名稱 12px 像素字最寬約 72 ⇒ 收到 88；時間戳（8×8，11 字 = 88px）右緣
+        // 從 198 移到 192，與 CLEAR(200~240) 之間留 8px，不再黏成「10:14CLEAR」。
+        fit(ctx, a.name, 30, y, 88, { color: ok ? C.yellow : '#6c7c98', size: MS() });
         if (ok) {
           const ts = (PG && PG.achTimeStr) ? PG.achTimeStr(a.id) : '';
-          if (ts) KB.text(ctx, ts, 198, y + 3, { color: '#6c7c98', align: 'right' });
+          if (ts) KB.text(ctx, ts, 192, y + 3, { color: '#6c7c98', align: 'right' });
           KB.text(ctx, 'CLEAR', 240, y + 3, { color: '#80e0a0', align: 'right' });
         } else if (!sprAt(ctx, 'uifb_lock', 234, y + 1, 'tl')) KB.text(ctx, '-', 240, y + 3, { color: '#4c5670', align: 'right' });
       }
@@ -351,7 +356,7 @@
         let ds = compact ? UI.MS_SMALL : ms;
         let dl = info.desc ? UI.wrapLines(info.desc, 228, { size: ds }, 9) : [];
         if (dl.length > 2) { ds = UI.MS_SMALL; dl = UI.wrapLines(info.desc, 228, { size: ds }, 2); }
-        const dlh = ds >= 14 ? 15 : 13;
+        const dlh = 14;                       // 12px 像素字的行高（SPEC 3.5）
         for (let i = 0; i < dl.length; i++) T(ctx, dl[i], 14, 62 + i * dlh, { color: '#c8d8f0', size: ds });
         // 風味文字（灰字、1 行，放不下就省略）
         const divY = compact ? 90 : 104, descBot = 62 + dl.length * dlh, fl = (info.flavour || [])[0];

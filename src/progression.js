@@ -255,7 +255,7 @@
   P.toasts = [];
   P.toastQ = [];
   P.TOAST_MAX = 1;
-  P.TOAST_Y = 152;      // 遊戲區右下（遊戲區 0~192，卡片高 26 → 152~178）
+  P.TOAST_Y = 150;      // 遊戲區右下（遊戲區 0~192，卡片高 28 → 150~178）
   /** 變身 / LEVEL UP / 必殺名稱橫幅是否正在演出（含 KB.game.abilityFlash 的變身閃光） */
   P.bannerBusy = function () {
     const g = KB.game;
@@ -620,7 +620,8 @@
     // 成就 toast：遊戲區右下滑入的卡片（一次 1 張，其餘排隊；避開正中央的變身橫幅與開場 WORLD 橫幅）
     for (let i = 0; i < P.toasts.length; i++) {
       const t = P.toasts[i], def = P.achDef(t.id); if (!def) continue;
-      const w = 146, h = 26, y = P.TOAST_Y + i * 30;
+      // font agent：名稱改用 12px 像素字（ink 高 12px）⇒ 卡片 26→28，名稱下緣才不會貼到框
+      const w = 146, h = 28, y = P.TOAST_Y + i * 32;
       const slide = t.t < 10 ? (10 - t.t) * 8 : (t.t > TOAST_LIFE - 12 ? (t.t - (TOAST_LIFE - 12)) * 10 : 0);
       const x = 250 - w + slide;
       ctx.save();
@@ -632,7 +633,7 @@
       const blink = ((t.t >> 2) & 1) && t.t < 24;
       P.drawTrophy(ctx, x + 5, y + 8, blink ? '#fff' : '#ffe040');
       KB.text(ctx, 'ACHIEVEMENT', x + 18, y + 3, { color: '#8fa0bc' });
-      T(ctx, def.name, x + 18, y + 11, { color: '#ffe040', size: (KB.UI && KB.UI.MS) || 14 });
+      T(ctx, def.name, x + 18, y + 12, { color: '#ffe040', size: (KB.UI && KB.UI.MS) || 12 });
       ctx.restore();
     }
     // Round 7（awaken）：能力圖示下方的覺醒量表（KB.AWAKEN 未載入時什麼都不畫）

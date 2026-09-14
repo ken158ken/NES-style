@@ -716,12 +716,15 @@
     drawMenu(ctx, f, ms) {
       panel(ctx, 8, 42, 240, 122);
       for (let i = 0; i < ITEMS.length; i++) {
-        const it = ITEMS[i], y = 47 + i * 23, sel = i === this.i;
-        if (sel) { KB.rect(ctx, 12, y - 2, 232, 21, 'rgba(255,224,64,0.16)'); cursor(ctx, 16, y + 8, f); }
-        fit(ctx, it.name, 28, y, 96, { color: sel ? C.yellow : '#fff', size: 16 });
-        KB.text(ctx, it.en, 130, y + 2, { color: sel ? '#ffd0a0' : '#7c8ca8' });
+        // font agent：英文名（8×8，最寬 'TIME ATTACK' = 88px）原本放在 x=130，會和右側
+        // 右對齊的成績（'7 關 00:50'）疊在一起 ⇒ 改成第 2 行放在中文名下方，右半整塊留給成績。
+        // 列距 23→24（面板 42~164 放得下 5 列），中文 ink = y-2~y+9、英文 = y+11~y+18。
+        const it = ITEMS[i], y = 46 + i * 24, sel = i === this.i;
+        if (sel) { KB.rect(ctx, 12, y - 3, 232, 22, 'rgba(255,224,64,0.16)'); cursor(ctx, 16, y + 8, f); }
+        fit(ctx, it.name, 28, y - 4, 120, { color: sel ? C.yellow : '#fff', size: 16 });
+        KB.text(ctx, it.en, 28, y + 11, { color: sel ? '#ffd0a0' : '#7c8ca8' });
         const [s, col] = summaryOf(it.id);
-        fit(ctx, s, 244, y + 3, 110, { color: col, align: 'right', size: UI.MS_SMALL });
+        fit(ctx, s, 244, y + 3, 112, { color: col, align: 'right', size: UI.MS_SMALL });
       }
       panel(ctx, 8, 168, 240, 34, 'rgba(12,8,28,0.86)');
       const dl = UI.wrapLines(this.item.desc, 226, { size: UI.MS_SMALL }, 2);

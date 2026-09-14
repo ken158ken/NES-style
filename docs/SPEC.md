@@ -113,6 +113,48 @@ g.spr('kirby_idle', x, y, { flip: dir < 0, t: this.t /* 秒，自動選幀 */, f
 道具：`item_tomato`, `item_food(4種以上)`, `item_1up`, `item_candy`, `item_star`(點數星), `item_abilitystar(2)`, `item_warpstar(2)`
 UI：`ui_hp_full`, `ui_hp_empty`, `ui_kirby_face`, `ui_boss_bar`, `ui_ability_<key>`(能力圖示 24×16), `ui_ability_none`, `ui_cursor`, `ui_font`（8×8 點陣字，見 gfx.js `KB.FONT`）
 
+### 3.5 文字與字型（`src/gfx.js` / `src/ui.js`；agent: font）
+**兩套繪字路徑，都輸出對齊像素格點的實心筆畫：**
+
+| 內容 | 路徑 | 說明 |
+|---|---|---|
+| 純 ASCII 且 `size === 8` | 8×8 點陣字 `KB.FONT`（`src/art/font.js`） | HUD 的 `SCORE` / 數字 / `CLEAR` / 時間戳等。**不變** |
+| 中文、混排、`size ≥ 12` | 像素中文字型（`KB.FONTS`） | 以**原生字級**繪製 + `alpha ≥ 128` 二值化，不放大也不縮小 |
+| 像素字型載入失敗 | 舊的「系統黑體 ×4 超取樣 + 覆蓋率二值化」 | 向下相容的退路，參數在 `KB.TEXT_CFG.scale / cover / boldFrom` |
+
+```js
+KB.FONTS   = { px12:'FusionPixel12', px16:'ArkPixel16', ready, failed, loaded:{}, zh:{} };
+KB.FONT_SRC= { px12:'assets/fonts/fusion12-zh_hant.woff2', px16:'assets/fonts/ark16-zh_tw.woff2' };
+KB.FONT_DATA          // dist 單檔版：tools/build.py 內嵌的 base64 data URI，優先於 FONT_SRC
+KB.TEXT_CFG.pixelMap  // [[字級上限, KB.FONTS 的 key, 實際繪製 px], …] ← 字級對應表，可調
+KB.TEXT_CFG.alpha     // 二值化門檻（預設 128）
+KB.TEXT_CFG.mixBitmap // false（預設）＝中英混排整段都用像素字型；true＝英數走 8×8
+KB.loadPixelFonts()   // gfx.js 載入時自動呼叫；完成後 clearTextCache() 讓畫面自動改用像素字
+```
+- 啟動後的頭幾幀（字型還沒載完）會走舊路徑，載好即自動重畫，**不需要等 `document.fonts.ready`**。
+- `pixelMap` 的字型若畫不出字串裡的漢字（用「國」實測），該串**自動退回 `px12`**；`KB.FONTS.zh` 記錄結果。
+
+**字級策略（統一規則，呼叫端請照這個寫）**
+| 用途 | 字級 | 實際字型 |
+|---|---|---|
+| 正文 / 選單 / 標籤（`UI.MS`） | 12 | 縫合像素字體 12px |
+| 次要灰字（`UI.MS_SMALL`） | 12 | 同上 |
+| 標題 / 能力名 / 分頁（寫 `size: 16`） | 16 → 對應到 12 | 同上（見下方「已知限制」） |
+| HUD 能力中文名 | 12 | 同上 |
+| 英文 / 數字 / HUD | 8 | 8×8 點陣字 |
+- **`size: 14` 一律不要再用**；要嘛 12（正文）要嘛 16（標題，由 `pixelMap` 決定實際 px）。
+- 行高：12px 字用 **14~15px**（緊湊表格 13px 可接受）；若日後 16px 中文可用則 18~20px。
+- 12px 中文的 ink 佔 `y+2 ~ y+13`（`KB.text` 的 `y` 是字框上緣），排版留白請照這個算。
+
+**已知限制（字型資產）**：`ark16-zh_tw.woff2` 是方舟像素字體官方 16px zh_TW 檔，但該尺寸**目前只收了
+3,252 個字，其中 CJK 統一漢字僅 97 個**（常用字如「繼續圖鐵鎚醒競績」都沒有），只能拿來畫拉丁 / 假名 /
+符號。`fusion12-zh_hant.woff2`（縫合像素字體 12px）有 36,558 字、19,214 個漢字，是目前唯一可用的繁中
+像素字型 ⇒ **所有中文實際都畫在 12px**。等到有可用的 16px 繁中像素字型，只要把檔案換掉、
+`KB.TEXT_CFG.pixelMap` 不動，標題就會自動變 16px。
+
+**字型授權**：縫合像素字體（Fusion Pixel Font）／方舟像素字體（Ark Pixel Font），皆為 SIL OFL 1.1，
+授權全文見 `assets/fonts/OFL-fusion.txt`、`assets/fonts/OFL-ark.txt`。
+
 ## 4. Entity 介面 — `src/entity.js`
 ```js
 class Entity {

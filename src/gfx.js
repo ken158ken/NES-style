@@ -8,6 +8,9 @@
     const c = document.createElement('canvas'); c.width = Math.max(1, w); c.height = Math.max(1, h);
     return c;
   }
+  // 需要 getImageData 的離屏畫布（文字遮罩 / 調色）—— 標記 willReadFrequently，
+  // 讓瀏覽器改用 CPU backing store（快很多，也不會噴 Canvas2D 警告）。
+  function readCtx(cv) { return cv.getContext('2d', { willReadFrequently: true }); }
   KB.makeCanvas = makeCanvas;
 
   function hexToRGBA(hex) {
@@ -158,17 +161,130 @@
     return (glyphCache[key] = f);
   }
 
-  // ---------- 中文（系統字型）→ 像素 ----------
-  // 舊作法（1 倍字級 + alpha>110 門檻）在沒有細明體內嵌點陣的機器（Linux / Mac）上，
-  // 12px 中文的筆畫 alpha 不足而被整條砍掉 → 只剩斷斷續續的細線。
-  // 新作法：以 N 倍字級（預設 4 倍＝48px）渲染到離屏畫布，再以「區塊平均覆蓋率」縮回目標字級並二值化
-  //（覆蓋率 ≥ 41% 即填滿）—— 筆畫一律至少 1px 實心且粗細一致，不依賴任何字型的內嵌點陣，
-  // 因此 Windows / Linux / Mac 結果一致。字型一律用黑體（筆畫等寬，縮小後最清楚）。
+  // ---------- 中文 → 像素 ----------
+  // 主路徑：內嵌的**像素中文字型**（見下方「像素字型」），以原生字級繪製 + alpha 二值化 ⇒
+  //         筆畫多的字（繼 / 續 / 圖 / 鐵 / 鎚 / 醒 / 競 / 績）在 12px 也是乾淨的實心像素。
+  // 退路（字型載入失敗 / 還沒載完的頭幾幀）：系統黑體以 N 倍字級（預設 4 倍＝48px）渲染到離屏畫布，
+  //         再以「區塊平均覆蓋率」縮回目標字級並二值化（覆蓋率 ≥ 41% 即填滿）。筆畫粗細一致但較糊。
   KB.ZH_FONT = '"Noto Sans CJK TC","Noto Sans TC","Microsoft JhengHei","微軟正黑體","PingFang TC","Heiti TC","Hiragino Sans GB","Droid Sans Fallback","WenQuanYi Zen Hei",sans-serif';
   KB.defaultFont = size => size + 'px ' + KB.ZH_FONT;
   // scale：超取樣倍率（字級 ×N 渲染）；cover：區塊覆蓋率門檻 0~255（越低筆畫越粗，105 ≈ 41%）；
   // boldFrom：此字級以上改用粗體（標題）。改參數後呼叫 KB.clearTextCache()。
-  KB.TEXT_CFG = { scale: 4, cover: 105, boldFrom: 16 };
+  // alpha：像素字型路徑的二值化門檻；pixelMap：字級 → 像素字型對應（見下方「像素字型」段）。
+  KB.TEXT_CFG = {
+    scale: 4, cover: 105, boldFrom: 16,       // ← 舊路徑（像素字型載入失敗時的退路）
+    alpha: 128,                                // 像素字型二值化門檻（0~255）
+    // 字級對應表：[要求字級上限, KB.FONTS 的 key, 實際繪製的 px]
+    // 由小到大依序比對；字型缺該字（例如 ark16 沒有漢字）會自動退回 px12。
+    pixelMap: [[13, 'px12', 12], [999, 'px16', 16]],
+    // 中英混排：false = 整段都用像素字型（拉丁字也用，畫面只有一種西文字體，視覺一致）
+    // true  = 中文用像素字型、英數用 8×8 點陣字（舊行為）。size===8 的純 ASCII 一律走 8×8，不受此旗標影響。
+    mixBitmap: false,
+  };
+
+  // ---------- 像素字型（SIL OFL 1.1）----------
+  // fusion12 = 縫合像素字體 12px 比例寬（繁中，19,214 個 CJK 漢字，UPM 1200）
+  // ark16    = 方舟像素字體 16px 比例寬（UPM 1600；**只有拉丁 / 假名 / 符號，漢字僅 97 個**）
+  // 兩者都是「點陣外框字」：以原生字級（12 / 16px）繪製時 Canvas 不做任何抗鋸齒，
+  // 直接就是對齊格點的實心像素 —— 不需要超取樣 + 覆蓋率二值化，筆畫多的字也不會糊。
+  KB.FONTS = { px12: 'FusionPixel12', px16: 'ArkPixel16', ready: false, failed: false, loaded: {}, zh: {} };
+  KB.FONT_SRC = KB.FONT_SRC || { px12: 'assets/fonts/fusion12-zh_hant.woff2', px16: 'assets/fonts/ark16-zh_tw.woff2' };
+  // dist 單檔版：tools/build.py 會在 gfx.js 之前塞入
+  //   KB.FONT_DATA = { px12: 'data:font/woff2;base64,…', px16: '…' }
+  // 有 KB.FONT_DATA 就優先用它（雙擊 dist/卡比之星.html 也有像素字型）。
+  // 需要中文字型才畫得出來的字（CJK 漢字 / 注音 / 全形標點 / 假名）
+  const ZH_RE = /[\u2e80-\u9fff\u3000-\u30ff\u3105-\u312f\u31a0-\u31bf\uf900-\ufaff\ufe30-\ufe4f\uff00-\uffef]/;
+
+  function fontSpec(family, px) { return px + 'px "' + family + '"'; }
+
+  // 這個字族在這個字級畫得出漢字嗎？（畫「國」跟一個不存在的字族比對像素）
+  function familyHasZh(family, px) {
+    try {
+      const cv = makeCanvas(px * 2, px * 2), c = readCtx(cv);
+      const shot = fam => {
+        c.clearRect(0, 0, cv.width, cv.height);
+        c.font = fontSpec(fam, px); c.textBaseline = 'alphabetic'; c.fillStyle = '#fff';
+        c.fillText('國', 0, px * 1.5);
+        return c.getImageData(0, 0, cv.width, cv.height).data.join(',');
+      };
+      return shot(family) !== shot('__kb_no_such_font__');
+    } catch (e) { return false; }
+  }
+
+  KB.loadPixelFonts = function () {
+    if (!window.FontFace || !document.fonts) { KB.FONTS.failed = true; return Promise.resolve(KB.FONTS); }
+    const data = KB.FONT_DATA || {};
+    const keys = Object.keys(KB.FONT_SRC);
+    const jobs = keys.map(k => {
+      const url = data[k] || KB.FONT_SRC[k];
+      if (!url) return Promise.resolve(null);
+      let ff;
+      try { ff = new FontFace(KB.FONTS[k], 'url(' + url + ')'); } catch (e) { return Promise.resolve(null); }
+      return ff.load().then(f => { document.fonts.add(f); return k; }, () => null);
+    });
+    return Promise.all(jobs).then(res => {
+      for (const k of res) if (k) KB.FONTS.loaded[k] = true;
+      for (const m of KB.TEXT_CFG.pixelMap) {
+        const k = m[1];
+        KB.FONTS.zh[k] = !!KB.FONTS.loaded[k] && familyHasZh(KB.FONTS[k], m[2]);
+      }
+      KB.FONTS.ready = !!KB.FONTS.loaded.px12;      // px12 是唯一有完整繁中的字型
+      KB.FONTS.failed = !KB.FONTS.ready;
+      KB.clearTextCache();
+      return KB.FONTS;
+    });
+  };
+
+  // 依要求字級挑像素字型；字型沒載好、或該字型畫不出字串裡的漢字就退回 px12；
+  // px12 也沒有 → 回傳 null（走舊的超取樣路徑）。
+  function pixelPlan(str, size) {
+    if (!KB.FONTS.ready) return null;
+    const map = KB.TEXT_CFG.pixelMap || [];
+    let key = 'px12', px = 12;
+    for (const m of map) if (size <= m[0]) { key = m[1]; px = m[2]; break; }
+    const needZh = ZH_RE.test(str);
+    if (!KB.FONTS.loaded[key] || (needZh && !KB.FONTS.zh[key])) { key = 'px12'; px = 12; }
+    if (!KB.FONTS.loaded[key] || (needZh && !KB.FONTS.zh[key])) return null;
+    return { family: KB.FONTS[key], px, key };
+  }
+  KB.pixelPlan = pixelPlan;
+
+  // 字型度量（每個字族 / 字級量一次）：ink 上緣固定落在 y+TOP，與舊路徑的視覺位置一致
+  const INK_TOP = 2;
+  const metCache = {};
+  function pixelMetrics(family, px) {
+    const k = family + '|' + px;
+    if (metCache[k]) return metCache[k];
+    const cv = makeCanvas(8, 8), c = cv.getContext('2d');
+    c.font = fontSpec(family, px); c.textBaseline = 'alphabetic';
+    let asc = Math.round(px * 5 / 6), desc = Math.max(1, Math.round(px / 6));
+    try {
+      const m = c.measureText('國H');
+      if (m.actualBoundingBoxAscent) asc = Math.ceil(m.actualBoundingBoxAscent);
+      const m2 = c.measureText('gpy，。');
+      if (m2.actualBoundingBoxDescent > 0) desc = Math.ceil(m2.actualBoundingBoxDescent);
+    } catch (e) { }
+    return (metCache[k] = { asc, desc, base: INK_TOP + asc, h: INK_TOP + asc + desc + 1 });
+  }
+
+  // 像素字型遮罩：原生字級直接繪製 + alpha 二值化（不縮放、不加粗）
+  function pixelMask(str, plan) {
+    const met = pixelMetrics(plan.family, plan.px), font = fontSpec(plan.family, plan.px);
+    const tmp = makeCanvas(4, 4), tc = tmp.getContext('2d');
+    tc.font = font;
+    const adv = Math.max(1, Math.ceil(tc.measureText(str).width));
+    const w = adv + 2, h = met.h;                        // +2：少數字形會超出 advance
+    const cv = makeCanvas(w, h), c = readCtx(cv);
+    c.font = font; c.textBaseline = 'alphabetic'; c.fillStyle = '#ffffff';
+    c.fillText(str, 0, met.base);
+    const img = c.getImageData(0, 0, w, h), d = img.data, A = KB.TEXT_CFG.alpha;
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i + 3] >= A) { d[i] = 255; d[i + 1] = 255; d[i + 2] = 255; d[i + 3] = 255; }
+      else d[i + 3] = 0;
+    }
+    c.putImageData(img, 0, 0);
+    return { cv, w: adv, h };                             // w 回傳 advance（排版用）
+  }
 
   function scaleFont(font, size, S) {
     const big = (size * S) + 'px';
@@ -181,15 +297,23 @@
 
   const maskCache = new Map();
   // 產生白色遮罩（已二值化）；同一串字不同顏色共用，避免重複超取樣
+  // 像素字型就緒 → 原生字級直繪；否則走舊的「系統黑體 ×N 超取樣 + 覆蓋率二值化」。
   function textMask(str, font, size) {
-    const key = str + '|' + font + '|' + size;
+    const plan = pixelPlan(str, size);
+    const key = str + '|' + (plan ? 'px' + plan.px + '@' + plan.family : font) + '|' + size;
     let m = maskCache.get(key); if (m) return m;
+    if (plan) {
+      m = pixelMask(str, plan);
+      if (maskCache.size > 300) maskCache.clear();
+      maskCache.set(key, m);
+      return m;
+    }
     const cfg = KB.TEXT_CFG, S = Math.max(1, cfg.scale | 0);
     const bigFont = scaleFont(font, size, S);
     const tmp = makeCanvas(4, 4), tc = tmp.getContext('2d');
     tc.font = bigFont;
     const wB = Math.max(S, Math.ceil(tc.measureText(str).width)) + 2 * S, hB = Math.ceil(size * S * 1.45) + 2 * S;
-    const big = makeCanvas(wB, hB), bc = big.getContext('2d');
+    const big = makeCanvas(wB, hB), bc = readCtx(big);
     bc.font = bigFont; bc.textBaseline = 'top'; bc.fillStyle = '#ffffff'; bc.fillText(str, S, S);
     const src = bc.getImageData(0, 0, wB, hB).data;
     const w = Math.ceil(wB / S), h = Math.ceil(hB / S);
@@ -222,11 +346,12 @@
     const key = str + '|' + font + '|' + color + '|' + size;
     if (textCache.has(key)) return textCache.get(key);
     const m = textMask(str, font, size);
-    const cv = makeCanvas(m.w, m.h), c = cv.getContext('2d');
+    const cw = m.cv.width, ch = m.cv.height;
+    const cv = makeCanvas(cw, ch), c = cv.getContext('2d');
     c.drawImage(m.cv, 0, 0);
     c.globalCompositeOperation = 'source-in';
-    c.fillStyle = color; c.fillRect(0, 0, m.w, m.h);
-    const r = { cv, w: m.w, h: m.h };
+    c.fillStyle = color; c.fillRect(0, 0, cw, ch);
+    const r = { cv, w: m.w, h: m.h };                 // w = 排版寬度（可能 < 畫布寬）
     if (textCache.size > 400) textCache.clear();
     textCache.set(key, r);
     return r;
@@ -279,6 +404,10 @@
     const font = opts.font || KB.defaultFont(size);
     return renderTextCanvas(String(str), font, opts.color || '#fff', size).w;
   };
+
+  // 啟動就開始載入像素字型（file:// 與 http 都可）。完成前的頭幾幀會走舊的超取樣路徑，
+  // 載好後 clearTextCache() 會讓所有文字自動改用像素字型重畫。
+  try { KB.loadPixelFonts(); } catch (e) { KB.FONTS.failed = true; }
 
   // 簡單像素矩形 / 圓
   KB.rect = function (ctx, x, y, w, h, color) { ctx.fillStyle = color; ctx.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h)); };

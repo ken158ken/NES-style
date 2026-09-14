@@ -980,7 +980,7 @@
       V('flash', '#ffffff', 8, 0.5);
       V('ring', p.cx, p.cy, { r0: 4, r1: 52, frames: 20, color: '#ffe040', width: 3 });
       V('ring', p.cx, p.cy, { r0: 10, r1: 34, frames: 14, color: '#ffffff', width: 2 });
-      V('textPop', p.cx, p.cy - 26, '合體技!', { color: '#ffe040', size: 14, frames: 60, rise: 12, outline: '#182038' });
+      V('textPop', p.cx, p.cy - 26, '合體技!', { color: '#ffe040', size: 12, frames: 60, rise: 12, outline: '#182038' });
       KB.particles(p.cx, p.cy, ['#ffe040', '#ffffff', '#a8d8f8'], 18, { spread: 3, life: 26 });
       sfx('ultimate', 'clone_summon');
       // 「合體技!」已經用 textPop 畫在玩家頭上（世界座標），不再發 toast，避免上下兩行同樣的字

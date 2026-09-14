@@ -1,8 +1,8 @@
 // UI：標題畫面 / 選關地圖 / HUD / 魔王血條 / 暫停 / Game Over / 結局
 // 所有精靈皆先以 KB.has 檢查；缺圖時改用本檔註冊的 uifb_* 備援圖或純繪圖，畫面本身就要完整好看。
 // 版面常數集中在 KB.UI.LAYOUT，美術 / game.js 可依此對齊。
-// 文字：ASCII 走 8×8 點陣字；中文一律 12px / 16px 黑體（gfx.js 超取樣轉像素；8~10px 中文不可讀）。
-//       其他檔案可用 KB.UI.text / KB.UI.textWidth / KB.UI.bigText 取得相同效果。
+// 文字：ASCII（size 8）走 8×8 點陣字；中文與混排走 12px 像素字型（縫合像素字體，gfx.js KB.FONTS）。
+//       其他檔案可用 KB.UI.text / KB.UI.textWidth / KB.UI.bigText 取得相同效果。字級規則見 SPEC 3.5。
 (function () {
   'use strict';
   const W = KB.W, H = KB.H, VH = KB.VIEW_H, HUD_Y = KB.HUD_Y;
@@ -27,14 +27,16 @@
   const clearedOf = id => !!(KB.save && KB.save.cleared && KB.save.cleared[id]);
 
   // ---------- 文字工具 ----------
-  // 中文字型：一律用黑體（筆畫等寬），由 gfx.js 以 3 倍字級超取樣後二值化成像素字，
-  // 不依賴細明體的內嵌點陣 → Windows / Linux / Mac 結果一致。
+  // 中文字型：gfx.js 以 12px 像素字型（FusionPixel12）原生字級直接繪製 + 二值化 —— 筆畫多的字
+  // （繼 / 續 / 圖 / 鐵 / 鎚 / 醒 / 競 / 績）也是乾淨的實心像素；字型載不到才退回黑體超取樣。
   const ZH = KB.ZH_FONT;
   UI.zhFont = s => s + 'px ' + ZH;
   const bitmapOK = s => String(s).split('').every(ch => KB.FONT[ch] || ch === ' ');
-  // 中文可讀性：QA 實測 12px 高筆畫字（繼 / 續 / 圖 / 開）仍糊，選單文字一律 ≥ MS（14px）
-  UI.MS = 14;         // 選單 / 標籤標準中文字級
-  UI.MS_SMALL = 12;   // 空間真的不夠時的下限（例如兩欄說明表的右欄）
+  // 中文可讀性：改用像素字型後 12px 已完全清晰（原本 14px 是為了救超取樣的糊字）
+  // 中文一律走 12px 像素字型（縫合像素字體）；MS / MS_SMALL 保留兩個名字讓呼叫端語意不變，
+  // 但值都是 12 —— 12px 以下的中文不可讀，12px 以上又沒有可用的繁中像素字型（見 SPEC 3.5）。
+  UI.MS = 12;         // 選單 / 標籤標準中文字級
+  UI.MS_SMALL = 12;   // 次要資訊（灰字 / 兩欄表的右欄）
   // 標題 logo 中心 y（sprite 160×48 ⇒ 佔 y 14~62）與標題選單面板可用的上 / 下界（menu.js TitleMenu 用）
   UI.TITLE_LOGO_CY = 38; UI.TITLE_MENU_TOP = 64; UI.TITLE_MENU_BOTTOM = 182;
   function zhOpts(str, o) {
@@ -45,7 +47,7 @@
     const s = size < 12 ? 12 : size;                      // 中文最小 12px
     return Object.assign({}, o, { size: s, font: UI.zhFont(s) });
   }
-  // 12px 混排：英數（點陣字可用者）用 8×8 點陣字、其餘用細明體，逐段繪製
+  // 混排切段（只在 KB.TEXT_CFG.mixBitmap === true 時才用）：英數走 8×8 點陣字、其餘走像素字型
   function runs(str) {
     const out = []; let cur = null;
     for (const ch of String(str)) {
@@ -56,8 +58,9 @@
   }
   const isMixed = rs => rs.some(r => r.bm && r.s.trim()) && rs.some(r => !r.bm);
   function runWidth(r, o) { return r.bm ? r.s.length * 8 : KB.textWidth(r.s, { size: o.size, font: o.font }); }
-  // 混排：12~16px 中文旁的英數改用 8×8 點陣字（更銳利也更省寬度）；bmDY 讓點陣字對齊中文的視覺中線
-  const canMix = o => !!o.font && !o.nomix && o.size >= 12 && o.size <= 16;
+  // 混排：預設 KB.TEXT_CFG.mixBitmap = false ⇒ 整段都用像素字型（畫面只有一種西文字體，視覺一致）；
+  // 設成 true 才會把英數換成 8×8 點陣字，bmDY 讓點陣字對齊中文的視覺中線
+  const canMix = o => KB.TEXT_CFG.mixBitmap !== false && !!o.font && !o.nomix && o.size >= 12 && o.size <= 16;
   const bmDY = size => Math.round(size / 4);
   // 與 KB.text 同介面；含中文時自動套用黑體並把字級提升到 ≥12
   function T(ctx, str, x, y, o) {
@@ -344,7 +347,7 @@
     KB.rect(ctx, cx - 34, cy + 22, 68, 13, '#e83060'); KB.rect(ctx, cx - 36, cy + 23, 72, 11, '#e83060');
     KB.text(ctx, 'FAN GAME', cx, cy + 25, { color: '#fff', align: 'center' });
   }
-  // 單行塞進 maxw：先照原字級，放不下就降到 12px，再放不下才截斷補「…」
+  // 單行塞進 maxw：先照原字級，放不下就降到 12px（中文的最小可讀字級），再放不下才截斷補「…」
   function fit(ctx, str, x, y, maxw, o) {
     let s = String(str);
     o = o || {};
@@ -432,15 +435,16 @@
     const top = 35, bottom = 170, n = Math.max(1, rows.length);
     const gap = Math.max(11, Math.min(18, Math.floor((bottom - top) / n)));
     let y = top + Math.max(0, Math.floor((bottom - top - gap * n) / 2));
-    // 兩欄：左欄按鍵（x 12，寬 78）、右欄說明（x 94，寬 152）
-    // 同一欄用同一字級（14px 放不下才整欄降 12px），避免每列字級不同看起來參差
-    const KW = 88, DW = 146;
+    // 兩欄：左欄按鍵（x 12，寬 88）、右欄說明（x 106，寬 138）
+    // font agent：改用 12px 像素字後左欄實測最寬 86、右欄最寬 132 —— 右欄右移到 106，
+    // 兩欄之間才留得出 8px 空隙（原本 x=100 時「Z / K / 空白鍵」會頂到「跳躍…」）。
+    const KW = 88, DW = 138, DX = 106;
     const allFit = (i, w, o) => rows.every(r => TW(r[i], o) <= w);
     const kSize = allFit(0, KW, { size: UI.MS, nomix: true }) ? UI.MS : UI.MS_SMALL;
     const dSize = allFit(1, DW, { size: UI.MS }) ? UI.MS : UI.MS_SMALL;
     for (const [k, d] of rows) {
       fit(ctx, k, 12, y, KW, { color: C.cyan, size: kSize, nomix: true });
-      fit(ctx, d, 100, y, DW, { color: '#fff', size: dSize });
+      fit(ctx, d, DX, y, DW, { color: '#fff', size: dSize });
       y += gap;
     }
     fit(ctx, '←→ 換頁　　' + (opts.hint || 'M：靜音　　SELECT：返回'), 128, 173, 238, { color: C.grey, align: 'center', size: UI.MS });
@@ -1188,26 +1192,28 @@
       this.shadow = shadow; this.trueEnd = trueEnd;
       // R7-P2-01：真結局比一般結局多 2 行，原本 FINAL SCORE(y92) 會和 ALL CLEAR(y98) 疊在一起；
       // 整體上移 2~8px，讓 FINAL SCORE(84~92) 與 ALL CLEAR(96~104) 之間留 4px。
+      // font agent：中文一律 12px 像素字（ink 佔 y+2~y+13）⇒ 行距統一 16px，
+      // 最後一行 FINAL SCORE 是 8×8 點陣字，與上一行留 4px、與 ALL CLEAR(96) 留 6px。
       this.lines = trueEnd ? [
         { s: '夢的盡頭，你把自己找了回來', size: 16, color: '#ffd8f8', y: 4 },
-        { s: '夢幻迴廊的門緩緩闔上', size: 14, color: '#fff', y: 24 },
-        { s: '普普星的夜空，久違地安靜', size: 14, color: '#fff', y: 40 },
-        { s: '能力發現 ' + EndingScene.seenLine() + '　成就 ' + EndingScene.achLine(), size: 12, color: '#c8d8f0', y: 56 },
-        { s: '大星星 ' + EndingScene.starLine() + '　通關次數 ' + EndingScene.playLine(), size: 12, color: '#c8d8f0', y: 70 },
-        { s: 'FINAL SCORE ' + pad7(this.score), size: 8, color: '#fff', y: 84 },
+        { s: '夢幻迴廊的門緩緩闔上', size: 12, color: '#fff', y: 20 },
+        { s: '普普星的夜空，久違地安靜', size: 12, color: '#fff', y: 35 },
+        { s: '能力發現 ' + EndingScene.seenLine() + '　成就 ' + EndingScene.achLine(), size: 12, color: '#c8d8f0', y: 50 },
+        { s: '大星星 ' + EndingScene.starLine() + '　通關次數 ' + EndingScene.playLine(), size: 12, color: '#c8d8f0', y: 65 },
+        { s: 'FINAL SCORE ' + pad7(this.score), size: 8, color: '#fff', y: 82 },
       ] : shadow ? [
-        { s: '影子消散，星之彼端重新亮起', size: 16, color: C.yellow, y: 10 },
-        { s: '追到最後才發現，那個影子', size: 14, color: '#fff', y: 32 },
-        { s: '一直是你自己走過來的路', size: 14, color: '#fff', y: 48 },
-        { s: '能力發現 ' + EndingScene.seenLine(), size: 12, color: '#c8d8f0', y: 66 },
-        { s: '成就 ' + EndingScene.achLine() + '　大星星 ' + EndingScene.starLine(), size: 12, color: '#c8d8f0', y: 80 },
-        { s: 'FINAL SCORE ' + pad7(this.score), size: 8, color: '#fff', y: 94 },
+        { s: '影子消散，星之彼端重新亮起', size: 16, color: C.yellow, y: 8 },
+        { s: '追到最後才發現，那個影子', size: 12, color: '#fff', y: 26 },
+        { s: '一直是你自己走過來的路', size: 12, color: '#fff', y: 42 },
+        { s: '能力發現 ' + EndingScene.seenLine(), size: 12, color: '#c8d8f0', y: 58 },
+        { s: '成就 ' + EndingScene.achLine() + '　大星星 ' + EndingScene.starLine(), size: 12, color: '#c8d8f0', y: 74 },
+        { s: 'FINAL SCORE ' + pad7(this.score), size: 8, color: '#fff', y: 91 },
       ] : [
-        { s: '和平回到了普普星！', size: 16, color: C.yellow, y: 12 },
+        { s: '和平回到了普普星！', size: 16, color: C.yellow, y: 16 },
         { s: '感謝遊玩', size: 16, color: '#fff', y: 38 },
-        { s: '本作為同人致敬作品', size: 14, color: '#c8d8f0', y: 60 },
-        { s: '所有美術與音樂皆為原創', size: 14, color: '#c8d8f0', y: 76 },
-        { s: 'FINAL SCORE ' + pad7(this.score), size: 8, color: '#fff', y: 96 },
+        { s: '本作為同人致敬作品', size: 12, color: '#c8d8f0', y: 58 },
+        { s: '所有美術與音樂皆為原創', size: 12, color: '#c8d8f0', y: 74 },
+        { s: 'FINAL SCORE ' + pad7(this.score), size: 8, color: '#fff', y: 92 },
       ];
       this.gapUnits = 8; this.reveal = 0;
       this.total = this.lines.reduce((a, l) => a + l.s.length + this.gapUnits, 0);
