@@ -11,27 +11,37 @@
 - 固定步進 60 FPS（`dt` 一律視為 1 frame；速度單位 = px/frame）
 - 磁磚 16×16；遊戲畫面區 256×192（16×12 格），底部 32px 為 HUD
 
-## 2. 檔案配置
+## 2. 檔案配置（2026-09-14）
 ```
-index.html            載入順序（勿改順序；新增檔案請加在對應區段）
-src/const.js          常數 / 共用調色盤
-src/gfx.js            精靈註冊、繪製、文字
-src/input.js          鍵盤 / 手把 / 虛擬輸入
-src/audio.js          音效 + 音樂（agent: audio）
-src/tilemap.js        磁磚地圖、物理碰撞
-src/entity.js         Entity 基底、粒子、通用投射物
-src/player.js         卡比狀態機
-src/abilities.js      複製能力（agent: abilities）
-src/enemies.js        敵人（agent: enemies）
-src/items.js          道具 / 星星彈 / 能力星
-src/bosses.js         魔王（agent: bosses）
-src/levels.js         關卡資料（agent: levels）
-src/game.js           GameScene（房間、鏡頭、門、HUD 呼叫）
-src/ui.js             標題 / 選關 / 暫停 / GameOver / 結局 / HUD（agent: ui）
-src/art/*.js          像素美術資料（agent: art-*）
-src/main.js           啟動、主迴圈、除錯 API
-tools/shot.py         Playwright 截圖工具（畫面比對用）
-tools/sheet.html      精靈總表檢視
+index.html                 載入順序（勿改順序；新增檔案加在對應區段，build.py 自動內嵌）
+assets/fonts/              像素字型（fusion12-zh_hant.woff2、unifont16-subset.woff2、OFL 授權、unifont_chars.txt 產生物）
+src/const.js               常數 / 調色盤 / 能力鍵表 / 主題
+src/gfx.js                 精靈註冊繪製、8×8 點陣字、像素字型載入（KB.loadPixelFonts）與中文渲染
+src/input.js               鍵盤 / 手把 / 虛擬輸入、按鍵綁定（BINDINGS / rebind / loadBindings）
+src/audio.js               151 sfx / 40 music / 環境音、音量 / duck / tempo API
+src/tilemap.js             磁磚地圖、物理、X F I W 磁磚、冰面 / 燃燒狀態
+src/entity.js              Entity / Enemy / Projectile / Hitbox、Extra 倍率、屬性標籤
+src/vfx.js                 KB.VFX 特效系統（24 API、變身演出、獨立 RNG）
+src/elements.js            KB.ELEM 元素反應（燒草 / 木箱 / 冰面 / 電擊水域 / 弱點 / 燃燒 / 麻痺）
+src/art/*.js               像素美術：font kirby kirby_weapons kirby_magic kirby_forms kirby_mix kirby_mix2 kirby_awaken enemies bosses world world6 world7 items_ui backgrounds helper
+src/skins.js               KB.SKINS 12 配色（重著色）
+src/player.js              卡比狀態機、變身鉤子 p.form、SELECT 長按、覺醒觸發
+src/abilities.js           8 基本能力；abilities_weapons / _magic / _forms（12 新能力）；abilities_mix / _mix2（24 混合）
+src/helper.js              KB.Helper 夥伴 ×2（指令 / 合體 / 等級）
+src/items.js               道具、能力星（丟星混合）、台座 essence、傳送星、大星星、開關、gatekeeper
+src/enemies.js             基本敵人 + 中魔王；enemies_weapons / _magic / _forms 新敵人
+src/bosses.js              5 魔王（二階段 / Extra 變體）；bosses_w6.js 暗影卡比 + W6 敵人；bosses_w7.js 夢魘之核 + W7 敵人
+src/levels.js              w1~w6 + 疊加層 MECH / R4 / R5 / ELEM6 / ELEM6B；levels_w7.js；levels_extra.js（EXTRA / NORMAL 層 + KB.applyRoomLayers）
+src/game.js                GameScene（房間 / 鏡頭 / 碰撞 / 門 / 結算流程 / 時停 / VFX 鉤子 / 挑戰鉤子）
+src/progression.js         KB.PROG 等級 / 連擊 / Rank / 成就 40 / 事件
+src/awaken.js              KB.AWAKEN Lv4 覺醒量表與 44 覺醒招
+src/records.js             成績板 KB.RecordsScene
+src/saves.js               KB.SAVES 3 存檔槽 + 全域設定；keyconfig.js 按鍵重映射場景
+src/ui.js                  Title / StageSelect / Result / GameOver / Ending / HUD / 文字工具 UI.text
+src/menu.js                暫停 / 標題選單 / 圖鑑 / 成就頁 / 設定
+src/arena.js               競技場；challenge.js 挑戰模式（時間攻擊 / 無傷 / 塔 / 每日）
+src/main.js                啟動、主迴圈、縮放、除錯 API
+tools/                     shot.py 截圖、engine_test.py、enemy_test.py、boss_test.py、test_*.py ×14、playthrough.py、level_check.js、audio_check.js、render_music.py、font_subset.py、build.py
 ```
 
 ## 3. 精靈（Sprite）格式 — `src/gfx.js`
