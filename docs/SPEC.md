@@ -113,7 +113,7 @@ g.spr('kirby_idle', x, y, { flip: dir < 0, t: this.t /* 秒，自動選幀 */, f
 道具：`item_tomato`, `item_food(4種以上)`, `item_1up`, `item_candy`, `item_star`(點數星), `item_abilitystar(2)`, `item_warpstar(2)`
 UI：`ui_hp_full`, `ui_hp_empty`, `ui_kirby_face`, `ui_boss_bar`, `ui_ability_<key>`(能力圖示 24×16), `ui_ability_none`, `ui_cursor`, `ui_font`（8×8 點陣字，見 gfx.js `KB.FONT`）
 
-### 3.5 文字與字型（`src/gfx.js` / `src/ui.js`；agent: font）
+### 3.5 文字與字型（`src/gfx.js` / `src/ui.js`；agent: font / font2）
 **兩套繪字路徑，都輸出對齊像素格點的實心筆畫：**
 
 | 內容 | 路徑 | 說明 |
@@ -123,37 +123,68 @@ UI：`ui_hp_full`, `ui_hp_empty`, `ui_kirby_face`, `ui_boss_bar`, `ui_ability_<k
 | 像素字型載入失敗 | 舊的「系統黑體 ×4 超取樣 + 覆蓋率二值化」 | 向下相容的退路，參數在 `KB.TEXT_CFG.scale / cover / boldFrom` |
 
 ```js
-KB.FONTS   = { px12:'FusionPixel12', px16:'ArkPixel16', ready, failed, loaded:{}, zh:{} };
-KB.FONT_SRC= { px12:'assets/fonts/fusion12-zh_hant.woff2', px16:'assets/fonts/ark16-zh_tw.woff2' };
+KB.FONTS   = { px12:'FusionPixel12', px16:'Unifont16', ready, failed, loaded:{}, zh:{} };
+KB.FONT_SRC= { px12:'assets/fonts/fusion12-zh_hant.woff2', px16:'assets/fonts/unifont16-subset.woff2' };
 KB.FONT_DATA          // dist 單檔版：tools/build.py 內嵌的 base64 data URI，優先於 FONT_SRC
+KB.FONT_CHARS16       // px16 子集的字元清單（build.py 由 assets/fonts/unifont_chars.txt 內嵌；index.html 直接跑＝null）
 KB.TEXT_CFG.pixelMap  // [[字級上限, KB.FONTS 的 key, 實際繪製 px], …] ← 字級對應表，可調
 KB.TEXT_CFG.alpha     // 二值化門檻（預設 128）
+KB.TEXT_CFG.boldFrom16// 16（預設）＝此字級以上的像素字型多畫一次 +1px 假粗體；999 = 關閉
 KB.TEXT_CFG.mixBitmap // false（預設）＝中英混排整段都用像素字型；true＝英數走 8×8
 KB.loadPixelFonts()   // gfx.js 載入時自動呼叫；完成後 clearTextCache() 讓畫面自動改用像素字
+KB.pixelPlan(str,size)// → {family, px, key} 或 null；可在 console 查某一串字會用哪個字型
 ```
 - 啟動後的頭幾幀（字型還沒載完）會走舊路徑，載好即自動重畫，**不需要等 `document.fonts.ready`**。
 - `pixelMap` 的字型若畫不出字串裡的漢字（用「國」實測），該串**自動退回 `px12`**；`KB.FONTS.zh` 記錄結果。
+- **缺字退路（px16 是子集字型）**：畫之前逐字檢查 —— ①`KB.FONT_CHARS16` 有清單就先快篩；
+  ②實際畫一次跟「同字族的 U+E000（.notdef）」「不存在字族（系統字）」比對像素，任一相同就算缺字。
+  只要整串裡有一個字缺，**整串退回 12px Fusion**，畫面上絕不會出現豆腐。結果按字快取（首次 ~2ms，之後幾乎 0）。
 
 **字級策略（統一規則，呼叫端請照這個寫）**
 | 用途 | 字級 | 實際字型 |
 |---|---|---|
-| 正文 / 選單 / 標籤（`UI.MS`） | 12 | 縫合像素字體 12px |
+| 正文 / 選單項目 / 標籤（`UI.MS`） | 12 | 縫合像素字體 12px |
 | 次要灰字（`UI.MS_SMALL`） | 12 | 同上 |
-| 標題 / 能力名 / 分頁（寫 `size: 16`） | 16 → 對應到 12 | 同上（見下方「已知限制」） |
-| HUD 能力中文名 | 12 | 同上 |
+| **標題級**（寫 `size: 16`） | 16 | GNU Unifont 16px 子集（＋1px 假粗體） |
+| HUD 能力中文名 | 12 | 縫合像素字體 12px |
 | 英文 / 數字 / HUD | 8 | 8×8 點陣字 |
-- **`size: 14` 一律不要再用**；要嘛 12（正文）要嘛 16（標題，由 `pixelMap` 決定實際 px）。
-- 行高：12px 字用 **14~15px**（緊湊表格 13px 可接受）；若日後 16px 中文可用則 18~20px。
-- 12px 中文的 ink 佔 `y+2 ~ y+13`（`KB.text` 的 `y` 是字框上緣），排版留白請照這個算。
+- **`size: 14` 一律不要再用**；要嘛 12（正文 / 選單項目）要嘛 16（標題）。
+- 「標題級」＝**每個畫面最多一兩處**的主角文字：頁首標題（操作說明 / 設定 / 成績板 / 挑戰模式 /
+  選擇存檔 / 按鍵設定 / 競技場）、關名（選關下方面板、開場橫幅、結算 STAGE CLEAR 下、成績板世界頁）、
+  能力名（暫停能力卡 / 圖鑑 / 競技場選能力）、變身 / 覺醒橫幅主標、魔王登場字幕、綁定按鍵彈窗、
+  結局第一行、`過關！`。**選單項目、清單列、分頁標籤、GameOver 選項一律 12px**（它們旁邊都有
+  8×8 英文副標或右側成績，16px 會直接疊字）。
+- 行高：12px 字用 **14~15px**（緊湊表格 13px 可接受）；16px 字上下各留 **≥ 3px**（行距 20~22px）。
+- ink 高度：12px 中文佔 `y+2 ~ y+13`、**16px 中文佔 `y+2 ~ y+18`**（`KB.text` 的 `y` 是字框上緣，
+  兩者上緣對齊同一條線 `INK_TOP=2`，所以把 12px 改成 16px **不會上移**，只會往下長 5px）。
+- 16px Unifont 是「方正細」的等寬 16×16 點陣（全形 16px / 半形 8px），原生筆畫只有 1px ⇒
+  跟旁邊的 12px 縫合字擺在一起反而顯得更輕、在深色面板上不夠份量。統一解法是
+  **`KB.TEXT_CFG.boldFrom16 = 16`（假粗體）**：`pixelMask` 把同一串字再畫一次、水平 +1px，
+  筆畫變 2px 實心，排版寬度也跟著 +1px。四種寫法實測（深色面板 / 淺色選關地圖 ×
+  `翠綠草原`（疏）/`繼續圖鑑`（密））：
+  | | 深色底 | 淺色底 |
+  |---|---|---|
+  | 原樣 | 太細，比 12px 正文還輕 | 幾乎看不見 |
+  | **加粗（採用）** | **最清楚，份量與 12px 正文一致** | 可讀，仍建議配面板 |
+  | 只加描邊 | 深色描邊在深色底上沒作用 | 有對比但筆畫仍細，密字（鑑）內部縫隙被描邊糊掉 |
+  | 加粗＋描邊 | 與加粗差不多 | 密字整個糊成一塊 |
+  ⇒ **全域一律加粗**；描邊只保留在原本呼叫端就有寫 `outline` 的地方（畫在天空 / 背景上的
+  `過關！`、魔王登場字幕、橫幅主標 —— 這些都是 3~5 個字的疏字，不會糊）。
 
-**已知限制（字型資產）**：`ark16-zh_tw.woff2` 是方舟像素字體官方 16px zh_TW 檔，但該尺寸**目前只收了
-3,252 個字，其中 CJK 統一漢字僅 97 個**（常用字如「繼續圖鐵鎚醒競績」都沒有），只能拿來畫拉丁 / 假名 /
-符號。`fusion12-zh_hant.woff2`（縫合像素字體 12px）有 36,558 字、19,214 個漢字，是目前唯一可用的繁中
-像素字型 ⇒ **所有中文實際都畫在 12px**。等到有可用的 16px 繁中像素字型，只要把檔案換掉、
-`KB.TEXT_CFG.pixelMap` 不動，標題就會自動變 16px。
+**16px 字集維護（`tools/font_subset.py`）**：`unifont16-subset.woff2` 只收「`src/**/*.js` 裡出現過的
+非 ASCII 字元 ＋ ASCII ＋ 一組常用標點」＝ 1,827 字 / 56 KB（Unifont 全字檔 5 MB，內嵌進 dist 會變 6.7 MB，
+所以一定要子集；**原檔不要放進專案**，工具會下載到 `/tmp/kb-unifont`）。
+```bash
+.venv/bin/python tools/font_subset.py            # 重新掃 src 產生子集 + assets/fonts/unifont_chars.txt
+.venv/bin/python tools/font_subset.py --check    # 只檢查：列出 src 有、子集沒有的字（CI 友善，缺字時 exit 1）
+.venv/bin/python tools/build.py                  # 產生的檔案要重跑 build 才會進 dist
+```
+**新增中文文案之後請跑一次 `--check`**；沒重跑子集的話新字會被缺字偵測擋掉、整串退回 12px（畫面不會壞，
+但標題會變小）。
 
-**字型授權**：縫合像素字體（Fusion Pixel Font）／方舟像素字體（Ark Pixel Font），皆為 SIL OFL 1.1，
-授權全文見 `assets/fonts/OFL-fusion.txt`、`assets/fonts/OFL-ark.txt`。
+**字型授權**：縫合像素字體（Fusion Pixel Font，SIL OFL 1.1，`assets/fonts/OFL-fusion.txt`）／
+GNU Unifont 16.0.04（GPLv2＋font exception 與 SIL OFL 1.1 雙授權，本專案依 OFL 1.1 使用，
+`assets/fonts/OFL-unifont.txt`）。
 
 ## 4. Entity 介面 — `src/entity.js`
 ```js

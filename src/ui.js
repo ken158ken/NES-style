@@ -1194,20 +1194,22 @@
       // 整體上移 2~8px，讓 FINAL SCORE(84~92) 與 ALL CLEAR(96~104) 之間留 4px。
       // font agent：中文一律 12px 像素字（ink 佔 y+2~y+13）⇒ 行距統一 16px，
       // 最後一行 FINAL SCORE 是 8×8 點陣字，與上一行留 4px、與 ALL CLEAR(96) 留 6px。
+      // font2：第一行回到 16px（ink 佔 y+2~y+18）⇒ 真結局 / 暗影結局的後續行各往下 2px，
+      //        第 1~2 行之間才留得出 4px（原本 trueEnd 的第 2 行 ink 起點 22 會貼到第 1 行的 22）。
       this.lines = trueEnd ? [
-        { s: '夢的盡頭，你把自己找了回來', size: 16, color: '#ffd8f8', y: 4 },
-        { s: '夢幻迴廊的門緩緩闔上', size: 12, color: '#fff', y: 20 },
-        { s: '普普星的夜空，久違地安靜', size: 12, color: '#fff', y: 35 },
-        { s: '能力發現 ' + EndingScene.seenLine() + '　成就 ' + EndingScene.achLine(), size: 12, color: '#c8d8f0', y: 50 },
-        { s: '大星星 ' + EndingScene.starLine() + '　通關次數 ' + EndingScene.playLine(), size: 12, color: '#c8d8f0', y: 65 },
-        { s: 'FINAL SCORE ' + pad7(this.score), size: 8, color: '#fff', y: 82 },
+        { s: '夢的盡頭，你把自己找了回來', size: 16, color: '#ffd8f8', y: 2 },
+        { s: '夢幻迴廊的門緩緩闔上', size: 12, color: '#fff', y: 22 },
+        { s: '普普星的夜空，久違地安靜', size: 12, color: '#fff', y: 37 },
+        { s: '能力發現 ' + EndingScene.seenLine() + '　成就 ' + EndingScene.achLine(), size: 12, color: '#c8d8f0', y: 52 },
+        { s: '大星星 ' + EndingScene.starLine() + '　通關次數 ' + EndingScene.playLine(), size: 12, color: '#c8d8f0', y: 67 },
+        { s: 'FINAL SCORE ' + pad7(this.score), size: 8, color: '#fff', y: 84 },
       ] : shadow ? [
-        { s: '影子消散，星之彼端重新亮起', size: 16, color: C.yellow, y: 8 },
-        { s: '追到最後才發現，那個影子', size: 12, color: '#fff', y: 26 },
-        { s: '一直是你自己走過來的路', size: 12, color: '#fff', y: 42 },
-        { s: '能力發現 ' + EndingScene.seenLine(), size: 12, color: '#c8d8f0', y: 58 },
-        { s: '成就 ' + EndingScene.achLine() + '　大星星 ' + EndingScene.starLine(), size: 12, color: '#c8d8f0', y: 74 },
-        { s: 'FINAL SCORE ' + pad7(this.score), size: 8, color: '#fff', y: 91 },
+        { s: '影子消散，星之彼端重新亮起', size: 16, color: C.yellow, y: 6 },
+        { s: '追到最後才發現，那個影子', size: 12, color: '#fff', y: 28 },
+        { s: '一直是你自己走過來的路', size: 12, color: '#fff', y: 44 },
+        { s: '能力發現 ' + EndingScene.seenLine(), size: 12, color: '#c8d8f0', y: 60 },
+        { s: '成就 ' + EndingScene.achLine() + '　大星星 ' + EndingScene.starLine(), size: 12, color: '#c8d8f0', y: 76 },
+        { s: 'FINAL SCORE ' + pad7(this.score), size: 8, color: '#fff', y: 93 },
       ] : [
         { s: '和平回到了普普星！', size: 16, color: C.yellow, y: 16 },
         { s: '感謝遊玩', size: 16, color: '#fff', y: 38 },

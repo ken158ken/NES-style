@@ -268,10 +268,13 @@
     drawTabs(ctx) {
       const on = this.tab;
       // font agent：底線寬度改用實測字寬（12px 像素字比舊的 14px 黑體窄，寫死 60/32 會凸出去）
-      const t0 = '能力圖鑑', t1 = '成就', w0 = TW(t0, { size: 16 }), w1 = TW(t1, { size: 16 });
+      // font2：標題列只有 19px 高（面板 4 ~ 分隔線 23）且右邊還要放 SELECT 提示與「發現 n/m」，
+      //        16px 分頁標籤會壓到底線與提示 ⇒ 分頁維持 12px；這一頁的標題級文字是能力名（16px）。
+      const ts = MS();
+      const t0 = '能力圖鑑', t1 = '成就', w0 = TW(t0, { size: ts }), w1 = TW(t1, { size: ts });
       const x1 = 10 + w0 + 14;
-      T(ctx, t0, 10, 4, { color: on === 0 ? C.yellow : '#67758f', size: 16 });
-      T(ctx, t1, x1, 4, { color: on === 1 ? C.yellow : '#67758f', size: 16 });
+      T(ctx, t0, 10, 4, { color: on === 0 ? C.yellow : '#67758f', size: ts });
+      T(ctx, t1, x1, 4, { color: on === 1 ? C.yellow : '#67758f', size: ts });
       KB.rect(ctx, on === 0 ? 10 : x1, 21, on === 0 ? w0 : w1, 1, C.yellow);
       KB.text(ctx, 'SELECT', 116, 11, { color: '#5c6884' });     // ← 提示：SELECT 切換分頁
     }

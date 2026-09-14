@@ -1,12 +1,16 @@
-Ark Pixel Font
-https://github.com/TakWolf/ark-pixel-font
+GNU Unifont 16.0.04
+https://unifoundry.com/unifont/
 
-Copyright (c) 2021, TakWolf (https://takwolf.com).
+Copyright (c) 1998-2025 Roman Czyborra, Paul Hardy, Qianqian Fang, Andrew Miller,
+Johnnie Weaver, David Corbett, Nils Moskopp, Rebecca Bettencourt, et al.
 
-This Font Software is licensed under the SIL Open Font License, Version 1.1.
-This license is copied below, and is also available with a FAQ at:
-https://openfontlicense.org
-
+GNU Unifont is dual-licensed:
+  (1) the GNU General Public License version 2 or (at your option) a later
+      version, with the GNU font embedding exception; and
+  (2) the SIL Open Font License, Version 1.1.
+本專案依 (2) SIL OFL 1.1 使用（`assets/fonts/unifont16-subset.woff2` 為以 pyftsubset
+裁出的子集，屬於 OFL 定義下的 Modified Version）。OFL 全文如下；GPLv2 全文見
+https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 
 -----------------------------------------------------------
 SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007

@@ -3974,3 +3974,122 @@ Round 8 QA（qa8）問題修正 —— agent: fix8（2026-09-12）。負責 R8-P
 4. `shots/agent_font/before_*.png` 全數保留供對照；`fallback_titlemenu.png` 是「字型載入失敗」的退路畫面。
 5. `assets/` 目前是 **untracked**（`git status` 顯示 `?? assets/`，`.gitignore` 沒擋）——請總控 `git add assets/`
    把兩個 woff2 與 `OFL-fusion.txt` / `OFL-ark.txt` 一起進版控，否則別台機器 clone 後只會拿到退路字型。
+
+## font2
+
+> 接續 `## font`：總控裁好的 **GNU Unifont 16.0.04 子集** 上線，中文標題真正變回 16px，並重新 review 標題類版面。
+> 截圖：`shots/agent_font2/`（`before_*` = 16px 前、`after_*` = 16px 後，共 43 + 59 張，scale 3）
+> ＋ `dist_*`（dist 單檔驗證）、`fallback_titlemenu.png`（字型載入失敗的退路）。
+
+### 1) px16 換成 Unifont 子集（`src/gfx.js` / `tools/build.py` / `assets/fonts/`）
+| | 之前 | 現在 |
+|---|---|---|
+| `KB.FONTS.px16` | `'ArkPixel16'` | **`'Unifont16'`** |
+| `KB.FONT_SRC.px16` | `assets/fonts/ark16-zh_tw.woff2`（69 KB、CJK 僅 97 字） | **`assets/fonts/unifont16-subset.woff2`（56 KB、1,827 字全含）** |
+| `KB.FONTS.zh.px16` | `false` ⇒ 全部退回 12px | **`true`** ⇒ 標題真的畫在 16px |
+- 刪掉 `assets/fonts/ark16-zh_tw.woff2`、`OFL-ark.txt`；新增 `assets/fonts/OFL-unifont.txt`
+  （Unifont 為 **GPLv2＋font exception / SIL OFL 1.1 雙授權**，本專案依 OFL 1.1 使用）。
+- `tools/build.py`：內嵌檔換成 Unifont 子集，並多內嵌 `KB.FONT_CHARS16`（子集字元清單）。
+  dist（`build.py` 印的字元數）3,191 KB → **3,180 KB**（**-11 KB**：ark16 的 92 KB base64 換成
+  Unifont 子集的 76 KB，再加 1,827 字的清單 ~5 KB）。檔案實際大小 3,435,488 bytes。
+- 原本「漢字覆蓋實測」（畫「國」比對）機制**完全保留**，只是這次測出來是 `true`。
+
+### 2) 缺字退路（子集字型必備）
+`pixelPlan()` 在挑到 px16 之後多跑一次 `planHasAll()`，**逐字**檢查：
+1. `KB.FONT_CHARS16`（dist 才有，`index.html` 直接跑是 `null`）先做 `indexOf` 快篩；
+2. 再**實際畫一次**該字，跟「同字族的 `U+E000`（.notdef）」與「不存在的字族（＝系統字 fallback）」
+   比對像素 —— 任一相同就判定缺字。
+只要整串裡有**一個**字缺，**整串退回 12px Fusion**，畫面上絕不會出現豆腐 / 空白。
+結果按「字族|字級|字」快取：實測首次 2 ms、之後 1,400 次 0.5 ms（`KB.pixelPlan(str,size)` 可在 console 查）。
+- 驗證：`KB.pixelPlan('翠綠草原',16)` → px16；`KB.pixelPlan('饕餮鼯鼲',16)` / `'翠綠饕原'` → **px12**；
+  子集 1,827 字逐字掃過去 **0 個誤判**；全部關名 / 能力名 / 魔王名 / 成就名都走得到 16px。
+
+### 3) 字集維護工具 `tools/font_subset.py`（新增）
+```bash
+.venv/bin/python tools/font_subset.py          # 掃 src/**/*.js 的非 ASCII + ASCII + 常用標點 → 子集 + 字元清單
+.venv/bin/python tools/font_subset.py --check  # 只檢查缺字（缺字時 exit 1，適合收工前跑）
+```
+- 用 `.venv` 的 fontTools `pyftsubset`；Unifont 原檔（5 MB）自動從 unifoundry.com 下載到
+  **`/tmp/kb-unifont`**（`--cache-dir` 可改），**不進專案**。
+- 產出 `assets/fonts/unifont16-subset.woff2`（56 KB）與 `assets/fonts/unifont_chars.txt`（1,827 字）。
+- **新增中文文案之後要重跑**，否則新字會被上面的缺字偵測擋掉、該串退回 12px（畫面不會壞，只是標題變小）。
+
+### 4) 加粗 vs 描邊（決策）
+16px Unifont 是等寬 16×16 點陣、筆畫只有 1px，跟旁邊 12px 縫合字擺在一起反而「更輕」。
+四種寫法在深色面板 / 淺色選關地圖 × 疏字（翠綠草原）/ 密字（繼續圖鑑）下實拍比較
+（`/tmp` 對照圖已刪，結論寫進 `docs/SPEC.md` 3.5）：
+
+| | 深色底 | 淺色底 |
+|---|---|---|
+| 原樣 | 太細，比 12px 正文還輕 | 幾乎看不見 |
+| **加粗（採用）** | **最清楚，份量與 12px 正文一致** | 可讀 |
+| 只加描邊 | 深色描邊在深色底上沒作用 | 有對比但筆畫仍細，密字（鑑）內部縫隙被描邊糊掉 |
+| 加粗＋描邊 | 與加粗差不多 | 密字整個糊成一塊 |
+
+⇒ **全域統一用假粗體**：`KB.TEXT_CFG.boldFrom16 = 16`（`999` 可關閉），
+`pixelMask()` 在 `plan.px >= boldFrom16` 時把同一串字再畫一次、水平 +1px，筆畫變 2px 實心，
+排版寬度同步 +1px。**描邊只保留在呼叫端本來就有寫 `outline` 的地方**（畫在天空 / 背景上的
+`過關！`、魔王登場字幕、變身橫幅主標 —— 都是 3~5 個字的疏字，不會糊）。
+
+### 5) 16px 套用清單（24 處；其餘一律 12px）
+| 畫面 | 文字 | 檔案:行 |
+|---|---|---|
+| 操作說明 | 頁首「操作說明」 | `ui.js:431` |
+| 設定 | 頁首「設定」 | `menu.js:541` |
+| 成績板 | 頁首「成績板」／世界頁關名 | `records.js:126, 239` |
+| 挑戰模式 | 頁首「挑戰模式」／結算副標 | `challenge.js:710, 821` |
+| 選擇存檔 | 頁首「選擇存檔」 | `saves.js:402` |
+| 按鍵設定 | 頁首「按鍵設定」／綁定彈窗「「跳躍」」 | `keyconfig.js:179, 231` |
+| 競技場 | 頁首「競技場」／選能力的能力名／結算副標 | `arena.js:237, 264, 352` |
+| 選關 | 下方面板關名 | `ui.js:747` |
+| 開場橫幅 | WORLD n 下的關名 | `ui.js:955` |
+| 結算 | STAGE CLEAR 下的關名 | `ui.js:1068` |
+| 暫停 | 能力卡的能力名 | `menu.js:120` |
+| 能力圖鑑 | 能力名 | `menu.js:347` |
+| 變身 / 覺醒橫幅 | 主標（副標仍 8×8 / 12px） | `vfx.js:743` |
+| 魔王登場字幕 | 魔王中文名（**12 → 16**，英文副標 y 90→94） | `game.js:482` |
+| 過關 | 「過關！」 | `game.js:487` |
+| 結局 | 一般 / 暗影 / 真結局的第一行（＋一般結局的「感謝遊玩」） | `ui.js:1200, 1207, 1214-1215` |
+
+**降回 12px（原本寫 16、但旁邊就有 8×8 英文副標或右側成績，16px 會直接疊字）**
+| 位置 | 原因 | 檔案:行 |
+|---|---|---|
+| 挑戰模式選單列 | 第 2 行就是英文名（y+11），16px ink 到 y+13 會壓上去 | `challenge.js:725` |
+| Boss Rush 規則列 | 同上（清單列，非標題） | `challenge.js:763` |
+| 存檔卡「檔案 n」/「－ 新遊戲 －」 | 與「使用中」徽章（x+62）、第 2 列（y+22）只有 17px | `saves.js:427, 435` |
+| 圖鑑 / 成就 分頁標籤 | 標題列只有 19px 高（面板 4 ~ 分隔線 23），且右邊還有 SELECT 提示與「發現 n/m」 | `menu.js:271-277` |
+- GameOver 選項、標題選單項目、HUD 能力中文名、所有正文 / 提示列 **都沒動**（維持 12px）。
+
+### 6) 版面修正（16px 回來後的溢出 / 重疊）
+| 畫面 | 問題 | 修法 |
+|---|---|---|
+| 變身 / 覺醒橫幅 | 主標 16px（ink -13~+3）貼到副標（y 4） | `vfx.js`：黑底帶高 34→**38**（`BANNER_H`，橫線 ±18.5）、主標 -15→**-17**、中文副標 1→**2**、ASCII 副標 4→**5**；上下都留 ≥3px |
+| 魔王登場字幕 | 主標放大後與英文副標（y 90）相黏 | `game.js`：副標 90→**94**（字幕底 104 留 2px） |
+| 成績板 世界頁 | 關名 ink 37~53 壓到分隔線（y 52）；可用寬 160 會壓到 x=156 的 `EXTRA CLEAR` 紅牌 | `records.js`：關名 y 35→**33**、寬 160→**112** |
+| 結局（真 / 暗影） | 第 1 行 16px ink 到 y+18，第 2 行 12px ink 起點只差 0~2px | `ui.js`：真結局 y `4/20/35/50/65/82`→**`2/22/37/52/67/84`**；暗影 `8/26/42/58/74/91`→**`6/28/44/60/76/93`**（一般結局本來就夠寬，不動） |
+| 挑戰模式選單 / 存檔卡 / 圖鑑分頁 | 疊字 | 見上表「降回 12px」 |
+- 其餘 50+ 個畫面逐張看過：選關（7 節點 + 標籤 + 鎖定 + W7）、暫停（無能力 / 3 招 / 6 招）、
+  圖鑑（3 招 / 6 招 / 未發現）、成就 4 頁、成績板 9 頁、挑戰 4 頁 + 結算、存檔 3 態、按鍵設定 3 態、
+  競技場 2 頁、開場 / 過關 / toast / HUD / GameOver / 3 種結局 —— **沒有溢出或重疊**。
+
+### 7) 驗證
+- `engine_test 118/118`、`test_progression 101/101`、`test_saves 67/67`、`test_skins 67/67`、
+  `test_challenge 93/93` 全 PASS；`node --check src/*.js` 全過；`node tools/level_check.js` 0 error。
+- **59 個畫面連拍**：`MISSING SPRITES: none`、`CONSOLE ERRORS: none`。
+- `tools/build.py` → `dist/卡比之星.html`（3,180 KB chars / 3.4 MB）；Playwright 開 `file://` 的 dist 實測
+  `document.fonts.check('16px Unifont16') === true`、`KB.FONT_CHARS16` 1,827 字、
+  `KB.FONTS.zh.px16 === true`，畫面與 `index.html` 版**逐像素一致**（`dist_*.png`）。
+- `index.html`（`file://`）同樣 `document.fonts.check('16px Unifont16') === true`。
+- 退路仍完好：擋掉所有 `*.woff2` 後 `KB.FONTS.failed = true`，自動回到「系統黑體 ×4 超取樣」路徑，
+  版面不變、無 pageerror（`shots/agent_font2/fallback_titlemenu.png`）。
+- 文件：`docs/SPEC.md` 3.5 全面改寫（字型表 / 字級策略 / 「標題級」定義 / ink 高度 /
+  加粗決策 / 缺字退路 / 字集維護指令 / 授權）；`說明.md` 字型授權段換成 Fusion + Unifont。
+
+### 8) 給總控
+1. `assets/fonts/` 內容有變（少了 `ark16-zh_tw.woff2` / `OFL-ark.txt`，多了
+   `unifont16-subset.woff2` / `unifont_chars.txt` / `OFL-unifont.txt`）—— `git add -A assets/` 時請注意。
+2. **`unifont_chars.txt` 是產生物**，不要手改；改中文文案後跑 `tools/font_subset.py`（或先 `--check`）。
+   建議把 `--check` 加進收工流程（缺字時 exit 1）。
+3. 子集是掃「`src/**/*.js` 的所有非 ASCII 字元」，**註解裡的字也會被收進去**（寧可多收也不要缺字）；
+   目前 1,827 字 / 56 KB，多幾十個字對體積幾乎沒影響。
+4. 想調整標題粗細：`KB.TEXT_CFG.boldFrom16`（16 = 開、999 = 關），改完要 `KB.clearTextCache()`。

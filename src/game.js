@@ -478,8 +478,9 @@
         const a = Math.min(1, this.bossIntroT / 20, ((this.bossIntroMax || 150) - this.bossIntroT) / 20);
         ctx.globalAlpha = Math.max(0, a);
         KB.rect(ctx, 0, 70, KB.W, 34, 'rgba(0,0,0,0.55)');
-        (KB.UI && KB.UI.text ? KB.UI.text : KB.text)(ctx, this.bossName, KB.W / 2, 74, { color: '#ffe040', align: 'center', size: 12, outline: '#402000' });
-        KB.text(ctx, this.boss && this.boss.subtitle ? this.boss.subtitle : 'BOSS', KB.W / 2, 90, { color: '#fff', align: 'center' });
+        // font2：魔王名是標題級 ⇒ 16px（ink 76~92）；英文副標 8×8 往下移到 94，字幕底 104 留 2px
+        (KB.UI && KB.UI.text ? KB.UI.text : KB.text)(ctx, this.bossName, KB.W / 2, 74, { color: '#ffe040', align: 'center', size: 16, outline: '#402000' });
+        KB.text(ctx, this.boss && this.boss.subtitle ? this.boss.subtitle : 'BOSS', KB.W / 2, 94, { color: '#fff', align: 'center' });
         ctx.globalAlpha = 1;
       }
       if (this.clearT >= 0 && this.clearT > 20) {

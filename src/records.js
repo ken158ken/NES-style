@@ -233,9 +233,10 @@
       const lv = (KB.LEVELS || [])[i]; if (!lv) return;
       const r = recordOf(lv.id), su = summary();
       panel(ctx, 6, 32, 244, 168);
-      // 關名
+      // 關名（font2：16px ink 佔 y+2~y+18 ⇒ y 35→33，與分隔線 y=52 留 1px；
+      //       可用寬度 160→112，才不會壓到 x=156 的 EXTRA CLEAR 紅牌）
       KB.text(ctx, 'W' + (i + 1), 14, 40, { color: C.yellow });
-      UI.fitText(ctx, lv.name || lv.id, 38, 35, 160, { color: '#fff', size: 16 });
+      UI.fitText(ctx, lv.name || lv.id, 38, 33, 112, { color: '#fff', size: 16 });
       // 狀態（未通關 / CLEAR / EXTRA CLEAR）
       const state = r.extra ? 'EXTRA CLEAR' : (r.cleared ? 'CLEAR' : '未通關');
       const scol = r.extra ? '#ff6070' : (r.cleared ? C.yellow : C.grey);

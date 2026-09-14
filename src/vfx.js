@@ -709,7 +709,8 @@
     return ctrl;   // 名稱橫幅由 ctrl.up() 在停格結束後放出
   };
 
-  // 名稱橫幅（也可單獨呼叫：必殺技名等）
+  // 名稱橫幅（也可單獨呼叫：必殺技名等）。BANNER_H：黑底帶高度（font2：主標 16px ⇒ 34→38）
+  const BANNER_H = 38;
   V.banner = function (name, sub, color) {
     color = color || '#ffe040';
     const IN = 10, HOLD = 40, OUT = 12;
@@ -726,7 +727,7 @@
         ctx.save();
         ctx.globalAlpha = clamp01(a) * 0.62;
         ctx.fillStyle = '#000000';
-        const bh = Math.round(34 * Math.min(1, k));
+        const bh = Math.round(BANNER_H * Math.min(1, k));
         ctx.fillRect(0, Math.round(cy - bh / 2), KB.W, bh);
         ctx.globalAlpha = clamp01(a);
         ctx.strokeStyle = color; ctx.lineWidth = 1;
@@ -737,15 +738,15 @@
         ctx.translate(cx, cy);
         ctx.scale(k, k);
         const T = (KB.UI && KB.UI.text) ? KB.UI.text : KB.text;
-        // font agent：兩行都是 12px 像素字（ink 從 y+2 起算、高 12）；橫幅高 34（cy±17），
-        // 主標 ink -13~-2、副標 ink 3~14，上下橫線（±16.5）各留 2~3px，副標不會被橫線切到。
-        if (this.name) T(ctx, this.name, 0, -15, { color: '#ffffff', align: 'center', size: 16, outline: '#201018' });
+        // font2：主標回到 16px 像素字（ink 從 y+2 起算、高 16）⇒ 橫幅高 34→38（cy±19、橫線 ±18.5），
+        // 主標 ink -15~+1、副標 ink 4~15（中文）/ 5~12（8×8），上下都留 3px 以上，不會被橫線切到。
+        if (this.name) T(ctx, this.name, 0, -17, { color: '#ffffff', align: 'center', size: 16, outline: '#201018' });
         // 副標：ASCII（能力 HUD 名）維持原本的 8×8 點陣字；中文改走 UI.text 12px，
         // 否則 8px 中文會被畫成一排細線看不清楚（R6-P1-04 的暗星雨提示就是中文）。
         if (this.sub) {
           if (/[^\x00-\x7F]/.test(this.sub) && KB.UI && KB.UI.text)
-            KB.UI.text(ctx, this.sub, 0, 1, { color, align: 'center', size: 12, outline: '#201018' });
-          else KB.text(ctx, this.sub, 0, 4, { color, align: 'center', outline: '#201018' });
+            KB.UI.text(ctx, this.sub, 0, 2, { color, align: 'center', size: 12, outline: '#201018' });
+          else KB.text(ctx, this.sub, 0, 5, { color, align: 'center', outline: '#201018' });
         }
         ctx.restore();
       },

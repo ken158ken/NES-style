@@ -423,14 +423,16 @@
       panel(ctx, CARD_X, y, CARD_W, CARD_H, selAny ? '#1a2450' : '#141b30', selAny ? C.yellow : '#5c6884');
       if (sel) UI.cursor(ctx, 5, y + CARD_H / 2 - 4, this.frame);
       // 標題列：檔案 n（目前使用中 → 小標）＋ 最後儲存時間
-      T(ctx, '檔案 ' + (i + 1), CARD_X + 10, y + 5, { color: selAny ? C.yellow : '#fff', size: 16 });
+      // font2：卡片標題列與「使用中」徽章（x+62）、第 2 列（y+22）之間只有 17px ⇒ 維持 12px；
+      //        這一頁的標題級文字是頁首「選擇存檔」（16px）。
+      T(ctx, '檔案 ' + (i + 1), CARD_X + 10, y + 5, { color: selAny ? C.yellow : '#fff', size: UI.MS });
       if (d.current) {
         KB.rect(ctx, CARD_X + 62, y + 6, 40, 12, '#2a5a3a');
         T(ctx, '使用中', CARD_X + 82, y + 6, { color: '#80e0a0', size: UI.MS_SMALL, align: 'center' });
       }
       if (d.empty) {
         const cx = CARD_X + CARD_W / 2;
-        T(ctx, '－ 新遊戲 －', cx, y + 22, { color: selAny ? '#fff' : C.grey, size: 16, align: 'center' });
+        T(ctx, '－ 新遊戲 －', cx, y + 22, { color: selAny ? '#fff' : C.grey, size: UI.MS, align: 'center' });
         T(ctx, '按 Z 從頭開始冒險', cx, y + 40, { color: C.grey, size: UI.MS_SMALL, align: 'center' });
         return;
       }

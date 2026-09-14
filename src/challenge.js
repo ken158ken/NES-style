@@ -721,7 +721,8 @@
         // 列距 23→24（面板 42~164 放得下 5 列），中文 ink = y-2~y+9、英文 = y+11~y+18。
         const it = ITEMS[i], y = 46 + i * 24, sel = i === this.i;
         if (sel) { KB.rect(ctx, 12, y - 3, 232, 22, 'rgba(255,224,64,0.16)'); cursor(ctx, 16, y + 8, f); }
-        fit(ctx, it.name, 28, y - 4, 120, { color: sel ? C.yellow : '#fff', size: 16 });
+        // font2：這一列第 2 行就是英文名（y+11），中文名改 16px 會直接壓上去 ⇒ 選單項目維持 12px
+        fit(ctx, it.name, 28, y - 4, 120, { color: sel ? C.yellow : '#fff', size: ms });
         KB.text(ctx, it.en, 28, y + 11, { color: sel ? '#ffd0a0' : '#7c8ca8' });
         const [s, col] = summaryOf(it.id);
         fit(ctx, s, 244, y + 3, 112, { color: col, align: 'right', size: UI.MS_SMALL });
@@ -759,7 +760,7 @@
       for (let i = 0; i < ARENA_OPTS.length; i++) {
         const o = ARENA_OPTS[i], y = 64 + i * 27, sel = i === this.j;
         if (sel) { KB.rect(ctx, 12, y - 3, 232, 25, 'rgba(255,128,96,0.16)'); cursor(ctx, 16, y + 8, f); }
-        fit(ctx, o.name, 28, y, 140, { color: sel ? C.yellow : '#fff', size: 16 });
+        fit(ctx, o.name, 28, y, 140, { color: sel ? C.yellow : '#fff', size: ms });
         const rec = a[o.id];
         KB.text(ctx, rec && rec.bestTime ? UI.mmss(rec.bestTime) : '--:--', 242, y + 4, { color: rec && rec.bestTime ? C.cyan : '#5c6884', align: 'right' });
       }

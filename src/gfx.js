@@ -175,20 +175,29 @@
     scale: 4, cover: 105, boldFrom: 16,       // ← 舊路徑（像素字型載入失敗時的退路）
     alpha: 128,                                // 像素字型二值化門檻（0~255）
     // 字級對應表：[要求字級上限, KB.FONTS 的 key, 實際繪製的 px]
-    // 由小到大依序比對；字型缺該字（例如 ark16 沒有漢字）會自動退回 px12。
+    // 由小到大依序比對；字型缺字（子集沒收的字）會自動退回 px12（見 planHasAll）。
     pixelMap: [[13, 'px12', 12], [999, 'px16', 16]],
     // 中英混排：false = 整段都用像素字型（拉丁字也用，畫面只有一種西文字體，視覺一致）
     // true  = 中文用像素字型、英數用 8×8 點陣字（舊行為）。size===8 的純 ASCII 一律走 8×8，不受此旗標影響。
     mixBitmap: false,
+    // font2：16px Unifont 是「方正細」的等寬點陣，深色底上比 12px 縫合字細 ⇒ 這個字級以上
+    // 在 pixelMask 裡多畫一次 +1px 水平位移（假粗體），筆畫變成 2px 實心，標題份量才夠。
+    // 設成 999 可關閉；改完要呼叫 KB.clearTextCache()。
+    boldFrom16: 16,
   };
 
-  // ---------- 像素字型（SIL OFL 1.1）----------
-  // fusion12 = 縫合像素字體 12px 比例寬（繁中，19,214 個 CJK 漢字，UPM 1200）
-  // ark16    = 方舟像素字體 16px 比例寬（UPM 1600；**只有拉丁 / 假名 / 符號，漢字僅 97 個**）
+  // ---------- 像素字型 ----------
+  // fusion12 = 縫合像素字體 12px 比例寬（SIL OFL 1.1；繁中，19,214 個 CJK 漢字，UPM 1200）
+  // unifont16= GNU Unifont 16.0.04 子集（OFL 1.1 / GPLv2+font exception 雙授權；16×16 全形點陣，
+  //            只裁出本遊戲用得到的 1,777 個字 ⇒ 56 KB。字集由 tools/font_subset.py 掃 src/**/*.js 產生）
   // 兩者都是「點陣外框字」：以原生字級（12 / 16px）繪製時 Canvas 不做任何抗鋸齒，
   // 直接就是對齊格點的實心像素 —— 不需要超取樣 + 覆蓋率二值化，筆畫多的字也不會糊。
-  KB.FONTS = { px12: 'FusionPixel12', px16: 'ArkPixel16', ready: false, failed: false, loaded: {}, zh: {} };
-  KB.FONT_SRC = KB.FONT_SRC || { px12: 'assets/fonts/fusion12-zh_hant.woff2', px16: 'assets/fonts/ark16-zh_tw.woff2' };
+  KB.FONTS = { px12: 'FusionPixel12', px16: 'Unifont16', ready: false, failed: false, loaded: {}, zh: {} };
+  KB.FONT_SRC = KB.FONT_SRC || { px12: 'assets/fonts/fusion12-zh_hant.woff2', px16: 'assets/fonts/unifont16-subset.woff2' };
+  // px16 是「只收遊戲用字」的子集 ⇒ 執行期若出現清單外的字（例如新加的文案還沒重跑 font_subset.py），
+  // 該字會變成豆腐 / 空白。KB.FONT_CHARS16 是 tools/font_subset.py 產生、tools/build.py 內嵌的字元清單
+  // （dist 才有；index.html 直接跑時為 null），用來快速判斷；兩種情況都會再做一次「逐字實繪比對」。
+  KB.FONT_CHARS16 = KB.FONT_CHARS16 || null;
   // dist 單檔版：tools/build.py 會在 gfx.js 之前塞入
   //   KB.FONT_DATA = { px12: 'data:font/woff2;base64,…', px16: '…' }
   // 有 KB.FONT_DATA 就優先用它（雙擊 dist/卡比之星.html 也有像素字型）。
@@ -210,6 +219,44 @@
       return shot(family) !== shot('__kb_no_such_font__');
     } catch (e) { return false; }
   }
+
+  // ---------- 缺字偵測（font2）----------
+  // px16 是子集字型，清單外的字會變成豆腐（.notdef）或掉到系統字。畫之前先逐字檢查：
+  //   ① 這個字畫出來 === 同字族畫 U+E000（保證不存在）⇒ 是 .notdef 豆腐
+  //   ② 這個字畫出來 === 用不存在的字族畫（＝系統字）⇒ 瀏覽器根本沒用到這個字族
+  // 任一成立就算「缺字」，整串退回 px12（絕不讓豆腐上畫面）。結果按「字族|字級|字」快取。
+  const charCache = Object.create(null);
+  function familyHasChar(family, px, ch) {
+    const k = family + '|' + px + '|' + ch;
+    const hit = charCache[k]; if (hit !== undefined) return hit;
+    let ok = false;
+    try {
+      const cv = makeCanvas(px * 2 + 4, px * 2), c = readCtx(cv);
+      const shot = (fam, s) => {
+        c.clearRect(0, 0, cv.width, cv.height);
+        c.font = fontSpec(fam, px); c.textBaseline = 'alphabetic'; c.fillStyle = '#fff';
+        c.fillText(s, 1, px * 1.4);
+        return c.getImageData(0, 0, cv.width, cv.height).data.join(',');
+      };
+      const mine = shot(family, ch);
+      ok = mine !== shot(family, '')                     // 整片空白（字型沒有這個字形）
+        && mine !== shot(family, '\uE000')              // 與 .notdef 相同（豆腐方框）
+        && mine !== shot('__kb_no_such_font__', ch);     // 與系統字相同（瀏覽器已 fallback）
+    } catch (e) { ok = false; }
+    return (charCache[k] = ok);
+  }
+  // 整串都畫得出來嗎？（空白不算；px12 是全字庫，只在 px16 這種子集字型上做逐字檢查）
+  function planHasAll(plan, str) {
+    if (plan.key !== 'px16') return true;
+    const list = KB.FONT_CHARS16;
+    for (const ch of String(str)) {
+      if (ch === ' ' || ch === '　' || ch === '\n') continue;
+      if (list && list.indexOf(ch) < 0) return false;     // build 產生的字集清單：先快篩
+      if (!familyHasChar(plan.family, plan.px, ch)) return false;
+    }
+    return true;
+  }
+  KB.fontHasAll = planHasAll;
 
   KB.loadPixelFonts = function () {
     if (!window.FontFace || !document.fonts) { KB.FONTS.failed = true; return Promise.resolve(KB.FONTS); }
@@ -235,7 +282,7 @@
     });
   };
 
-  // 依要求字級挑像素字型；字型沒載好、或該字型畫不出字串裡的漢字就退回 px12；
+  // 依要求字級挑像素字型；字型沒載好、畫不出漢字、或子集缺了字串裡任何一個字 ⇒ 整串退回 px12；
   // px12 也沒有 → 回傳 null（走舊的超取樣路徑）。
   function pixelPlan(str, size) {
     if (!KB.FONTS.ready) return null;
@@ -243,9 +290,13 @@
     let key = 'px12', px = 12;
     for (const m of map) if (size <= m[0]) { key = m[1]; px = m[2]; break; }
     const needZh = ZH_RE.test(str);
-    if (!KB.FONTS.loaded[key] || (needZh && !KB.FONTS.zh[key])) { key = 'px12'; px = 12; }
+    let plan = { family: KB.FONTS[key], px, key };
+    // px16 子集缺字 → 退回 px12（避免豆腐）；px12 是全字庫，只檢查漢字覆蓋
+    if (!KB.FONTS.loaded[key] || (needZh && !KB.FONTS.zh[key]) || !planHasAll(plan, str)) {
+      key = 'px12'; px = 12; plan = { family: KB.FONTS[key], px, key };
+    }
     if (!KB.FONTS.loaded[key] || (needZh && !KB.FONTS.zh[key])) return null;
-    return { family: KB.FONTS[key], px, key };
+    return plan;
   }
   KB.pixelPlan = pixelPlan;
 
@@ -267,23 +318,27 @@
     return (metCache[k] = { asc, desc, base: INK_TOP + asc, h: INK_TOP + asc + desc + 1 });
   }
 
-  // 像素字型遮罩：原生字級直接繪製 + alpha 二值化（不縮放、不加粗）
+  // 像素字型遮罩：原生字級直接繪製 + alpha 二值化（不縮放）
+  // font2：字級 ≥ KB.TEXT_CFG.boldFrom16 時做「假粗體」—— 同一串字再畫一次、水平 +1px，
+  //        Unifont 16px 的 1px 細筆畫變成 2px，標題在深色底上才有份量（12px 縫合字不受影響）。
   function pixelMask(str, plan) {
     const met = pixelMetrics(plan.family, plan.px), font = fontSpec(plan.family, plan.px);
+    const bold = plan.px >= (KB.TEXT_CFG.boldFrom16 || 999);
     const tmp = makeCanvas(4, 4), tc = tmp.getContext('2d');
     tc.font = font;
     const adv = Math.max(1, Math.ceil(tc.measureText(str).width));
-    const w = adv + 2, h = met.h;                        // +2：少數字形會超出 advance
+    const w = adv + 2 + (bold ? 1 : 0), h = met.h;       // +2：少數字形會超出 advance
     const cv = makeCanvas(w, h), c = readCtx(cv);
     c.font = font; c.textBaseline = 'alphabetic'; c.fillStyle = '#ffffff';
     c.fillText(str, 0, met.base);
+    if (bold) c.fillText(str, 1, met.base);
     const img = c.getImageData(0, 0, w, h), d = img.data, A = KB.TEXT_CFG.alpha;
     for (let i = 0; i < d.length; i += 4) {
       if (d[i + 3] >= A) { d[i] = 255; d[i + 1] = 255; d[i + 2] = 255; d[i + 3] = 255; }
       else d[i + 3] = 0;
     }
     c.putImageData(img, 0, 0);
-    return { cv, w: adv, h };                             // w 回傳 advance（排版用）
+    return { cv, w: adv + (bold ? 1 : 0), h };            // w 回傳 advance（排版用；假粗體多 1px）
   }
 
   function scaleFont(font, size, S) {
