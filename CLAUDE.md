@@ -1,4 +1,4 @@
-# 卡比之星（同人版）— 開發 Context（所有 agent 必讀，2026-09-14 全面更新）
+# 卡比之星（同人版）— 開發 Context（所有 agent 必讀，2026-09-15 更新）
 
 > 零相依 HTML5 Canvas 平台遊戲，雙擊 `index.html` 或 `dist/卡比之星.html` 即可玩。
 > 現況總覽看 `docs/STATUS.md`（先讀這份）；規格 `docs/SPEC.md`；歷史進度 `docs/PROGRESS.md`（各輪各 agent 區段 + 每輪「總結」）；任務板 `docs/TASKS.md`；QA `docs/QA_REPORT.md`。
@@ -11,7 +11,7 @@ PY=.venv/bin/python                     # 已裝 playwright（Chromium 已下載
 $PY tools/shot.py --scene title --steps 120 --out shots/agent_x/title.png            # 截圖（scale 3）；場景：title select game gameover ending sheet
 $PY tools/shot.py --scene game --level w1 --room 0 --ability fire --script "press right 40; tap attack 1; press attack 10" --seq 6:4 --hitbox --out shots/agent_x/fire.png
 $PY tools/shot.py --scene game --level w1 --script "step 30; tap start 2; step 10" --out shots/agent_x/pause.png   # 暫停卡
-$PY tools/engine_test.py                # 引擎 118 項（改 player / tilemap / gfx 後必跑）
+$PY tools/engine_test.py                # 引擎 167 項（改 player / tilemap / gfx 後必跑）
 $PY tools/enemy_test.py [--extra]       # 敵人 393（--extra 79）
 $PY tools/boss_test.py --runs 3 [--extra] [--boss kracko]   # 7 魔王（fight 全勝 PASS、2/3 WARN）
 $PY tools/test_weapons.py / test_magic.py / test_forms.py / test_charge.py / test_mix.py / test_mix2.py / test_helper.py / test_elements.py / test_progression.py / test_awaken.py / test_extra.py / test_challenge.py / test_saves.py / test_skins.py
@@ -38,7 +38,7 @@ $PY tools/build.py                      # 打包 dist（內嵌 JS + 字型 base6
 ## 多 agent 協作規則
 - 每輪由總控在 docs/TASKS.md 寫「檔案所有權矩陣」，agent 只改自己的檔；需要別人檔案的改動寫在 PROGRESS.md 自己區段「跨檔需求」，由總控整合。
 - 編輯前重新讀檔；小範圍 Edit；不要整檔 Write 覆蓋別人的檔。`KB.PHYS` 既有常數不得更動（新常數加尾端）。
-- 新能力 / 招式：def 需含 `moves / desc / flavour(陣列)`、`hat_<key>`、`ui_ability_<key>`（24×16）、`kirby_attack_<key>`；音效名先查 `node tools/audio_check.js`。
+- 新能力 / 招式：每能力固定五招順序 X / ↑+X / ↓+X / 空中 X / 蓄力（方向讀 `p.atkDir`，空中招用 slowFall ≤ 30 幀不可懸停）；def 需含 `moves / desc / flavour(陣列)`、`hat_<key>`、`ui_ability_<key>`（24×16）、`kirby_attack_<key>`；音效名先查 `node tools/audio_check.js`。
 - 收工前：跑對應測試 + build.py；把截圖路徑、未完成、已知問題寫進 PROGRESS.md 自己區段。**agent 不要 git commit / reset**（總控 commit）。
 - 通關機器人偶發失敗（RNG 序列）重跑一次再判定；kracko fight 2/3 是已知 WARN。
 

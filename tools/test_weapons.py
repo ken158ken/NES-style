@@ -334,6 +334,9 @@ def phase_defs(h):
       for (const k of ['gunner','ninja','blade','bow']) {
         const d = KB.ABILITIES[k];
         out[k] = d ? { moves:(d.moves||[]).length, desc:!!d.desc, flavour:!!d.flavour,
+          flavourArr: Array.isArray(d.flavour), flavourLines: Array.isArray(d.flavour) ? d.flavour.length : 0,
+          flavourMax: Array.isArray(d.flavour) ? Math.max(0, ...d.flavour.map(t=>String(t).length)) : 99,
+          uiFlavour: (KB.UI.abilityInfo(k).flavour || []).slice(0, 2),
           inKeys: KB.ABILITY_KEYS.indexOf(k)>=0, name: KB.ABILITY_NAMES[k]||null, hud: KB.ABILITY_HUD[k]||null,
           hat: KB.has(d.hat), icon: KB.has(d.icon), mini: KB.has(d.icon+'_mini'), anim: KB.has('kirby_attack_'+k) } : null;
       }
@@ -343,6 +346,12 @@ def phase_defs(h):
         check(f'{k}: ability def registered', v is not None and v['inKeys'] and v['name'] and v['hud'], v)
         if not v: continue
         check(f'{k}: >= 4 moves + desc + flavour', v['moves'] >= 4 and v['desc'] and v['flavour'], v)
+        # fix9 / R9-P2-02：flavour 必須是陣列（寫成字串時暫停卡 / 圖鑑只會畫出一個字），
+        #   每行 ≤ 13 字、最多 2 行；UI.abilityInfo 取到的也要是整句而不是單字。
+        check(f'{k}: flavour 是陣列（≤ 2 行、每行 ≤ 13 字）',
+              v['flavourArr'] and 1 <= v['flavourLines'] <= 2 and v['flavourMax'] <= 13, v)
+        check(f'{k}: UI.abilityInfo 的 flavour 是整句（不是單一個字）',
+              all(len(t) >= 2 for t in v['uiFlavour']) and len(v['uiFlavour']) >= 1, v['uiFlavour'])
         check(f'{k}: hat / icon / mini / base attack sprite exist', v['hat'] and v['icon'] and v['mini'] and v['anim'], v)
     ens = h.ev("()=>['pistolo','kagedee','ronin','archerwaddle'].map(k=>[k,!!KB.ENEMIES[k]])")
     check('enemies registered in KB.ENEMIES', all(x[1] for x in ens), ens)

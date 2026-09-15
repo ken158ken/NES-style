@@ -234,6 +234,23 @@ def phase_trigger(h):
       __kb.press({jump:true, attack:true}); __kb.step(1); __kb.release();
       return { air, active: KB.AWAKEN.active() }; }""")
     check('空中同幀跳+攻 → 一樣發動', r3['air'] and r3['active'], r3)
+    # fix9 / R9-P2-01：漂浮中也能發動（Round 9 之後玩家大半時間待在 float）
+    _prep(h)
+    r3b = h.ev("""()=>{ const p = KB.player; p.vy = -3; p.onGround = false; p.setState('jump'); __kb.step(2);
+      __kb.press({up:true}); __kb.step(3); __kb.release();
+      const fl = p.state === 'float';
+      __kb.press({jump:true, attack:true}); __kb.step(1); __kb.release();
+      return { fl, active: KB.AWAKEN.active(), move: KB.AWAKEN.moveName || '', state: p.state }; }""")
+    check('漂浮中跳+攻 → 一樣發動覺醒', r3b['fl'] and r3b['active'], r3b)
+    check('漂浮中覺醒的招式名正確（百斬星光劍）', r3b['move'] == '百斬星光劍', r3b)
+    # 量表沒滿時漂浮中跳+攻不攔截（照舊拍動 / 出招）
+    _prep(h, gauge=60)
+    r3c = h.ev("""()=>{ const p = KB.player; p.vy = -3; p.onGround = false; p.setState('jump'); __kb.step(2);
+      __kb.press({up:true}); __kb.step(3); __kb.release();
+      const fl = p.state === 'float';
+      __kb.press({jump:true, attack:true}); __kb.step(1); __kb.release(); __kb.step(2);
+      return { fl, active: KB.AWAKEN.active(), state: p.state }; }""")
+    check('漂浮中量表沒滿 → 不攔截（維持普通出招）', r3c['fl'] and not r3c['active'] and r3c['state'] in ('attack', 'float', 'fall'), r3c)
     # 沒有能力時不發動
     _prep(h)
     r4 = h.ev("""()=>{ KB.player.dropAbility(false); KB.AWAKEN.add(100);

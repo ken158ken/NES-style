@@ -19,7 +19,7 @@ import sys, json, pathlib, base64, argparse
 from playwright.sync_api import sync_playwright
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from test_charge import run_charge
+from test_charge import run_charge, run_move_table
 
 try:
     sys.stdout.reconfigure(encoding='utf-8')
@@ -504,6 +504,22 @@ def phase_dragon(h):
     vys = [abs(s['p']['vy']) for s in S2]
     check(n + '放開跳鍵後緩降（|vy| ≤ 0.8，不是自由落體）', max(vys) <= 0.8, dict(maxVy=max(vys)))
     h.save_shot('dragon_fly')
+    # fix9 / R9-P1-01：地面按住 ↑ 也會起飛（原本只有空中按 ↑ 有效，地面完全不動）
+    h.goto(6, 9, ability='dragon', immune=True)
+    h.run(20, 20)
+    g0 = h.player()
+    check(n + '（↑ 起飛前）站在地面', g0['onGround'] is True, dict(y=g0['y'], og=g0['onGround']))
+    Su = h.run(40, 5, keys='up')
+    yu = min(s['p']['y'] for s in Su)
+    check(n + '地面按住 ↑ 會起飛（與空中一致）', yu < g0['y'] - 20, dict(y0=g0['y'], yUp=yu))
+    check(n + '地面按住 ↑ 起飛後離地', Su[-1]['p']['onGround'] is False, Su[-1]['p'])
+    # 和「按住跳」同一種手感（上升高度差 < 12px）
+    h.goto(6, 9, ability='dragon', immune=True)
+    h.run(20, 20)
+    Sj = h.run(40, 5, keys='jump')
+    yj = min(s['p']['y'] for s in Sj)
+    check(n + '地面按住 ↑ 與按住跳上升高度相近（< 12px）', abs(yu - yj) < 12, dict(yUp=yu, yJump=yj))
+    h.save_shot('dragon_up_takeoff')
     # 龍炎彈會產生貫穿火球
     h.goto(3, 9, ability='dragon', immune=True)
     h.run(74, 74, keys='attack'); h.run(30, 5)
@@ -540,6 +556,12 @@ def phase_mech(h):
     S2 = h.run(43, 4)
     hi_tap = min(s['p']['y'] for s in S2)
     check(n + '噴射跳：按住跳比點一下跳更高', hi_hold < hi_tap - 6, dict(hold=hi_hold, tap=hi_tap))
+    # fix9 / R9-P1-01：按住 ↑ 要走同一份噴射（原本 ↑ 只有一般漂浮，上升速度不到按住跳的一半）
+    h.goto(3, 9, ability='mech', immune=True)
+    S3 = h.run(46, 4, keys='up')
+    hi_up = min(s['p']['y'] for s in S3)
+    check(n + '按住 ↑ 與按住跳同速噴射（高度差 < 12px）', abs(hi_up - hi_hold) < 12, dict(up=hi_up, jump=hi_hold))
+    h.save_shot('mech_up_jet')
     # 火箭拳會飛出去再飛回來
     h.goto(3, 9, ability='mech', immune=True)
     h.run(3, 3, keys='attack')
@@ -704,6 +726,8 @@ def phase_data(h):
 # 蓄力必殺門檻（fix5b / QA R5-P1-03）：招式表寫的幀數 = 真實門檻
 def phase_charge(h):
     run_charge(h, ['dragon', 'mech'], check)
+    # fix9 / R9-P2-03：4 種變身的招式表也要合 Round 9 規則（ghost 原本多一列「穿牆中 ↑↓」）
+    run_move_table(h, KEYS, check)
 
 
 def main():

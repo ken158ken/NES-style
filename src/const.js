@@ -46,6 +46,11 @@ window.KB = window.KB || {};
     flyHoldGround: 4,     // 地面按住 ↑ 連續幾幀後起飛（門 / 梯優先，避免走過門口誤飛）
     flyFlapEvery: 9,      // 漂浮中按住 ↑ 每 n 幀自動拍動一次（等同按一次跳）
     flyFlapSfxEvery: 2,   // 自動拍動的音效節流：每 n 次拍動才播一次 float 音
+    // ---- fix9（R9-P1-02 / P2-04）：飛行高度上限與水中 ↑ 上浮 ----
+    flyCeilY: 8,          // 房間頂：卡比 top 不得高於此 y（沒有天花板的房間也飛不出畫面）
+    flyCeilVy: 0.2,       // 碰到房間頂時的下壓速度（與撞天花板一致）
+    swimUpEvery: 12,      // 水中按住 ↑ 每 n 幀輕划一次
+    swimUpHoldMul: 0.7,   // 水中按住 ↑ 的上浮初速 = swimUp × 此倍率
   };
   // 鏡頭手感（game.js updateCamera）
   KB.CAM = {

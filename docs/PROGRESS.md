@@ -4342,3 +4342,57 @@ Round 8 QA（qa8）問題修正 —— agent: fix8（2026-09-12）。負責 R8-P
   P1：① **R9-P1-01 龍化地面按住 ↑ 不起飛**（`form.fly` + `formUpdate` 的 `onGround` 早退；mech 則是 ↑=一般漂浮、跳=噴射，同鍵兩種速度）→ magic-forms；② **R9-P1-02 開放天空按住 ↑ 可無限飛出畫面**（w1 r0 飛到 y=−120、相機夾在 0、卡比消失）→ player。
   P2：漂浮中跳+攻不覺醒（player）／武器四能力 flavour 是字串導致能力卡只畫一個字（basic·既有）／ghost 招式表 ↑↓ 各 2 次（magic-forms）／水中 ↑ 無作用（player）／說明頁沒寫 4 幀門檻與門梯優先（ui）／gravity 浮空同樣會飛出畫面（player）／螺旋塔貼牆梯子吐氣彈當幀撞牆（player·既有）。
   未動 src；本輪只寫 `docs/QA_REPORT.md`、本區段與 `shots/agent_qa9/`。**未跑 build.py、未 commit**（等總控）。
+
+
+## fix9
+（Round 9 修正 agent；只改 src / tools，未 commit）
+
+### 修了什麼（對應 qa9 的 R9-P1 / R9-P2）
+
+| 編號 | 改法 | 檔案 |
+|---|---|---|
+| **R9-P1-02** 開放天空無限上升 | 新增 `KB.PHYS.flyCeilY = 8` / `flyCeilVy = 0.2`，`Player.clampTop()`（top ≤ 8 → `y = 8`、`vy = max(vy, 0.2)`；`ride` / `dead` 不套）掛在 **`afterPhysics()`**，所有走 physics 的狀態（漂浮 / 一般 / 出招 / 石頭 / 滑鏟 / 受傷）共用同一道。`updateFloat` 另外在頂住時**停止拍動**（按跳與 ↑ 自動拍動都不再給上升力）→ 可懸停在房間頂；相機本來就夾在 `cam.y ≥ 0`，不需要動 | `src/const.js`、`src/player.js` |
+| **R9-P2-06** gravity ↑X 浮空飛出畫面 | 同一道 `clampTop`（`updateAttack` 的 hover 也走 `physics → afterPhysics`）；實測 160 幀後 y 由 3.69 → 夾在 **8**，卡比完整在畫面內 | `src/player.js` |
+| **R9-P1-01** 龍化地面按住 ↑ 不起飛 | dragon `formUpdate` 的 `p.onGround` 分支改成：**按住跳或按住 ↑（`p.dirHold.up` 且 `flyHoldT ≥ flyHoldGround`、腳下沒有門 / 梯）→ 起飛**（`vy = -2.6`、離地、`setState('jump')`、拍翅音效 + 粒子），之後照原本的空中飛行分支。空中飛行加 `atRoomTop()` 保護 | `src/abilities_forms.js` |
+| **R9-P1-01（mech 部分）** 同一顆鍵兩種上升速度 | 變身加旗標 `form.jet = true`；`player.js` 的「按住 ↑ → 漂浮」**排除 jet 變身**（漂浮中的自動拍動也排除），改由 mech 自己處理：地面按住 ↑ = 起跳（`P.jump`）+ 噴射，空中按住 ↑ / 跳 = 同一份噴射（移除原本的 `s !== 'float'` 例外），頂到房間頂就不再推。實測 40 幀高度：↑ 與跳差 < 12px（原本 97.7 vs 40.8） | `src/abilities_forms.js`、`src/player.js` |
+| **R9-P2-01** 漂浮中跳+攻不覺醒 | `updateFloat()` 開頭補 `if (KB.AWAKEN && KB.AWAKEN.tryTrigger && KB.AWAKEN.tryTrigger(this)) return;`（量表沒滿不攔截，照舊拍動 / 出招） | `src/player.js` |
+| **R9-P2-02** 武器四能力 flavour 是字串 | `gunner / ninja / blade / bow` 的 `flavour` 改成陣列（gunner 拆 2 行 9 / 7 字，其餘 1 行 ≤ 10 字）；另外在 `UI.abilityInfo` 加 `flavourArr()` 正規化（字串 → 單元素陣列），日後再有人寫成字串也不會只畫出一個字 | `src/abilities_weapons.js`、`src/menu.js` |
+| **R9-P2-03** ghost 招式表 ↑↓ 各 2 次 | 刪掉第 5 列「穿牆中 ↑↓」，把變化寫進第 1 列招名：`['X', '穿牆開關（↑↓飄浮）']`；4 列 = X → ↑+X → ↓+X → 空中 X，`run_move_table` 全綠（ghost 沒有蓄力招，所以沒有蓄力列） | `src/abilities_forms.js` |
+| **R9-P2-04** 水中按 ↑ 無作用 | `updateSwim()`：按住 ↑ 時每 `P.swimUpEvery = 12` 幀輕划一次，初速 `P.swimUp × P.swimUpHoldMul(0.7)` = −1.54（按跳仍是 −2.2），有氣泡粒子 + 節流音效；與按跳並存，`canFloatNow()` 不動（水中照樣不起飛） | `src/const.js`、`src/player.js` |
+| **R9-P2-05** 說明頁沒寫新規則 | `UI.HELP2` 第 4 列改成 `['按住 ↑', '地面按住起飛；門前不飛']`（11 字 / 132px ≤ 右欄 138px，實測不截斷）。**第 1 頁跳躍列沒補「/ 按住 ↑」**：左欄上限 88px，`Z / K / 空白鍵` 已經 86px，加上去是 134px 一定被截斷；第 1 頁本來就有獨立的「按住 ↑ ／ 持續飛行」列 | `src/ui.js` |
+| **R9-P2-07** 梯子吐氣彈貼牆消失 | `ladderPuff()`：先用出生框（10×10）四角檢查是否卡在實心磁磚裡，是的話出生點往卡比這側退 8px（`cx + dir*2`）並改成 **不 solid + `life = 10`**（穿牆約 1 格後自然消失）；不貼牆的梯子完全照舊（solid、life 22） | `src/player.js` |
+
+### 新增 / 修改的測試
+- `tools/engine_test.py` **153 → 167**：+ 開放天空按住 ↑ 200 幀（y ≥ flyCeilY、vy ≥ 0、維持 float、cam.y = 0、再 30 幀仍不超過）、+ 水中按住 ↑ 上浮（會上浮 / 放開下沉 / 第 1 幀 vy ≈ swimUp×0.7 / 按跳更快 / 仍是 swim）、+ 貼牆梯子吐氣彈（臨時把梯子右側改成 `#`：仍生得出投射物且 4 幀後還在；一般梯子照舊）。
+- `tools/test_forms.py` **231 → 263**：+ dragon 地面按住 ↑ 起飛（離地、與按住跳高度差 < 12px）、+ mech 按住 ↑ 與按住跳同速噴射（< 12px）、+ 對 4 種變身跑 `run_move_table`（ghost 因此被鎖住）。
+- `tools/test_awaken.py` **237 → 240**：+ 漂浮中跳+攻發動覺醒、招名正確、量表沒滿時不攔截。
+- `tools/test_weapons.py` **370 → 378**：+ 4 種武器 `flavour` 必須是陣列（≤ 2 行、每行 ≤ 13 字）、`UI.abilityInfo` 取到的是整句不是單字。
+
+### 驗證
+- 測試：**engine 167/167、forms 263/263、awaken 240/240、weapons 378/378、magic 192/192、mix 509/509、mix2 607/607、charge 115/115、helper 131/131** 全 PASS；`audio_check` 全過、`font_subset.py --check` 無缺字。
+- 通關：`playthrough --level w1 --ability sword --godmode` → cleared=True / deaths=0 / bossDamage=100% / missing []；`--level w7` 同樣 cleared=True / deaths=0。
+- 打包：`tools/build.py` → `dist/卡比之星.html` 3313 KB。
+- 截圖（全部用 Read 看過）：`shots/agent_fix9/`
+  `fly_ceiling.png`（按住 ↑ 220 幀停在畫面頂，y=11 / vy=0.62 / cam.y=0）、`gravity_hover_clamp.png`（浮空 200 幀 minY=8）、
+  `dragon_up_takeoff.png`（地面按 ↑ 起飛，136 → 85.4）、`mech_up_jet.png`（↑ 噴射，136 → 32.3）、
+  `water_up.png`（水中按 ↑ 一路上浮出水；不按時 155.9 → 161 下沉）、
+  `ladder_puff_w2r1.png` / `_b.png`（貼牆梯子看得到吐氣彈）、`ladder_puff_w2r0.png` / `_w2r3.png`（開放式梯子照舊）、
+  `card_gunner|ninja|blade|bow|ghost.png`（暫停卡風味文字完整；ninja / bow 是 6 列 → 依原設計不畫風味文字）、
+  `dex_gunner|bow|ghost.png`（圖鑑詳情）、`help_p0.png` / `help_p1.png`（說明兩頁，無截斷）。
+
+### 已知問題 / 給下一輪
+1. 第 1 頁「按住 ↑ ／ 持續飛行（可一直上升）」字面上仍是「可一直上升」，實際會被房間頂擋住；右欄已滿 132/138px，要改就得整句重寫（例如「持續飛行（到房間頂）」），留給 ui agent 決定。
+2. `clampTop` 是全域高度上限（房間頂 8px），`ride`（傳送星）與 `dead` 例外。若未來有「刻意讓玩家飛到地圖上方」的關卡設計，要改成讀房間旗標。
+3. mech 的 `form.jet` 只影響「按住 ↑」的路徑；空中**點一下跳**仍會進一般漂浮（既有手感，未動）。
+4. ghost 招式表現在 4 列（沒有蓄力招），暫停卡與圖鑑排版都確認過。
+
+---
+# Round 9 總結（總控，2026-09-15）— 操作重構完成
+最終驗證：engine 167、forms 263、awaken 240、weapons 378、magic 192、mix 509、mix2 607、charge 115、helper 131、enemy 393、boss ALL PASS、level_check 0 error、font_subset 無缺字、playthrough w1 / w4 / w7 --godmode cleared、build 3313KB。
+## 成果
+- 按住 ↑ = 飛行（地面 4 幀起飛、門 / 梯優先、空中即時漂浮、漂浮中每 9 幀自動拍動、放開下降、房頂封頂 flyCeilY）；水中按住 ↑ 輕划上浮；龍化 / 機甲按住 ↑ 與按住跳同義。
+- 漂浮中 X 用能力（無能力才吐氣）；空中 X / ↑X / ↓X 皆可出招且持續下墜；招式結束 ↑ 仍按著自動回漂浮；漂浮中可觸發覺醒。
+- 44 能力每種固定五招 X / ↑+X / ↓+X / 空中 X / 蓄力：12 基本 / 武器新增 13 招 + 空中變體、8 魔法 / 變身新增 5 招 + 補判定、24 混合新增 48 招；p.atkDir 快照統一方向判斷。
+- 說明頁更新、flavour 統一陣列、幽靈招式表整理、梯子吐氣彈不再貼牆消失。
+## 已知 / 下一輪
+- 說明頁第 1 頁飛行描述可再精修；def.hover 粒度；atkDir 工具收斂到 const.js；qa9 提到 gunner 霰彈近身打不到（刻意）。

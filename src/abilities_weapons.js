@@ -139,7 +139,7 @@
   def('gunner', {
     color: '#d8dce8', duration: 10, hold: true, maxHold: 600, lockMove: false, moveSpeed: P.walk, fps: 14, canJump: true,
     desc: '雙手各握一把星塵左輪，一邊走一邊把彈幕鋪滿整個房間。',
-    flavour: '彈匣裡裝的是勇氣，退膛的是恐懼。',
+    flavour: ['彈匣裡裝的是勇氣，', '退膛的是恐懼。'],
     moves: [['X 按住', '雙槍連射'], ['↑+X', '對空三連'], ['↓+X', '蓄力霰彈'], ['空中 X', '俯衝掃射'], ['按住 60 幀放開', '必殺・子彈時間']],
     onGet(p) { const d = data(p); d.t = 0; d.charged = false; },
     onCrouchAttack(p) { startMove(p, 'shotgun'); },
@@ -319,7 +319,7 @@
   def('ninja', {
     color: '#5460a0', duration: 26, hold: true, maxHold: 600, lockMove: false, moveSpeed: P.walk, fps: 14, canJump: true,
     desc: '身法快得只看得見殘影，手裡劍與替身術一氣呵成。',
-    flavour: '影子先到，本體後到。',
+    flavour: ['影子先到，本體後到。'],
     moves: [['X', '手裡剎三連'], ['↑+X', '昇龍手裡劍'], ['↓+X', '替身瞬移'], ['空中 X', '飛踢'], ['蓄力放開', '必殺・影分身斬'], ['貼牆＋跳', '壁跳（任何牆面）']],
     onGet(p) { const d = data(p); d.t = 0; d.wallT = 0; ensureTicker(p); },
     onCrouchAttack(p) { startMove(p, 'warp'); },
@@ -467,7 +467,7 @@
   def('blade', {
     color: '#eef2ff', duration: 20, hold: true, maxHold: 600, lockMove: false, moveSpeed: P.walk, fps: 12, canJump: true,
     desc: '一柄比身體還長的大太刀，出鞘的瞬間連空氣都被切開。',
-    flavour: '刀在鞘中時最快。',
+    flavour: ['刀在鞘中時最快。'],
     moves: [['X', '三段連斬'], ['↑+X', '上撩斬'], ['↓+X', '地摺斬'], ['空中 X', '落下斬'], ['按住 50 幀放開', '必殺・居合一閃']],
     onGet(p) { const d = data(p); d.combo = 0; d.cut = []; },
     onCrouchAttack(p) { startMove(p, 'lowcut'); },
@@ -703,7 +703,7 @@
   def('bow', {
     color: '#48c048', duration: 22, hold: true, maxHold: 600, lockMove: false, moveSpeed: P.walk, fps: 12, canJump: true,
     desc: '精靈之弓拉滿時會把周圍的光都吸進箭尖，放手就是一道流星。',
-    flavour: '風會告訴你該瞄哪裡。',
+    flavour: ['風會告訴你該瞄哪裡。'],
     moves: [['X', '射箭'], ['↑+X', '對空連射'], ['↓+X', '陷阱箭'], ['空中 X', '箭雨'], ['蓄力 40', '貫穿箭'], ['蓄力 80', '必殺・流星箭']],
     onGet(p) { const d = data(p); d.lv = 0; },
     onCrouchAttack(p) { startMove(p, 'trap'); },

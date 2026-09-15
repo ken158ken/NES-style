@@ -780,6 +780,75 @@ def main():
         check('p.dirHold 放開後為 false', hd2 == {'up': False, 'down': False}, hd2)
         release(1); step(60)
 
+        # 46. fix9 / R9-P1-02：開放天空（無天花板）按住 ↑ 不會飛出畫面
+        goto(2, 9); step(3)
+        ceil = jsv('KB.PHYS.flyCeilY')
+        pg.evaluate("(o)=>__kb.press(o)", {'up': True})
+        ys = []
+        for i in range(220): step(1); ys.append(pl()['y'])
+        q = pl()
+        check('按住 ↑ 200 幀仍在房間內（y ≥ flyCeilY）', min(ys) >= ceil - 0.01, (min(ys), ceil))
+        check('頂到房間頂後 vy 被壓成正值（不再上升）', q['vy'] >= 0, (q['y'], q['vy']))
+        check('頂住時仍是漂浮狀態（可懸停）', q['state'] == 'float', q['state'])
+        check('鏡頭不動（cam.y 仍為 0）', jsv('KB.game.cam.y') == 0, jsv('KB.game.cam.y'))
+        step(30)
+        check('頂住後繼續按 ↑ 也不會超過房間頂', pl()['y'] >= ceil - 0.01, pl()['y'])
+        shot('fly_ceiling')
+        release(1); step(200)
+
+        # 47. fix9 / R9-P2-04：水中按住 ↑ 每 12 幀輕划一次（與按跳並存）
+        goto(38, 9); step(2)
+        press('right', 30)
+        check('水中(47)', pl()['state'] == 'swim', pl()['state'])
+        release(1); step(30)
+        y0 = pl()['y']
+        pg.evaluate("(o)=>__kb.press(o)", {'up': True}); step(24)
+        y1 = pl()['y']
+        check('水中按住 ↑ 會上浮', y1 < y0 - 4 and pl()['state'] == 'swim', (y0, y1, pl()['state']))
+        vy_up = pl()['vy']
+        release(1); step(30)
+        y2 = pl()['y']
+        check('放開 ↑ 後恢復下沉', y2 > y1, (y1, y2))
+        # 輕划的初速＝按跳的 70%（swimUp × swimUpHoldMul）；按跳照舊是 100%
+        want = jsv('KB.PHYS.swimUp') * jsv('KB.PHYS.swimUpHoldMul')
+        release(1); step(4)
+        pg.evaluate("(o)=>__kb.press(o)", {'up': True}); step(1)
+        vy_hold = pl()['vy']
+        check('水中按住 ↑ 第 1 幀輕划（vy ≈ swimUp × 0.7）', abs(vy_hold - want) < 0.2, (vy_hold, want))
+        release(1); step(10); tap('jump', 1); step(1)
+        check('水中按跳仍是整下（比輕划快）', pl()['vy'] < vy_hold - 0.2, (pl()['vy'], vy_hold))
+        check('水中按住 ↑ 不會起飛（仍為 swim）', pl()['state'] == 'swim', pl()['state'])
+        release(1); step(60)
+
+        # 48. fix9 / R9-P2-07：貼牆的梯子上按 X，吐氣彈不會在出生那幀就消失
+        goto(53, 7); step(2)
+        press('up', 6)
+        st48 = pl()
+        # 梯子右側臨時補一面牆（模擬 w2 r1 的貼牆梯子）
+        wall = pg.evaluate("()=>{ const m=KB.game.map, p=KB.player;"
+                           " const ty=Math.floor(p.cy/16), tx=Math.floor(p.cx/16)+1, old=m.get(tx,ty);"
+                           " m.set(tx,ty,'#'); m.set(tx,ty+1,'#'); p.dir=1; return [tx,ty,old]; }")
+        pg.evaluate("(o)=>__kb.press(o)", {'up': True, 'attack': True}); step(1)
+        pg.evaluate("(o)=>__kb.press(o)", {'up': True}); step(1)
+        n48 = len([e for e in pg.evaluate("()=>__kb.entities()") if e['type'] == 'proj'])
+        atk = jsv('KB.player.ladderAtkT')
+        check('貼牆梯子上按 X → 吐氣彈有生出來（不會當幀撞牆消失）',
+              st48['state'] == 'climb' and atk > 0 and n48 >= 1, (st48['state'], atk, n48, wall))
+        step(4)
+        n48b = len([e for e in pg.evaluate("()=>__kb.entities()") if e['type'] == 'proj'])
+        check('貼牆吐氣彈會穿牆約 1 格後才消失（不是立刻不見）', n48b >= 1, n48b)
+        pg.evaluate("(w)=>{ const m=KB.game.map; m.set(w[0],w[1],w[2]); m.set(w[0],w[1]+1,w[2]); }", wall)
+        release(1); step(30)
+        # 一般（不貼牆）梯子照舊射出吐氣彈
+        goto(53, 7); step(2)
+        press('up', 6)
+        pg.evaluate("()=>{ KB.player.dir = 1; }")
+        pg.evaluate("(o)=>__kb.press(o)", {'up': True, 'attack': True}); step(1)
+        pg.evaluate("(o)=>__kb.press(o)", {'up': True}); step(1)
+        n49 = [e for e in pg.evaluate("()=>__kb.entities()") if e['type'] == 'proj']
+        check('一般梯子上按 X 仍然射出吐氣彈', len(n49) >= 1 and pl()['state'] == 'climb', (len(n49), pl()['state']))
+        release(1); step(30)
+
         b.close()
     print('---')
     fails = [r for r in results if not r[1]]

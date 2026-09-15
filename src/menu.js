@@ -91,6 +91,12 @@
     },
   };
 
+  /** 風味文字正規化：字串 → 單元素陣列；空值 → []（fix9 / R9-P2-02） */
+  function flavourArr(f) {
+    if (Array.isArray(f)) return f;
+    return f ? [String(f)] : [];
+  }
+
   UI.abilityInfo = function (key) {
     const d = (key && KB.ABILITIES) ? KB.ABILITIES[key] : null;
     const t = UI.ABILITY_HELP[key || 'none'] || {};
@@ -99,7 +105,9 @@
       name: t.name || (d && d.name) || (KB.ABILITY_NAMES && KB.ABILITY_NAMES[key]) || '普通',
       en: t.en || (d && d.hudName) || (KB.ABILITY_HUD && KB.ABILITY_HUD[key]) || 'NORMAL',
       desc: (d && d.desc) || t.desc || '',
-      flavour: (d && d.flavour) || t.flavour || (t.desc ? [t.desc] : []),
+      // fix9 / R9-P2-02：def.flavour 規格是陣列，但歷史上有寫成字串的（對字串 slice/[0] 會只取一個字）
+      //   → 這裡統一正規化成陣列，任何能力都不會再只畫出一個字。
+      flavour: flavourArr((d && d.flavour) || t.flavour || (t.desc ? [t.desc] : [])),
       moves: (d && d.moves) || t.moves || [],
       icon: key ? ((d && d.icon) || ('ui_ability_' + key)) : 'ui_ability_none',
       hat: key ? ((d && d.hat) || ('hat_' + key)) : null,

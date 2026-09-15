@@ -346,10 +346,28 @@
       p.grav = 0;
       const am = data(p).mode;
       if (s === 'attack' && (am === 'dive' || am === 'rise')) return false;   // 俯衝 / 升龍時由招式自己控制 vy
-      if (p.onGround) { if (p.vy > 0) p.vy = 0; return false; }
+      if (p.onGround) {
+        // fix9 / R9-P1-01：地面按住跳 **或** 按住 ↑ 就起飛（和空中同一顆鍵、同一種手感）。
+        //   ↑ 沿用 player.js 的地面規則：連續按住 P.flyHoldGround 幀，且腳下沒有門 / 梯（門梯優先）。
+        const map = KB.game && KB.game.map;
+        const upFly = !!(p.dirHold && p.dirHold.up) && p.flyHoldT >= P.flyHoldGround
+          && !(KB.game && KB.game.doorAt && KB.game.doorAt(p))
+          && !(map && (map.onLadder(p.cx, p.cy) || map.onLadder(p.cx, p.bottom + 1)));
+        if ((KB.input.down('jump') || upFly) && s !== 'attack' && s !== 'inhale' && !p.full) {
+          p.vy = -2.6; p.onGround = false; p.jumped = true; p.jumpBufT = 0; p.coyoteT = 0;
+          p.setState('jump');
+          d.flap = 0;
+          sfx('wing_flap');
+          KB.particles(p.cx, p.bottom - 2, ['#ffffff', '#ffc0c0', '#e88080'], 3,
+            { spread: 1.0, grav: -0.02, life: 18, up: 0.4, size: 2 });
+          return false;
+        }
+        if (p.vy > 0) p.vy = 0; return false;
+      }
       // Round 9：按住跳 **或** 按住 ↑ 都能持續拍翅上升（player.js 的 ↑ 長按飛行會排除 form.fly，
       //   所以龍化要自己讀 p.dirHold.up，手感才和其他能力一致）
-      if (KB.input.down('jump') || (p.dirHold && p.dirHold.up)) {
+      // fix9 / R9-P1-02：頂到房間上緣就不再拍翅上升（clampTop 會把 vy 壓成 +0.2，能懸停在頂端）
+      if ((KB.input.down('jump') || (p.dirHold && p.dirHold.up)) && !(p.atRoomTop && p.atRoomTop())) {
         p.vy = p.vy < -1.2 ? Math.min(p.vy + 0.18, -1.2) : -1.2;
         d.flap++;
         if (d.flap % 12 === 0) {
@@ -596,7 +614,9 @@
     onGet(p) {
       const d = data(p); d.jetT = 0; d.stepT = 0;
       p.setForm({
-        key: 'mech', armor: 1, hp: 6,
+        // fix9 / R9-P1-01：jet = 「↑ 走噴射、不走漂浮」（player.js 讀），
+        //   讓按住 ↑ 與按住跳是同一種上升速度。
+        key: 'mech', armor: 1, hp: 6, jet: true,
         spr(pp, anim, opts) {
           opts.frame = undefined; opts.t = pp.t;
           if (pp.state === 'attack') {
@@ -625,11 +645,25 @@
         }
       } else d.stepT = 0;
       // 噴射跳：離地後按住跳最多 30 幀持續上升
-      if (p.onGround) d.jetT = 0;
-      // Round 9：按住跳（原本）或按住 ↑（新的飛行鍵）都會噴射；漂浮中除外 —— 那時 player.js
-      //   的「↑ 長按飛行」已經在負責上升，再加噴射會變成兩份推力。
-      else if ((KB.input.down('jump') || (p.dirHold && p.dirHold.up && s !== 'float'))
-        && p.vy < 1.2 && d.jetT < 30 && s !== 'attack') {
+      if (p.onGround) {
+        d.jetT = 0;
+        // fix9 / R9-P1-01：地面按住 ↑ ＝ 按住跳（起跳後接噴射）；門 / 梯優先，規則同 player.js
+        const map = KB.game && KB.game.map;
+        const upFly = !!(p.dirHold && p.dirHold.up) && p.flyHoldT >= P.flyHoldGround
+          && !(KB.game && KB.game.doorAt && KB.game.doorAt(p))
+          && !(map && (map.onLadder(p.cx, p.cy) || map.onLadder(p.cx, p.bottom + 1)));
+        if (upFly && s !== 'attack' && s !== 'inhale' && !p.full) {
+          p.vy = P.jump; p.onGround = false; p.jumped = true; p.jumpBufT = 0; p.coyoteT = 0;
+          p.setState('jump');
+          sfx('jet');
+          KB.particles(p.cx, p.bottom - 1, ['#78e8ff', '#ffffff', '#1888c8'], 3, { spread: 0.8, grav: 0.02, life: 14, up: -0.6, size: 2 });
+        }
+      }
+      // Round 9：按住跳（原本）或按住 ↑（新的飛行鍵）都會噴射。
+      //   fix9 / R9-P1-01：漂浮中也照噴 —— 原本排除 float 會讓 ↑ 只有一半的上升速度
+      //   （同一顆鍵兩種速度）；現在 ↑ 與跳完全同速。頂到房間上緣（P.flyCeilY）就不再推。
+      else if ((KB.input.down('jump') || (p.dirHold && p.dirHold.up))
+        && p.vy < 1.2 && d.jetT < 30 && s !== 'attack' && !(p.atRoomTop && p.atRoomTop())) {
         d.jetT++;
         p.vy -= 0.17;
         if (d.jetT % 4 === 1) KB.particles(p.cx + rnd(-4, 4), p.bottom - 1, ['#78e8ff', '#ffffff', '#1888c8'], 2, { spread: 0.7, grav: 0.02, life: 12, up: -0.6, size: 2 });
@@ -793,7 +827,9 @@
     hat: null,
     desc: '變成半透明的白色被單；能穿過薄牆、附身敵人，還能發出讓人僵直的哀嚎。',
     flavour: ['身體變得輕飄飄、涼颼颼的，', '牆壁看起來也沒那麼硬了。'],
-    moves: [['X', '穿牆開關（2 格內）'], ['↑+X', '隱身 180 幀（嚇愣）'], ['↓+X', '附身（無目標＝墜擊）'], ['空中 X', '幽靈哀嚎（stun）'], ['穿牆中 ↑↓', '上下飄浮']],
+    // fix9 / R9-P2-03：招式表固定 X → ↑+X → ↓+X → 空中 X 各一列（穿牆中的上下飄浮寫進招名括號，
+    //   原本多一列「穿牆中 ↑↓」會讓 ↑ / ↓ 各出現 2 次，不合 run_move_table 規則）。
+    moves: [['X', '穿牆開關（↑↓飄浮）'], ['↑+X', '隱身 180 幀（嚇愣）'], ['↓+X', '附身（無目標＝墜擊）'], ['空中 X', '幽靈哀嚎（stun）']],
     onGet(p) {
       const d = data(p);
       d.phaseT = GHOST_PHASE; d.invisT = 0; d.possessT = 0; d.guard = null;

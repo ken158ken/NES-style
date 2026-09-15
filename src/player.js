@@ -46,6 +46,7 @@
       this.flyHoldT = 0;      // ↑ 連續按住幀數（每幀維護；放開歸零）
       this.flyFlapT = 0;      // 漂浮中自動拍動計時
       this.flyFlapN = 0;      // 自動拍動次數（音效節流用）
+      this.swimUpN = 0;       // fix9：水中按住 ↑ 的輕划次數（音效節流用）
       this.dirHold = { up: false, down: false };                 // 每幀方向鍵狀態（hold 型招式讀）
       this.atkDir = { up: false, down: false, air: false };      // startAttack 當幀的方向快照
       this.name = 'kirby';
@@ -327,7 +328,9 @@
       //   地面：連續按住 P.flyHoldGround 幀才起飛，且該幀腳下不能有門 / 梯（門與梯優先，
       //         避免玩家一路按著 ↑ 找門時走過門口就飛起來）。
       //   空中（jump / fall）：按住 ↑ 立即起飛（條件與空中按跳漂浮相同）。
-      if (inp.down('up') && this.canFloatNow()) {
+      //   fix9 / R9-P1-01：form.jet（機甲）自己用噴射處理 ↑，不走漂浮 —— 否則同一顆鍵
+      //         會有「漂浮」與「噴射」兩種上升速度。
+      if (inp.down('up') && this.canFloatNow() && !(this.form && this.form.jet)) {
         if (!this.onGround) {
           if ((this.state === 'jump' || this.state === 'fall') && !this.landingSoon()) { this.startFloat(); return; }
         } else if (this.flyHoldT >= P.flyHoldGround && !KB.game.doorAt(this)
@@ -353,7 +356,21 @@
       }
     }
 
+    /** fix9 / R9-P1-02：房間頂高度夾制 —— 沒有天花板的房間（開放天空）也不能飛出畫面。
+     *  卡比 top ≤ P.flyCeilY 就像撞到天花板一樣被壓住（vy ≥ P.flyCeilVy），仍可懸停在頂端；
+     *  鏡頭本來就夾在 y ≥ 0，不需要跟著動。回傳 true = 本幀被頂住。
+     *  漂浮 / 龍化飛行 / 機甲噴射 / 重力浮空（def.hover）都走 physics → afterPhysics，共用這一道。 */
+    clampTop() {
+      if (this.state === 'ride' || this.state === 'dead' || this.y > P.flyCeilY) return false;
+      this.y = P.flyCeilY;
+      if (this.vy < P.flyCeilVy) this.vy = P.flyCeilVy;
+      return true;
+    }
+    /** 已經頂在房間上緣（拍動 / 噴射不再給上升力） */
+    atRoomTop() { return this.y <= P.flyCeilY; }
+
     afterPhysics() {
+      this.clampTop();
       if (this.fellOut && this.state !== 'dead') { this.hp = 0; this.die(true); }
       // 尖刺
       const map = KB.game.map;
@@ -427,14 +444,19 @@
     }
     updateFloat() {
       const inp = KB.input;
+      // fix9 / R9-P2-01：漂浮中一樣可以用「跳 + 攻擊」發動覺醒（量表沒滿時不攔截）
+      if (KB.AWAKEN && KB.AWAKEN.tryTrigger && KB.AWAKEN.tryTrigger(this)) return;
       const dirIn = (inp.down('right') ? 1 : 0) - (inp.down('left') ? 1 : 0);
       if (dirIn) { this.dir = dirIn; this.vx += dirIn * 0.1; }
       else this.vx *= 0.92;
       this.vx = Math.max(-1.0, Math.min(1.0, this.vx));
+      // fix9 / R9-P1-02：頂到房間上緣就不再拍動上升（維持懸停，不會飛出畫面）
+      const topped = this.atRoomTop();
+      if (topped) { this.flyFlapT = 0; if (this.vy < P.flyCeilVy) this.vy = P.flyCeilVy; }
       // 每按一次跳＝拍動一次（動畫重播 + 吐氣粒子）
-      if (inp.pressed('jump')) { this.floatFlap(false); this.flyFlapT = 0; }
+      else if (inp.pressed('jump')) { this.floatFlap(false); this.flyFlapT = 0; }
       // Round 9：按住 ↑ → 每 P.flyFlapEvery 幀自動拍動一次（＝持續上升）；放開 ↑ 就回一般漂浮下降
-      else if (inp.down('up') && !(this.form && this.form.fly)) {
+      else if (inp.down('up') && !(this.form && (this.form.fly || this.form.jet))) {
         this.flyFlapT++;
         if (this.flyFlapT >= P.flyFlapEvery) { this.flyFlapT = 0; this.floatFlap(true); }
       } else { this.flyFlapT = 0; }
@@ -744,6 +766,13 @@
       if (dirIn) { this.dir = dirIn; this.vx += dirIn * 0.12; } else this.vx *= 0.9;
       this.vx = Math.max(-P.swimSpeed, Math.min(P.swimSpeed, this.vx));
       if (inp.pressed('jump')) { this.vy = P.swimUp; KB.audio.sfx('float'); KB.particles(this.cx, this.cy, '#c0f0ff', 3, { spread: 1, grav: -0.05, life: 15 }); }
+      // fix9 / R9-P2-04：水中按住 ↑ 也會上浮 —— 每 P.swimUpEvery 幀輕划一次（swimUp 的 70%），
+      //   與按跳並存（↑ 仍然不會起飛，canFloatNow 在水中照樣回 false）。
+      else if (inp.down('up') && (this.flyHoldT % P.swimUpEvery) === 1) {
+        this.vy = Math.min(this.vy, P.swimUp * P.swimUpHoldMul);
+        if ((this.swimUpN++ % Math.max(1, P.flyFlapSfxEvery)) === 0) KB.audio.sfx('float');
+        KB.particles(this.cx, this.cy, '#c0f0ff', 2, { spread: 0.8, grav: -0.05, life: 14 });
+      }
       if (inp.down('down')) this.vy += 0.1;
       // 嘴邊氣泡
       this.bubbleT++;
@@ -899,7 +928,20 @@
     ladderPuff() {
       this.ladderAtkT = P.ladderAtkCd;
       KB.audio.sfx('exhale');
-      KB.shoot({ spr: 'proj_airpuff', x: this.cx + this.dir * 10, y: this.cy, vx: this.dir * 2.6, dmg: 1, owner: 'player', life: 22, w: 10, h: 10, dir: this.dir, solid: true, fxHit: 'fx_poof' });
+      // fix9 / R9-P2-07：貼牆的梯子（如 w2 r1）出生點會落在實心磁磚裡 → solid 的吐氣彈
+      //   當幀就判定撞牆而消失。先往卡比這側退 8px；退完仍在牆內就改成不 solid（穿牆約 1 格後消失）。
+      const map = KB.game.map;
+      // 出生框（10×10）四角有任何一角在實心磁磚裡就算被擋
+      const blocked = px => {
+        for (const ox of [-5, 5]) for (const oy of [-4, 4]) if (map.isSolidPx(px + ox, this.cy + oy)) return true;
+        return false;
+      };
+      let sx = this.cx + this.dir * 10, solid = true;
+      if (blocked(sx)) {
+        sx = this.cx + this.dir * 2;                 // 退 8px（貼身）
+        solid = false;                               // 前方就是牆 → 不 solid，穿牆約 1 格後消失
+      }
+      KB.shoot({ spr: 'proj_airpuff', x: sx, y: this.cy, vx: this.dir * 2.6, dmg: 1, owner: 'player', life: solid ? 22 : 10, w: 10, h: 10, dir: this.dir, solid: solid, fxHit: 'fx_poof' });
       KB.particles(this.cx + this.dir * 8, this.cy, ['#ffffff', '#dcf0ff'], 2, { spread: 0.6, grav: 0, life: 14, up: 0.1, vx: this.dir * 0.4 });
     }
     updateClimb() {

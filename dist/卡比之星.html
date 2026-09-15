@@ -60,6 +60,11 @@ window.KB = window.KB || {};
     flyHoldGround: 4,     // 地面按住 ↑ 連續幾幀後起飛（門 / 梯優先，避免走過門口誤飛）
     flyFlapEvery: 9,      // 漂浮中按住 ↑ 每 n 幀自動拍動一次（等同按一次跳）
     flyFlapSfxEvery: 2,   // 自動拍動的音效節流：每 n 次拍動才播一次 float 音
+    // ---- fix9（R9-P1-02 / P2-04）：飛行高度上限與水中 ↑ 上浮 ----
+    flyCeilY: 8,          // 房間頂：卡比 top 不得高於此 y（沒有天花板的房間也飛不出畫面）
+    flyCeilVy: 0.2,       // 碰到房間頂時的下壓速度（與撞天花板一致）
+    swimUpEvery: 12,      // 水中按住 ↑ 每 n 幀輕划一次
+    swimUpHoldMul: 0.7,   // 水中按住 ↑ 的上浮初速 = swimUp × 此倍率
   };
   // 鏡頭手感（game.js updateCamera）
   KB.CAM = {
@@ -18251,6 +18256,7 @@ KB.FONT_DATA = {
       this.flyHoldT = 0;      // ↑ 連續按住幀數（每幀維護；放開歸零）
       this.flyFlapT = 0;      // 漂浮中自動拍動計時
       this.flyFlapN = 0;      // 自動拍動次數（音效節流用）
+      this.swimUpN = 0;       // fix9：水中按住 ↑ 的輕划次數（音效節流用）
       this.dirHold = { up: false, down: false };                 // 每幀方向鍵狀態（hold 型招式讀）
       this.atkDir = { up: false, down: false, air: false };      // startAttack 當幀的方向快照
       this.name = 'kirby';
@@ -18532,7 +18538,9 @@ KB.FONT_DATA = {
       //   地面：連續按住 P.flyHoldGround 幀才起飛，且該幀腳下不能有門 / 梯（門與梯優先，
       //         避免玩家一路按著 ↑ 找門時走過門口就飛起來）。
       //   空中（jump / fall）：按住 ↑ 立即起飛（條件與空中按跳漂浮相同）。
-      if (inp.down('up') && this.canFloatNow()) {
+      //   fix9 / R9-P1-01：form.jet（機甲）自己用噴射處理 ↑，不走漂浮 —— 否則同一顆鍵
+      //         會有「漂浮」與「噴射」兩種上升速度。
+      if (inp.down('up') && this.canFloatNow() && !(this.form && this.form.jet)) {
         if (!this.onGround) {
           if ((this.state === 'jump' || this.state === 'fall') && !this.landingSoon()) { this.startFloat(); return; }
         } else if (this.flyHoldT >= P.flyHoldGround && !KB.game.doorAt(this)
@@ -18558,7 +18566,21 @@ KB.FONT_DATA = {
       }
     }
 
+    /** fix9 / R9-P1-02：房間頂高度夾制 —— 沒有天花板的房間（開放天空）也不能飛出畫面。
+     *  卡比 top ≤ P.flyCeilY 就像撞到天花板一樣被壓住（vy ≥ P.flyCeilVy），仍可懸停在頂端；
+     *  鏡頭本來就夾在 y ≥ 0，不需要跟著動。回傳 true = 本幀被頂住。
+     *  漂浮 / 龍化飛行 / 機甲噴射 / 重力浮空（def.hover）都走 physics → afterPhysics，共用這一道。 */
+    clampTop() {
+      if (this.state === 'ride' || this.state === 'dead' || this.y > P.flyCeilY) return false;
+      this.y = P.flyCeilY;
+      if (this.vy < P.flyCeilVy) this.vy = P.flyCeilVy;
+      return true;
+    }
+    /** 已經頂在房間上緣（拍動 / 噴射不再給上升力） */
+    atRoomTop() { return this.y <= P.flyCeilY; }
+
     afterPhysics() {
+      this.clampTop();
       if (this.fellOut && this.state !== 'dead') { this.hp = 0; this.die(true); }
       // 尖刺
       const map = KB.game.map;
@@ -18632,14 +18654,19 @@ KB.FONT_DATA = {
     }
     updateFloat() {
       const inp = KB.input;
+      // fix9 / R9-P2-01：漂浮中一樣可以用「跳 + 攻擊」發動覺醒（量表沒滿時不攔截）
+      if (KB.AWAKEN && KB.AWAKEN.tryTrigger && KB.AWAKEN.tryTrigger(this)) return;
       const dirIn = (inp.down('right') ? 1 : 0) - (inp.down('left') ? 1 : 0);
       if (dirIn) { this.dir = dirIn; this.vx += dirIn * 0.1; }
       else this.vx *= 0.92;
       this.vx = Math.max(-1.0, Math.min(1.0, this.vx));
+      // fix9 / R9-P1-02：頂到房間上緣就不再拍動上升（維持懸停，不會飛出畫面）
+      const topped = this.atRoomTop();
+      if (topped) { this.flyFlapT = 0; if (this.vy < P.flyCeilVy) this.vy = P.flyCeilVy; }
       // 每按一次跳＝拍動一次（動畫重播 + 吐氣粒子）
-      if (inp.pressed('jump')) { this.floatFlap(false); this.flyFlapT = 0; }
+      else if (inp.pressed('jump')) { this.floatFlap(false); this.flyFlapT = 0; }
       // Round 9：按住 ↑ → 每 P.flyFlapEvery 幀自動拍動一次（＝持續上升）；放開 ↑ 就回一般漂浮下降
-      else if (inp.down('up') && !(this.form && this.form.fly)) {
+      else if (inp.down('up') && !(this.form && (this.form.fly || this.form.jet))) {
         this.flyFlapT++;
         if (this.flyFlapT >= P.flyFlapEvery) { this.flyFlapT = 0; this.floatFlap(true); }
       } else { this.flyFlapT = 0; }
@@ -18949,6 +18976,13 @@ KB.FONT_DATA = {
       if (dirIn) { this.dir = dirIn; this.vx += dirIn * 0.12; } else this.vx *= 0.9;
       this.vx = Math.max(-P.swimSpeed, Math.min(P.swimSpeed, this.vx));
       if (inp.pressed('jump')) { this.vy = P.swimUp; KB.audio.sfx('float'); KB.particles(this.cx, this.cy, '#c0f0ff', 3, { spread: 1, grav: -0.05, life: 15 }); }
+      // fix9 / R9-P2-04：水中按住 ↑ 也會上浮 —— 每 P.swimUpEvery 幀輕划一次（swimUp 的 70%），
+      //   與按跳並存（↑ 仍然不會起飛，canFloatNow 在水中照樣回 false）。
+      else if (inp.down('up') && (this.flyHoldT % P.swimUpEvery) === 1) {
+        this.vy = Math.min(this.vy, P.swimUp * P.swimUpHoldMul);
+        if ((this.swimUpN++ % Math.max(1, P.flyFlapSfxEvery)) === 0) KB.audio.sfx('float');
+        KB.particles(this.cx, this.cy, '#c0f0ff', 2, { spread: 0.8, grav: -0.05, life: 14 });
+      }
       if (inp.down('down')) this.vy += 0.1;
       // 嘴邊氣泡
       this.bubbleT++;
@@ -19104,7 +19138,20 @@ KB.FONT_DATA = {
     ladderPuff() {
       this.ladderAtkT = P.ladderAtkCd;
       KB.audio.sfx('exhale');
-      KB.shoot({ spr: 'proj_airpuff', x: this.cx + this.dir * 10, y: this.cy, vx: this.dir * 2.6, dmg: 1, owner: 'player', life: 22, w: 10, h: 10, dir: this.dir, solid: true, fxHit: 'fx_poof' });
+      // fix9 / R9-P2-07：貼牆的梯子（如 w2 r1）出生點會落在實心磁磚裡 → solid 的吐氣彈
+      //   當幀就判定撞牆而消失。先往卡比這側退 8px；退完仍在牆內就改成不 solid（穿牆約 1 格後消失）。
+      const map = KB.game.map;
+      // 出生框（10×10）四角有任何一角在實心磁磚裡就算被擋
+      const blocked = px => {
+        for (const ox of [-5, 5]) for (const oy of [-4, 4]) if (map.isSolidPx(px + ox, this.cy + oy)) return true;
+        return false;
+      };
+      let sx = this.cx + this.dir * 10, solid = true;
+      if (blocked(sx)) {
+        sx = this.cx + this.dir * 2;                 // 退 8px（貼身）
+        solid = false;                               // 前方就是牆 → 不 solid，穿牆約 1 格後消失
+      }
+      KB.shoot({ spr: 'proj_airpuff', x: sx, y: this.cy, vx: this.dir * 2.6, dmg: 1, owner: 'player', life: solid ? 22 : 10, w: 10, h: 10, dir: this.dir, solid: solid, fxHit: 'fx_poof' });
       KB.particles(this.cx + this.dir * 8, this.cy, ['#ffffff', '#dcf0ff'], 2, { spread: 0.6, grav: 0, life: 14, up: 0.1, vx: this.dir * 0.4 });
     }
     updateClimb() {
@@ -20647,7 +20694,7 @@ KB.FONT_DATA = {
   def('gunner', {
     color: '#d8dce8', duration: 10, hold: true, maxHold: 600, lockMove: false, moveSpeed: P.walk, fps: 14, canJump: true,
     desc: '雙手各握一把星塵左輪，一邊走一邊把彈幕鋪滿整個房間。',
-    flavour: '彈匣裡裝的是勇氣，退膛的是恐懼。',
+    flavour: ['彈匣裡裝的是勇氣，', '退膛的是恐懼。'],
     moves: [['X 按住', '雙槍連射'], ['↑+X', '對空三連'], ['↓+X', '蓄力霰彈'], ['空中 X', '俯衝掃射'], ['按住 60 幀放開', '必殺・子彈時間']],
     onGet(p) { const d = data(p); d.t = 0; d.charged = false; },
     onCrouchAttack(p) { startMove(p, 'shotgun'); },
@@ -20827,7 +20874,7 @@ KB.FONT_DATA = {
   def('ninja', {
     color: '#5460a0', duration: 26, hold: true, maxHold: 600, lockMove: false, moveSpeed: P.walk, fps: 14, canJump: true,
     desc: '身法快得只看得見殘影，手裡劍與替身術一氣呵成。',
-    flavour: '影子先到，本體後到。',
+    flavour: ['影子先到，本體後到。'],
     moves: [['X', '手裡剎三連'], ['↑+X', '昇龍手裡劍'], ['↓+X', '替身瞬移'], ['空中 X', '飛踢'], ['蓄力放開', '必殺・影分身斬'], ['貼牆＋跳', '壁跳（任何牆面）']],
     onGet(p) { const d = data(p); d.t = 0; d.wallT = 0; ensureTicker(p); },
     onCrouchAttack(p) { startMove(p, 'warp'); },
@@ -20975,7 +21022,7 @@ KB.FONT_DATA = {
   def('blade', {
     color: '#eef2ff', duration: 20, hold: true, maxHold: 600, lockMove: false, moveSpeed: P.walk, fps: 12, canJump: true,
     desc: '一柄比身體還長的大太刀，出鞘的瞬間連空氣都被切開。',
-    flavour: '刀在鞘中時最快。',
+    flavour: ['刀在鞘中時最快。'],
     moves: [['X', '三段連斬'], ['↑+X', '上撩斬'], ['↓+X', '地摺斬'], ['空中 X', '落下斬'], ['按住 50 幀放開', '必殺・居合一閃']],
     onGet(p) { const d = data(p); d.combo = 0; d.cut = []; },
     onCrouchAttack(p) { startMove(p, 'lowcut'); },
@@ -21211,7 +21258,7 @@ KB.FONT_DATA = {
   def('bow', {
     color: '#48c048', duration: 22, hold: true, maxHold: 600, lockMove: false, moveSpeed: P.walk, fps: 12, canJump: true,
     desc: '精靈之弓拉滿時會把周圍的光都吸進箭尖，放手就是一道流星。',
-    flavour: '風會告訴你該瞄哪裡。',
+    flavour: ['風會告訴你該瞄哪裡。'],
     moves: [['X', '射箭'], ['↑+X', '對空連射'], ['↓+X', '陷阱箭'], ['空中 X', '箭雨'], ['蓄力 40', '貫穿箭'], ['蓄力 80', '必殺・流星箭']],
     onGet(p) { const d = data(p); d.lv = 0; },
     onCrouchAttack(p) { startMove(p, 'trap'); },
@@ -22903,10 +22950,28 @@ KB.FONT_DATA = {
       p.grav = 0;
       const am = data(p).mode;
       if (s === 'attack' && (am === 'dive' || am === 'rise')) return false;   // 俯衝 / 升龍時由招式自己控制 vy
-      if (p.onGround) { if (p.vy > 0) p.vy = 0; return false; }
+      if (p.onGround) {
+        // fix9 / R9-P1-01：地面按住跳 **或** 按住 ↑ 就起飛（和空中同一顆鍵、同一種手感）。
+        //   ↑ 沿用 player.js 的地面規則：連續按住 P.flyHoldGround 幀，且腳下沒有門 / 梯（門梯優先）。
+        const map = KB.game && KB.game.map;
+        const upFly = !!(p.dirHold && p.dirHold.up) && p.flyHoldT >= P.flyHoldGround
+          && !(KB.game && KB.game.doorAt && KB.game.doorAt(p))
+          && !(map && (map.onLadder(p.cx, p.cy) || map.onLadder(p.cx, p.bottom + 1)));
+        if ((KB.input.down('jump') || upFly) && s !== 'attack' && s !== 'inhale' && !p.full) {
+          p.vy = -2.6; p.onGround = false; p.jumped = true; p.jumpBufT = 0; p.coyoteT = 0;
+          p.setState('jump');
+          d.flap = 0;
+          sfx('wing_flap');
+          KB.particles(p.cx, p.bottom - 2, ['#ffffff', '#ffc0c0', '#e88080'], 3,
+            { spread: 1.0, grav: -0.02, life: 18, up: 0.4, size: 2 });
+          return false;
+        }
+        if (p.vy > 0) p.vy = 0; return false;
+      }
       // Round 9：按住跳 **或** 按住 ↑ 都能持續拍翅上升（player.js 的 ↑ 長按飛行會排除 form.fly，
       //   所以龍化要自己讀 p.dirHold.up，手感才和其他能力一致）
-      if (KB.input.down('jump') || (p.dirHold && p.dirHold.up)) {
+      // fix9 / R9-P1-02：頂到房間上緣就不再拍翅上升（clampTop 會把 vy 壓成 +0.2，能懸停在頂端）
+      if ((KB.input.down('jump') || (p.dirHold && p.dirHold.up)) && !(p.atRoomTop && p.atRoomTop())) {
         p.vy = p.vy < -1.2 ? Math.min(p.vy + 0.18, -1.2) : -1.2;
         d.flap++;
         if (d.flap % 12 === 0) {
@@ -23153,7 +23218,9 @@ KB.FONT_DATA = {
     onGet(p) {
       const d = data(p); d.jetT = 0; d.stepT = 0;
       p.setForm({
-        key: 'mech', armor: 1, hp: 6,
+        // fix9 / R9-P1-01：jet = 「↑ 走噴射、不走漂浮」（player.js 讀），
+        //   讓按住 ↑ 與按住跳是同一種上升速度。
+        key: 'mech', armor: 1, hp: 6, jet: true,
         spr(pp, anim, opts) {
           opts.frame = undefined; opts.t = pp.t;
           if (pp.state === 'attack') {
@@ -23182,11 +23249,25 @@ KB.FONT_DATA = {
         }
       } else d.stepT = 0;
       // 噴射跳：離地後按住跳最多 30 幀持續上升
-      if (p.onGround) d.jetT = 0;
-      // Round 9：按住跳（原本）或按住 ↑（新的飛行鍵）都會噴射；漂浮中除外 —— 那時 player.js
-      //   的「↑ 長按飛行」已經在負責上升，再加噴射會變成兩份推力。
-      else if ((KB.input.down('jump') || (p.dirHold && p.dirHold.up && s !== 'float'))
-        && p.vy < 1.2 && d.jetT < 30 && s !== 'attack') {
+      if (p.onGround) {
+        d.jetT = 0;
+        // fix9 / R9-P1-01：地面按住 ↑ ＝ 按住跳（起跳後接噴射）；門 / 梯優先，規則同 player.js
+        const map = KB.game && KB.game.map;
+        const upFly = !!(p.dirHold && p.dirHold.up) && p.flyHoldT >= P.flyHoldGround
+          && !(KB.game && KB.game.doorAt && KB.game.doorAt(p))
+          && !(map && (map.onLadder(p.cx, p.cy) || map.onLadder(p.cx, p.bottom + 1)));
+        if (upFly && s !== 'attack' && s !== 'inhale' && !p.full) {
+          p.vy = P.jump; p.onGround = false; p.jumped = true; p.jumpBufT = 0; p.coyoteT = 0;
+          p.setState('jump');
+          sfx('jet');
+          KB.particles(p.cx, p.bottom - 1, ['#78e8ff', '#ffffff', '#1888c8'], 3, { spread: 0.8, grav: 0.02, life: 14, up: -0.6, size: 2 });
+        }
+      }
+      // Round 9：按住跳（原本）或按住 ↑（新的飛行鍵）都會噴射。
+      //   fix9 / R9-P1-01：漂浮中也照噴 —— 原本排除 float 會讓 ↑ 只有一半的上升速度
+      //   （同一顆鍵兩種速度）；現在 ↑ 與跳完全同速。頂到房間上緣（P.flyCeilY）就不再推。
+      else if ((KB.input.down('jump') || (p.dirHold && p.dirHold.up))
+        && p.vy < 1.2 && d.jetT < 30 && s !== 'attack' && !(p.atRoomTop && p.atRoomTop())) {
         d.jetT++;
         p.vy -= 0.17;
         if (d.jetT % 4 === 1) KB.particles(p.cx + rnd(-4, 4), p.bottom - 1, ['#78e8ff', '#ffffff', '#1888c8'], 2, { spread: 0.7, grav: 0.02, life: 12, up: -0.6, size: 2 });
@@ -23350,7 +23431,9 @@ KB.FONT_DATA = {
     hat: null,
     desc: '變成半透明的白色被單；能穿過薄牆、附身敵人，還能發出讓人僵直的哀嚎。',
     flavour: ['身體變得輕飄飄、涼颼颼的，', '牆壁看起來也沒那麼硬了。'],
-    moves: [['X', '穿牆開關（2 格內）'], ['↑+X', '隱身 180 幀（嚇愣）'], ['↓+X', '附身（無目標＝墜擊）'], ['空中 X', '幽靈哀嚎（stun）'], ['穿牆中 ↑↓', '上下飄浮']],
+    // fix9 / R9-P2-03：招式表固定 X → ↑+X → ↓+X → 空中 X 各一列（穿牆中的上下飄浮寫進招名括號，
+    //   原本多一列「穿牆中 ↑↓」會讓 ↑ / ↓ 各出現 2 次，不合 run_move_table 規則）。
+    moves: [['X', '穿牆開關（↑↓飄浮）'], ['↑+X', '隱身 180 幀（嚇愣）'], ['↓+X', '附身（無目標＝墜擊）'], ['空中 X', '幽靈哀嚎（stun）']],
     onGet(p) {
       const d = data(p);
       d.phaseT = GHOST_PHASE; d.invisT = 0; d.possessT = 0; d.guard = null;
@@ -40972,7 +41055,8 @@ KB.FONT_DATA = {
     ['水中 X', '水中也能吸入（減半）'],
     ['梯子上 X', '在梯子上吐氣星攻擊'],
     ['↓ + 跳', '單向平台上＝穿下去'],
-    ['按住 ↑', '漂浮飛行（連按跳亦可）'],
+    // fix9 / R9-P2-05：寫出真正的新規則（地面按住即起飛、門 / 梯優先）；右欄 12px 上限 138px
+    ['按住 ↑', '地面按住起飛；門前不飛'],
     ['空中 X', '空中也能出招 ↑X／↓X'],
     ['滑鏟中 跳', '滑鏟可用跳躍取消'],
     ['受傷時', '能力星噴出，可撿回'],
@@ -41962,6 +42046,12 @@ KB.FONT_DATA = {
     },
   };
 
+  /** 風味文字正規化：字串 → 單元素陣列；空值 → []（fix9 / R9-P2-02） */
+  function flavourArr(f) {
+    if (Array.isArray(f)) return f;
+    return f ? [String(f)] : [];
+  }
+
   UI.abilityInfo = function (key) {
     const d = (key && KB.ABILITIES) ? KB.ABILITIES[key] : null;
     const t = UI.ABILITY_HELP[key || 'none'] || {};
@@ -41970,7 +42060,9 @@ KB.FONT_DATA = {
       name: t.name || (d && d.name) || (KB.ABILITY_NAMES && KB.ABILITY_NAMES[key]) || '普通',
       en: t.en || (d && d.hudName) || (KB.ABILITY_HUD && KB.ABILITY_HUD[key]) || 'NORMAL',
       desc: (d && d.desc) || t.desc || '',
-      flavour: (d && d.flavour) || t.flavour || (t.desc ? [t.desc] : []),
+      // fix9 / R9-P2-02：def.flavour 規格是陣列，但歷史上有寫成字串的（對字串 slice/[0] 會只取一個字）
+      //   → 這裡統一正規化成陣列，任何能力都不會再只畫出一個字。
+      flavour: flavourArr((d && d.flavour) || t.flavour || (t.desc ? [t.desc] : [])),
       moves: (d && d.moves) || t.moves || [],
       icon: key ? ((d && d.icon) || ('ui_ability_' + key)) : 'ui_ability_none',
       hat: key ? ((d && d.hat) || ('hat_' + key)) : null,
