@@ -169,3 +169,14 @@
 | skins | src/skins.js、src/player.js（draw 換精靈）、src/gfx.js（重著色快取）、tools/test_skins.py | 12 種卡比配色（成就解鎖）、KB.SKINS API、預覽、HUD 臉同步（若能不改 ui.js 就用精靈別名） |
 | audio8 | src/audio.js、tools/audio_check.js、tools/render_music.py | 24 混合 sfx、20 覺醒招 sfx、挑戰模式 2 曲 + 計時 / 達成 jingle |
 | qa8（第二波） | docs/QA_REPORT.md | 全系統驗收 |
+
+---
+# Round 9：操作重構（2026-09-15）— ↑ 長按飛行、空中可施展、每能力 ↑X / ↓X 齊全
+使用者需求：① 每種能力「↑+X」與「↓+X」都要有各自的招；② 空中也能施展能力（人物同時下墜）；③ 一直按 ↑ = 一直按跳（持續飛行）。
+| agent | 擁有檔案 | 內容 |
+|---|---|---|
+| player-input | src/player.js、src/input.js（HELP）、src/const.js（尾端新常數）、tools/engine_test.py | ↑ 長按飛行（地面 / 空中 / 漂浮中自動拍動）、漂浮中 X 用能力（不再吐氣）、空中 X / ↑X / ↓X 皆可出招且持續下墜、p.atkDir 快照、招式結束若 ↑ 仍按著自動回漂浮、門 / 梯優先 |
+| abilities-basic | src/abilities.js、src/abilities_weapons.js、src/art/kirby.js、src/art/kirby_weapons.js、tools/test_weapons.py、tools/test_charge.py（僅新增） | 8 基本 + 4 武器：每種確保 X / ↑X / ↓X / 空中 X 四招齊全且空中可用 ↑X ↓X（缺的補原創招） |
+| abilities-magic-forms | src/abilities_magic.js、src/abilities_forms.js、src/art/kirby_magic.js、src/art/kirby_forms.js、tools/test_magic.py、tools/test_forms.py | 8 種同上 |
+| abilities-mix | src/abilities_mix.js、src/abilities_mix2.js、src/art/kirby_mix.js、src/art/kirby_mix2.js、tools/test_mix.py、tools/test_mix2.py | 24 混合：每種補齊 ↑X / ↓X / 空中 X（現在只有 3 招） |
+| qa9（第二波） | docs/QA_REPORT.md | 44 能力 × 4 方向 × 地面 / 空中 驗收、飛行手感、通關 |

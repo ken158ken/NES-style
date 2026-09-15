@@ -4095,3 +4095,25 @@ Round 8 QA（qa8）問題修正 —— agent: fix8（2026-09-12）。負責 R8-P
 3. 子集是掃「`src/**/*.js` 的所有非 ASCII 字元」，**註解裡的字也會被收進去**（寧可多收也不要缺字）；
    目前 1,827 字 / 56 KB，多幾十個字對體積幾乎沒影響。
 4. 想調整標題粗細：`KB.TEXT_CFG.boldFrom16`（16 = 開、999 = 關），改完要 `KB.clearTextCache()`。
+
+---
+# Round 9：操作重構（2026-09-15 啟動）
+分工見 docs/TASKS.md Round 9。介面約定（player-input 提供，abilities 讀）：
+- `p.atkDir = { up, down, air }` 於 startAttack 當幀快照（KB.input.down('up'/'down')、!p.onGround）；abilities 的 onAttack 可讀 p.atkDir 或照舊讀 KB.input。
+- 空中出招：player 不阻擋；重力照常（abilities 可用 slowFall 緩降但不可懸停 > 30 幀，除非 def.hover）。
+- 招式優先序（abilities 內部判斷）：↑X > ↓X > 空中 X > X；空中時 ↑X / ↓X 若無空中專用版就沿用地面版效果（判定框位置隨卡比）。
+
+## player-input
+（agent 在此追加）
+
+## abilities-basic
+（agent 在此追加）
+
+## abilities-magic-forms
+（agent 在此追加）
+
+## abilities-mix
+（agent 在此追加）
+
+## qa9
+（agent 在此追加）
