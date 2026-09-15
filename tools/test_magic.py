@@ -15,7 +15,7 @@ import sys, pathlib, argparse, base64
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from playwright.sync_api import sync_playwright
 import enemy_test as ET
-from enemy_test import Harness, HOOK_JS, TEST_LEVEL, check
+from enemy_test import Harness, HOOK_JS, TEST_LEVEL, check, GROUND_TOP, PLAYER_H
 from test_charge import run_charge
 
 try:
@@ -378,6 +378,113 @@ def phase_clone(h):
     check(n + 'no leftover magic entities', magic_ents(h) == [], magic_ents(h))
 
 
+
+# ---------------------------------------------------------------------------
+# 5.5 Round 9：↑X / ↓X / 空中 X 全部出得來（地面 + 空中）且打得死
+#   規格（docs/TASKS.md Round 9 + PROGRESS.md「Round 9」介面約定）：
+#     ① 每種能力 X / ↑+X / ↓+X / 空中 X 四招各自不同
+#     ② ↑X / ↓X 在空中也要出招（優先於空中 X），空中招之後一定會繼續下墜
+#        （例外：def.hover 的「重力・浮空」本來就是懸停招）
+#   每個 case：放一隻不會動的 waddledee → 出招 → 命中致死（或凍結 / 拉扯後扣血）→ 狀態回正常。
+# ---------------------------------------------------------------------------
+def put_dummy(h, px, py, hover=False):
+    """在指定像素座標放一隻不會動的 waddledee；hover=True 關掉重力（測空中招時當空靶）"""
+    h.spawn('waddledee', 5, 9)
+    # think() 直接關掉：waddledee 察覺卡比時會「受驚小跳」（vy = -1.6），
+    # 浮空靶沒有重力就會一路往上飄，招式判定會對不上。
+    h.ev("([x,y,f])=>{const e=__te; e.x=x; e.y=y; e.vx=0; e.vy=0; e.speed=0; e.turnAtEdge=false; e.turnAtWall=false;"
+         " e.active=true; e.think=function(){ this.vx=0; if(f) this.vy=0; }; if(f){e.grav=0; e.solid=false;} }",
+         [px, py, bool(hover)])
+    step(h, 1)
+    return target(h)
+
+
+def setup_case(h, key, air, dx, dy, hover=None):
+    """開場 → （空中招時）把卡比放到離地 48px → 依相對位置放靶；回傳卡比座標"""
+    h.goto(3, 9, ability=key, immune=True)
+    if key == 'clone':
+        give(h, 'clone')          # 分身要走 onGet 才會生成
+    h.ev("()=>{KB.player.dir=1;}")
+    if air:
+        g = gstate(h)
+        h.teleport(g['x'], GROUND_TOP - PLAYER_H - 48)
+        step(h, 1)
+    p = h.ev("()=>({cx:KB.player.cx, bottom:KB.player.bottom, y:KB.player.y})")
+    hov = air if hover is None else hover
+    # 浮空靶＝和卡比同高度；不浮空的靶一律站在地面上
+    put_dummy(h, p['cx'] + dx, (p['bottom'] if hov else GROUND_TOP) - 14 + dy, hov)
+    return p
+
+
+# key, 標籤, 按鍵序列, 空中?, 靶相對 (dx, dy), 等待幀數, 出招後要下墜?[, 靶要浮空?]
+R9_MAGIC = [
+    ('mage', '↑+X 冰牆', [('up', 3), ('up,attack', 3)], False, (16, 0), 40, False),
+    ('mage', '↓+X 雷擊', [('down', 4), ('down,attack', 3)], False, (48, 0), 90, False),
+    ('mage', '↑+X 冰階（空中）', [('up', 3), ('up,attack', 3)], True, (16, 0), 40, True),
+    ('mage', '↓+X 雷擊（空中）', [('down', 4), ('down,attack', 3)], True, (48, 0), 90, True),
+    ('mage', '空中 X 風刃', [('attack', 3)], True, (28, 0), 50, True),
+    ('time', '↑+X 加速（時震環）', [('up', 3), ('up,attack', 3)], False, (16, 0), 30, False),
+    ('time', '↓+X 慢動作（時之枷）', [('down', 4), ('down,attack', 3)], False, (16, 0), 40, False),
+    ('time', '↑+X 加速（空中）', [('up', 3), ('up,attack', 3)], True, (16, 0), 30, True),
+    ('time', '↓+X 慢動作（空中）', [('down', 4), ('down,attack', 3)], True, (16, 0), 40, True),
+    ('time', '空中 X 回溯（殘影斬）', [('attack', 3)], True, (-26, 0), 40, True),
+    ('gravity', '↑+X 浮空（重力波）', [('up', 3), ('up,attack', 3)], False, (16, 0), 30, False),
+    ('gravity', '↓+X 反重力', [('down', 4), ('down,attack', 3)], False, (16, 0), 40, False),
+    ('gravity', '↑+X 浮空（空中）', [('up', 3), ('up,attack', 3)], True, (16, 0), 30, False),   # def.hover：懸停招
+    ('gravity', '↓+X 反重力（空中）', [('down', 4), ('down,attack', 3)], True, (16, 0), 40, True),
+    # 隕石落點會左右飄 ±0.4px/幀，浮空靶不一定擦得到 → 用地面靶，靠落地爆炸（r 36）判定
+    ('gravity', '空中 X 隕石', [('attack', 3)], True, (30, 0), 110, True, False),
+    ('clone', '↑+X 分身塔', [('up', 3), ('up,attack', 3)], False, (-4, -30), 40, False),
+    ('clone', '↓+X 交換（星爆）', [('down', 4), ('down,attack', 3)], False, (12, 0), 30, False),
+    ('clone', '↑+X 分身塔（空中）', [('up', 3), ('up,attack', 3)], True, (-4, -30), 40, True),
+    ('clone', '↓+X 交換（空中）', [('down', 4), ('down,attack', 3)], True, (12, 0), 30, True),
+    ('clone', '空中 X 分身墊腳', [('attack', 3)], True, (-4, 14), 50, True),
+]
+
+
+def phase_round9(h):
+    n = 'R9 '
+    for row in R9_MAGIC:
+        key, label, seq, air, (dx, dy), wait, fall = row[:7]
+        hover = row[7] if len(row) > 7 else None
+        nm = f'{n}{key} [{label}]'
+        try:
+            setup_case(h, key, air, dx, dy, hover)
+            y0 = gstate(h)['y']
+            for keys, fr in seq:
+                press(h, keys, fr)
+            release(h)
+            step(h, wait)
+            check(nm + ': 命中致死 / 凍結', killed(h), target(h))
+            normal_after(h, key, nm)
+            if air and fall:
+                step(h, 70)
+                g = gstate(h)
+                check(nm + ': 空中出招後仍會下墜（不會浮在原地）',
+                      g['y'] > y0 + 8 or g['state'] in ('idle', 'walk', 'crouch'), dict(y0=y0, y1=g['y'], state=g['state']))
+        except Exception as ex:
+            check(nm + ': raised', False, repr(ex))
+
+    # 招式表：固定順序 X / ↑+X / ↓+X / 空中 X / 蓄力，且 ≤ 6 列
+    for key in MAGIC_KEYS:
+        mv = h.ability_moves(key)['moves']
+        keys0 = [m[0] for m in mv]
+        check(f'{n}{key}: moves 有 ↑+X 與 ↓+X', any('↑' in k for k in keys0) and any('↓' in k for k in keys0), keys0)
+        check(f'{n}{key}: moves 第一列是 X、含空中 X、≤ 6 列',
+              keys0[0] == 'X' and any('空中 X' in k for k in keys0) and len(mv) <= 6, keys0)
+        order = [i for i, k in enumerate(keys0) if k in ('X', '↑+X', '↓+X', '空中 X')]
+        check(f'{n}{key}: moves 順序 X → ↑+X → ↓+X → 空中 X', order == sorted(order) and len(order) == 4, keys0)
+
+    # 穿牆 / 特殊狀態下的招式：時停中 ↑X / ↓X 仍然是加速 / 慢動作（時停規則不變）
+    h.goto(3, 9, ability='time', immune=True)
+    press(h, 'attack', 3); release(h); step(h, 40)      # 等時停的收招動作（34 幀）演完
+    press(h, 'up', 3); press(h, 'up,attack', 3); release(h); step(h, 2)
+    mode = h.ev("()=>KB.player.abilityData.mode")
+    check(n + 'time: 時停中 ↑+X 仍然是加速（時停規則不變）', mode == 'haste', mode)
+    check(n + 'time: 時停中仍在計時（招式不會取消時停）', gstate(h)['timeStop'] > 0, gstate(h)['timeStop'])
+    step(h, 200)
+
+
 # ---------------------------------------------------------------------------
 # 5. 魔法系敵人
 # ---------------------------------------------------------------------------
@@ -470,6 +577,10 @@ def phase_registry(h):
     for i in info:
         ok = i['has'] and i['inKeys'] and i['name'] and i['hud'] and i['moves'] >= 4 and i['desc'] and i['color'] and i['hat'] and i['icon'] and i['mini'] and i['anim']
         check(n + i['k'] + ' registered with moves / desc / sprites', ok, i)
+    # Round 9：新招的專用動畫幀（缺了會畫洋紅方塊）
+    for spr in ['kirby_attack_clone_tower', 'kirby_attack_mage_wall', 'kirby_attack_mage_bolt',
+                'kirby_attack_time_haste', 'kirby_attack_time_slow', 'kirby_attack_gravity_float', 'kirby_attack_gravity_lift']:
+        check(n + 'sprite ' + spr, h.ev("(s)=>KB.has(s)", spr), spr)
     es = h.ev("(keys)=>keys.map(k=>({k, has:!!KB.ENEMIES[k], walk:KB.has(k+'_walk'), attack:KB.has(k+'_attack')}))", list(MAGIC_ENEMIES))
     for e in es:
         check(n + e['k'] + ' enemy registered with walk / attack sprites', e['has'] and e['walk'] and e['attack'], e)
@@ -493,8 +604,8 @@ def main():
     ET.VERBOSE = a.v
     ET.SHOTS = SHOTS
     phases = [('registry', phase_registry), ('mage', phase_mage), ('time', phase_time),
-              ('gravity', phase_gravity), ('clone', phase_clone), ('charge', phase_charge),
-              ('enemies', phase_enemies)]
+              ('gravity', phase_gravity), ('clone', phase_clone), ('round9', phase_round9),
+              ('charge', phase_charge), ('enemies', phase_enemies)]
     only = [k for k in a.only.split(',') if k]
     if only:
         phases = [p for p in phases if p[0] in only]

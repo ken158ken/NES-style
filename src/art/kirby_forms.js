@@ -176,6 +176,11 @@
     dragonFrame({ wing: 0, dy: -1, feet: [[11, 20], [16, 20]], tailUp: true }),
   ], { fps: 7 });
   S('kirby_dragon_fly', [dragonFrame({ wing: 1, dy: -1, tailUp: true }), dragonFrame({ wing: 2 })], { fps: 8 });
+  // ↑+X 升龍尾撩（Round 9 新招）：翅膀上展躍起、尾巴由下往上甩
+  S('kirby_dragon_rise', [
+    dragonFrame({ wing: 1, angry: true, mouth: MOUTH_FANG, tailUp: true, dy: -1, feet: [[11, 20], [16, 20]] }),
+    dragonFrame({ wing: 2, angry: true, mouth: MOUTH_FANG, tailUp: true, fire: true, dy: -2, feet: [[12, 20], [17, 20]] }),
+  ], { fps: 12 });
   S('kirby_dragon_attack', [
     dragonFrame({ wing: 2, angry: true, mouth: MOUTH_FANG, feet: [[10, 20], [17, 20]] }),
     dragonFrame({ wing: 1, angry: true, mouth: MOUTH_FANG, fire: true, dy: -1 }),
@@ -211,6 +216,7 @@
     only(g, 8, 8 + dy, 'L'); only(g, 20, 8 + dy, 'L');
     // 手臂（前臂朝向右）：punch 時整隻拳頭往前伸出
     if (o.punch) { box(g, 20, 11 + dy, 6, 7, 'g'); box(g, 23, 11 + dy, 3, 7, 'L'); box(g, 24, 13 + dy, 2, 3, 'y'); }
+    else if (o.noArm) { /* 鑽頭幀自己畫手臂（見 mechDrillFrame）*/ }
     else { ell(g, 21, 14 + dy, 3, 4, 'g'); }
     outline(g, 'k');
     // --- 腳（鋼靴，8×5）---
@@ -224,6 +230,33 @@
     mechFrame({ dy: -1, feet: [[9, 19], [15, 19]] }),
   ], { fps: 7 });
   S('kirby_mech_jump', [mechFrame({ jet: true, feet: [[9, 19], [15, 19]] })]);
+  /**
+   * ↓+X 鑽頭突進（Round 9 新招）：26×24 的機甲往右挪 1px 貼進 30×24 的畫面，
+   * 空出來的右側 4px 畫旋轉鑽頭 —— 30 / 2 = 15 剛好還是機甲的中心，底部中央錨點不會偏。
+   */
+  function mechDrillFrame(o) {
+    const g = G(30, 24);
+    const dy = o.dy || 0;
+    stamp(g, mechFrame(Object.assign({ noArm: true }, o)), 1, 0);
+    // 套筒（肩膀接出去）
+    box(g, 19, 12 + dy, 6, 7, 'G');
+    box(g, 19, 12 + dy, 6, 2, 'g');
+    box(g, 19, 18 + dy, 6, 1, 'D');
+    // 圓錐鑽頭：亮面 + 斜向螺旋紋（drillT 錯開一格＝旋轉中）+ 金色尖端
+    tri(g, [25, 10 + dy], [25, 21 + dy], [29, 15 + dy], 'L');
+    const k = o.drillT ? 1 : 0;
+    for (let i = 0; i < 5; i++) px(g, 25 + (i >> 1), 11 + k + i + dy, 'd');
+    for (let i = 0; i < 4; i++) px(g, 26 + (i >> 1), 17 + k + i + dy, 'G');
+    px(g, 29, 15 + dy, 'y'); px(g, 28, 14 + dy, 'y'); px(g, 28, 16 + dy, 'y');
+    // 火花
+    if (o.drillT) { px(g, 29, 10 + dy, 'y'); px(g, 28, 21 + dy, 'y'); }
+    outline(g, 'k');            // 只有新畫的鑽頭會被描邊（機甲的外框本來就已經是 'k'）
+    return RS(g);
+  }
+  S('kirby_mech_drill', [
+    mechDrillFrame({ eye: 'y', feet: [[7, 19], [16, 19]] }),
+    mechDrillFrame({ eye: 'y', drillT: 1, dy: -1, jet: true, feet: [[9, 19], [15, 19]] }),
+  ], { fps: 14 });
   S('kirby_mech_attack', [
     mechFrame({ eye: 'y', feet: [[8, 19], [16, 19]] }),
     mechFrame({ eye: 'y', punch: true, dy: -1, jet: true }),
@@ -237,15 +270,26 @@
     const g = G(24, 22);
     const dy = o.dy || 0, ph = o.phase || 0;           // 波浪相位
     // 被單主體：上半圓 + 往下擴張的裙襬
-    disc(g, 12, 10 + dy, 8, 'e');
-    for (let y = 10 + dy; y < 19 + dy; y++) {
-      const half = 8 + Math.round((y - (10 + dy)) * 0.25);
-      for (let x = 12 - half; x <= 12 + half; x++) px(g, x, y, 'e');
+    if (o.dive) {
+      // 俯衝：頭小一點，整體收成水滴狀（尖端朝下）
+      disc(g, 12, 9 + dy, 6, 'e');
+    } else {
+      disc(g, 12, 10 + dy, 8, 'e');
+      for (let y = 10 + dy; y < 19 + dy; y++) {
+        const half = 8 + Math.round((y - (10 + dy)) * 0.25);
+        for (let x = 12 - half; x <= 12 + half; x++) px(g, x, y, 'e');
+      }
     }
-    // 裙襬三個波浪
-    for (let x = 2; x <= 22; x++) {
-      const w = Math.round(2.2 * Math.sin((x + ph * 3) * 0.72));
-      for (let y = 19 + dy; y <= 19 + dy + 2 + w; y++) px(g, x, y, 'e');
+    if (o.dive) {
+      // 怨靈墜擊：身體收成往下的尖錐，兩側殘影往上飄
+      tri(g, [5, 8 + dy], [19, 8 + dy], [12, 21 + dy], 'e');
+      for (const x of [3, 8, 16, 21]) for (let y = 0; y <= 3; y++) px(g, x, y + dy, 'E');
+    } else {
+      // 裙襬三個波浪
+      for (let x = 2; x <= 22; x++) {
+        const w = Math.round(2.2 * Math.sin((x + ph * 3) * 0.72));
+        for (let y = 19 + dy; y <= 19 + dy + 2 + w; y++) px(g, x, y, 'e');
+      }
     }
     // 陰影（右下）
     shade(g, 9, 7 + dy, 'e', 'o', 'E');
@@ -254,15 +298,21 @@
     outline(g, 'q');
     // 臉：黑色空洞眼 + 嘴
     const eye = o.wail ? ['qq', 'kk', 'kk'] : ['.k.', 'kkk', 'kkk'];
-    stamp(g, eye, 10, 7 + dy);
-    stamp(g, eye, 15, 7 + dy);
-    if (o.wail) stamp(g, ['.kkk.', 'kkkkk', 'kkkkk', '.kkk.'], 11, 12 + dy);
-    else stamp(g, ['.kk.', 'k..k'], 12, 13 + dy);
+    const fy = o.dive ? -2 : 0;
+    stamp(g, eye, 10, 7 + dy + fy);
+    stamp(g, eye, 15, 7 + dy + fy);
+    if (o.wail) stamp(g, ['.kkk.', 'kkkkk', 'kkkkk', '.kkk.'], 11, 12 + dy + fy);
+    else stamp(g, ['.kk.', 'k..k'], 12, 13 + dy + fy);
     return RS(g);
   }
   S('kirby_ghost_idle', [ghostFrame({ phase: 0 }), ghostFrame({ phase: 1, dy: -1 })], { fps: 4 });
   S('kirby_ghost_walk', [ghostFrame({ phase: 1 }), ghostFrame({ phase: 2, dy: -1 })], { fps: 6 });
   S('kirby_ghost_attack', [ghostFrame({ phase: 0, wail: true }), ghostFrame({ phase: 2, wail: true, dy: -2 })], { fps: 10 });
+  // ↓+X 沒有附身目標時的「怨靈墜擊」（Round 9）：裙襬收成尖端往下俯衝
+  S('kirby_ghost_plunge', [
+    ghostFrame({ phase: 1, wail: true, dive: true }),
+    ghostFrame({ phase: 2, wail: true, dive: true, dy: -1 }),
+  ], { fps: 10 });
 
   // ======================================================================
   //  4.5) `kirby_attack_<key>` 預設攻擊幀（fix5）
@@ -278,7 +328,8 @@
     const g = G(22, 22);
     const dy = o.dy || 0;
     // 手臂（舉起 / 往下砸）
-    for (const [ax, ay] of (o.arms || [[2, 12], [19, 12]])) ell(g, ax, ay + dy, 2, 3, 'p');
+    // [x, y] 或 [x, y, r]（r = 拳頭半徑，上勾拳用大一點的拳）
+    for (const a of (o.arms || [[2, 12], [19, 12]])) ell(g, a[0], a[1] + dy, a[2] || 2, a[2] || 3, 'p');
     // 身體（比例照 art/kirby.js 的 20×20 卡比：球心略高、腳在最下面兩列）
     ball(g, 11, 9 + dy, 8);
     // 臉：怒眼 + 露牙 + 腮紅
@@ -301,6 +352,11 @@
     giantFrame({ dy: -1, arms: [[3, 4], [18, 4]], feet: [[4, 17], [12, 17]] }),
     giantFrame({ arms: [[2, 13], [19, 13]], feet: [[1, 17], [15, 17]], dust: true }),
   ], { fps: 8 });
+  // ↑+X 巨人上勾拳（Round 9 新招）：frame0 屈膝蓄力 / frame1 雙拳捶天（form.scale=2 會放大成 44×44）
+  S('kirby_attack_giant_up', [
+    giantFrame({ dy: 1, arms: [[3, 13, 3], [18, 13, 3]], feet: [[4, 17], [12, 17]] }),
+    giantFrame({ dy: 1, arms: [[4, 1, 3], [17, 1, 3]], feet: [[3, 17], [13, 17]], dust: true }),
+  ], { fps: 10 });
   S('kirby_attack_dragon', [
     dragonFrame({ wing: 2, angry: true, mouth: MOUTH_FANG, feet: [[10, 20], [17, 20]] }),
     dragonFrame({ wing: 1, angry: true, mouth: MOUTH_FANG, fire: true, dy: -1 }),

@@ -4229,7 +4229,48 @@ Round 8 QA（qa8）問題修正 —— agent: fix8（2026-09-12）。負責 R8-P
 
 
 ## abilities-magic-forms
-（agent 在此追加）
+
+擁有檔案：`src/abilities_magic.js`、`src/abilities_forms.js`、`src/art/kirby_magic.js`、`src/art/kirby_forms.js`、`tools/test_magic.py`、`tools/test_forms.py`。
+
+### 8 種能力的四招表（★＝Round 9 新增 / 改動）
+| key | X | ↑+X | ↓+X | 空中 X | 蓄力必殺 |
+|---|---|---|---|---|---|
+| mage 元素法師 | 火球（爆炸） | 冰牆（空中＝腳邊「冰階」）★冰刺判定 dmg 3 | 雷擊召喚（空中也打到地面） | 風刃三連 | 元素風暴（60 幀） |
+| time 時間 | 時間停止 180 幀（時停中 X＝近身連拳） | 加速 120 幀 ★起手「時震環」dmg 3 | 慢動作 240 幀 ★起手「時之枷」dmg 3 | 回溯 60 幀 ★殘影路徑 dmg 3 | —— |
+| gravity 重力 | 黑洞 | 浮空 240 幀 ★起手重力波 dmg 3（`def.hover` 只在這招打開） | 反重力（拉起）★±32px 擠壓 dmg 2 | 隕石三連 | 奇點（60 幀） |
+| clone 分身 | 全員吐星 | ★**分身塔**（新招：兩個分身疊成柱子，26×60 向上判定 dmg 4 + 向上小星） | 交換位置 ★原地留下星爆 dmg 3 | 分身墊腳 ★腳下星爆 dmg 3 + 向下小星 | 百裂分身（60 幀） |
+| giant 巨大化 | 巨腳踩踏 | ★**巨人上勾拳**（新招：40×64 向上判定 dmg 6；**按住不放**接回原本的「大口吸」） | 巨人衝撞（破硬磚，空中照出） | 屁股墜落 | ——（限時 900 幀） |
+| dragon 龍化 | 龍息（可按住） | ★**升龍尾撩**（新招：躍起 + 30×44 火焰判定 dmg 5，自己控 vy 所以一定會落下來） | 尾擊（前後雙向） | 俯衝 | 龍炎彈（60 幀） |
+| mech 機甲 | 火箭拳 | 追蹤飛彈 ×2 | ★**鑽頭突進**（新招：24×16 前方判定 dmg 3 / rehit 6、破磚、撞牆補一發衝擊波；空中＝斜下鑽擊） | 噴射墜踩 | 全彈發射（50 幀） |
+| ghost 幽靈 | 穿牆開關 | 隱身 180 幀 ★56px 內敵人嚇愣 freezeT 40 | 附身；★**沒有目標時改出「怨靈墜擊」**（新招：跟隨判定 dmg 4 + 落地 dmg 3，穿牆中會停在地板上不會沉下去） | 幽靈哀嚎（stun 60） | —— |
+
+### Round 9 的共用作法（兩個 ability 檔各一份，寫法相同）
+- `atkDir(p)`：讀 `p.atkDir`（player-input 的當幀快照），沒有該欄位時自動退回 `KB.input.down()` → 舊版 player.js 也能跑。
+- `pickMode(p, { up, down, air, ground, airUp, airDown, airOk })`：優先序 **排隊的招 > ↑X > ↓X > 空中 X > X**；`airUp/airDown` 是空中專用變體，`airOk` 讓幽靈「穿牆中不算空中」（否則穿牆時 X 永遠變哀嚎、關不掉）。
+- `airSlow(p, d, v, lim)`：空中招最多緩降 `lim`（預設 28）幀後恢復自然重力 ⇒ **空中出招一定會繼續下墜**。唯一的懸停招是 gravity ↑+X 浮空，作法是在 `onAttack` 內把 `p.abilityDef.hover` 切成 true（招式結束 / onLose 關掉）——**不要**把 `hover: true` 寫死在 def 上，否則隕石 / 黑洞在空中也會不受重力停在原地。
+- `moves` 表一律改成固定順序 **X → ↑+X → ↓+X → 空中 X → 蓄力**，其餘（被動 / 按住跳 / 限時）排後面，全部 ≤ 6 列（暫停卡剛好放得下，見 `shots/agent_r9_magicforms/card_mech.png`）。
+- 新招各有 2 幀專用精靈：`kirby_attack_clone_tower`（art/kirby_magic.js）、`kirby_attack_giant_up` / `kirby_dragon_rise` / `kirby_mech_drill`（30×24 專用幀，機甲往右挪 1px 空出鑽頭）/ `kirby_ghost_plunge`（art/kirby_forms.js），並接到各自的 `form.spr()` / `setup({anim})`。
+
+### 進度
+- [2026-09-15] 完成：**mage + time**（pickMode/atkDir/airSlow 共用層；冰牆補冰刺判定、雷擊空中可用、加速＝時震環、慢動作＝時之枷、回溯＝殘影路徑判定；moves 表重排）；驗證：`tools/test_magic.py --only mage,time` 全 PASS。
+- [2026-09-15] 完成：**gravity + clone**（浮空改成「只有這招 hover」、反重力補擠壓判定；clone 新招 ↑X 分身塔＋交換星爆＋墊腳星爆，新精靈 `kirby_attack_clone_tower`）；驗證：`tools/test_magic.py` **192/192 PASS**；截圖 `shots/agent_r9_magicforms/clone_tower_*.png`。
+- [2026-09-15] 完成：**giant + dragon**（giant ↑X 上勾拳＋按住接大口吸、dragon ↑X 升龍尾撩，新精靈 `kirby_attack_giant_up` / `kirby_dragon_rise`）；驗證：`tools/test_forms.py --only giant,dragon` 全 PASS；截圖 `giant_upper_*.png`、`dragon_rise_*.png`。
+- [2026-09-15] 完成：**mech + ghost**（mech ↓X 鑽頭突進、ghost ↓X 無目標→怨靈墜擊、↑X 隱身補嚇愣，新精靈 `kirby_mech_drill` / `kirby_ghost_plunge`）；驗證：`tools/test_forms.py` **226/226 PASS**；截圖 `mech_drill_*.png`、`ghost_plunge_*.png`、精靈放大圖 `zoom_new_sprites.png`。
+- [2026-09-15] 完成：接上 player-input 交件版（`p.atkDir` / `p.dirHold` / `def.hover`）：dragon 飛行與 mech 噴射跳改成「按住跳**或**按住 ↑」（mech 漂浮中不加噴射，避免兩份推力）、gravity 的 hover 改成逐招切換；驗證：`test_magic.py` 192/192、`test_forms.py` 226/226、`node tools/audio_check.js` 全過、`tools/build.py` OK。
+- 測試新增（既有項目一項沒刪）：`test_magic.py` 119 → **192**（新增 `round9` 階段：4 能力 × {↑X 地 / ↓X 地 / ↑X 空 / ↓X 空 / 空中 X} 命中致死 + 回正常狀態 + 空中招下墜、moves 表順序 / ↑↓ / ≤6 列、時停中 ↑X 仍是加速）；`test_forms.py` 153 → **226**（同樣的 4 能力 × 5 招 + ghost 地面附身致死 + 穿牆中三個方向都出得來 + 新精靈檢查）。
+
+### 截圖（`shots/agent_r9_magicforms/`）
+`clone_tower_00/01.png`、`dragon_rise_00/01.png`、`mech_drill_00/01.png`、`giant_upper_00/01.png`、`ghost_plunge_00/01.png`、`mage_airwall_00/01.png`、暫停招式卡 `card_mech.png` / `card_clone.png`、精靈總表 `sheet_mech.png` / `sheet_dragon.png` / `sheet_ghost.png` / `sheet_giant.png` / `sheet_clone.png`、新精靈放大 `zoom_new_sprites.png`。全部無洋紅（`__kb.missing()` 空、兩份測試最後都沒有 MISSING SPRITES）。
+
+### 跨檔需求 / 給總控
+1. **`def.hover` 的粒度**：目前 player.js 是「整個能力」的旗標，但同一種能力通常只有一招要懸停。本輪的作法是 abilities 自己在 `onAttack` 改寫 `p.abilityDef.hover`（gravity 用），能work但屬於 side-effect；若之後要正規化，建議 player 改成讀「當幀的招式旗標」（例如 `p.hoverT` 或 `def.hover(p)` 函式）。
+2. **abilities-basic / abilities-mix**：本輪的 `atkDir()` / `pickMode()` / `airSlow()` 三個小工具是複製一份在各自檔案（各檔都是 IIFE，沒有共用命名空間）。若總控想收斂成 `KB.ATK.pick(...)`，可以把 abilities_magic.js 開頭那一段抽到 const.js / entity.js 之類的共用檔。
+3. **ui**：8 種的 `moves` 都是 5~6 列，`UI.drawAbilityCard` 目前顯示正常（`card_mech.png` 六列剛好）；若之後 mix 系也補到 6 列，請確認卡片高度上限。
+4. **qa9**：ghost 在 **穿牆（noclip）** 狀態下 `p.onGround` 幾乎恆為 false，所以「空中出招要下墜」這條對幽靈只在穿牆關閉時成立（穿牆本來就是無重力飛行）。測試是先按 X 關掉穿牆再測空中招，驗收時請用同樣的前提。
+5. **giant 的 ↑+X 語意變了**：點按＝上勾拳、**按住**才是原本的「大口吸（吞中魔王）」。圖鑑 / 說明文案若有另外寫在 ui.js，請一起改。
+6. **字型子集要重做**（`assets/fonts` 不在本 agent 的擁有檔案內，沒有動它）：`tools/font_subset.py --check` 目前缺
+   `刮嚇堂屈彗怨愣拆捶摺擰昇曳枷泉炮爪磐筒蟬鑽`（本輪新增的是 `怨愣枷鑽捶`，其餘來自同輪其他 agent）。
+   缺字只會讓那一串退回 12px（例如暫停卡的「鑽頭突進」），不會壞掉；**收工前請總控跑一次 `tools/font_subset.py`**。
 
 ## abilities-mix
 > 檔案：`src/abilities_mix.js`、`src/abilities_mix2.js`、`src/art/kirby_mix.js`、`src/art/kirby_mix2.js`、

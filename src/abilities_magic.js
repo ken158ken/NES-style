@@ -49,12 +49,39 @@
   }
   function restartAttack(p) { p.setState('idle'); p.startAttack(); }
   function startMove(p, m) { data(p).next = m; restartAttack(p); }
-  function pickMode(p, air, upMode, ground) {
+
+  // ---------- Round 9：出招方向 / 優先序 ----------
+  // player-input 會在 startAttack 當幀寫入 `p.atkDir = { up, down, air }`（KB.input 的快照）；
+  // 舊版 player.js 沒有這個欄位時自動退回即時輸入，行為與 Round 5 相同。
+  function atkDir(p) {
+    const a = p.atkDir;
+    return {
+      up: a ? !!a.up : down('up'),
+      down: a ? !!a.down : down('down'),
+      air: a ? !!a.air : !p.onGround,
+    };
+  }
+  /**
+   * 招式優先序（Round 9 約定）：排隊的招 > ↑X > ↓X > 空中 X > X。
+   * o = { up, down, air, ground, airUp, airDown }；airUp / airDown 是「空中專用變體」，
+   * 沒填就沿用地面版（判定框位置跟著卡比走）。
+   */
+  function pickMode(p, o) {
     const d = data(p), q = d.next; d.next = null;
     if (q) return q;
-    if (!p.onGround && air) return air;
-    if (down('up') && upMode) return upMode;
-    return ground;
+    const a = atkDir(p);
+    if (a.up && o.up) return (a.air && o.airUp) || o.up;
+    if (a.down && o.down) return (a.air && o.airDown) || o.down;
+    if (a.air && o.air) return o.air;
+    return o.ground;
+  }
+  /**
+   * 空中出招的緩降：最多 lim 幀（預設 28 < 30 幀上限），之後恢復自然重力 —— 保證「空中出招仍會下墜」。
+   * def.hover 的能力（重力浮空 / 龍化飛行）不套用這裡。
+   */
+  function airSlow(p, d, v, lim) {
+    if (p.onGround) return;
+    if (d.t <= (lim === undefined ? 28 : lim)) slowFall(p, v);
   }
   function setup(p, o) {
     const D = p.abilityDef;
@@ -171,8 +198,8 @@
   // ======================================================================
   // 1. mage 元素法師（尖帽 + 法杖）
   //    X       火球      ：拋物線飛行，命中 / 落地爆炸（範圍 30px，dmg 4）
-  //    ↑+X     冰牆      ：前方生成 3 格高冰牆（240 幀，可站上去、擋投射物，火焰可融）
-  //    ↓+X     雷擊召喚  ：前方 48px 畫魔法陣，30 幀後天雷三連（每發 dmg 3）
+  //    ↑+X     冰牆      ：前方生成 3 格高冰牆（240 幀，可站上去、擋投射物，火焰可融）；空中＝腳邊「冰階」
+  //    ↓+X     雷擊召喚  ：前方 48px 畫魔法陣，30 幀後天雷三連（每發 dmg 3）；空中一樣打到地面
   //    空中 X  風刃三連  ：三道穿透風刃（dmg 2）
   //    按住 60 幀放開 必殺：元素風暴（火 / 冰 / 雷 三波全畫面，每波 dmg 4）
   // ======================================================================
@@ -281,19 +308,27 @@
     duration: 22, hold: true, maxHold: 0, lockMove: true, canJump: false, fps: 10,
     desc: '戴上星辰尖帽、握住元素法杖，火冰雷風任你差遣；蓄滿魔力還能喚來元素風暴。',
     flavour: ['尖帽一戴，指尖就有火星。', '火冰雷風，想要哪個都行。'],
-    moves: [['X', '火球（爆炸）'], ['↑+X', '冰牆（可站上去）'], ['↓+X', '雷擊召喚'], ['空中 X', '風刃三連'], ['按住 60 幀放開', '必殺：元素風暴']],
+    moves: [['X', '火球（爆炸）'], ['↑+X', '冰牆（空中＝冰階）'], ['↓+X', '雷擊召喚'], ['空中 X', '風刃三連'], ['按住 60 幀放開', '必殺：元素風暴']],
     hatOffset: { attack: [0, 0] },
     onGet(p) { data(p).t = 0; },
     onCrouchAttack(p) { startMove(p, 'bolt'); },
     onAttack(p) {
       const d = data(p); killBox(p);
       d.t = 0; d.shot = false; d.charged = false; d.wave = 0; d.winds = 0;
-      d.mode = pickMode(p, 'wind', 'wall', 'fire');
+      d.mode = pickMode(p, { up: 'wall', down: 'bolt', air: 'wind', ground: 'fire' });
       if (d.mode === 'wall') {
         setup(p, { anim: 'kirby_attack_mage_wall', dur: 26, fps: 10, lock: true });
         if (d.wall && !d.wall.dead) d.wall.restore();
         d.wall = KB.spawn(new IceWall(p));
         sfx('icewall', 'ice');
+        // Round 9：冰牆是從地面「刺」出來的 —— 牆的位置本身就有一道冰屬性判定（dmg 3）
+        KB.hitbox({ x: d.wall.x - 4, y: d.wall.y, w: T + 8, h: T * 3, dmg: 3, owner: 'player', type: 'ice',
+          life: 10, rehit: 0, pierce: true, knock: 1.5, breakBlocks: false });
+        // 空中變體「冰階」：冰牆蓋在腳邊高度，緩降 28 幀方便踩上去（之後照常下墜）
+        if (!p.onGround) {
+          slowFall(p, 0.4);
+          V('textPop', p.cx, p.y - 14, '冰階', { color: '#c0f0ff', frames: 34 });
+        }
       } else if (d.mode === 'bolt') {
         setup(p, { anim: 'kirby_attack_mage_bolt', dur: 34, fps: 10, lock: true });
         const x = p.cx + p.dir * 48;
@@ -320,10 +355,12 @@
       const D = p.abilityDef;
 
       if (d.mode === 'wall') {
+        airSlow(p, d, 0.5);
         if (d.t < 10) KB.particles(p.cx + p.dir * rnd(10, 24), p.cy + rnd(-10, 10), ['#ffffff', '#c0f0ff'], 1, { spread: 0.4, grav: 0, life: 12, up: 0, size: 1 });
         return;
       }
       if (d.mode === 'bolt') {
+        airSlow(p, d, 0.5);
         if (d.t % 4 === 0) KB.particles(p.cx + p.dir * 8, p.y - 6, ['#a860f0', '#ffe040'], 1, { spread: 0.6, grav: -0.03, life: 14, up: 0.6, size: 1 });
         return;
       }
@@ -409,9 +446,10 @@
   // ======================================================================
   // 2. time 時間（懷錶帽 + 齒輪光環）
   //    X       時間停止  ：180 幀全場凍結（CD 600 幀）；時停中 X 改為近身拳，累積傷害在解除瞬間一次結算
-  //    ↓+X     慢動作    ：240 幀敵方隔幀更新
-  //    ↑+X     加速      ：120 幀自身移動速度 ×1.8
+  //    ↑+X     加速      ：120 幀自身移動速度 ×1.8，起手「時震環」dmg 3（Round 9）
+  //    ↓+X     慢動作    ：240 幀敵方隔幀更新，起手「時之枷」dmg 3（Round 9）
   //    空中 X  回溯      ：回到 60 幀前的位置（殘影逆放）
+  //    ※ Round 9：↑X / ↓X 在空中一樣出得來（優先於空中 X），空中版最多緩降 28 幀後照常下墜
   // ======================================================================
   const TIME_CD = 600;
   // 回溯的冷卻（fix5b）：回溯會把卡比拉回 60 幀前的座標，26 幀就能再放一次 ⇒
@@ -477,7 +515,7 @@
     duration: 30, hold: false, maxHold: 0, lockMove: true, canJump: true, fps: 8,
     desc: '懷錶指針一停，世界就跟著停；時停中打出的傷害會在時間恢復的瞬間一起爆開。',
     flavour: ['喀。懷錶的指針停住了。', '接下來的事，等等再算。'],
-    moves: [['X', '時間停止（180 幀）'], ['時停中 X', '近身連拳（解除時結算）'], ['↓+X', '慢動作'], ['↑+X', '加速'], ['空中 X', '回溯（60 幀前）']],
+    moves: [['X', '時間停止（180 幀）'], ['↑+X', '加速＋時震環'], ['↓+X', '慢動作＋時之枷'], ['空中 X', '回溯（60 幀前）'], ['時停中 X', '近身連拳（解除時結算）']],
     hatOffset: { attack: [0, 0] },
     onGet(p) { data(p).t = 0; timeHistory(p); },
     onCrouchAttack(p) { startMove(p, 'slow'); },
@@ -485,7 +523,7 @@
       const d = data(p); killBox(p); d.t = 0;
       timeHistory(p);
       const g = KB.game;
-      let mode = pickMode(p, 'rewind', 'haste', 'stop');
+      let mode = pickMode(p, { up: 'haste', down: 'slow', air: 'rewind', ground: 'stop' });
       if (mode === 'stop' && g && g.timeStopT > 0) mode = 'punch';
       if (mode === 'rewind' && g && d.rewindAt !== undefined && g.frame - d.rewindAt < TIME_REWIND_CD) {
         mode = 'punch';
@@ -555,6 +593,10 @@
         KB.particles(p.cx, p.cy, ['#d8b0ff', '#a860f0', '#ffffff'], 14, { spread: 2.4, grav: 0, life: 26 });
         KB.fx('fx_gear', p.cx, p.cy - 16, { life: 40 });
         sfx('slowmo', 'charge');
+        // Round 9：慢動作本身也是一招 —— 身邊 ±36px 的「時之枷」把敵人的時間直接擰斷（dmg 3）
+        d.box = KB.hitbox({ x: p.cx - 36, y: p.cy - 24, w: 72, h: 48, dmg: 3, owner: 'player', type: 'time',
+          life: 12, rehit: 0, pierce: true, knock: 1.4, breakBlocks: false });
+        V('ring', p.cx, p.cy, { r0: 4, r1: 40, frames: 16, color: '#d8b0ff', width: 2 });
       } else if (mode === 'haste') {
         setup(p, { anim: 'kirby_attack_time_haste', dur: 18, fps: 16, lock: false });
         V('textPop', p.cx, p.y - 18, '加速', { color: '#ffe040', frames: 50 });
@@ -562,6 +604,11 @@
         V('sparkTrail', p, { color: ['#ffe040', '#ffffff'], frames: 120 });
         V('afterimage', p, { color: '#ffe040', frames: 120, alpha: 0.4 });
         sfx('slowmo', 'charge_ready');
+        // Round 9：起手的「時震環」—— 加速到旁人看不見的瞬間，周圍 ±28px 被時間亂流刮傷（dmg 3）
+        d.box = KB.hitbox({ x: p.cx - 28, y: p.cy - 20, w: 56, h: 40, dmg: 3, owner: 'player', type: 'time',
+          life: 10, rehit: 0, pierce: true, knock: 2, breakBlocks: false });
+        V('ring', p.cx, p.cy, { r0: 2, r1: 34, frames: 14, color: '#ffe040', width: 2 });
+        KB.particles(p.cx, p.cy, ['#ffe040', '#ffffff'], 10, { spread: 2.2, grav: 0, life: 16 });
         tick(p, 'haste', {
           life: 120,
           fn: (pp, t) => {
@@ -589,6 +636,11 @@
           ghost(h[0] + 7, h[1] + 15, { spr: 'kirby_fall', dir: p.dir, alpha: 0.45, life: 8 + (hist.length - i) / 3, tint: '#60d8f8' });
         }
         KB.particles(p.cx, p.cy, ['#60d8f8', '#ffffff'], 12, { spread: 2.4, grav: 0, life: 20 });
+        // Round 9：逆放的殘影會把路徑上的敵人一起「倒帶」掉（dmg 3）——空中 X 也是一招，不只是位移
+        const bx0 = Math.min(p.cx, tgt[0] + 7), bx1 = Math.max(p.cx, tgt[0] + 7);
+        const by0 = Math.min(p.cy, tgt[1] + 7), by1 = Math.max(p.cy, tgt[1] + 7);
+        KB.hitbox({ x: bx0 - 14, y: by0 - 14, w: (bx1 - bx0) + 28, h: (by1 - by0) + 28, dmg: 3, owner: 'player', type: 'time',
+          life: 8, rehit: 0, pierce: true, knock: 1.5, breakBlocks: false });
         p.x = tgt[0]; p.y = tgt[1]; p.vx = 0; p.vy = 0;
         if (p.clampToRoom) p.clampToRoom();               // fix5 保險：歷史座標若曾在房間外，回溯不把卡比送出地圖
         hist.length = 0;
@@ -610,11 +662,13 @@
       }
       if (d.mode === 'slow') {
         p.vx *= 0.8;
+        airSlow(p, d, 0.5);
         if (d.t % 5 === 0) KB.particles(p.cx + rnd(-14, 14), p.cy + rnd(-14, 14), ['#d8b0ff', '#a860f0'], 1, { spread: 0.4, grav: 0, life: 16, up: 0.2, size: 1 });
         return;
       }
-      if (d.mode === 'rewind') { slowFall(p, 0.3); return; }
+      if (d.mode === 'rewind') { airSlow(p, d, 0.3); return; }
       if (d.mode === 'haste') {
+        airSlow(p, d, 0.6, 16);
         if (d.t % 2 === 0) KB.particles(p.cx - p.dir * 8, p.cy + rnd(-6, 6), ['#ffe040', '#ffffff'], 1, { spread: 0.5, grav: 0, life: 10, up: 0, size: 1 });
         return;
       }
@@ -626,9 +680,9 @@
   // ======================================================================
   // 3. gravity 重力（黑洞頭盔 + 紫色能量）
   //    X       黑洞      ：前方 48px 生成 90 幀引力點（80px 內敵人 / 敵彈被吸入），結束爆炸
-  //    ↓+X     反重力    ：範圍內敵人浮起失控 90 幀
+  //    ↑+X     浮空      ：240 幀自由上下飛（重力翻轉的簡化版，見 PROGRESS 跨檔需求）＋起手重力波 dmg 3
+  //    ↓+X     反重力    ：範圍內敵人浮起失控 90 幀，±32px 內另有 dmg 2 的重力擠壓
   //    空中 X  隕石      ：上方落下 3 顆隕石，落地衝擊波
-  //    ↑+X     浮空      ：240 幀自由上下飛（重力翻轉的簡化版，見 PROGRESS 跨檔需求）
   //    按住 60 幀放開 必殺：奇點（全畫面吸引 + 內爆）
   // ======================================================================
   class BlackHole extends KB.Entity {
@@ -704,16 +758,22 @@
   def('gravity', {
     name: '重力', hudName: 'GRAVITY', color: '#a860f0',
     duration: 24, hold: true, maxHold: 0, lockMove: true, canJump: false, fps: 10,
+    // Round 9：`hover` 是「這一招可以懸停」的旗標（player.js updateAttack 每幀讀 def.hover，
+    //   true 時把重力交給 def 控制 p.vy）。重力只有 ↑+X 浮空需要，所以在 onAttack 依招式切換，
+    //   不能寫死成 true —— 否則隕石 / 黑洞在空中也會不受重力停在原地。
+    hover: false,
+
     desc: '把黑洞戴在頭上的瘋狂發明：吸進來、浮起來、砸下去，最後連空間一起壓成奇點。',
     flavour: ['頭上那顆，是真的黑洞。', '上跟下，由我來決定。'],
-    moves: [['X', '黑洞（引力點）'], ['↓+X', '反重力（敵人浮空）'], ['空中 X', '隕石三連'], ['↑+X', '浮空 240 幀'], ['按住 60 幀放開', '必殺：奇點']],
+    moves: [['X', '黑洞（引力點）'], ['↑+X', '浮空 240 幀＋重力波'], ['↓+X', '反重力（敵人浮空）'], ['空中 X', '隕石三連'], ['按住 60 幀放開', '必殺：奇點']],
     hatOffset: { attack: [0, 0] },
     onGet(p) { data(p).t = 0; },
     onCrouchAttack(p) { startMove(p, 'lift'); },
     onAttack(p) {
       const d = data(p); killBox(p);
       d.t = 0; d.charged = false; d.meteors = 0; d.done = false;
-      d.mode = pickMode(p, 'meteor', 'flip', 'hole');
+      d.mode = pickMode(p, { up: 'flip', down: 'lift', air: 'meteor', ground: 'hole' });
+      p.abilityDef.hover = (d.mode === 'flip');   // 只有浮空是懸停招（見 def 上方註解）
       if (d.mode === 'lift') {
         setup(p, { anim: 'kirby_attack_gravity_lift', dur: 30, fps: 10, lock: true });
         const targets = [];
@@ -727,6 +787,9 @@
           V('aura', e, { color: '#d8b0ff', r: 14, frames: 90 });
         }
         d.lifted = targets;
+        // Round 9：近距離（±32px）的重力擠壓 dmg 2；遠一點的只被拉起來（既有手感不變）
+        d.box = KB.hitbox({ x: p.cx - 32, y: p.cy - 28, w: 64, h: 56, dmg: 2, owner: 'player', type: 'gravity',
+          life: 10, rehit: 0, pierce: true, knock: 0, breakBlocks: false });
         V('ring', p.cx, p.cy, { r0: 8, r1: 76, frames: 18, color: '#d8b0ff', width: 2 });
         V('textPop', p.cx, p.y - 16, '反重力', { color: '#d8b0ff', frames: 45 });
         shake(3);
@@ -761,6 +824,9 @@
         V('ring', p.cx, p.cy, { r0: 4, r1: 40, frames: 16, color: '#a860f0', width: 2 });
         KB.particles(p.cx, p.cy, ['#a860f0', '#d8b0ff'], 16, { spread: 2.6, grav: -0.05, life: 26, up: 1 });
         sfx('gravity_lift', 'beam');
+        // Round 9：起手的重力波 —— 翻轉重力的瞬間，身邊 ±32px 的空間被壓扁（dmg 3）
+        d.box = KB.hitbox({ x: p.cx - 32, y: p.cy - 24, w: 64, h: 48, dmg: 3, owner: 'player', type: 'gravity',
+          life: 10, rehit: 0, pierce: true, knock: 2.4, breakBlocks: false });
         tick(p, 'flip', {
           life: 240,
           fn: (pp, t) => {
@@ -795,8 +861,8 @@
     update(p, dt, held) {
       const d = data(p); d.t++;
       const D = p.abilityDef;
-      if (d.mode === 'lift') { p.vx *= 0.8; return; }
-      if (d.mode === 'flip') { slowFall(p, 0.4); return; }
+      if (d.mode === 'lift') { p.vx *= 0.8; airSlow(p, d, 0.5); return; }
+      if (d.mode === 'flip') { slowFall(p, 0.4); return; }   // 浮空本來就是懸停招（def.hover）
       if (d.mode === 'meteor') {
         slowFall(p, 0.4);
         if ((d.t === 4 || d.t === 14 || d.t === 24) && d.meteors < 3) {
@@ -868,15 +934,16 @@
       }
       if (d.t >= 18 && !held && !d.charged && KB.input.pressed('attack')) restartAttack(p);
     },
-    onEnd(p) { killBox(p); clearAnim(p); const d = data(p); d.mode = null; d.charged = false; },
-    onLose(p) { killBox(p); clearAnim(p); killTickers(p); },
+    onEnd(p) { killBox(p); clearAnim(p); const d = data(p); d.mode = null; d.charged = false; p.abilityDef.hover = false; },
+    onLose(p) { killBox(p); clearAnim(p); killTickers(p); const D = p.abilityDef; if (D) D.hover = false; },
   });
 
   // ======================================================================
   // 4. clone 分身（雙尾裝飾 + 2 個小卡比 companion）
   //    取得能力時生成 2 個分身（type 'ally'，跟隨後方 20 / 40px，自動朝最近敵人吐小星 dmg 1）
   //    X       全員吐星  ：本體 + 2 分身三道星
-  //    ↓+X     交換位置  ：與前方分身瞬間互換
+  //    ↑+X     分身塔    ：兩個分身疊成柱子頂著卡比往上打（Round 9 新招，26×60 向上判定 dmg 4）
+  //    ↓+X     交換位置  ：與前方分身瞬間互換，原地留下星爆 dmg 3（Round 9）
   //    空中 X  分身墊腳  ：踩著分身再跳一次
   //    按住 60 幀放開 必殺：百裂分身（8 道殘影衝鋒）
   // ======================================================================
@@ -987,7 +1054,7 @@
     duration: 20, hold: true, maxHold: 0, lockMove: true, canJump: false, fps: 12,
     desc: '一人分成三人打：兩個小分身會自動掩護射擊，還能踩著它們二段跳。',
     flavour: ['一個不夠，那就三個。', '兩個小分身，替我打。'],
-    moves: [['X', '全員吐星（三道）'], ['↓+X', '交換位置'], ['空中 X', '分身墊腳（再跳一次）'], ['按住 60 幀放開', '必殺：百裂分身'], ['被動', '分身自動射擊']],
+    moves: [['X', '全員吐星（三道）'], ['↑+X', '分身塔（向上柱擊）'], ['↓+X', '交換位置（留下星爆）'], ['空中 X', '分身墊腳（再跳一次）'], ['按住 60 幀放開', '必殺：百裂分身'], ['被動', '分身自動射擊']],
     hatOffset: { attack: [0, 0] },
     onGet(p) { data(p).t = 0; ensureClones(p); sfx('clone_summon', 'ability'); },
     onCrouchAttack(p) { startMove(p, 'swap'); },
@@ -995,7 +1062,7 @@
       const d = data(p); killBox(p);
       d.t = 0; d.charged = false; d.rush = 0; d.done = false;
       const list = ensureClones(p);
-      d.mode = pickMode(p, 'step', null, 'star');
+      d.mode = pickMode(p, { up: 'tower', down: 'swap', air: 'step', ground: 'star' });
       // 墊腳安全閥：這次滯空已經墊過 / 已經飛到上限高度 → 改成地面招（全員吐星），不會卡住手感也不會無限上升
       if (d.mode === 'step' && (d.stepUsed >= 1 || stepRoom(p) < 6)) d.mode = 'star';
       if (d.mode === 'swap') {
@@ -1013,9 +1080,31 @@
           c.x = ox - c.w / 2; c.y = oy - c.h / 2;
           p.x = nx - p.w / 2; p.y = ny - p.h / 2;
           p.vx = 0; p.vy = 0;
+          // Round 9：交換不只是位移 —— 卡比離開的位置留下一顆星爆（dmg 3），空中一樣打得到
+          KB.hitbox({ x: ox - 16, y: oy - 14, w: 32, h: 28, dmg: 3, owner: 'player', type: 'star',
+            life: 10, rehit: 0, pierce: true, knock: 2, breakBlocks: true });
+          V('ring', ox, oy, { r0: 2, r1: 30, frames: 14, color: '#ffe040', width: 2 });
+          KB.fx('fx_hit', ox, oy);
           V('textPop', p.cx, p.y - 16, '交換', { color: '#ffb0d0', frames: 36 });
           sfx('clone_swap', 'swallow');
         }
+      } else if (d.mode === 'tower') {
+        // Round 9 新招「分身塔」：兩個分身疊成柱子把卡比頂上去，整根柱子都是判定
+        setup(p, { anim: 'kirby_attack_clone_tower', dur: 30, fps: 12, lock: true });
+        d.tower = 0;
+        p.vx *= 0.3;
+        if (!p.onGround) slowFall(p, 0.4);
+        d.box = KB.hitbox({ x: 0, y: 0, w: 26, h: 60, dmg: 4, owner: 'player', type: 'clone', follow: p,
+          ox: -13, oy: -48, life: 26, rehit: 10, pierce: true, knock: 2.2, breakBlocks: true, flipWithOwner: false });
+        for (let i = 0; i < list.length; i++) {
+          const c = list[i]; if (!c || c.dead) continue;
+          c.cool = Math.max(c.cool, 24); c.flashT = 6;
+        }
+        V('textPop', p.cx, p.y - 22, '分身塔', { color: '#ffb0d0', frames: 40 });
+        V('ring', p.cx, p.cy - 20, { r0: 4, r1: 30, frames: 14, color: '#ffb0d0', width: 2 });
+        KB.particles(p.cx, p.cy - 10, ['#ffb0d0', '#ffffff', '#ffe040'], 12, { spread: 1.6, grav: -0.05, life: 22, up: 1.4 });
+        sfx('clone_summon', 'jump');
+        shake(3);
       } else if (d.mode === 'step') {
         setup(p, { anim: 'kirby_attack_clone_step', dur: 20, fps: 12, lock: false });
         const c = list[0];
@@ -1028,6 +1117,11 @@
           V('ring', p.cx, p.bottom + 4, { r0: 4, r1: 24, frames: 12, color: '#ffb0d0', width: 2 });
         }
         V('textPop', p.cx, p.y - 14, '墊腳', { color: '#ffe040', frames: 30 });
+        // Round 9：被踩的分身會往腳下轟一發（dmg 3 + 一顆向下的小星），空中 X 也有判定
+        KB.hitbox({ x: p.cx - 15, y: p.bottom - 4, w: 30, h: 20, dmg: 3, owner: 'player', type: 'star',
+          life: 10, rehit: 0, pierce: true, knock: 2, breakBlocks: true });
+        KB.shoot({ spr: 'proj_ministar', x: p.cx, y: p.bottom + 6, vx: 0, vy: 3.2, dmg: 2, owner: 'player', life: 36,
+          w: 10, h: 10, grav: 0, solid: false, pierce: false, type: 'star', dir: p.dir, fxHit: 'fx_hit', trail: '#ffe040', rotSpeed: -0.3, knock: 1.5 });
         sfx('clone_swap', 'jump');
       } else if (d.mode === 'rush') {
         setup(p, { anim: 'kirby_attack_clone_rush', dur: 90, fps: 16, lock: true });
@@ -1044,7 +1138,30 @@
       const d = data(p); d.t++;
       const D = p.abilityDef;
       const list = clones(p);
-      if (d.mode === 'swap') { p.vx *= 0.6; return; }
+      if (d.mode === 'swap') { p.vx *= 0.6; airSlow(p, d, 0.6); return; }
+      if (d.mode === 'tower') {
+        p.vx *= 0.7;
+        airSlow(p, d, 0.5);
+        // 分身疊在頭上（每幀重新指定，換房 / 死亡時不會留下奇怪位置）
+        for (let i = 0; i < list.length; i++) {
+          const c = list[i]; if (c.dead) continue;
+          c.x = p.cx - c.w / 2; c.y = p.y - 14 - i * 14;
+          c.dir = p.dir;
+        }
+        beat(d.box);
+        if (d.t % 4 === 1) {
+          const k = 1 + ((d.t / 4) | 0) % 3;
+          KB.particles(p.cx + rnd(-8, 8), p.y - 12 * k, ['#ffffff', '#ffb0d0', '#ffe040'], 2, { spread: 0.8, grav: -0.04, life: 16, up: 1, size: 1 });
+          V('slash', p.cx, p.y - 12 * k, 16, -Math.PI / 2, { color: '#ffe040' });
+        }
+        if (d.t === 6 && !d.tower) {
+          d.tower = 1;
+          KB.shoot({ spr: 'proj_ministar', x: p.cx, y: p.y - 44, vx: 0, vy: -3.4, dmg: 2, owner: 'player', life: 42,
+            w: 10, h: 10, grav: 0, solid: false, pierce: false, type: 'star', dir: p.dir, fxHit: 'fx_hit', trail: '#ffe040', rotSpeed: 0.3, knock: 1.5 });
+          sfx('spit');
+        }
+        return;
+      }
       if (d.mode === 'step') { slowFall(p, 1.4); return; }
       if (d.mode === 'rush') {
         p.vx = p.dir * 2.2;

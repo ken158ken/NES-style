@@ -299,6 +299,133 @@ def phase_moves(h, only=None):
             check(nm + ': raised', False, repr(ex_))
 
 
+
+# ---------------------------------------------------------------------------
+# 階段 2.5（Round 9）：↑X / ↓X / 空中 X 全部出得來（地面 + 空中）且打得死
+#   規格：docs/TASKS.md Round 9 + docs/PROGRESS.md「Round 9」介面約定
+#     ① 每種變身 X / ↑+X / ↓+X / 空中 X 四招各自不同（giant 上勾拳・dragon 升龍・mech 鑽頭・ghost 墜擊）
+#     ② ↑X / ↓X 在空中也要出招（優先於空中 X），出招後仍然會下墜
+#     ③ 變身狀態（giant scale ×2 / mech armor / ghost noclip）下一樣出得來
+# ---------------------------------------------------------------------------
+def put_dummy(h, px, py, hover=False):
+    """在指定像素座標放一隻不會動的 waddledee；hover=True 關掉重力（空中招的空靶）"""
+    h.spawn('waddledee', 5, 9)
+    # think() 直接關掉：waddledee 察覺卡比時會「受驚小跳」（vy = -1.6），
+    # 浮空靶沒有重力就會一路往上飄，招式判定會對不上。
+    h.ev("([x,y,f])=>{const e=__te; e.x=x; e.y=y; e.vx=0; e.vy=0; e.speed=0; e.turnAtEdge=false; e.turnAtWall=false;"
+         " e.active=true; e.think=function(){ this.vx=0; if(f) this.vy=0; }; if(f){e.grav=0; e.solid=false;} }",
+         [px, py, bool(hover)])
+    h.run(1, 1)
+    return h.ent()
+
+
+def hit_ok(e):
+    """命中致死（或凍結 / 被拉扯後扣血）"""
+    return bool(e) and (e['dead'] or e['hp'] < 2 or e['freezeT'] > 0)
+
+
+def r9_setup(h, key, air, dx, dy, hover=None, phase_off=False, up=48):
+    h.goto(3, 9, ability=key, immune=True)
+    if phase_off:                       # ghost：先把穿牆關掉，回到一般物理（地面 / 空中）
+        h.run(3, 3, keys='attack'); h.run(14, 7)
+    p = h.player()
+    if air:
+        h.teleport(p['x'], GROUND_TOP - p['h'] - up); h.run(1, 1)
+        p = h.player()
+    hov = air if hover is None else hover
+    # 浮空靶＝跟卡比同高度；不浮空的靶一律站在地面上（卡比在空中時會先落地，靶才打得到）
+    put_dummy(h, p['cx'] + dx, (p['bottom'] if hov else GROUND_TOP) - 14 + dy, hov)
+    return h.player()
+
+
+# key, 標籤, 按鍵序列, 空中?, 靶相對 (dx, dy), 等待幀數, 出招後要下墜?, 靶要浮空?
+R9_FORMS = [
+    ('giant', '↑+X 上勾拳', [('up', 3), ('up,attack', 3)], False, (-6, -40), 40, False, True),
+    ('giant', '↓+X 巨人衝撞', [('down', 3), ('down,attack', 3)], False, (46, 0), 50, False, False),
+    ('giant', '↑+X 上勾拳（空中）', [('up', 3), ('up,attack', 3)], True, (-6, -40), 40, True, True),
+    ('giant', '↓+X 巨人衝撞（空中）', [('down', 3), ('down,attack', 3)], True, (46, 0), 50, True, False),
+    ('giant', '空中 X 屁股墜落', [('attack', 3)], True, (20, 0), 80, True, False),
+    ('dragon', '↑+X 升龍尾撩', [('up', 3), ('up,attack', 3)], False, (-2, -30), 50, False, True),
+    ('dragon', '↓+X 尾擊', [('down', 3), ('down,attack', 3)], False, (16, 0), 40, False, False),
+    ('dragon', '↑+X 升龍尾撩（空中）', [('up', 3), ('up,attack', 3)], True, (-2, -30), 50, True, True),
+    ('dragon', '↓+X 尾擊（空中）', [('down', 3), ('down,attack', 3)], True, (16, 0), 40, True, True),
+    ('dragon', '空中 X 俯衝', [('attack', 3)], True, (42, 0), 70, True, False),
+    ('mech', '↑+X 追蹤飛彈', [('up', 3), ('up,attack', 3)], False, (50, 0), 100, False, False),
+    ('mech', '↓+X 鑽頭突進', [('down', 3), ('down,attack', 3)], False, (26, 0), 50, False, False),
+    ('mech', '↑+X 追蹤飛彈（空中）', [('up', 3), ('up,attack', 3)], True, (50, 0), 100, True, True),
+    ('mech', '↓+X 鑽頭突進（空中）', [('down', 3), ('down,attack', 3)], True, (26, 6), 50, True, True),
+    ('mech', '空中 X 噴射墜踩', [('attack', 3)], True, (12, 0), 80, True, False),
+    ('ghost', '↑+X 隱身（嚇愣）', [('up', 3), ('up,attack', 3)], False, (20, 0), 30, False, False),
+    ('ghost', '↑+X 隱身（空中）', [('up', 3), ('up,attack', 3)], True, (20, 0), 30, True, True),
+    ('ghost', '↓+X 怨靈墜擊（空中）', [('down', 3), ('down,attack', 3)], True, (-2, 34), 50, True, True),
+    ('ghost', '空中 X 幽靈哀嚎', [('attack', 3)], True, (30, 0), 40, True, True),
+]
+
+
+def phase_round9(h, only=None):
+    n = 'R9 '
+    for key, label, seq, air, (dx, dy), wait, fall, hover in R9_FORMS:
+        if only and key not in only: continue
+        nm = f'{n}{key} [{label}]'
+        try:
+            r9_setup(h, key, air, dx, dy, hover=hover, phase_off=(key == 'ghost'))
+            y0 = h.player()['y']
+            for keys, fr in seq:
+                h.run(fr, fr, keys=keys)
+            h.release()
+            h.run(wait, 5)
+            e = h.ent()
+            check(nm + ': 命中致死 / 凍結', hit_ok(e), dict(hp=e['hp'], dead=e['dead'], freezeT=e['freezeT']))
+            st = h.player()['state']
+            check(nm + ': 招式結束回到正常狀態', st in NORMAL_STATES, st)
+            if air and fall:
+                h.run(80, 10)
+                p = h.player()
+                check(nm + ': 空中出招後仍會下墜（不會浮在原地）',
+                      p['y'] > y0 + 8 or p['state'] in ('idle', 'walk', 'crouch'), dict(y0=y0, y1=p['y'], state=p['state']))
+        except Exception as ex_:
+            check(nm + ': raised', False, repr(ex_))
+
+    # ghost ↓+X 附身（地面）：重疊的敵人 → 附身 → 再按 ↓+X 解除時敵人死亡
+    if not only or 'ghost' in only:
+        nm = n + 'ghost [↓+X 附身（地面）]'
+        h.goto(3, 9, ability='ghost', immune=True)
+        h.run(3, 3, keys='attack'); h.run(14, 7)                 # 關掉穿牆
+        e0 = h.spawn('waddledee', 5, 9, d=-1)
+        h.teleport(e0['x'] - 2, e0['y'] - 2); h.run(2, 2)
+        h.run(3, 3, keys='down'); h.run(3, 3, keys='down,attack'); h.run(4, 4)
+        check(nm + ': 附身成立', h.player()['possessed'] == 'waddledee', h.player()['possessed'])
+        h.release(); h.run(2, 2)
+        h.run(3, 3, keys='down'); h.run(3, 3, keys='down,attack'); h.run(10, 5)
+        check(nm + ': 解除附身後敵人死亡', h.ent()['dead'], h.ent())
+        check(nm + ': 招式結束回到正常狀態', h.player()['state'] in NORMAL_STATES, h.player()['state'])
+
+        # 穿牆（noclip）狀態下四個方向都還出得來，而且 X 仍然是「關掉穿牆」
+        h.goto(3, 9, ability='ghost', immune=True)
+        modes = {}
+        for keys, want in (('up,attack', 'invis'), ('down,attack', 'possess/plunge'), ('attack', 'phase')):
+            h.goto(3, 9, ability='ghost', immune=True)
+            pre = keys.split(',')[0]
+            if pre != 'attack': h.run(3, 3, keys=pre)
+            h.run(3, 3, keys=keys); h.run(2, 2)
+            modes[keys] = h.ev("()=>KB.player.abilityData.mode")
+        check(n + 'ghost: 穿牆中 ↑+X = 隱身', modes['up,attack'] == 'invis', modes)
+        check(n + 'ghost: 穿牆中 ↓+X = 附身 / 怨靈墜擊', modes['down,attack'] in ('possess', 'plunge'), modes)
+        check(n + 'ghost: 穿牆中 X 仍然是穿牆開關（不會被空中招蓋掉）',
+              modes['attack'] == 'phase' and h.player()['form']['noclip'] is False, modes)
+
+    # 招式表：固定順序 X / ↑+X / ↓+X / 空中 X，且 ≤ 6 列
+    for k in KEYS:
+        if only and k not in only: continue
+        mv = h.info(k)['moves']
+        keys0 = [m[0] for m in mv]
+        check(f'{n}{k}: moves 有 ↑+X 與 ↓+X', any('↑' in x for x in keys0) and any('↓' in x for x in keys0), keys0)
+        check(f'{n}{k}: moves 第一列是 X、含空中 X、≤ 6 列',
+              keys0[0].startswith('X') and any('空中 X' in x for x in keys0) and len(mv) <= 6, keys0)
+        order = [i for i, x in enumerate(keys0) if x.startswith('X') or x in ('↑+X', '↓+X', '空中 X')]
+        check(f'{n}{k}: moves 順序 X → ↑+X → ↓+X → 空中 X', order == sorted(order) and len(order) == 4, keys0)
+
+
 # ---------------------------------------------------------------------------
 # 階段 3：giant 專屬
 # ---------------------------------------------------------------------------
@@ -543,12 +670,13 @@ def phase_enemies(h):
 SPRITES = {
     # `kirby_attack_<key>` 是 player.js currentAnim() 在 state==='attack' 時的預設名字：
     # form 還沒建立 / 已經解除而能力還在的那幾幀會落回它，沒註冊就會畫洋紅方塊（fix5）。
-    'giant': ['hat_giant', 'kirby_attack_giant', 'ui_ability_giant', 'ui_ability_giant_mini'],
-    'dragon': ['kirby_dragon_idle', 'kirby_dragon_walk', 'kirby_dragon_fly', 'kirby_dragon_attack',
+    # Round 9 新招的專用幀：kirby_attack_giant_up / kirby_dragon_rise / kirby_mech_drill / kirby_ghost_plunge
+    'giant': ['hat_giant', 'kirby_attack_giant', 'kirby_attack_giant_up', 'ui_ability_giant', 'ui_ability_giant_mini'],
+    'dragon': ['kirby_dragon_idle', 'kirby_dragon_walk', 'kirby_dragon_fly', 'kirby_dragon_attack', 'kirby_dragon_rise',
                'kirby_attack_dragon', 'proj_dragonball', 'ui_ability_dragon', 'ui_ability_dragon_mini'],
-    'mech': ['kirby_mech_idle', 'kirby_mech_walk', 'kirby_mech_jump', 'kirby_mech_attack',
+    'mech': ['kirby_mech_idle', 'kirby_mech_walk', 'kirby_mech_jump', 'kirby_mech_attack', 'kirby_mech_drill',
              'kirby_attack_mech', 'proj_rocketfist', 'proj_missile', 'ui_ability_mech', 'ui_ability_mech_mini'],
-    'ghost': ['kirby_ghost_idle', 'kirby_ghost_walk', 'kirby_ghost_attack',
+    'ghost': ['kirby_ghost_idle', 'kirby_ghost_walk', 'kirby_ghost_attack', 'kirby_ghost_plunge',
               'kirby_attack_ghost', 'ui_ability_ghost', 'ui_ability_ghost_mini'],
 }
 ENEMY_SPRITES = ['bigbloom_walk', 'bigbloom_attack', 'drako_fly', 'drako_attack',
@@ -602,6 +730,7 @@ def main():
         stages = [
             ('form', lambda: [phase_form(h, k) for k in KEYS if not only or k in only]),
             ('moves', lambda: phase_moves(h, only)),
+            ('round9', lambda: phase_round9(h, only)),
             ('giant', lambda: phase_giant(h) if not only or 'giant' in only else None),
             ('dragon', lambda: phase_dragon(h) if not only or 'dragon' in only else None),
             ('mech', lambda: phase_mech(h) if not only or 'mech' in only else None),

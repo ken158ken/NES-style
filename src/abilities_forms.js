@@ -70,12 +70,38 @@
   const clearAnim = p => { const D = p.abilityDef; if (D) { D.anim = null; D.maxHold = 0; } };
   function restartAttack(p) { p.setState('idle'); p.startAttack(); }
   function startMove(p, m) { data(p).next = m; restartAttack(p); }
-  function pickMode(p, air, upMode, ground) {
+
+  // ---------- Round 9：出招方向 / 優先序（與 abilities_magic.js 同一套約定）----------
+  // player-input 在 startAttack 當幀寫入 `p.atkDir = { up, down, air }`；舊版 player.js 沒這欄位時退回即時輸入。
+  function atkDir(p) {
+    const a = p.atkDir;
+    return {
+      up: a ? !!a.up : down('up'),
+      down: a ? !!a.down : down('down'),
+      air: a ? !!a.air : !p.onGround,
+    };
+  }
+  /**
+   * 優先序：排隊的招 > ↑X > ↓X > 空中 X > X。
+   * o = { up, down, air, ground, airUp, airDown, airOk }
+   *   airUp / airDown：空中專用變體（沒填就沿用地面版，判定框跟著卡比走）
+   *   airOk：回傳 false 代表「這個狀態不算空中」（幽靈穿牆時 onGround 恆 false）
+   */
+  function pickMode(p, o) {
     const d = data(p), q = d.next; d.next = null;
     if (q) return q;
-    if (!p.onGround && air) return air;
-    if (down('up') && upMode) return upMode;
-    return ground;
+    const a = atkDir(p);
+    const air = a.air && (!o.airOk || o.airOk(p));
+    if (a.up && o.up) return (air && o.airUp) || o.up;
+    if (a.down && o.down) return (air && o.airDown) || o.down;
+    if (air && o.air) return o.air;
+    return o.ground;
+  }
+  const slowFall = (p, v) => { if (!p.onGround && p.vy > v) p.vy = v; };
+  /** 空中出招的緩降：最多 lim 幀（預設 28 < 30 幀上限），之後恢復自然重力 ⇒ 空中出招一定會下墜 */
+  function airSlow(p, d, v, lim) {
+    if (p.onGround) return;
+    if (d.t <= (lim === undefined ? 28 : lim)) slowFall(p, v);
   }
   function holding(p, held) { const d = p.abilityDef; return (held && d.maxHold > 0 && p.stateT < d.maxHold) || p.attackTimer > 2; }
   /** 場上最近的敵人（飛彈追蹤用） */
@@ -110,17 +136,24 @@
   // ======================================================================
   //  1. 巨大化 GIANT —— 限時 900 幀的破壞狂歡
   //     X      巨腳踩踏：躍起後落地，兩側各一道衝擊波（hit-stop）
-  //     ↓+X    巨人衝撞：前衝 30 幀全身判定 dmg 6，可撞破硬磚 X
+  //     ↑+X    巨人上勾拳：頭頂 40×46 判定 dmg 6（Round 9 新招）；**按住不放** 會接到原本的「大口吸」
+  //     ↓+X    巨人衝撞：前衝 30 幀全身判定 dmg 6，可撞破硬磚 X（空中照樣使得出來，重力照常）
   //     空中 X  屁股墜落：vy 8 直落，落地大衝擊環
   //     被動    體型 ×2、吸入範圍 ×2、可直接吞下中魔王、裝甲 3（armor 1）
   // ======================================================================
   const GIANT_TIME = 900, GIANT_WARN = 120;
+  /** 巨大化的「大口吸」：直接切進 player.js 的吸入狀態（吸力範圍 / 嘴巴判定都乘上 p.sizeMul = 2）*/
+  function bigInhale(p) {
+    p.setState('inhale'); p.inhaleT = 0; sfx('inhale');
+    vf('ring', p.cx, p.cy + 4, { r0: 12, r1: 76, frames: 18, color: '#ffd080', width: 2 });
+    KB.particles(p.cx + p.dir * 40, p.cy, ['#ffffff', '#ffd080'], 8, { spread: 1.2, grav: 0, life: 18, vx: -p.dir * 2 });
+  }
   def('giant', {
     color: '#ff8040', duration: 20, lockMove: true, canJump: false, fps: 8,
     hat: 'hat_giant',
     desc: '吞下巨大花的花粉，身體膨脹成兩倍大；撐得住三下攻擊，走一步地都在抖。',
     flavour: ['吸一大口氣——啵！整隻膨脹成兩倍。', '這個大小，連中魔王都能一口吞掉。'],
-    moves: [['X', '巨腳踩踏'], ['↓+X', '巨人衝撞（破硬磚）'], ['空中 X', '屁股墜落'], ['↑+X（按住）', '大口吸（可吞中魔王）'], ['被動', '裝甲 3・受傷不掉能力'], ['限時', '900 幀後自動縮小']],
+    moves: [['X', '巨腳踩踏'], ['↑+X', '上勾拳（按住＝大口吸）'], ['↓+X', '巨人衝撞（破硬磚）'], ['空中 X', '屁股墜落'], ['被動', '裝甲 3・受傷不掉能力'], ['限時', '900 幀後自動縮小']],
     onGet(p) {
       const d = data(p);
       d.timer = GIANT_TIME; d.step = 0; d.warned = false; d.mode = null;
@@ -137,6 +170,7 @@
           opts.t = pp.t;
           if (m === 'charge') { opts.frame = undefined; opts.fps = 12; return 'kirby_run'; }
           if (m === 'butt') { opts.frame = 0; return 'kirby_crouch'; }
+          if (m === 'upper') { opts.frame = undefined; opts.fps = 10; return 'kirby_attack_giant_up'; }
           opts.frame = undefined; opts.fps = 8; return 'kirby_attack_giant';
         },
       });
@@ -182,13 +216,20 @@
     onCrouchAttack(p) { startMove(p, 'charge'); },
     onAttack(p) {
       const d = data(p); killBox(p); d.t = 0; d.landed = false;
-      d.mode = pickMode(p, 'butt', 'inhale', 'stomp');
-      if (d.mode === 'inhale') {
-        // 大口吸：直接切進 player.js 的吸入狀態（吸力範圍 / 嘴巴判定都會乘上 p.sizeMul = 2）
-        d.mode = null;
-        p.setState('inhale'); p.inhaleT = 0; sfx('inhale');
-        vf('ring', p.cx, p.cy + 4, { r0: 12, r1: 76, frames: 18, color: '#ffd080', width: 2 });
-        KB.particles(p.cx + p.dir * 40, p.cy, ['#ffffff', '#ffd080'], 8, { spread: 1.2, grav: 0, life: 18, vx: -p.dir * 2 });
+      d.mode = pickMode(p, { up: 'upper', down: 'charge', air: 'butt', ground: 'stomp' });
+      if (d.mode === 'inhale') { bigInhale(p); return; }
+      if (d.mode === 'upper') {
+        // Round 9 新招「巨人上勾拳」：往上一記大拳，頭頂 40×46 判定；按住不放接大口吸
+        setup(p, { dur: 26, fps: 10, lock: true });
+        p.vy = Math.min(p.vy, -2.4); p.onGround = false;
+        sfx('giant_roar'); shake(4);
+        d.box = KB.hitbox({
+          x: 0, y: 0, w: 40, h: 64, dmg: 6, owner: 'player', type: 'hammer', follow: p,
+          ox: -20, oy: -40, life: 16, rehit: 10, knock: 3.4, pierce: true, flipWithOwner: false, breakBlocks: true,
+        });
+        vf('ring', p.cx, p.y - 12, { r0: 6, r1: 48, frames: 18, color: '#ffd080', width: 3 });
+        vf('slash', p.cx + p.dir * 6, p.y - 10, 26, -Math.PI / 2, { frames: 12, color: '#ffffff', width: 3 });
+        KB.particles(p.cx, p.y - 6, ['#ffd080', '#ffffff', '#f0e0c0'], 12, { spread: 2.2, up: 1.6, life: 24 });
         return;
       }
       if (d.mode === 'charge') {
@@ -217,6 +258,20 @@
     },
     update(p, dt, held) {
       const d = data(p); d.t++;
+      if (d.mode === 'upper') {
+        beat(d.box);
+        if (d.t % 3 === 1) KB.particles(p.cx + rnd(-10, 10), p.y - 10, ['#ffd080', '#ffffff'], 1, { spread: 0.8, grav: 0.04, life: 14, up: 0.8, size: 2 });
+        // 按住不放 → 接大口吸（原本的 ↑+X 招式，吸力範圍 ×2、可直接吞中魔王）
+        if (held && d.t >= 12) {
+          killBox(p);
+          d.mode = null;
+          bigInhale(p);
+          // setState('inhale') 會把 attackTimer 歸零，而外層 updateAttack 接著還會 `attackTimer--`
+          // 然後在 <= 0 時把狀態拉回 idle/fall —— 這裡先墊高一格，讓本幀的遞減不會取消吸入。
+          p.attackTimer = 2;
+        }
+        return;
+      }
       if (d.mode === 'charge') {
         p.vx = p.dir * 4;
         beat(d.box);
@@ -253,6 +308,7 @@
   // ======================================================================
   //  2. 龍化 DRAGON —— 翅膀 + 尾巴 + 角，按住跳可飛行
   //     X      龍息    ：前方 56px 持續火焰（按住最多 90 幀）；按滿 60 幀放開 → 必殺
+  //     ↑+X    升龍尾撩：躍起 + 頭頂 30×44 火焰判定 dmg 5（Round 9 新招，空中也能接）
   //     ↓+X    尾擊    ：前後雙向斬擊
   //     空中 X  俯衝    ：斜下衝 40 幀（紅色殘影）+ 落地衝擊波
   //     蓄力    龍炎彈  ：letterbox + 巨大貫穿火球
@@ -262,14 +318,17 @@
     hat: null,
     desc: '長出蝠翼、尾巴與金角；按住跳就能一直飛，張口就是一條火河。',
     flavour: ['背後「啪」地張開一對紅色蝠翼，', '吸一口氣，喉嚨深處已經燒起來了。'],
-    moves: [['按住跳', '飛行'], ['X（可按住）', '龍息'], ['↓+X', '尾擊（前後）'], ['空中 X', '俯衝'], ['按住 60 幀放開', '必殺：龍炎彈']],
+    moves: [['X（可按住）', '龍息'], ['↑+X', '升龍尾撩'], ['↓+X', '尾擊（前後）'], ['空中 X', '俯衝'], ['按住 60 幀放開', '必殺：龍炎彈'], ['按住跳', '飛行']],
     onGet(p) {
       const d = data(p); d.flap = 0;
       p.setForm({
         key: 'dragon', fly: true,
         spr(pp, anim, opts) {
           opts.frame = undefined; opts.t = pp.t;
-          if (pp.state === 'attack') { opts.fps = 10; return 'kirby_dragon_attack'; }
+          if (pp.state === 'attack') {
+            opts.fps = 10;
+            return ((pp.abilityData || {}).mode === 'rise') ? 'kirby_dragon_rise' : 'kirby_dragon_attack';
+          }
           if (!pp.onGround) { opts.fps = 8; return 'kirby_dragon_fly'; }
           if (Math.abs(pp.vx) > 0.3) { opts.fps = 7; return 'kirby_dragon_walk'; }
           opts.fps = 3; return 'kirby_dragon_idle';
@@ -285,9 +344,12 @@
       if (p.inWater || s === 'swim') { p.grav = P.grav; return false; }
       // 飛行：忽略重力，按住跳持續上升、放開緩降
       p.grav = 0;
-      if (s === 'attack' && data(p).mode === 'dive') return false;     // 俯衝時由招式控制
+      const am = data(p).mode;
+      if (s === 'attack' && (am === 'dive' || am === 'rise')) return false;   // 俯衝 / 升龍時由招式自己控制 vy
       if (p.onGround) { if (p.vy > 0) p.vy = 0; return false; }
-      if (KB.input.down('jump')) {
+      // Round 9：按住跳 **或** 按住 ↑ 都能持續拍翅上升（player.js 的 ↑ 長按飛行會排除 form.fly，
+      //   所以龍化要自己讀 p.dirHold.up，手感才和其他能力一致）
+      if (KB.input.down('jump') || (p.dirHold && p.dirHold.up)) {
         p.vy = p.vy < -1.2 ? Math.min(p.vy + 0.18, -1.2) : -1.2;
         d.flap++;
         if (d.flap % 12 === 0) {
@@ -304,8 +366,22 @@
     onCrouchAttack(p) { startMove(p, 'tail'); },
     onAttack(p) {
       const d = data(p); killBox(p); d.t = 0; d.landed = false;
-      d.mode = pickMode(p, 'dive', null, 'breath');
-      if (d.mode === 'tail') {
+      d.mode = pickMode(p, { up: 'rise', down: 'tail', air: 'dive', ground: 'breath' });
+      if (d.mode === 'rise') {
+        // Round 9 新招「升龍尾撩」：翅膀一拍躍起，尾巴帶著火焰由下往上撩
+        setup(p, { dur: 30, fps: 12, lock: true });
+        p.vy = -5.4; p.onGround = false; p.vx = p.dir * 1.2;
+        sfx('tail_whip'); sfx('wing_flap');
+        d.box = KB.hitbox({
+          x: 0, y: 0, w: 30, h: 44, dmg: 5, owner: 'player', type: 'fire', follow: p,
+          ox: -15, oy: -30, life: 24, rehit: 8, knock: 3.2, pierce: true, flipWithOwner: false, breakBlocks: true,
+        });
+        vf('slash', p.cx, p.y - 8, 26, -Math.PI / 2, { frames: 14, color: '#ff9020', width: 3 });
+        vf('ring', p.cx, p.cy - 6, { r0: 4, r1: 34, frames: 16, color: '#ffe040', width: 2 });
+        vf('afterimage', p, { frames: 30, every: 3, color: '#ff4040', alpha: 0.5 });
+        KB.particles(p.cx, p.cy, ['#ffe040', '#ff9020', '#ff4010'], 12, { spread: 2, grav: -0.02, life: 22, up: 1.4 });
+        shake(4);
+      } else if (d.mode === 'tail') {
         setup(p, { dur: 26, fps: 12, lock: true });
         sfx('tail_whip');
         for (const s of [-1, 1]) {
@@ -345,7 +421,15 @@
     update(p, dt, held) {
       const d = data(p); d.t++;
       light(72);
-      if (d.mode === 'tail') return;
+      if (d.mode === 'tail') { airSlow(p, d, 0.6); return; }
+      if (d.mode === 'rise') {
+        // 自己的重力（form.fly 期間 p.grav = 0）：先衝上去，之後照樣落下來
+        p.vy += 0.42; p.vx *= 0.9;
+        beat(d.box);
+        if (d.t % 2 === 1) KB.fx('fx_fire', p.cx + rnd(-8, 8), p.y - rnd(2, 22), { life: 10, fps: 12, flip: p.dir < 0 });
+        if (d.t % 3 === 0) KB.particles(p.cx + rnd(-10, 10), p.y - rnd(0, 26), ['#ffe040', '#ff9020'], 2, { spread: 0.8, grav: -0.03, life: 16, up: 0.6, size: 1 });
+        return;
+      }
       if (d.mode === 'dive') {
         beat(d.box);
         if (!d.landed) {
@@ -408,7 +492,8 @@
   // ======================================================================
   //  3. 機甲 MECH —— 裝甲值 6（armor 1），走路噴蒸氣
   //     X      火箭拳：拳頭飛出 100px 再飛回，來回各一次判定
-  //     ↑+X    飛彈  ：2 枚拋物線追蹤飛彈
+  //     ↑+X    飛彈  ：2 枚拋物線追蹤飛彈（空中一樣射得出來）
+  //     ↓+X    鑽頭突進：右臂變鑽頭前突 34 幀，dmg 3 / rehit 6、破磚（Round 9 新招；空中＝斜下鑽擊）
   //     空中 X  噴射墜踩
   //     跳躍    噴射跳（按住跳額外上升 30 幀）
   //     蓄力    必殺：全彈發射（6 枚飛彈 + 火箭拳）
@@ -507,14 +592,17 @@
     hat: null,
     desc: '穿上重裝甲：裝甲值 6，受傷先扣裝甲不掉能力；火箭拳、追蹤飛彈與噴射一應俱全。',
     flavour: ['「喀鏘」一聲，整組裝甲扣上身。', '胸口的動力爐亮起來——全系統正常。'],
-    moves: [['X', '火箭拳（來回判定）'], ['↑+X', '追蹤飛彈 ×2'], ['空中 X', '噴射墜踩'], ['按住跳', '噴射跳'], ['按住 50 幀放開', '必殺：全彈發射']],
+    moves: [['X', '火箭拳（來回判定）'], ['↑+X', '追蹤飛彈 ×2'], ['↓+X', '鑽頭突進（破磚）'], ['空中 X', '噴射墜踩'], ['按住 50 幀放開', '必殺：全彈發射'], ['按住跳', '噴射跳']],
     onGet(p) {
       const d = data(p); d.jetT = 0; d.stepT = 0;
       p.setForm({
         key: 'mech', armor: 1, hp: 6,
         spr(pp, anim, opts) {
           opts.frame = undefined; opts.t = pp.t;
-          if (pp.state === 'attack') { opts.fps = 10; return 'kirby_mech_attack'; }
+          if (pp.state === 'attack') {
+            opts.fps = 10;
+            return ((pp.abilityData || {}).mode === 'drill') ? 'kirby_mech_drill' : 'kirby_mech_attack';
+          }
           if (!pp.onGround) { opts.fps = 6; return 'kirby_mech_jump'; }
           if (Math.abs(pp.vx) > 0.3) { opts.fps = 7; return 'kirby_mech_walk'; }
           opts.fps = 3; return 'kirby_mech_idle';
@@ -538,7 +626,10 @@
       } else d.stepT = 0;
       // 噴射跳：離地後按住跳最多 30 幀持續上升
       if (p.onGround) d.jetT = 0;
-      else if (KB.input.down('jump') && p.vy < 1.2 && d.jetT < 30 && s !== 'attack') {
+      // Round 9：按住跳（原本）或按住 ↑（新的飛行鍵）都會噴射；漂浮中除外 —— 那時 player.js
+      //   的「↑ 長按飛行」已經在負責上升，再加噴射會變成兩份推力。
+      else if ((KB.input.down('jump') || (p.dirHold && p.dirHold.up && s !== 'float'))
+        && p.vy < 1.2 && d.jetT < 30 && s !== 'attack') {
         d.jetT++;
         p.vy -= 0.17;
         if (d.jetT % 4 === 1) KB.particles(p.cx + rnd(-4, 4), p.bottom - 1, ['#78e8ff', '#ffffff', '#1888c8'], 2, { spread: 0.7, grav: 0.02, life: 12, up: -0.6, size: 2 });
@@ -546,11 +637,23 @@
       }
       return false;
     },
-    onCrouchAttack(p) { startMove(p, 'fist'); },
+    onCrouchAttack(p) { startMove(p, 'drill'); },
     onAttack(p) {
       const d = data(p); killBox(p); d.t = 0; d.landed = false;
-      d.mode = pickMode(p, 'jetdrop', 'missile', 'fist');
-      if (d.mode === 'missile') {
+      d.mode = pickMode(p, { up: 'missile', down: 'drill', air: 'jetdrop', ground: 'fist' });
+      if (d.mode === 'drill') {
+        // Round 9 新招「鑽頭突進」：右臂換成鑽頭往前鑽，地面沿地板推進、空中斜下鑽擊
+        setup(p, { dur: 34, fps: 14, lock: true });
+        p.vx = p.dir * 2.8;
+        if (!p.onGround) p.vy = Math.max(p.vy, 1.6);
+        sfx('jet'); sfx('mech_step'); shake(3);
+        d.box = KB.hitbox({
+          x: 0, y: 0, w: 24, h: 16, dmg: 3, owner: 'player', type: 'mech', follow: p,
+          ox: 2, oy: 2, life: 4, rehit: 6, knock: 2, pierce: true, breakBlocks: true,
+        });
+        vf('sparkTrail', p, { frames: 34, every: 3, color: ['#ffe040', '#ffffff', '#78e8ff'] });
+        KB.particles(p.cx + p.dir * 14, p.cy + 4, ['#ffe040', '#ffffff', '#b8c0d0'], 8, { spread: 1.6, grav: 0.05, life: 16, vx: p.dir * 1.2 });
+      } else if (d.mode === 'missile') {
         setup(p, { dur: 26, fps: 10, lock: true });
         fireMissile(p, 2);
         shake(3);
@@ -581,6 +684,18 @@
     },
     update(p, dt, held) {
       const d = data(p); d.t++;
+      if (d.mode === 'drill') {
+        beat(d.box);
+        if (p.onGround) p.vx = p.dir * 2.8;
+        else { p.vx = p.dir * 2.2; p.vy = Math.max(p.vy, 1.8); }   // 空中＝斜下鑽擊（照樣下墜）
+        if (d.t % 2 === 0) {
+          KB.particles(p.cx + p.dir * (12 + rnd(0, 8)), p.cy + rnd(0, 8), ['#ffe040', '#ffffff', '#b8c0d0'], 2,
+            { spread: 1.2, grav: 0.06, life: 14, vx: -p.dir * 0.8, size: 1 });
+        }
+        if (d.t % 8 === 0) { sfx('mech_step'); shake(1); }
+        if (p.hitWall) { p.attackTimer = Math.min(p.attackTimer, 6); groundWave(p, { dmg: 4, w: 30, color: '#c0e8ff', shake: 5, sfx: 'jet', ring: 40 }); }
+        return;
+      }
       if (d.mode === 'jetdrop') {
         beat(d.box);
         if (!d.landed) {
@@ -604,7 +719,7 @@
         }
         return;
       }
-      if (d.mode === 'missile') return;
+      if (d.mode === 'missile') { airSlow(p, d, 0.6); return; }
       // 火箭拳：打完仍按住 → 蓄力，放開時放全彈發射
       if (d.t >= 18) {
         if (held) {
@@ -624,9 +739,10 @@
   // ======================================================================
   //  4. 幽靈 GHOST —— 半透明，穿牆 / 附身 / 哀嚎 / 隱身
   //     X      穿牆開關：noclip 期間只能穿「最多 2 格厚」的牆，太厚會被推回
+  //     ↑+X    隱身    ：180 幀內敵人察覺不到；起手 56px 內的敵人會嚇愣 freezeT 40（Round 9）
   //     ↓+X    附身    ：與敵人重疊時附身（方向鍵移動、X 觸發攻擊、再按 ↓+X 解除）
+  //                     沒有目標時改出「怨靈墜擊」（Round 9 新的空中 / 地面通用變體，dmg 4）
   //     空中 X  幽靈哀嚎：範圍內敵人 stun 60 幀
-  //     ↑+X    隱身    ：180 幀內敵人察覺不到
   // ======================================================================
   const GHOST_PHASE = 240, GHOST_POSSESS = 300, GHOST_INVIS = 180;
   /** 水平方向連續實心磁磚的厚度（含所在格），上限 8 */
@@ -677,7 +793,7 @@
     hat: null,
     desc: '變成半透明的白色被單；能穿過薄牆、附身敵人，還能發出讓人僵直的哀嚎。',
     flavour: ['身體變得輕飄飄、涼颼颼的，', '牆壁看起來也沒那麼硬了。'],
-    moves: [['X', '穿牆開關（2 格內）'], ['↓+X', '附身敵人'], ['空中 X', '幽靈哀嚎（stun）'], ['↑+X', '隱身 180 幀'], ['穿牆中 ↑↓', '上下飄浮']],
+    moves: [['X', '穿牆開關（2 格內）'], ['↑+X', '隱身 180 幀（嚇愣）'], ['↓+X', '附身（無目標＝墜擊）'], ['空中 X', '幽靈哀嚎（stun）'], ['穿牆中 ↑↓', '上下飄浮']],
     onGet(p) {
       const d = data(p);
       d.phaseT = GHOST_PHASE; d.invisT = 0; d.possessT = 0; d.guard = null;
@@ -686,7 +802,10 @@
         key: 'ghost', noclip: true, alpha: 0.6,
         spr(pp, anim, opts) {
           opts.frame = undefined; opts.t = pp.t;
-          if (pp.state === 'attack') { opts.fps = 10; return 'kirby_ghost_attack'; }
+          if (pp.state === 'attack') {
+            opts.fps = 10;
+            return ((pp.abilityData || {}).mode === 'plunge') ? 'kirby_ghost_plunge' : 'kirby_ghost_attack';
+          }
           if (Math.abs(pp.vx) > 0.3) { opts.fps = 6; return 'kirby_ghost_walk'; }
           opts.fps = 4; return 'kirby_ghost_idle';
         },
@@ -811,14 +930,12 @@
     },
     onCrouchAttack(p) { startMove(p, 'possess'); },
     onAttack(p) {
-      const d = data(p); killBox(p); d.t = 0;
-      // 招式選擇：穿牆中 p.onGround 幾乎恆為 false（不與磁磚碰撞），所以「空中」要排除穿牆狀態，
-      // 否則穿牆時 X 會一直變成哀嚎、再也關不掉穿牆。優先序：↓ 附身 > ↑ 隱身 > 空中哀嚎 > X 穿牆開關。
+      const d = data(p); killBox(p); d.t = 0; d.landed = false;
+      // 招式選擇（Round 9 統一優先序：↑ 隱身 > ↓ 附身 > 空中哀嚎 > X 穿牆開關）。
+      // 穿牆中 p.onGround 幾乎恆為 false（不與磁磚碰撞），所以「空中」要排除穿牆狀態，
+      // 否則穿牆時 X 會一直變成哀嚎、再也關不掉穿牆（airOk）。
       const phasing = !!(p.form && p.form.noclip);
-      const q = d.next; d.next = null;
-      d.mode = q || (down('down') ? 'possess'
-        : down('up') ? 'invis'
-          : (!p.onGround && !phasing) ? 'wail' : 'phase');
+      d.mode = pickMode(p, { up: 'invis', down: 'possess', air: 'wail', ground: 'phase', airOk: () => !phasing });
       if (d.mode === 'possess') {
         setup(p, { dur: 18, fps: 10, lock: true });
         // 找目標：**判定框重疊就一定成立**（fix5b / R5-P1-04 —— 原本只看中心距 < 26px，
@@ -832,11 +949,21 @@
           if (dd < bd) { bd = dd; tgt = e; }
         }
         if (over) tgt = over;
-        if (tgt) this.possess(p, tgt);
-        else {
-          sfx('unpossess');
-          vf('textPop', p.cx, p.y - 4, '沒有目標', { color: '#c4ccec', frames: 30, size: 9 });
-        }
+        if (tgt) { this.possess(p, tgt); return; }
+        d.mode = 'plunge';        // Round 9：附不到身就改出「怨靈墜擊」（空中 ↓X 主要走這條）
+      }
+      if (d.mode === 'plunge') {
+        setup(p, { anim: 'kirby_ghost_plunge', dur: 30, fps: 10, lock: true });
+        p.vx *= 0.3; p.vy = Math.max(p.vy, 5.4);
+        sfx('ghost_wail');
+        d.box = KB.hitbox({
+          x: 0, y: 0, w: 28, h: 28, dmg: 4, owner: 'player', type: 'ghost', follow: p,
+          ox: -14, oy: -2, life: 26, rehit: 8, knock: 2, pierce: true, flipWithOwner: false, breakBlocks: false,
+        });
+        vf('ring', p.cx, p.cy, { r0: 20, r1: 2, frames: 14, color: '#c4ccec', width: 2 });
+        vf('afterimage', p, { frames: 30, every: 2, color: '#c4ccec', alpha: 0.5 });
+        vf('textPop', p.cx, p.y - 4, '怨靈墜擊', { color: '#c4ccec', frames: 34, size: 9 });
+        KB.particles(p.cx, p.y - 2, ['#ffffff', '#c4ccec'], 10, { spread: 1.8, grav: -0.02, life: 20 });
       } else if (d.mode === 'wail') {
         setup(p, { dur: 34, fps: 10, lock: true });
         sfx('ghost_wail');
@@ -862,6 +989,15 @@
         if (p.form) p.form.alpha = 0.3;
         vf('ring', p.cx, p.cy, { r0: 30, r1: 2, frames: 16, color: '#c4ccec', width: 2 });
         vf('textPop', p.cx, p.y - 4, '隱身', { color: '#c4ccec', frames: 36, size: 10 });
+        // Round 9：卡比在眼前「啪」地消失 —— 56px 內的敵人會嚇愣（freezeT 40），隱身也算一招
+        for (const e of KB.game.entities) {
+          if (e.dead || e.type !== 'enemy' || e.active === false) continue;
+          if (Math.hypot(e.cx - p.cx, e.cy - p.cy) > 56) continue;
+          e.freezeT = Math.max(e.freezeT || 0, 40); e.vx = 0;
+          e.alert = false; e.alertT = 0;
+          KB.particles(e.cx, e.y - 2, ['#ffffff', '#c4ccec'], 5, { spread: 1.2, up: 0.9, life: 20 });
+          vf('textPop', e.cx, e.y - 6, '？', { color: '#ffffff', frames: 28, size: 9 });
+        }
         // 尾隨的 0 傷害判定框：排在敵人之後更新，負責把敵人的 alert 清掉
         if (d.guard) d.guard.dead = true;
         d.guard = KB.hitbox({
@@ -888,8 +1024,30 @@
     update(p, dt, held) {
       const d = data(p); d.t++;
       if (d.mode === 'wail') {
-        if (!p.onGround) p.vy = Math.min(p.vy, 0.3);
+        airSlow(p, d, 0.3);
         if (d.t % 3 === 0) KB.particles(p.cx + rnd(-20, 20), p.cy + rnd(-18, 18), ['#ffffff', '#c4ccec'], 1, { spread: 0.4, grav: -0.03, life: 16, size: 1 });
+        return;
+      }
+      if (d.mode === 'plunge') {
+        beat(d.box);
+        p.vy = Math.max(p.vy, 5.4);
+        // 穿牆模式下沒有地形碰撞（form.noclip）→ 自己看腳下那格，免得一路沉到房間底部
+        const map = KB.game && KB.game.map;
+        const blocked = p.form && p.form.noclip && map && map.isSolidPx(p.cx, p.bottom + 2);
+        if (blocked || p.onGround) {
+          if (blocked) p.vy = 0;
+          if (!d.landed) {
+            d.landed = true;
+            vf('ring', p.cx, p.bottom - 2, { r0: 4, r1: 44, frames: 18, color: '#ffffff', width: 2 });
+            KB.hitbox({ x: p.cx - 24, y: p.bottom - 20, w: 48, h: 22, dmg: 3, owner: 'player', type: 'ghost',
+              life: 8, rehit: 0, pierce: true, knock: 2, breakBlocks: false });
+            KB.particles(p.cx, p.bottom, ['#ffffff', '#c4ccec'], 10, { spread: 2.2, life: 20 });
+            sfx('unpossess'); shake(4);
+            p.attackTimer = Math.min(p.attackTimer, 10);
+          }
+        }
+        if (d.t % 3 === 0) KB.particles(p.cx + rnd(-8, 8), p.y + rnd(0, 10), ['#ffffff', '#c4ccec'], 1, { spread: 0.4, grav: -0.04, life: 14, size: 1 });
+        return;
       }
     },
     onEnd(p) { killBox(p); clearAnim(p); data(p).mode = null; },

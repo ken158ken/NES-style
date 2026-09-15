@@ -521,6 +521,16 @@
     wideK({ body: [4, 4, 13], arms: [], eyes: EYE_SHUT, eyeAt: [[8, 10], [12, 10]], mouth: MOUTH_LINE, mouthAt: [10, 14], cheekAt: [[6, 12]], feet: [[4, 15], [9, 15]] }),
   ], { fps: 12 });
 
+  // ↑+X 分身塔（Round 9 新招）：蹲穩 + 雙手向上撐住疊起來的分身柱
+  //   兩個分身是真的實體（CloneKirby 自己畫在卡比頭上），這裡只畫本體的「撐」姿勢 + 頭頂小星。
+  const STAR3 = ['.y.', 'yay', '.y.'];
+  S('kirby_attack_clone_tower', [
+    wideK({ arms: [[16, 3, 5], [0, 3, 5]], eyes: EYE_WIDE, eyeAt: [[7, 6], [12, 6]], mouth: MOUTH_O, mouthAt: [9, 12],
+      feet: [[1, 15], [11, 15]], front: [[STAR3, 10, 0]] }),
+    wideK({ dy: 1, arms: [[16, 0, 5], [0, 0, 5]], eyes: EYE_SQUINT, eyeAt: [[7, 7], [12, 7]], mouth: mouthBig(6, 5), mouthAt: [9, 12],
+      feet: [[0, 15], [12, 15]], front: [[STAR3, 10, 0], [['.y.'], 5, 2], [['.y.'], 15, 2]] }),
+  ], { fps: 12 });
+
   // 空中 X 分身墊腳：向上蹬
   S('kirby_attack_clone_step', [
     wideK({ arms: [[16, 2, 5], [0, 2, 5]], eyeAt: [[7, 4], [12, 4]], mouth: MOUTH_OPEN, mouthAt: [9, 11], feet: [[2, 15], [10, 15]] }),
