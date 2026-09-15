@@ -42,6 +42,12 @@
       this.form = null; this.sizeMul = 1; this.possessed = null;
       // Round 6（mix）：SELECT 按住幀數（放開時決定「丟棄能力」還是「呼叫夥伴」）
       this.selectHoldT = 0; this.selectLock = false;
+      // Round 9（player-input）：按住 ↑ ＝ 飛行 / 出招方向快照
+      this.flyHoldT = 0;      // ↑ 連續按住幀數（每幀維護；放開歸零）
+      this.flyFlapT = 0;      // 漂浮中自動拍動計時
+      this.flyFlapN = 0;      // 自動拍動次數（音效節流用）
+      this.dirHold = { up: false, down: false };                 // 每幀方向鍵狀態（hold 型招式讀）
+      this.atkDir = { up: false, down: false, air: false };      // startAttack 當幀的方向快照
       this.name = 'kirby';
     }
 
@@ -158,6 +164,10 @@
       if (this.climbTopT > 0) this.climbTopT--;
       if (this.ladderAtkT > 0) this.ladderAtkT--;
       if (this.swimActT > 0) this.swimActT--;
+      // ---- Round 9：方向鍵狀態（hold 型招式讀 p.dirHold）與 ↑ 連續按住幀數（飛行用）----
+      const upDown = inp.down('up'), dnDown = inp.down('down');
+      this.dirHold.up = upDown; this.dirHold.down = dnDown;
+      if (upDown) this.flyHoldT++; else { this.flyHoldT = 0; this.flyFlapT = 0; this.flyFlapN = 0; }
       this.wasInWater = this.inWater;
       this.inWater = map.inWater(this.cx, this.cy);
       // 入水 / 出水水花
@@ -258,7 +268,13 @@
           if (KB.physics.onPlatformOnly(map, this)) { this.dropDown(); return; }
           this.startSlide(); return;
         }
-        if (inp.pressed('attack') && this.abilityDef && this.abilityDef.onCrouchAttack) { this.abilityDef.onCrouchAttack(this); }
+        // Round 9：蹲下 + 攻擊。def 有 onCrouchAttack 就走原本的路徑（既有 ↓+X 招式不變）；
+        //   沒有的話一律走 startAttack，由 abilities 內部讀 p.atkDir.down 決定要放哪一招。
+        if (inp.pressed('attack') && this.abilityDef) {
+          const cd = this.abilityDef;
+          if (cd.onCrouchAttack) cd.onCrouchAttack(this);
+          else { this.startAttack(); return; }
+        }
         this.physics(); return;
       } else if (this.state === 'crouch') this.setState('idle');
 
@@ -305,6 +321,19 @@
         // 長按（>= SELECT_HOLD）而夥伴系統沒接手時，維持原本的「掉在腳邊」；
         // 只有真正的短按才是「往前拋出去砸敵人」。
         if (!toHelper && this.ability) this.dropAbility(true, held < SELECT_HOLD);
+      }
+
+      // ---- Round 9：按住 ↑ ＝ 持續飛行（放在攻擊之後 → ↑+X / 空中 X 一律先出招）----
+      //   地面：連續按住 P.flyHoldGround 幀才起飛，且該幀腳下不能有門 / 梯（門與梯優先，
+      //         避免玩家一路按著 ↑ 找門時走過門口就飛起來）。
+      //   空中（jump / fall）：按住 ↑ 立即起飛（條件與空中按跳漂浮相同）。
+      if (inp.down('up') && this.canFloatNow()) {
+        if (!this.onGround) {
+          if ((this.state === 'jump' || this.state === 'fall') && !this.landingSoon()) { this.startFloat(); return; }
+        } else if (this.flyHoldT >= P.flyHoldGround && !KB.game.doorAt(this)
+          && !map.onLadder(this.cx, this.cy) && !map.onLadder(this.cx, this.bottom + 1)) {
+          this.startFloat(); return;
+        }
       }
 
       const vyPre = this.vy;
@@ -372,10 +401,24 @@
     }
 
     // ---------- 漂浮 ----------
+    /** 現在可以進入 / 維持漂浮嗎（含物、吐氣鎖、變身飛行、水中一律不行） */
+    canFloatNow() {
+      if (this.full || this.exhaleLockT > 0) return false;
+      if (this.form && this.form.fly) return false;          // dragon / mech 的按住跳飛行交給 form 自己控制
+      if (this.inWater) return false;
+      return true;
+    }
     startFloat() {
       this.setState('float'); this.vy = P.floatUp; this.floatFrame = 0; this.floatAnimT = 0; KB.audio.sfx('float');
       this.running = false; this.jumpBufT = 0;
+      this.flyFlapT = 0; this.flyFlapN = 0;
       this.floatPuff();
+    }
+    /** 拍動一次（按跳 / 按住 ↑ 自動拍動共用）；quietEvery > 1 時音效節流 */
+    floatFlap(auto) {
+      this.vy = P.floatUp; this.floatAnimT = 0;
+      if (!auto || (this.flyFlapN++ % Math.max(1, P.flyFlapSfxEvery)) === 0) KB.audio.sfx('float');
+      this.floatPuff(); this.jumpBufT = 0;
     }
     /** 每次拍動吐出 1~2 顆小空氣粒子 */
     floatPuff() {
@@ -389,9 +432,18 @@
       else this.vx *= 0.92;
       this.vx = Math.max(-1.0, Math.min(1.0, this.vx));
       // 每按一次跳＝拍動一次（動畫重播 + 吐氣粒子）
-      if (inp.pressed('jump')) { this.vy = P.floatUp; this.floatAnimT = 0; KB.audio.sfx('float'); this.floatPuff(); this.jumpBufT = 0; }
-      // 只有「攻擊鍵」會吐氣；按 ↓ 或 ↓+攻擊都不吐氣（避免誤觸）
-      if (inp.pressed('attack') && !inp.down('down')) { this.exhale(); return; }
+      if (inp.pressed('jump')) { this.floatFlap(false); this.flyFlapT = 0; }
+      // Round 9：按住 ↑ → 每 P.flyFlapEvery 幀自動拍動一次（＝持續上升）；放開 ↑ 就回一般漂浮下降
+      else if (inp.down('up') && !(this.form && this.form.fly)) {
+        this.flyFlapT++;
+        if (this.flyFlapT >= P.flyFlapEvery) { this.flyFlapT = 0; this.floatFlap(true); }
+      } else { this.flyFlapT = 0; }
+      // Round 9：漂浮中按 X —— 有能力就直接出招（離開 float，不吐氣，不論有沒有按 ↓）；
+      //   沒有能力才是原本的吐氣（且按 ↓ 或 ↓+攻擊不吐氣，避免誤觸）。
+      if (inp.pressed('attack')) {
+        if (this.ability && !this.full) { this.startAttack(); return; }
+        if (!inp.down('down')) { this.exhale(); return; }
+      }
       if (inp.pressed('up') && this.onGround) { const d = KB.game.doorAt(this); if (d) { this.enterDoor(d); return; } }
       this.floatAnimT++;
       this.grav = P.floatGrav; this.maxFall = P.floatMaxFall;
@@ -556,6 +608,10 @@
     // ---------- 能力攻擊 ----------
     startAttack() {
       const d = this.abilityDef; if (!d) return;
+      // Round 9：出招方向快照（abilities 的 onAttack / update 讀 p.atkDir 決定放哪一招）
+      //   up / down = 按下攻擊當幀的方向鍵狀態；air = 當幀不在地面（空中版招式）
+      const inp = KB.input;
+      this.atkDir = { up: inp.down('up'), down: inp.down('down'), air: !this.onGround };
       if (d.key === 'stone' || d.stoneLike) { this.startStone(); return; }
       this.setState('attack'); this.attackTimer = d.duration || 20; this.attackLock = d.lockMove !== false;
       this.attackFps = d.fps || 12;
@@ -578,8 +634,24 @@
       if (d.update) d.update(this, dt1(), inp.down('attack'));
       this.attackTimer--;
       if (d.hold && inp.down('attack') && (d.maxHold === undefined || this.stateT < d.maxHold)) this.attackTimer = Math.max(this.attackTimer, 2);
-      if (this.attackTimer <= 0) { if (d.onEnd) d.onEnd(this); this.setState(this.onGround ? 'idle' : 'fall'); }
+      let resumeFly = false;
+      if (this.attackTimer <= 0) {
+        if (d.onEnd) d.onEnd(this);
+        this.setState(this.onGround ? 'idle' : 'fall');
+        resumeFly = this.state === 'fall';
+      }
+      // Round 9：空中出招期間重力照常（不因 attackLock 停住垂直）；
+      //   只有 def.hover === true 才把重力交給 def 自己控制 p.vy（懸停型招式）。
+      const hover = !!d.hover && !this.onGround;
+      const g0 = this.grav;
+      if (hover) this.grav = 0;
       this.physics(); this.afterPhysics();
+      if (hover) this.grav = g0;
+      // 招式結束回到 fall：↑ 仍按著（或跳鍵剛按）→ 自動接回漂浮，可以一路飛一路出招
+      if (resumeFly && this.state === 'fall' && !this.onGround && this.canFloatNow()
+        && (inp.down('up') || inp.pressed('jump') || this.jumpBufT > 0) && !this.landingSoon()) {
+        this.startFloat();
+      }
     }
     startStone() {
       this.setState('stone'); this.vx = 0; this.stoneT = 0; KB.audio.sfx('stone');

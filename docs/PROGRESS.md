@@ -4104,7 +4104,67 @@ Round 8 QA（qa8）問題修正 —— agent: fix8（2026-09-12）。負責 R8-P
 - 招式優先序（abilities 內部判斷）：↑X > ↓X > 空中 X > X；空中時 ↑X / ↓X 若無空中專用版就沿用地面版效果（判定框位置隨卡比）。
 
 ## player-input
-（agent 在此追加）
+> 檔案：`src/player.js`、`src/input.js`（HELP）、`src/const.js`（KB.PHYS 尾端新常數）、`tools/engine_test.py`。截圖：`shots/agent_player_input/`。
+
+### 給 abilities agent 的最終介面（**照這個寫**）
+| 介面 | 說明 |
+|---|---|
+| `p.atkDir = { up, down, air }` | **startAttack 當幀**的快照：`up`/`down` ＝ 該幀 `KB.input.down('up'/'down')`、`air` ＝ 該幀 `!p.onGround`。`restartAttack()`（連段）會重新快照。石頭系（`startStone`）也會設。 |
+| `p.dirHold = { up, down }` | **每幀**更新的方向鍵狀態（`Player.update` 開頭），給 hold 型招式讀（例如按住 ↑ 持續蓄力 / 改變彈道）。 |
+| `p.flyHoldT` | ↑ 連續按住幀數（放開歸零）。招式想判斷「玩家正在飛」可讀這個。 |
+| 空中出招 | player **完全不阻擋**：空中 `pressed('attack')` 一律 `startAttack()`（jump / fall / 剛離地 / 漂浮中都可）。`updateAttack` 的重力照常跑，招式**不會**因 `attackLock` 停在半空。 |
+| `def.hover === true` | 空中出招期間 player 把 `grav` 設為 0，**vy 完全交給 def 自己控制**（懸停 / 滯空型招式用；不設就是照常下墜）。 |
+| **自動回漂浮** | 招式結束時若人還在空中（`setState('fall')`）且 `↑ 仍按著` 或 `跳鍵剛按 / jumpBuffer 內`，player 會**自動 `startFloat()`** → 玩家可以「一路飛一路出招」。def 不需要做任何事；若某招**不想**被接回漂浮，請在 `onEnd` 裡自己 `p.setState('fall')` 之外再設 `p.exhaleLockT = 1`。 |
+| 蹲下 ↓+X | `def.onCrouchAttack` 存在 → 走原本的路徑（既有 ↓+X 招式完全不變）；**沒有 onCrouchAttack 就直接 `startAttack()`**，請在 `onAttack` 內用 `p.atkDir.down` 分支。 |
+| 漂浮中 X | **有能力 → 直接 `startAttack()`**（離開 float、不吐氣，不論有沒有按 ↓）；無能力才是原本的吐氣（↓+X 不吐氣的規則保留）。 |
+| 招式優先序（建議） | `↑X > ↓X > 空中 X > X`；空中的 ↑X / ↓X 若沒有空中專用版就沿用地面版效果。 |
+
+### 行為規格（Round 9 操作重構）
+1. **按住 ↑ ＝ 持續飛行**
+   - **地面**：按住 ↑ 連續 `KB.PHYS.flyHoldGround`(4) 幀後 `startFloat()`。門 / 梯**優先**——該幀 `KB.game.doorAt(p)` 有門、或 `cx,cy` / `cx,bottom+1` 在梯子上，就**不起飛**（避免一路按著 ↑ 找門時走過門口誤飛；進門仍是原本的 `pressed('up')`）。含物（`full`）、吐氣鎖（`exhaleLockT>0`）、水中、`form.fly` 一律不起飛。
+   - **空中**（state `jump` / `fall`）：按住 ↑ **立即** `startFloat()`，條件與「空中按跳漂浮」相同（`!full`、`exhaleLockT<=0`、`!form.fly`、`!landingSoon()`）。
+   - **判定順序**：門 / 梯 → 覺醒（跳+攻）→ 蹲下 / 滑鏟 → 跳躍 / 按跳漂浮 → **攻擊** → SELECT → **↑ 起飛**。放在攻擊之後是關鍵：空中 `↑+X` 會先出招而不是先起飛（`('up',3) + ('up,attack',3)` 這種既有測試序列因此完全不受影響）。
+   - **漂浮中**：按住 ↑ 每 `KB.PHYS.flyFlapEvery`(9) 幀自動拍動一次（`vy = floatUp`、動畫重播、`floatPuff` 粒子、`float` 音效每 `flyFlapSfxEvery`(2) 次才播一次）→ y 單調遞減。放開 ↑ 立刻回一般漂浮下降；碰天花板照舊 `vy = 0.2`。按跳拍動與連按上升**完全保留**。
+2. **漂浮中 X 用能力**：見上表。
+3. **空中可施展且持續下墜**：`updateAttack` 的 `physics()` 照常套重力（只有 `def.hover` 才停重力）；招式結束 + ↑ 仍按著 → 自動接回 `float`。
+4. **相容**：時停 / 覺醒（跳+攻同幀，`KB.AWAKEN.tryTrigger` 兩個鉤子都沒動）、滑鏟 ↓+跳、平台下穿、梯子上攻擊、水中（`canFloatNow()` 擋掉）、`form.fly`（dragon 按住跳飛行 / mech 噴射跳）全部沿用原行為；`form.fly` 時 ↑ 長按與漂浮自動拍動都不觸發。
+
+### 新常數（`KB.PHYS` 尾端，既有數值一律未動）
+| 常數 | 值 | 說明 |
+|---|---|---|
+| `flyHoldGround` | 4 | 地面按住 ↑ 幾幀後起飛 |
+| `flyFlapEvery` | 9 | 漂浮中按住 ↑ 每 n 幀自動拍動一次 |
+| `flyFlapSfxEvery` | 2 | 自動拍動的 `float` 音效節流（每 n 次才播） |
+
+新增 player 欄位：`flyHoldT` / `flyFlapT` / `flyFlapN` / `dirHold` / `atkDir`；新增方法 `canFloatNow()` / `floatFlap(auto)`。
+
+### 進度
+- [2026-09-15 R9-PI-1] 完成：**↑ 長按飛行**（地面 4 幀門 / 梯優先、空中即時、漂浮中每 9 幀自動拍動）＋ `KB.PHYS` 三個新常數。
+  驗證：`engine_test.py` 第 39 / 40 / 41 組；截圖 `shots/agent_player_input/fly2_03.png`、`fly2_07.png`（按住 ↑ 邊往右邊上升）。下一步：漂浮中出招。
+- [2026-09-15 R9-PI-2] 完成：**漂浮中 X 用能力**（有能力→ startAttack 不吐氣、無能力→ 照舊吐氣且 ↓+X 不吐）、**空中 X / ↑X / ↓X 一律出招且持續下墜**、**招式結束 ↑ 仍按著自動回漂浮**、`def.hover` 停重力鉤子、蹲下無 `onCrouchAttack` 改走 `startAttack`。
+  驗證：`engine_test.py` 第 42 / 43 / 44 組；截圖 `shots/agent_player_input/aa_a1.png`（空中 ↑+X 上挑斬，hitbox 在空中）、`aa_a5.png`（招式結束後仍按著 ↑ → 自動回到漂浮，人還在空中）。下一步：atkDir / HELP / 測試收尾。
+- [2026-09-15 R9-PI-3] 完成：**`p.atkDir` 快照 + `p.dirHold` 每幀維護**、`input.js` HELP 改寫。
+  HELP 由 8 列變 10 列：跳躍列改「跳躍（空中再按＝飛行）」、新增「按住 ↑ ／ 持續飛行（可一直上升）」與「↑X / ↓X ／ 空中也能出招」。
+  ⚠️ `ui.js drawHelp` 的右欄 12px 上限是 **138px**，原任務指定的「跳躍（空中再按 / 按住 ↑ ＝ 飛行）」實測 204px 會被截斷 → 拆成兩列（各 132 / 132px）。
+  驗證：`engine_test.py` 第 45 組（HELP 格式檢查仍 PASS）；截圖 `shots/agent_player_input/help.png`（10 列排版無重疊、無截斷）。下一步：回歸測試。
+- [2026-09-15 R9-PI-4] 收工驗證：`tools/engine_test.py` **153/153 PASS**（原 118 項全保留 + 新增 35 項）。
+  回歸：`enemy_test.py` **393/393**、`test_weapons.py` **105/105**、`test_forms.py` **153/153**、`test_awaken.py` **237/237**（全部與交件前數字相同）；
+  `playthrough.py --level w1 --ability sword --godmode` → **cleared 5988 幀 deaths=0 missing[]**、`--level w7 --ability sword --godmode` → **cleared 9184 幀 deaths=0 missing[]**（機器人按 ↑ 進門只按 3 幀 < 4 幀門檻，且門口一律不起飛，完全沒有被飛行卡住）。
+  `node --check src/player.js src/input.js src/const.js` 全通過。**未跑 build.py、未 commit**（三個 abilities agent 仍在改 abilities*.js）。
+
+### 跨檔需求（player-input → 總控 / 其他 agent）
+1. **`src/ui.js`（UI.HELP2，本輪無人擁有）— 說明第 2 頁補兩列**：我在 `KB.input.HELP2_ADD` 準備好了字串（已量過寬度 ≤ 138px），請併進 `UI.HELP2`：
+   `['按住 ↑', '地面按住 4 幀也會起飛']` 與 `['空中 X', '空中也能出招 ↑X／↓X']`。
+   （`input.js` 載入順序在 `ui.js` **之前**，沒辦法自己 push 進去，所以只提供資料。）
+   另外 `UI.HELP2` 的「`['跳（連按）', '漂浮；X 吐氣結束']`」現在不精確了——有能力時漂浮中按 X 是**出招**不是吐氣，建議改成「漂浮；X 出招 / 吐氣」。
+2. **abilities 三位 agent**：`onCrouchAttack` 不再是 ↓+X 的唯一入口——沒有定義 `onCrouchAttack` 的 def，蹲下按 X 現在會進 `startAttack()`（以前是完全沒反應）。請確保 `onAttack` 讀得到 `p.atkDir.down` 並給出對應招式，否則會放出和站立 X 相同的招。
+3. **`src/abilities_forms.js`（abilities-magic-forms）**：`dragon` / `mech` 的 `form.fly` 路徑我完全沒動，但現在玩家很可能「按住 ↑」想飛——目前 `form.fly` 時 ↑ 不做任何事（飛行仍是按住**跳**）。建議 `formUpdate` 內把 `KB.input.down('up')` 也當成上升輸入（讀 `p.dirHold.up` 即可），操作才一致。
+4. **`src/audio.js`（總控）**：漂浮自動拍動的 `float` 音效已做「每 2 次播 1 次」的節流（`KB.PHYS.flyFlapSfxEvery`），實際約每 300ms 一次。若長時間飛行仍覺得吵，把這個常數調大即可（不需要動 audio.js 的 `SFX_THROTTLE`）。
+
+### 已知問題 / 未完成
+- 地面起飛門檻 4 幀是「門 / 梯之外」的保險；若之後有關卡把門放在**很窄的走道**且玩家一定要按著 ↑ 走過去，仍可能在離開門的判定框後第 1 幀就起飛（因為 `flyHoldT` 不會歸零）。目前 w1~w7 實測（playthrough）沒有這種情形。
+- `def.hover` 只在「空中出招」時停重力；地面出招不受影響（地面本來就有 onGround 擋著）。
+- 未跑 `tools/build.py`、未 commit。
 
 ## abilities-basic
 （agent 在此追加）

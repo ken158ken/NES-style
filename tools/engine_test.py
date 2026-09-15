@@ -632,6 +632,154 @@ def main():
         check('陸上受傷擊退不變（vx=-2.0, vy=-2.2）',
               abs(abs(kl[0]) - 2.0) < 0.01 and abs(kl[1] + 2.2) < 0.01, kl)
 
+
+        # ================= Round 9 / player-input：↑ 長按飛行、空中出招 =================
+        # 39. ↑ 長按起飛：地面連續 4 幀 / 空中立即
+        goto(2, 9); step(4)
+        pg.evaluate("(o)=>__kb.press(o)", {'up': True})
+        st_seq = []
+        for i in range(6): step(1); st_seq.append((pl()['state'], jsv('KB.player.flyHoldT')))
+        check('地面按住 ↑ 未滿 4 幀不起飛', all(s != 'float' for s, f in st_seq[:3]), st_seq)
+        check('地面按住 ↑ 第 4 幀起飛', st_seq[3][0] == 'float', st_seq)
+        check('p.flyHoldT 每幀累加', [f for s, f in st_seq][:4] == [1, 2, 3, 4], st_seq)
+        release(1); step(200)
+        check('放開 ↑ 後 flyHoldT 歸零', jsv('KB.player.flyHoldT') == 0, jsv('KB.player.flyHoldT'))
+        # 空中：跳起來後按住 ↑ → 立即漂浮（同一幀）
+        goto(2, 9); step(3)
+        tap('jump', 1); step(6)
+        check('跳躍中(39)', pl()['state'] == 'jump', pl()['state'])
+        pg.evaluate("(o)=>__kb.press(o)", {'up': True}); step(1)
+        check('空中按住 ↑ 立即起飛（1 幀）', pl()['state'] == 'float', pl()['state'])
+        release(1); step(200)
+        # 含物（full）時不可用 ↑ 起飛
+        goto(2, 9); step(2)
+        pg.evaluate("()=>{KB.player.mouth={ability:null,name:'star',score:10};KB.player.setState('full');}")
+        press('up', 10)
+        check('含物時按住 ↑ 不起飛', pl()['state'] != 'float', pl()['state'])
+        release(1); pg.evaluate("()=>{KB.player.mouth=null;KB.player.setState('idle');}"); step(4)
+        # KB.PHYS 新常數
+        check('KB.PHYS.flyHoldGround = 4 / flyFlapEvery = 9',
+              jsv('KB.PHYS.flyHoldGround') == 4 and jsv('KB.PHYS.flyFlapEvery') == 9,
+              (jsv('KB.PHYS.flyHoldGround'), jsv('KB.PHYS.flyFlapEvery')))
+        check('SPEC 既有常數仍未變（floatUp / floatGrav / exhaleLock）',
+              jsv('[KB.PHYS.floatUp,KB.PHYS.floatGrav,KB.PHYS.exhaleLock]') == [-1.6, 0.06, 8])
+
+        # 40. 漂浮中按住 ↑ 持續上升（y 單調遞減）；放開 ↑ 就下降
+        goto(2, 9); step(3)
+        pg.evaluate("(o)=>__kb.press(o)", {'up': True}); step(6)
+        check('進入漂浮(40)', pl()['state'] == 'float', pl()['state'])
+        ys = []
+        for i in range(40): step(1); ys.append(pl()['y'])
+        mono = all(ys[i + 1] <= ys[i] + 1e-6 for i in range(len(ys) - 1))
+        check('按住 ↑ 漂浮持續上升（y 單調遞減）', mono and ys[-1] < ys[0] - 20, (ys[0], ys[-1], mono))
+        check('按住 ↑ 期間仍是 float 狀態', pl()['state'] == 'float', pl()['state'])
+        flaps = jsv('KB.player.flyFlapN')
+        check('每 9 幀自動拍動一次（40 幀約 4 次）', 3 <= flaps <= 5, flaps)
+        release(1); step(40)
+        y0 = pl()['y']; step(30)
+        check('放開 ↑ 回一般漂浮下降', pl()['y'] > y0 and jsv('KB.player.flyFlapT') == 0, (y0, pl()['y']))
+        shot('fly_hold_up')
+        release(1); step(220)
+
+        # 41. 門口按住 ↑ ＝ 進門，不會起飛
+        goto(64, 9); step(2)
+        press('right', 22); release(1); step(2)
+        pg.evaluate("(o)=>__kb.press(o)", {'up': True})
+        seen = []
+        for i in range(20): step(1); seen.append(pl()['state'])
+        check('門口按住 ↑ 不會起飛', 'float' not in seen, seen[:8])
+        check('門口按住 ↑ 仍然進門', 'door' in seen or st()['game']['room'] == 1, (seen[:4], st()['game']['room']))
+        release(1); step(30)
+        # 梯子上按住 ↑ ＝ 爬梯，不起飛
+        goto(52, 9); step(2)
+        press('right', 8); release(1)
+        press('up', 20)
+        check('梯子上按住 ↑ 是爬梯不是起飛', pl()['state'] == 'climb', pl()['state'])
+        press('up', 150); release(1); step(6)
+        check('爬到梯頂按住 ↑ 不會起飛（梯子優先）', pl()['state'] in ('idle', 'walk') and pl()['onGround'], pl()['state'])
+        release(1); step(10)
+
+        # 42. 漂浮中按 X：有能力＝出招（不吐氣）；無能力＝吐氣
+        goto(2, 9, ability='sword'); step(3)
+        press('jump', 4); release(1); tap('jump', 1); step(2)
+        check('漂浮中(42, 有能力)', pl()['state'] == 'float', pl()['state'])
+        tap('attack', 1); step(1)
+        check('漂浮中 X 有能力 → 出招（不吐氣）', pl()['state'] == 'attack', pl()['state'])
+        release(1); step(200)
+        goto(2, 9, ability='sword'); step(3)
+        press('jump', 4); release(1); tap('jump', 1); step(2)
+        press('down,attack', 1); step(1)
+        check('漂浮中 ↓+X 有能力 → 一樣出招', pl()['state'] == 'attack', pl()['state'])
+        release(1); step(200)
+        goto(2, 9); step(3)
+        press('jump', 4); release(1); tap('jump', 1); step(2)
+        check('漂浮中(42, 無能力)', pl()['state'] == 'float', pl()['state'])
+        tap('attack', 1); step(1)
+        check('漂浮中 X 無能力 → 照舊吐氣', pl()['state'] == 'exhale', pl()['state'])
+        release(1); step(200)
+
+        # 43. 空中 X 出招且持續下墜（y 持續增加）
+        goto(2, 9, ability='sword'); step(3)
+        pg.evaluate("(h)=>{const p=KB.player;p.y-=h;p.vy=0;p.onGround=false;p.setState('fall');}", 96); step(1)
+        check('空中(43)', not pl()['onGround'] and pl()['vy'] > 0, (pl()['state'], pl()['vy']))
+        tap('attack', 1); step(1)
+        check('空中 X 出招', pl()['state'] == 'attack', pl()['state'])
+        ay = [pl()['y']]
+        for i in range(10): step(1); ay.append(pl()['y'])
+        check('空中出招期間仍持續下墜（y 增加）', ay[-1] > ay[0] + 2 and pl()['vy'] > 0, (ay[0], ay[-1], pl()['vy']))
+        shot('air_attack')
+        release(1); step(200)
+        # 空中 ↑+X / ↓+X 都能出招，且會記錄方向
+        goto(2, 9, ability='sword'); step(3)
+        pg.evaluate("(h)=>{const p=KB.player;p.y-=h;p.vy=0;p.onGround=false;p.setState('fall');}", 96); step(1)
+        press('up,attack', 1); step(1)
+        d1 = jsv('JSON.stringify(KB.player.atkDir)')
+        check('空中 ↑+X 出招，atkDir = up+air',
+              pl()['state'] in ('attack', 'fall') and json.loads(d1) == {'up': True, 'down': False, 'air': True}, (pl()['state'], d1))
+        release(1); step(200)
+        goto(2, 9, ability='sword'); step(3)
+        pg.evaluate("(h)=>{const p=KB.player;p.y-=h;p.vy=0;p.onGround=false;p.setState('fall');}", 96); step(1)
+        press('down,attack', 1); step(1)
+        d2 = json.loads(jsv('JSON.stringify(KB.player.atkDir)'))
+        check('空中 ↓+X 出招，atkDir = down+air', d2 == {'up': False, 'down': True, 'air': True}, d2)
+        release(1); step(200)
+
+        # 44. 招式結束時 ↑ 仍按著 → 自動回到漂浮
+        goto(2, 9, ability='sword'); step(3)
+        pg.evaluate("(h)=>{const p=KB.player;p.y-=h;p.vy=0;p.onGround=false;p.setState('fall');}", 96); step(1)
+        check('空中(44)', not pl()['onGround'], (pl()['state'], pl()['vy']))
+        pg.evaluate("(o)=>__kb.press(o)", {'up': True, 'attack': True}); step(2)
+        pg.evaluate("(o)=>__kb.press(o)", {'up': True})          # 放開 X 但持續按 ↑
+        back = None
+        for i in range(90):
+            step(1)
+            if pl()['state'] == 'float': back = i; break
+            if pl()['onGround']: break
+        check('招式結束時 ↑ 仍按著 → 自動回到漂浮', back is not None, (back, pl()['state'], pl()['onGround']))
+        release(1); step(220)
+
+        # 45. p.atkDir / p.dirHold 介面（abilities agent 讀）
+        goto(2, 9, ability='sword'); step(4)
+        press('attack', 1); step(1)
+        d3 = json.loads(jsv('JSON.stringify(KB.player.atkDir)'))
+        check('地面 X：atkDir 全 false', d3 == {'up': False, 'down': False, 'air': False}, d3)
+        release(1); step(60)
+        press('up', 3); press('up,attack', 1); step(1)
+        d4 = json.loads(jsv('JSON.stringify(KB.player.atkDir)'))
+        check('地面 ↑+X：atkDir.up 且不起飛', d4['up'] is True and d4['air'] is False and pl()['state'] == 'attack', (d4, pl()['state']))
+        release(1); step(60)
+        press('down', 3); press('down,attack', 1); step(1)
+        d5 = json.loads(jsv('JSON.stringify(KB.player.atkDir)'))
+        check('地面 ↓+X：atkDir.down', d5['down'] is True, d5)
+        release(1); step(30)
+        press('up', 2)
+        hd = json.loads(jsv('JSON.stringify(KB.player.dirHold)'))
+        check('p.dirHold 每幀維護（↑ 按著）', hd == {'up': True, 'down': False}, hd)
+        release(2)
+        hd2 = json.loads(jsv('JSON.stringify(KB.player.dirHold)'))
+        check('p.dirHold 放開後為 false', hd2 == {'up': False, 'down': False}, hd2)
+        release(1); step(60)
+
         b.close()
     print('---')
     fails = [r for r in results if not r[1]]

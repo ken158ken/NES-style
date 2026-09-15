@@ -42,6 +42,10 @@ window.KB = window.KB || {};
     ladderAtkCd: 14,      // 梯子上吐氣彈的冷卻幀數
     abilityStarLife: 600, // 能力星存在幀數（Extra 模式 ×0.5）→ items.js 使用
     extraMaxHp: 3,        // Extra 模式最大 HP
+    // ---- Round 9（player-input）：按住 ↑ ＝ 持續飛行 ----
+    flyHoldGround: 4,     // 地面按住 ↑ 連續幾幀後起飛（門 / 梯優先，避免走過門口誤飛）
+    flyFlapEvery: 9,      // 漂浮中按住 ↑ 每 n 幀自動拍動一次（等同按一次跳）
+    flyFlapSfxEvery: 2,   // 自動拍動的音效節流：每 n 次拍動才播一次 float 音
   };
   // 鏡頭手感（game.js updateCamera）
   KB.CAM = {
