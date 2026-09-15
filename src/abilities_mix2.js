@@ -71,12 +71,22 @@
   }
   function restartAttack(p) { p.setState('idle'); p.startAttack(); }
   function startMove(p, m) { data(p).next = m; restartAttack(p); }
-  function pickMode(p, air, upMode, ground) {
+  // Round 9：攻擊方向快照。player-input 會在 startAttack 當幀把 { up, down, air } 存進 p.atkDir；
+  //   舊版 player.js 沒有這個欄位時自己讀 KB.input（行為相同）。
+  function atkDir(p) {
+    const a = p.atkDir;
+    if (a && typeof a === 'object') return { up: !!a.up, down: !!a.down, air: !!a.air };
+    return { up: down('up'), down: down('down'), air: !p.onGround };
+  }
+  // Round 9 招式優先序：↑X > ↓X > 空中 X > X
+  function pickMode(p, MV) {
     const d = data(p), q = d.next; d.next = null;
     if (q) return q;
-    if (!p.onGround && air) return air;
-    if (down('up') && upMode) return upMode;
-    return ground;
+    const a = atkDir(p);
+    if (a.up && MV.up) return 'up';
+    if (a.down && MV.dn) return 'dn';
+    if (a.air && MV.air) return 'air';
+    return 'm1';
   }
   function setup(p, o) {
     const D = p.abilityDef;
@@ -208,6 +218,14 @@
   // ======================================================================
   function build(row, spec) {
     const [key, a, b, el, cn, hud, color] = row;
+    // Round 9：五招槽（m1 = X、up = ↑X、dn = ↓X、air = 空中 X、ult = 蓄力）。
+    const MV = {
+      m1: spec.m1, ult: spec.ult,
+      up: spec.up || (spec.m2 === 'up' ? spec.m2move : null),
+      dn: spec.dn || (spec.m2 === 'down' ? spec.m2move : null),
+      air: spec.air || (spec.m2 === 'air' ? spec.m2move : null),
+    };
+    const animOf = m => 'kirby_attack_' + key + (m === 'up' ? '_up' : m === 'dn' ? '_dn' : '');
     const o = {
       key, name: cn, hudName: hud, color,
       mix: [a, b], mixEl: el, transform: true,
@@ -217,19 +235,20 @@
       desc: spec.desc, flavour: Array.isArray(spec.flavour) ? spec.flavour : (spec.flavour ? [String(spec.flavour)] : []), moves: spec.moves,
       onGet(p) { const d = data(p); d.t = 0; d.charged = false; d.next = null; },
       onLose(p) { killBox(p); clearAnim(p); },
-      onCrouchAttack: spec.m2 === 'down' ? (p => startMove(p, 'm2')) : undefined,
+      // 地面 ↓+X 走 player.js 的蹲下分支（crouch 時按攻擊），所以一定要掛這個鉤子
+      onCrouchAttack(p) { if (MV.dn) startMove(p, 'dn'); else startMove(p, 'm1'); },
       onAttack(p) {
         const d = data(p);
         killBox(p); d.t = 0; d.charged = false;
-        d.mode = pickMode(p, spec.m2 === 'air' ? 'm2' : null, spec.m2 === 'up' ? 'm2' : null, 'm1');
-        const mv = d.mode === 'm2' ? spec.m2move : d.mode === 'ult' ? spec.ult : spec.m1;
-        setup(p, { anim: mv.anim || ('kirby_attack_' + key), dur: mv.dur, fps: mv.fps || 14, lock: mv.lock, maxHold: mv.maxHold || 0 });
+        d.mode = pickMode(p, MV);
+        const mv = MV[d.mode] || MV.m1;
+        setup(p, { anim: mv.anim || animOf(d.mode), dur: mv.dur, fps: mv.fps || 14, lock: mv.lock, maxHold: mv.maxHold || 0 });
         if (mv.start) mv.start(p, d);
       },
       update(p, dt, held) {
         const d = data(p); d.t++;
         light(64);
-        const mv = d.mode === 'm2' ? spec.m2move : d.mode === 'ult' ? spec.ult : spec.m1;
+        const mv = MV[d.mode] || MV.m1;
         if (mv.tick) mv.tick(p, d, d.t, held);
         if (d.mode !== 'm1') return;
         if (d.t === HOLD(p.ability)) { d.charged = true; sfx('charge_ready'); vx('chargeReady', p.cx, p.cy - 14, color); }
@@ -243,8 +262,16 @@
       },
       onEnd(p) { killBox(p); clearAnim(p); },
     };
-    if (!o.onCrouchAttack) delete o.onCrouchAttack;
+    o.mv = MV;                       // Round 9：補招用（addMoves）
     KB.ABILITIES[key] = o;
+    return o;
+  }
+  // Round 9：把 ↑X / ↓X / 空中 X 補進既有定義，並換上 5 招的招式表（固定順序）
+  function addMoves(key, extra, moves) {
+    const o = KB.ABILITIES[key];
+    if (!o || !o.mv) return null;
+    Object.assign(o.mv, extra);
+    if (moves) o.moves = moves;
     return o;
   }
   // 必殺共用開場（黑邊 + zoom + 招式名橫幅）
@@ -560,6 +587,14 @@
         vx('ring', p.cx, p.cy, { r0: 4, r1: 38, frames: 16, color: '#ffe040', width: 3 });
         vx('burst', p.cx, p.cy, { n: 22, colors: ['#ffe040', '#ff9020', '#ff4010'], speed: 3.4, life: 24, grav: 0.04, size: 2 });
         vx('flash', '#ff9020', 6, 0.45);
+        // Round 9 空中變體：在空中施展時，替身的火會直接炸到腳下的地面
+        if (!p.onGround) {
+          const gy = groundY(p);
+          abox(p.cx, gy - 24, 60, 48, { dmg: 7, type: 'fire', life: 12, rehit: 0, knock: 2.4 });
+          firePool(p.cx, gy, 44, 3);
+          vx('ring', p.cx, gy - 10, { r0: 4, r1: 36, frames: 16, color: '#ffe040', width: 3 });
+          vx('burst', p.cx, gy - 8, { n: 18, colors: ['#ffe040', '#ff9020', '#c88850'], speed: 3, life: 22, grav: 0.05 });
+        }
         shake(6); hitstop(3); sfx('teleport'); sfx('fire');
         d.dashed = dx;
       },
@@ -653,6 +688,15 @@
         abox(p.cx, p.cy - 2, 44, 32, { dmg: 7, type: 'ice', life: 10, rehit: 0, freeze: true, knock: 2 });
         vx('slash', p.cx, p.cy - 2, 24, 0.1, { color: '#d8f4ff', width: 3, frames: 10, arc: 2.4, flip: p.dir < 0 });
         vx('flash', '#d8f4ff', 5, 0.4);
+        // Round 9 空中變體：空中瞬移時在落點的地面立起兩片碎鏡冰刃
+        if (!p.onGround) {
+          const gy = groundY(p);
+          abox(p.cx, gy - 16, 44, 32, { dmg: 7, type: 'ice', life: 12, rehit: 0, freeze: true, knock: 2 });
+          for (const s2 of [-1, 1]) {
+            shoot({ spr: 'proj_mix2_shard_ice', x: p.cx + s2 * 14, y: gy - 14, vx: 0, vy: 0, dmg: 5, w: 12, h: 26, life: 26, solid: false, pierce: true, freeze: true, type: 'ice', destructible: false });
+          }
+          vx('ring', p.cx, gy - 8, { r0: 3, r1: 30, frames: 14, color: '#b8f0ff', width: 2 });
+        }
         shake(5); hitstop(2); sfx('teleport'); sfx('ice');
       },
       tick(p, d, t) {
@@ -1327,4 +1371,562 @@
       },
     },
   });
+
+  // ======================================================================
+  //  Round 9：補齊 ↑+X / ↓+X / 空中 X（每組五招：X / ↑X / ↓X / 空中 X / 蓄力）
+  //  規則與第一批相同：↑X 是對空升招（空中出招時用 echo() 把餘波打到腳下地面），
+  //  ↓X 一律以 groundY(p) 為基準（地面 / 空中演出一致），空中 X 是俯衝或滯空射擊
+  //  （滯空一律 slowFall 且招式長度 ≤ 30 幀，不會變成懸停）。
+  // ======================================================================
+  function echo(p, o) {
+    const air = !p.onGround, gy = groundY(p), x = p.cx + p.dir * 6;
+    const w = air ? (o.w || 48) : Math.round((o.w || 48) * 0.75);
+    const h = abox(x, gy - 11, w, o.h || 24, {
+      dmg: air ? (o.dmg || 4) : Math.max(2, (o.dmg || 4) - 2), type: o.type, life: 12, rehit: 0, knock: 1.2, freeze: !!o.freeze,
+      onHit: o.para ? (e => para(e, 100)) : undefined,
+    });
+    vx('ring', x, gy - 6, { r0: 3, r1: 26, frames: 12, color: o.color, width: 2 });
+    vx('burst', x, gy - 6, { n: 12, colors: o.cols, speed: 2.6, life: 18, grav: 0.05 });
+    parts(x + rnd(-16, 16), gy - 4, o.cols, 3, { spread: 0.7, grav: -0.04, life: 18, up: 0.5, size: 1 });
+    shake(3);
+    return h;
+  }
+  const hop = (p, v) => { if (p.onGround) { p.vy = v; p.onGround = false; } };
+
+  // ---------- 1. flamebow 焰弓 ----------
+  addMoves('flamebow', {
+    up: {
+      dur: 32, fps: 14, lock: true,
+      start(p, d) {
+        d.burst = false;
+        shoot({ spr: 'proj_mix2_arrow_fire', x: p.cx + p.dir * 8, y: p.cy - 8, vx: p.dir * 0.8, vy: -7, rot: -Math.PI / 2, dmg: 4, w: 10, h: 18, life: 18, type: 'fire', trail: '#ff9020', solid: false });
+        vx('line', p.cx, p.cy - 4, p.cx + p.dir * 6, p.cy - 56, { color: '#ffe040', width: 1, frames: 8 });
+        sfx('bow');
+      },
+      tick(p, d, t) {
+        if (t === 13 && !d.burst) {
+          d.burst = true;
+          const x = p.cx + p.dir * 10, y = p.cy - 46;
+          abox(x, y, 50, 50, { dmg: 7, type: 'fire', life: 16, rehit: 0, knock: 2 });
+          for (let i = -2; i <= 2; i++) {
+            shoot({ spr: 'proj_mix2_arrow_fire', x, y, vx: i * 1.5, vy: 2.6 + Math.abs(i) * 0.3, rot: Math.PI / 2, grav: 0.16, dmg: 4, w: 12, h: 8, life: 60, type: 'fire', trail: '#ff9020', onWall(pr) { firePool(pr.cx, pr.bottom, 40, 3); } });
+          }
+          for (let i = 0; i < 3; i++) vx('ring', x, y, { r0: 4 + i * 8, r1: 40, frames: 16 + i * 2, color: i & 1 ? '#ffe040' : '#ff9020', width: 2 });
+          vx('burst', x, y, { n: 24, colors: ['#ffffff', '#ffe040', '#ff9020'], speed: 3.4, life: 26, grav: 0.04 });
+          vx('flash', '#ffe040', 6, 0.45);
+          echo(p, { type: 'fire', color: '#ff9020', cols: ['#ffe040', '#ff9020'], dmg: 5 });
+          shake(5); sfx('fireball');
+        }
+      },
+    },
+    dn: {
+      dur: 36, fps: 14, lock: true,
+      start(p, d) { d.n = 0; sfx('bow'); },
+      tick(p, d, t) {
+        if (!p.onGround) slowFall(p, 3.6);
+        if (t % 6 === 2 && d.n < 3) {
+          const i = d.n++, gy = groundY(p), x = p.cx + p.dir * (20 + i * 24);
+          shoot({ spr: 'proj_mix2_arrow_fire', x: p.cx + p.dir * 10, y: p.cy, vx: p.dir * 3.4, vy: 3.8, rot: p.dir > 0 ? 0.85 : Math.PI - 0.85, dmg: 3, w: 12, h: 8, life: 22, type: 'fire', trail: '#ff9020', solid: false });
+          abox(x, gy - 25, 18, 46, {
+            dmg: 5, type: 'fire', life: 26, rehit: 10, knock: 1.4,
+            onUpdate(h) { if ((h.life & 3) === 0) { KB.fx('fx_fire', h.x + rnd(2, h.w - 2), h.y + rnd(10, h.h), { life: 12, fps: 12 }); parts(h.x + rnd(0, h.w), h.y + h.h - 4, ['#ffe040', '#ff9020'], 2, { spread: 0.3, grav: -0.12, life: 18, up: 1, size: 1 }); } },
+          });
+          vx('ring', x, gy - 6, { r0: 2, r1: 20, frames: 12, color: '#ffe040', width: 2 });
+          shake(3); sfx('fire');
+        }
+      },
+    },
+  }, [['X', '火箭（命中爆炸）'], ['↑+X', '烈陽仰射'], ['↓+X', '地火箭列'], ['空中 X', '火雨（落地留火海）'], ['按住 50 幀放開', '蓄力・鳳凰箭']]);
+
+  // ---------- 2. frosthammer 冰鎚 ----------
+  addMoves('frosthammer', {
+    up: {
+      dur: 30, fps: 12, lock: true,
+      start(p, d) {
+        hop(p, -4.4);
+        const x = p.cx + p.dir * 8;
+        d.box = abox(x, p.cy - 20, 32, 54, { dmg: 7, type: 'ice', life: 12, rehit: 0, freeze: true, knock: 2.4, onHit: e => { e.vy = -5; } });
+        for (const s of [-1, 1]) {
+          shoot({ spr: 'proj_mix2_shard_ice', x, y: p.cy - 22, vx: s * 1.6, vy: -4.6, grav: 0.2, dmg: 4, w: 10, h: 20, life: 44, type: 'ice', freeze: true, destructible: false, rotSpeed: 0.22 * s });
+        }
+        vx('slash', x, p.cy - 12, 26, -1.5, { color: '#b8f0ff', width: 4, frames: 12, arc: 2.5, flip: p.dir < 0 });
+        vx('burst', x, p.cy - 18, { n: 20, colors: ['#ffffff', '#b8f0ff', '#3f96d8'], speed: 3, life: 24, grav: -0.04, dir: -Math.PI / 2, spread: 0.8 });
+        echo(p, { type: 'ice', color: '#b8f0ff', cols: ['#ffffff', '#b8f0ff'], dmg: 5, freeze: true });
+        shake(5); hitstop(2); sfx('hammer'); sfx('ice');
+      },
+      tick(p, d, t) {
+        if (t % 3 === 0) parts(p.cx + p.dir * 8 + rnd(-10, 10), p.cy - rnd(0, 30), ['#ffffff', '#b8f0ff'], 2, { spread: 0.5, grav: -0.08, life: 18, up: 0.8, size: 1 });
+        if (t === 14) killBox(p);
+      },
+    },
+    air: {
+      dur: 44, fps: 12, lock: true,
+      start(p, d) {
+        d.landed = false; p.vy = 7; p.vx = p.dir * 1;
+        vx('afterimage', p, { frames: 30, color: '#6fd0f8', every: 2, alpha: 0.55 });
+        sfx('hammer');
+      },
+      tick(p, d, t) {
+        if (d.landed) return;
+        p.vy = Math.max(p.vy, 6.4);
+        d.box = fbox(p, { w: 28, h: 28, dmg: 5, type: 'ice', ox: -14, oy: -6, life: 3, rehit: 8, freeze: true, flipWithOwner: false });
+        if (t % 3 === 0) parts(p.cx + rnd(-8, 8), p.cy, ['#ffffff', '#b8f0ff'], 2, { spread: 0.5, grav: 0, life: 14, up: 0, size: 1 });
+        if (p.onGround && t > 3) {
+          d.landed = true; killBox(p);
+          abox(p.cx, p.bottom - 15, 68, 34, { dmg: 8, type: 'ice', life: 16, rehit: 0, freeze: true, knock: 2.4 });
+          for (const s of [-1, 1]) {
+            shoot({ spr: 'proj_mix2_shard_ice', x: p.cx + s * 26, y: p.bottom - 14, vx: 0, vy: 0, dmg: 5, w: 12, h: 26, life: 26, solid: false, pierce: true, freeze: true, type: 'ice', destructible: false });
+          }
+          vx('ring', p.cx, p.bottom - 6, { r0: 4, r1: 44, frames: 16, color: '#b8f0ff', width: 3 });
+          vx('burst', p.cx, p.bottom - 6, { n: 24, colors: ['#ffffff', '#b8f0ff', '#3f96d8'], speed: 3.4, life: 26, grav: 0.05, size: 2 });
+          vx('textPop', p.cx, p.y - 12, 'FREEZE!', { color: '#b8f0ff', size: 8, frames: 30, rise: 0.5 });
+          shake(8); hitstop(4); sfx('icewall');
+          p.attackTimer = Math.min(p.attackTimer, 16);
+        }
+      },
+    },
+  }, [['X', '凍地衝擊'], ['↑+X', '冰鎚上擊'], ['↓+X', '冰柱群'], ['空中 X', '霜墜鎚'], ['按住 50 幀放開', '蓄力・冰河期']]);
+
+  // ---------- 3. thundersword 雷劍 ----------
+  addMoves('thundersword', {
+    up: {
+      dur: 28, fps: 16, lock: true,
+      start(p, d) {
+        hop(p, -4.6);
+        const x = p.cx + p.dir * 8;
+        d.box = abox(x, p.cy - 26, 24, 68, { dmg: 6, type: 'spark', life: 12, rehit: 0, knock: 2.4, onHit: e => { e.vy = -4.8; para(e, 110); } });
+        vx('lightning', x, p.cy + 8, x, p.cy - 58, { color: '#ffe860', frames: 14, jitter: 6, branches: 4 });
+        vx('slash', x, p.cy - 14, 25, -1.6, { color: '#ffe860', width: 3, frames: 12, arc: 2.6, flip: p.dir < 0 });
+        vx('flash', '#ffe860', 5, 0.4);
+        echo(p, { type: 'spark', color: '#ffe860', cols: ['#ffe860', '#ffffff', '#4878f8'], dmg: 5, para: true });
+        shake(4); sfx('sword'); sfx('spark');
+      },
+      tick(p, d, t) {
+        if (t % 3 === 0) parts(p.cx + rnd(-8, 8), p.cy - rnd(0, 38), ['#ffe860', '#ffffff'], 1, { spread: 0.3, grav: 0, life: 12, up: 0.5, size: 1 });
+        if (t === 13) killBox(p);
+      },
+    },
+    dn: {
+      dur: 34, fps: 14, lock: true,
+      start(p, d) { d.done = false; if (!p.onGround) p.vy = Math.max(p.vy, 4.2); sfx('sword'); },
+      tick(p, d, t) {
+        if (!p.onGround) slowFall(p, 5);
+        if (t === 9 && !d.done) {
+          d.done = true;
+          const gy = groundY(p);
+          abox(p.cx + p.dir * 18, gy - 12, 84, 22, { dmg: 7, type: 'spark', life: 18, rehit: 0, knock: 2, onHit: e => para(e, 130) });
+          for (let i = 0; i < 3; i++) {
+            const x = p.cx + p.dir * (14 + i * 26);
+            vx('lightning', x, gy - 4, x, gy - 34, { color: i & 1 ? '#ffffff' : '#ffe860', frames: 12, jitter: 6, branches: 3 });
+            parts(x, gy - 4, ['#ffe860', '#ffffff'], 4, { spread: 0.8, grav: -0.05, life: 18, up: 0.7, size: 1 });
+          }
+          vx('shockwave', p.cx, gy, { w: 36, h: 16, dir: p.dir, speed: 5, frames: 18, color: '#ffe860' });
+          vx('flash', '#ffe860', 5, 0.4);
+          shake(7); hitstop(3); sfx('thunder');
+        }
+      },
+    },
+  }, [['X', '帶電斬（麻痺）'], ['↑+X', '雷昇斬'], ['↓+X', '落雷插劍'], ['空中 X', '雷擊落下斬'], ['按住 50 幀放開', '蓄力・雷神劍']]);
+
+  // ---------- 4. flameninja 火忍 ----------
+  addMoves('flameninja', {
+    up: {
+      dur: 28, fps: 16, lock: true,
+      start(p, d) {
+        hop(p, -4.2);
+        const x = p.cx + p.dir * 6;
+        d.box = abox(x, p.cy - 22, 30, 56, { dmg: 6, type: 'fire', life: 10, rehit: 0, knock: 2, onHit: e => { e.vy = -4.4; } });
+        for (let i = -1; i <= 1; i++) {
+          shoot({ spr: 'proj_mix2_star_fire', x, y: p.cy - 14, vx: i * 1.8, vy: -5.4, dmg: 4, w: 12, h: 12, life: 40, type: 'fire', pierce: true, solid: false, rotSpeed: 0.4, trail: '#ff9020' });
+        }
+        vx('circle', x, p.cy - 18, { r: 24, frames: 18, color: '#ff5828', spin: 0.42 });
+        vx('burst', x, p.cy - 20, { n: 18, colors: ['#ffe040', '#ff9020', '#ff4010'], speed: 3, life: 22, grav: -0.05, dir: -Math.PI / 2, spread: 0.7 });
+        echo(p, { type: 'fire', color: '#ff5828', cols: ['#ffe040', '#ff5828'], dmg: 5 });
+        shake(3); sfx('shuriken'); sfx('fire');
+      },
+      tick(p, d, t) {
+        if (t % 3 === 0) parts(p.cx + rnd(-10, 10), p.cy - rnd(0, 30), ['#ffe040', '#ff5828'], 1, { spread: 0.4, grav: -0.06, life: 14, up: 0.6, size: 1 });
+        if (t === 12) killBox(p);
+      },
+    },
+    air: {
+      dur: 28, fps: 16, lock: false,
+      start(p, d) {
+        d.n = 0;
+        vx('afterimage', p, { frames: 24, color: '#ff5828', every: 2, alpha: 0.5 });
+        sfx('shuriken');
+      },
+      tick(p, d, t) {
+        slowFall(p, 1.3);
+        if (t % 4 === 1 && d.n < 5) {
+          const i = d.n++;
+          const a = 0.85 + i * 0.22;
+          shoot({ spr: 'proj_mix2_star_fire', x: p.cx + p.dir * 8, y: p.cy + 2, vx: Math.cos(a) * 5 * (p.dir < 0 ? -1 : 1), vy: Math.sin(a) * 5, dmg: 4, w: 12, h: 12, life: 50, type: 'fire', pierce: true, rotSpeed: 0.5, trail: '#ff9020', onWall(pr) { firePool(pr.cx, pr.bottom, 36, 3); } });
+          parts(p.cx, p.cy + 2, ['#ffe040', '#ff5828'], 2, { spread: 0.5, grav: 0.02, life: 14, up: 0, size: 1 });
+          sfx('shuriken');
+        }
+      },
+    },
+  }, [['X', '火遁手裡劍'], ['↑+X', '火遁・天輪手裡劍'], ['↓+X', '火焰替身爆'], ['空中 X', '炎舞亂投'], ['按住 50 幀放開', '蓄力・火遁大炎']]);
+
+  // ---------- 5. frostninja 冰忍 ----------
+  addMoves('frostninja', {
+    up: {
+      dur: 30, fps: 16, lock: true,
+      start(p, d) {
+        hop(p, -4.2);
+        const x = p.cx + p.dir * 6;
+        d.box = abox(x, p.cy - 24, 28, 58, { dmg: 6, type: 'ice', life: 12, rehit: 0, freeze: true, knock: 1.8, onHit: e => { e.vy = -4.2; } });
+        for (let i = 0; i < 3; i++) {
+          shoot({ spr: 'proj_mix2_shard_ice', x: x + (i - 1) * 7, y: p.cy - 10 - i * 8, vx: (i - 1) * 0.9, vy: -5, dmg: 4, w: 10, h: 22, life: 38, type: 'ice', freeze: true, solid: false, pierce: true, destructible: false });
+        }
+        vx('slash', x, p.cy - 16, 22, -1.6, { color: '#a8e8ff', width: 3, frames: 12, arc: 2.6, flip: p.dir < 0 });
+        vx('burst', x, p.cy - 22, { n: 18, colors: ['#ffffff', '#a8e8ff', '#3f96d8'], speed: 2.8, life: 24, grav: -0.03, dir: -Math.PI / 2, spread: 0.7 });
+        echo(p, { type: 'ice', color: '#a8e8ff', cols: ['#ffffff', '#a8e8ff'], dmg: 5, freeze: true });
+        shake(3); sfx('ice');
+      },
+      tick(p, d, t) {
+        if (t % 3 === 0) parts(p.cx + rnd(-10, 10), p.cy - rnd(0, 34), ['#ffffff', '#a8e8ff'], 1, { spread: 0.4, grav: -0.04, life: 16, up: 0.6, size: 1 });
+        if (t === 14) killBox(p);
+      },
+    },
+    air: {
+      dur: 28, fps: 16, lock: false,
+      start(p, d) { d.n = 0; vx('afterimage', p, { frames: 24, color: '#a8e8ff', every: 2, alpha: 0.5 }); sfx('ice'); },
+      tick(p, d, t) {
+        slowFall(p, 1.3);
+        if (t % 3 === 1 && d.n < 6) {
+          const i = d.n++;
+          const a = 0.8 + (i % 3) * 0.3;
+          shoot({ spr: 'proj_mix2_arrow_ice', x: p.cx + p.dir * 8, y: p.cy + 2, vx: Math.cos(a) * 5.4 * (p.dir < 0 ? -1 : 1), vy: Math.sin(a) * 5.4, rot: a * (p.dir < 0 ? -1 : 1), dmg: 4, w: 12, h: 8, life: 50, type: 'ice', freeze: true, trail: '#a8e8ff' });
+          parts(p.cx, p.cy + 2, ['#ffffff', '#a8e8ff'], 2, { spread: 0.5, grav: 0.02, life: 14, up: 0, size: 1 });
+          sfx('shuriken');
+        }
+      },
+    },
+  }, [['X', '冰針三連'], ['↑+X', '冰柱天梯'], ['↓+X', '冰鏡瞬移'], ['空中 X', '霰針亂舞'], ['按住 50 幀放開', '蓄力・吹雪']]);
+
+  // ---------- 6. thundergun 雷槍 ----------
+  addMoves('thundergun', {
+    up: {
+      dur: 30, fps: 14, lock: true,
+      start(p, d) {
+        d.burst = false;
+        shoot({ spr: 'proj_mix2_orb_spark', x: p.cx + p.dir * 8, y: p.cy - 8, vx: p.dir * 0.6, vy: -6.6, dmg: 4, w: 10, h: 10, life: 18, type: 'spark', trail: '#ffc830', solid: false });
+        KB.fx('fx_muzzle', p.cx + p.dir * 12, p.cy - 6, { flip: p.dir < 0 });
+        sfx('gun');
+      },
+      tick(p, d, t) {
+        if (t === 12 && !d.burst) {
+          d.burst = true;
+          const x = p.cx + p.dir * 8, y = p.cy - 42;
+          abox(x, y, 46, 46, {
+            dmg: 6, type: 'spark', life: 28, rehit: 10, knock: 1.6, onHit: e => para(e, 120),
+            onUpdate(h) {
+              if ((h.life & 3) === 0) {
+                vx('lightning', h.x + 2, h.y + rnd(2, h.h - 2), h.x + h.w - 2, h.y + rnd(2, h.h - 2), { color: '#ffc830', frames: 6, jitter: 4, branches: 2 });
+                parts(h.x + rnd(0, h.w), h.y + rnd(0, h.h), ['#fff8c0', '#ffc830'], 1, { spread: 0.4, grav: 0, life: 12, up: 0, size: 1 });
+              }
+            },
+          });
+          vx('circle', x, y, { r: 26, frames: 26, color: '#ffc830', spin: 0.3 });
+          vx('flash', '#ffc830', 5, 0.4);
+          echo(p, { type: 'spark', color: '#ffc830', cols: ['#fff8c0', '#ffc830'], dmg: 4, para: true });
+          shake(4); sfx('spark');
+        }
+      },
+    },
+    air: {
+      dur: 28, fps: 14, lock: false,
+      start(p, d) { d.n = 0; vx('aura', p, { color: '#ffc830', r: 16, frames: 26 }); },
+      tick(p, d, t) {
+        slowFall(p, 1.3);
+        if (t % 6 === 1 && d.n < 4) {
+          d.n++;
+          const mx = p.cx + p.dir * 10, my = p.cy + 3;
+          shoot({ spr: 'proj_mix2_orb_spark', x: mx, y: my, vx: p.dir * 3.4, vy: 3.4, dmg: 4, w: 10, h: 10, life: 50, type: 'spark', dir: p.dir, trail: '#ffc830', onHit: e => para(e, 100) });
+          vx('line', mx, my, mx + p.dir * 34, my + 34, { color: '#ffc830', width: 1, frames: 5 });
+          KB.fx('fx_muzzle', mx, my, { flip: p.dir < 0 });
+          sfx('gun'); shake(1);
+        }
+      },
+    },
+  }, [['X', '電擊彈（鎖鏈電）'], ['↑+X', '對空電漿彈'], ['↓+X', '電網霰彈'], ['空中 X', '滯空掃射'], ['按住 50 幀放開', '蓄力・雷射砲']]);
+
+  // ---------- 7. stonegiant 岩巨人 ----------
+  addMoves('stonegiant', {
+    up: {
+      dur: 32, fps: 12, lock: true,
+      start(p, d) {
+        hop(p, -4);
+        const x = p.cx + p.dir * 10;
+        d.box = abox(x, p.cy - 22, 32, 62, { dmg: 7, type: 'stone', life: 14, rehit: 0, knock: 2.6, onHit: e => { e.vy = -5.2; } });
+        for (const s of [-1, 1]) {
+          shoot({ spr: 'proj_mix2_shard_stone', x: x + s * 8, y: p.cy - 24, vx: s * 1.4, vy: -4.8, grav: 0.24, dmg: 5, w: 12, h: 24, life: 50, type: 'stone', destructible: false, rotSpeed: 0.18 * s });
+        }
+        vx('ring', x, p.cy - 14, { r0: 4, r1: 34, frames: 16, color: '#c0b098', width: 3 });
+        vx('burst', x, p.cy - 20, { n: 22, colors: ['#d8ccb8', '#c0b098', '#8a7a62'], speed: 3.2, life: 26, grav: 0.06, dir: -Math.PI / 2, spread: 0.8, size: 2 });
+        echo(p, { type: 'stone', color: '#c0b098', cols: ['#d8ccb8', '#c0b098'], dmg: 5, w: 54 });
+        shake(6); hitstop(2); sfx('rocket_punch'); sfx('hardblock');
+      },
+      tick(p, d, t) {
+        if (t % 3 === 0) parts(p.cx + p.dir * 10 + rnd(-10, 10), p.cy - rnd(0, 34), ['#d8ccb8', '#c0b098'], 2, { spread: 0.5, grav: 0.06, life: 20, up: 0.8, size: 1 });
+        if (t === 15) killBox(p);
+      },
+    },
+    air: {
+      dur: 46, fps: 12, lock: true,
+      start(p, d) {
+        d.landed = false; p.vy = 7.6; p.vx = p.dir * 0.6;
+        vx('afterimage', p, { frames: 30, color: '#a89078', every: 2, alpha: 0.5 });
+        sfx('giant_roar');
+      },
+      tick(p, d, t) {
+        if (d.landed) return;
+        p.vy = Math.max(p.vy, 7);
+        d.box = fbox(p, { w: 32, h: 26, dmg: 6, type: 'stone', ox: -16, oy: -4, life: 3, rehit: 8, flipWithOwner: false });
+        if (t % 3 === 0) parts(p.cx + rnd(-10, 10), p.cy, ['#d8ccb8', '#a89078'], 2, { spread: 0.5, grav: -0.04, life: 14, up: 0.3, size: 2 });
+        if (p.onGround && t > 3) {
+          d.landed = true; killBox(p);
+          abox(p.cx, p.bottom - 16, 96, 36, { dmg: 9, type: 'stone', life: 16, rehit: 0, knock: 2.8, breakBlocks: true });
+          for (const s of [-1, 1]) {
+            vx('shockwave', p.cx, p.bottom, { w: 48, h: 20, dir: s, speed: 5.4, frames: 20, color: '#c0b098' });
+            shoot({ spr: 'proj_mix2_shard_stone', x: p.cx + s * 16, y: p.bottom - 12, vx: s * 2.6, vy: -3.6, grav: 0.26, dmg: 5, w: 12, h: 24, life: 50, type: 'stone', destructible: false, rotSpeed: 0.2 * s });
+          }
+          vx('ring', p.cx, p.bottom - 6, { r0: 4, r1: 52, frames: 18, color: '#d8ccb8', width: 3 });
+          vx('burst', p.cx, p.bottom - 6, { n: 28, colors: ['#d8ccb8', '#c0b098', '#8a7a62'], speed: 3.8, life: 28, grav: 0.1, size: 2 });
+          vx('textPop', p.cx, p.y - 12, 'QUAKE!', { color: '#d8ccb8', size: 8, frames: 30, rise: 0.5 });
+          shake(11); hitstop(5); sfx('stomp');
+          p.attackTimer = Math.min(p.attackTimer, 18);
+        }
+      },
+    },
+  }, [['X', '岩拳踩踏'], ['↑+X', '擎天岩柱'], ['↓+X', '滾石衝撞'], ['空中 X', '巨人墜擊'], ['按住 50 幀放開', '蓄力・山崩']]);
+
+  // ---------- 8. flamedragon 炎龍 ----------
+  addMoves('flamedragon', {
+    up: {
+      dur: 34, fps: 12, lock: true,
+      start(p, d) { d.box = null; vx('aura', p, { color: '#ff5030', r: 18, frames: 32 }); sfx('dragon_breath'); },
+      tick(p, d, t) {
+        if (t === 4) {
+          const x = p.cx + p.dir * 4;
+          d.box = abox(x, p.cy - 32, 28, 68, { dmg: 6, type: 'fire', life: 24, rehit: 8, knock: 1.4, onHit: e => { e.vy = -3.6; } });
+          vx('circle', x, p.cy - 28, { r: 22, frames: 22, color: '#ff9020', spin: 0.24 });
+        }
+        if (t >= 4 && t <= 28 && t % 2 === 0) {
+          const x = p.cx + p.dir * 4;
+          KB.fx('fx_fire', x + rnd(-8, 8), p.cy - rnd(4, 56), { life: 14, fps: 12 });
+          parts(x + rnd(-10, 10), p.cy - rnd(0, 58), ['#ffe040', '#ff9020', '#ff4010'], 2, { spread: 0.5, grav: -0.12, life: 22, up: 1.2, size: 1 });
+        }
+        if (t === 8) echo(p, { type: 'fire', color: '#ff9020', cols: ['#ffe040', '#ff9020'], dmg: 5 });
+        if (t === 28) killBox(p);
+      },
+    },
+    dn: {
+      dur: 32, fps: 12, lock: true,
+      start(p, d) { d.done = false; if (!p.onGround) p.vy = Math.max(p.vy, 3.8); sfx('tail_whip'); },
+      tick(p, d, t) {
+        if (!p.onGround) slowFall(p, 4.6);
+        if (t === 8 && !d.done) {
+          d.done = true;
+          const gy = groundY(p);
+          abox(p.cx + p.dir * 24, gy - 13, 72, 24, { dmg: 7, type: 'fire', life: 18, rehit: 0, knock: 2, onHit: e => { e.vy = -3; } });
+          firePool(p.cx + p.dir * 18, gy, 50, 3); firePool(p.cx + p.dir * 48, gy, 50, 3);
+          for (let i = 0; i < 3; i++) vx('line', p.cx, gy - 4 - i * 4, p.cx + p.dir * 60, gy - 4 - i * 4, { color: i === 1 ? '#ffe040' : '#ff5030', width: 1, frames: 12 });
+          vx('burst', p.cx + p.dir * 24, gy - 6, { n: 20, colors: ['#ffe040', '#ff9020', '#ff4010'], speed: 3.2, life: 24, grav: 0.04 });
+          shake(6); hitstop(2); sfx('fire');
+        }
+      },
+    },
+  }, [['X', '炎息加強'], ['↑+X', '焚天吐息'], ['↓+X', '熔岩爪痕'], ['空中 X', '炎翼衝'], ['按住 50 幀放開', '蓄力・太陽炎']]);
+
+  // ---------- 9. thunderdragon 雷龍 ----------
+  addMoves('thunderdragon', {
+    up: {
+      dur: 32, fps: 12, lock: true,
+      start(p, d) { d.box = null; vx('aura', p, { color: '#b0d8ff', r: 18, frames: 30 }); sfx('giant_roar'); },
+      tick(p, d, t) {
+        if (t === 4) {
+          const x = p.cx + p.dir * 4;
+          d.box = abox(x, p.cy - 33, 26, 70, { dmg: 6, type: 'spark', life: 22, rehit: 8, knock: 1.4, onHit: e => { e.vy = -3.8; para(e, 110); } });
+          vx('lightning', x, p.cy + 6, x, p.cy - 62, { color: '#b0d8ff', frames: 16, jitter: 7, branches: 4 });
+        }
+        if (t >= 4 && t <= 26 && t % 3 === 0) {
+          const x = p.cx + p.dir * 4;
+          vx('lightning', x + rnd(-8, 8), p.cy - 10, x + rnd(-10, 10), p.cy - rnd(30, 60), { color: '#ffffff', frames: 8, jitter: 5, branches: 2 });
+          parts(x + rnd(-10, 10), p.cy - rnd(0, 60), ['#ffffff', '#b0d8ff', '#4878f8'], 2, { spread: 0.5, grav: -0.1, life: 20, up: 1, size: 1 });
+        }
+        if (t === 8) echo(p, { type: 'spark', color: '#b0d8ff', cols: ['#ffffff', '#b0d8ff'], dmg: 5, para: true });
+        if (t === 26) killBox(p);
+      },
+    },
+    dn: {
+      dur: 32, fps: 12, lock: true,
+      start(p, d) { d.done = false; if (!p.onGround) p.vy = Math.max(p.vy, 3.8); sfx('tail_whip'); },
+      tick(p, d, t) {
+        if (!p.onGround) slowFall(p, 4.6);
+        if (t === 8 && !d.done) {
+          d.done = true;
+          const gy = groundY(p);
+          abox(p.cx + p.dir * 24, gy - 13, 76, 24, { dmg: 7, type: 'spark', life: 20, rehit: 0, knock: 2, onHit: e => para(e, 130) });
+          for (let i = 0; i < 4; i++) {
+            const x = p.cx + p.dir * (10 + i * 20);
+            vx('lightning', x, gy - 3, x + p.dir * 18, gy - 3, { color: i & 1 ? '#ffffff' : '#b0d8ff', frames: 10, jitter: 5, branches: 2 });
+            parts(x, gy - 4, ['#ffffff', '#b0d8ff'], 3, { spread: 0.7, grav: -0.05, life: 18, up: 0.6, size: 1 });
+          }
+          vx('shockwave', p.cx, gy, { w: 34, h: 16, dir: p.dir, speed: 5, frames: 18, color: '#b0d8ff' });
+          shake(6); hitstop(2); sfx('spark');
+        }
+      },
+    },
+  }, [['X', '雷息'], ['↑+X', '雷鳴嘶吼'], ['↓+X', '地脈雷爪'], ['空中 X', '雷翼俯衝'], ['按住 50 幀放開', '蓄力・雷雲']]);
+
+  // ---------- 10. timebeam 時光束 ----------
+  addMoves('timebeam', {
+    dn: {
+      dur: 38, fps: 12, lock: true,
+      start(p, d) { d.done = false; sfx('slowmo'); },
+      tick(p, d, t) {
+        if (!p.onGround) slowFall(p, 3);
+        if (t === 8 && !d.done) {
+          d.done = true;
+          const gy = groundY(p);
+          abox(p.cx + p.dir * 14, gy - 22, 66, 42, {
+            dmg: 6, type: 'beam', life: 40, rehit: 12, knock: 0.8, onHit: e => para(e, 150),
+            onUpdate(h) {
+              if ((h.life & 3) === 0) parts(h.x + rnd(0, h.w), h.y + rnd(0, h.h), ['#c0a8ff', '#ffffff', '#7a30d8'], 2, { spread: 0.3, grav: -0.02, life: 24, up: 0.2, size: 1 });
+            },
+          });
+          for (let i = 0; i < 3; i++) vx('ring', p.cx + p.dir * 14, gy - 18, { r0: 4 + i * 8, r1: 40, frames: 22 + i * 4, color: '#c0a8ff', width: 2 });
+          vx('circle', p.cx + p.dir * 14, gy - 18, { r: 28, frames: 36, color: '#ffffff', spin: -0.16 });
+          shoot({ spr: 'proj_mix2_ring_time', x: p.cx + p.dir * 14, y: gy - 18, vx: 0, vy: 0, dmg: 4, w: 20, h: 20, life: 40, solid: false, pierce: true, type: 'beam', destructible: false, rotSpeed: -0.12 });
+          vx('worldTint', '#302060', 0.2, 24);
+          shake(4); sfx('timestop');
+        }
+      },
+    },
+    air: {
+      dur: 30, fps: 12, lock: false,
+      start(p, d) {
+        vx('circle', p.cx, p.cy, { r: 26, frames: 30, color: '#c0a8ff', spin: -0.28 });
+        shoot({ spr: 'proj_mix2_ring_time', x: p.cx, y: p.cy, vx: 0, vy: 0, dmg: 3, w: 16, h: 16, life: 30, solid: false, pierce: true, type: 'beam', destructible: false, rotSpeed: -0.2 });
+        sfx('rewind');
+      },
+      tick(p, d, t) {
+        slowFall(p, 1.1);
+        d.box = fbox(p, { w: 44, h: 44, dmg: 4, type: 'beam', ox: -22, oy: -22, life: 3, rehit: 10, flipWithOwner: false, onHit: e => para(e, 140) });
+        if (t % 3 === 0) {
+          const a = t * 0.24;
+          parts(p.cx + Math.cos(a) * 20, p.cy + Math.sin(a) * 20, ['#c0a8ff', '#ffffff'], 1, { spread: 0.2, grav: 0, life: 16, up: 0, size: 1 });
+        }
+        if (t === 20) { vx('ring', p.cx, p.cy, { r0: 6, r1: 40, frames: 16, color: '#ffffff', width: 2 }); sfx('timeresume'); }
+      },
+    },
+  }, [['X', '凍結光束'], ['↑+X', '時間裂縫'], ['↓+X', '時砂沙漏'], ['空中 X', '逆行光環'], ['按住 50 幀放開', '蓄力・時停爆']]);
+
+  // ---------- 11. gravityblade 重力刃 ----------
+  addMoves('gravityblade', {
+    up: {
+      dur: 30, fps: 14, lock: true,
+      start(p, d) {
+        hop(p, -4.2);
+        const x = p.cx + p.dir * 8;
+        d.box = abox(x, p.cy - 22, 30, 58, { dmg: 6, type: 'cutter', life: 14, rehit: 0, knock: 1.4, onHit: e => { e.vy = -5.4; } });
+        for (const s of [-1, 1]) {
+          shoot({ spr: 'proj_mix2_star_void', x, y: p.cy - 16, vx: s * 1.6, vy: -5, dmg: 4, w: 12, h: 12, life: 44, type: 'cutter', pierce: true, solid: false, rotSpeed: 0.36, trail: '#9060e0' });
+        }
+        vx('ring', x, p.cy - 16, { r0: 4, r1: 34, frames: 18, color: '#9060e0', width: 2 });
+        vx('burst', x, p.cy - 20, { n: 18, colors: ['#ffffff', '#c0a8ff', '#9060e0'], speed: 3, life: 24, grav: -0.06, dir: -Math.PI / 2, spread: 0.8 });
+        echo(p, { type: 'cutter', color: '#9060e0', cols: ['#c0a8ff', '#9060e0'], dmg: 5 });
+        shake(4); sfx('gravity_lift');
+      },
+      tick(p, d, t) {
+        // 反重力：把附近的敵人往上抬（只抬小怪）
+        const g = KB.game;
+        if (g && t < 18) for (const e of g.entities) {
+          if (e.dead || e.type !== 'enemy' || e.tough) continue;
+          if (Math.abs(e.cx - p.cx) < 42 && Math.abs(e.cy - p.cy) < 48) e.y -= 0.9;
+        }
+        if (t % 3 === 0) parts(p.cx + rnd(-12, 12), p.cy - rnd(0, 34), ['#c0a8ff', '#9060e0'], 1, { spread: 0.3, grav: -0.06, life: 18, up: 0.7, size: 1 });
+        if (t === 14) killBox(p);
+      },
+    },
+    air: {
+      dur: 38, fps: 14, lock: true,
+      start(p, d) {
+        d.landed = false; p.vy = 6.6; p.vx = p.dir * 0.8;
+        vx('afterimage', p, { frames: 28, color: '#9060e0', every: 2, alpha: 0.55 });
+        vx('circle', p.cx, p.cy, { r: 24, frames: 24, color: '#c0a8ff', spin: 0.4 });
+        sfx('blackhole');
+      },
+      tick(p, d, t) {
+        if (d.landed) return;
+        p.vy = Math.max(p.vy, 6.2);
+        d.box = fbox(p, { w: 30, h: 30, dmg: 5, type: 'cutter', ox: -15, oy: -15, life: 3, rehit: 8, flipWithOwner: false });
+        const g = KB.game;
+        if (g) for (const e of g.entities) {
+          if (e.dead || e.type !== 'enemy' || e.tough) continue;
+          const dx = p.cx - e.cx, dy = p.cy - e.cy, dd = Math.hypot(dx, dy);
+          if (dd > 4 && dd < 54) { e.x += dx / dd * 0.8; e.y += dy / dd * 0.4; }
+        }
+        if (t % 2 === 0) parts(p.cx + rnd(-12, 12), p.cy + rnd(-12, 12), ['#c0a8ff', '#9060e0'], 1, { spread: 0.4, grav: 0, life: 14, up: 0, size: 1 });
+        if (p.onGround && t > 3) {
+          d.landed = true; killBox(p);
+          abox(p.cx, p.bottom - 15, 64, 32, { dmg: 8, type: 'cutter', life: 14, rehit: 0, knock: 2.4 });
+          for (let i = 0; i < 3; i++) vx('ring', p.cx, p.bottom - 8, { r0: 4 + i * 10, r1: 44, frames: 16 + i * 3, color: '#c0a8ff', width: 2 });
+          vx('burst', p.cx, p.bottom - 6, { n: 24, colors: ['#ffffff', '#c0a8ff', '#9060e0', '#2a1040'], speed: 3.6, life: 26, grav: 0.04 });
+          vx('textPop', p.cx, p.y - 12, 'CRUSH!', { color: '#c0a8ff', size: 8, frames: 30, rise: 0.5 });
+          shake(8); hitstop(4); sfx('blackhole');
+          p.attackTimer = Math.min(p.attackTimer, 14);
+        }
+      },
+    },
+  }, [['X', '軌道刃環繞'], ['↑+X', '反重力昇刃'], ['↓+X', '引力回收刃'], ['空中 X', '墜壓刃'], ['按住 50 幀放開', '蓄力・刃之奇點']]);
+
+  // ---------- 12. hammermech 鎚機甲 ----------
+  addMoves('hammermech', {
+    dn: {
+      dur: 36, fps: 12, lock: true,
+      start(p, d) { d.done = false; if (!p.onGround) p.vy = Math.max(p.vy, 4.8); sfx('jet'); },
+      tick(p, d, t) {
+        if (!p.onGround) slowFall(p, 5.6);
+        if (t === 10 && !d.done) {
+          d.done = true;
+          const gy = groundY(p);
+          abox(p.cx, gy - 15, 80, 28, { dmg: 8, type: 'mech', life: 18, rehit: 0, knock: 2.6, breakBlocks: true, onHit: e => { e.vy = -3.2; } });
+          for (const s of [-1, 1]) {
+            vx('shockwave', p.cx, gy, { w: 42, h: 18, dir: s, speed: 5, frames: 18, color: '#ff9850' });
+            shoot({ spr: 'proj_mix2_rocket_steel', x: p.cx + s * 20, y: gy - 10, vx: s * 3.6, vy: -1.2, grav: 0.2, dmg: 5, w: 16, h: 10, life: 46, type: 'mech', dir: s, trail: '#ffd8a0' });
+          }
+          vx('ring', p.cx, gy - 6, { r0: 4, r1: 46, frames: 16, color: '#ffd8a0', width: 3 });
+          vx('burst', p.cx, gy - 6, { n: 24, colors: ['#ffd8a0', '#ff9850', '#d8dce8'], speed: 3.4, life: 26, grav: 0.08, size: 2 });
+          shake(9); hitstop(4); sfx('mech_step');
+        }
+      },
+    },
+    air: {
+      dur: 30, fps: 14, lock: false,
+      start(p, d) {
+        d.n = 0;
+        vx('aura', p, { color: '#ff9850', r: 18, frames: 28 });
+        sfx('jet');
+      },
+      tick(p, d, t) {
+        slowFall(p, 1.2);
+        d.box = fbox(p, { w: 44, h: 40, dmg: 5, type: 'mech', ox: -22, oy: -20, life: 3, rehit: 9, flipWithOwner: false });
+        if (t % 2 === 0) {
+          const a = t * 0.42;
+          parts(p.cx + Math.cos(a) * 22, p.cy + Math.sin(a) * 18, ['#ffd8a0', '#ff9850', '#d8dce8'], 2, { spread: 0.3, grav: 0, life: 14, up: 0, size: 1 });
+        }
+        if (t === 10 || t === 22) {
+          const s = t === 10 ? 1 : -1;
+          shoot({ spr: 'proj_mix2_rocket_steel', x: p.cx + s * p.dir * 10, y: p.cy + 6, vx: s * p.dir * 4.4, vy: 1.6, dmg: 5, w: 16, h: 10, life: 48, type: 'mech', dir: s * p.dir, trail: '#ffd8a0' });
+          vx('line', p.cx, p.cy + 6, p.cx + s * p.dir * 36, p.cy + 18, { color: '#ffd8a0', width: 1, frames: 5 });
+          sfx('missile'); shake(2);
+        }
+      },
+    },
+  }, [['X', '火箭鎚'], ['↑+X', '飛彈鎚'], ['↓+X', '地錨衝擊'], ['空中 X', '噴射迴旋鎚'], ['按住 50 幀放開', '蓄力・軌道砲鎚']]);
+
 })();

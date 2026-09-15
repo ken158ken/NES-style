@@ -382,6 +382,87 @@
   })();
 
   // ==========================================================
+  //  Round 9：↑+X（上挑）/ ↓+X（下砸）共用 2 幀姿勢
+  //  —— 同一套姿勢，武器與元素配色各自不同；特效差異由 abilities_mix.js 的 VFX 負責。
+  // ==========================================================
+  // ── 上挑型：沉腰蓄勢 → 武器朝天挑起（帶上升弧光）
+  function upFrames(w0, el) {
+    const A = EL[el], W = wtint(w0, el), Wd = wrot180(W);
+    return [
+      mkA({
+        dy: 2, arms: [[15, 9, 5], [3, 10, 5]], front: [hold(Wd, 17, 12)],
+        eyes: EYE_SQUINT, eyeAt: [[7, 7], [12, 7]], mouth: MOUTH_LINE, mouthAt: [10, 14], feet: [[0, 15], [12, 15]],
+      }),
+      mkA({
+        dy: -3, arms: [[14, -3, 5], [4, 1, 5]], front: [hold(W, 13, -3)],
+        eyes: EYE_SHUT, eyeAt: [[7, 7], [12, 7]], mouth: MOUTH_OPEN, mouthAt: [9, 10],
+        back: [[slashArc(CW, CH, 20, 20, 17, -172, -18, A.hi, A.v), 0, 0]],
+        feet: [[3, 15], [11, 15]],
+      }),
+    ];
+  }
+  // ── 下砸型：高舉過頂 → 朝腳下插落（帶落地衝擊弧光）
+  function dnFrames(w0, el) {
+    const A = EL[el], W = wtint(w0, el), Wd = wrot180(W);
+    let shock = blank(CW, CH);
+    for (let x = 6; x < 34; x += 2) shock = paste(shock, [x % 4 ? A.v : A.hi], x, 34);
+    return [
+      mkA({
+        dy: -2, arms: [[13, -2, 5], [5, -1, 5]], front: [hold(W, 14, -2)],
+        eyes: EYE_SQUINT, eyeAt: [[7, 6], [12, 6]], mouth: MOUTH_LINE, mouthAt: [10, 13],
+      }),
+      mkA({
+        dy: 2, arms: [[16, 8, 5], [2, 9, 5]], front: [hold(Wd, 18, 12)],
+        eyes: EYE_SHUT, eyeAt: [[7, 7], [12, 7]], mouth: MOUTH_OPEN, mouthAt: [9, 12], cheekAt: [[5, 12], [15, 12]],
+        back: [[slashArc(CW, CH, 22, 22, 16, -34, 96, A.hi, A.v), 0, 0], [shock, 0, 0]],
+        feet: [[0, 15], [12, 15]],
+      }),
+    ];
+  }
+  // ── 龍型（沒有武器）：仰天吐息 / 俯衝抓地
+  function upBreathFrames(el) {
+    const Wg = tint(WING_R, el), m1 = recolor(MUZZLE, { f: EL[el].v, a: EL[el].hi });
+    return [
+      mkA({
+        back: [[Wg, 2, 12]], arms: [[15, 6, 5], [1, 7, 5]],
+        eyes: EYE_SQUINT, eyeAt: [[7, 6], [12, 6]], mouth: MOUTH_O, mouthAt: [10, 11],
+      }),
+      mkA({
+        dy: -2, back: [[Wg, 1, 8]], arms: [[16, 3, 5], [0, 4, 5]],
+        eyes: EYE_SHUT, eyeAt: [[7, 6], [12, 6]], mouth: MOUTH_OPEN, mouthAt: [9, 8],
+        front: [[m1, 8, -1], [m1, 10, -8]],
+      }),
+    ];
+  }
+  function dnBreathFrames(el) {
+    const Wg = tint(WING_R, el), m1 = recolor(MUZZLE, { f: EL[el].v, a: EL[el].hi });
+    return [
+      mkA({
+        dy: -1, back: [[Wg, 2, 9]], arms: [[16, 4, 5], [0, 5, 5]],
+        eyes: EYE_SQUINT, eyeAt: [[7, 6], [12, 6]], mouth: MOUTH_LINE, mouthAt: [10, 12],
+      }),
+      mkA({
+        dy: 2, back: [[Wg, 2, 13]], arms: [[17, 10, 6], [-1, 11, 6]],
+        eyes: EYE_SHUT, eyeAt: [[7, 7], [12, 7]], mouth: MOUTH_OPEN, mouthAt: [9, 12],
+        front: [[m1, 14, 16], [m1, 20, 15]], feet: [[0, 15], [12, 15]],
+      }),
+    ];
+  }
+  // 12 組合的 ↑X / ↓X 姿勢（武器與 X 招同一把，元素配色相同）
+  const MIX_POSE = [
+    ['flamesword', W_SWORD, 'fire'], ['frostsword', W_SWORD, 'ice'], ['thunderblade', W_KATANA, 'spark'],
+    ['flamegun', wrot270w(W_GUN), 'fire'], ['frostgun', wrot270w(W_GUN), 'ice'], ['thunderbow', W_BOWD, 'spark'],
+    ['flamehammer', W_HAMMER, 'fire'], ['stonehammer', W_HAMMER, 'stone'], ['shadowblade', W_DISC, 'shadow'],
+    ['starmage', W_STAFF, 'star'], ['thundermech', wrot270w(W_FIST), 'spark'],
+  ];
+  for (const [k, w, el] of MIX_POSE) {
+    S('kirby_attack_' + k + '_up', upFrames(w, el), { fps: 14 });
+    S('kirby_attack_' + k + '_dn', dnFrames(w, el), { fps: 14 });
+  }
+  S('kirby_attack_frostdragon_up', upBreathFrames('ice'), { fps: 12 });
+  S('kirby_attack_frostdragon_dn', dnBreathFrames('ice'), { fps: 12 });
+
+  // ==========================================================
   //  帽子：底帽（武器方）＋ 元素冠飾 疊加，並依元素重新上色
   // ==========================================================
   const HAT_HELM = [   // 騎士盔（劍）

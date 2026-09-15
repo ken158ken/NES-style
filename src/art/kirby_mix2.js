@@ -484,6 +484,81 @@
   S('kirby_attack_hammermech_ult', burstFrames(W_PISTON, 'steel'), { fps: 10 });
 
   // ==========================================================
+  //  Round 9：↑+X（上挑）/ ↓+X（下砸）共用 2 幀姿勢
+  //  —— 第二批刻意跟第一批不同：上挑是「弓步前傾刺天」、下砸是「屈膝縱身壓落」。
+  // ==========================================================
+  function upFrames(w0, el) {
+    const A = EL[el], W = wtint(w0, el), Wb = wrot270w(W);
+    return [
+      mkA({
+        dy: 1, arms: [[3, 8, 5], [12, 10, 5]], back: [hold(Wb, 4, 9)],
+        eyes: EYE_SQUINT, eyeAt: [[8, 7], [13, 7]], mouth: MOUTH_LINE, mouthAt: [10, 14], feet: [[0, 15], [12, 15]],
+      }),
+      mkA({
+        dy: -4, arms: [[15, -2, 5], [5, 2, 5]], front: [hold(W, 14, -4)],
+        eyes: EYE_SHUT, eyeAt: [[8, 7], [13, 7]], mouth: MOUTH_OPEN, mouthAt: [9, 10],
+        back: [[slashArc(CW, CH, 21, 18, 18, -166, -14, A.hi, A.v), 0, 0]],
+        feet: [[4, 15], [10, 15]],
+      }),
+    ];
+  }
+  function dnFrames(w0, el) {
+    const A = EL[el], W = wtint(w0, el), Wd = wrot180(W);
+    let shock = blank(CW, CH);
+    for (let x = 4; x < 36; x += 2) shock = paste(shock, [x % 4 ? A.v : A.hi], x, 33);
+    for (let x = 10; x < 30; x += 4) shock = paste(shock, [A.hi], x, 31);
+    return [
+      mkA({
+        dy: -3, arms: [[12, -3, 5], [6, -2, 5]], front: [hold(W, 13, -3)],
+        eyes: EYE_SQUINT, eyeAt: [[7, 6], [12, 6]], mouth: MOUTH_O, mouthAt: [10, 12], feet: [[3, 15], [11, 15]],
+      }),
+      mkA({
+        dy: 3, arms: [[16, 9, 6], [1, 10, 6]], front: [hold(Wd, 18, 13)],
+        eyes: EYE_SHUT, eyeAt: [[7, 7], [12, 7]], mouth: MOUTH_OPEN, mouthAt: [9, 12], cheekAt: [[4, 12], [15, 12]],
+        back: [[slashArc(CW, CH, 20, 24, 17, -20, 110, A.hi, A.v), 0, 0], [shock, 0, 0]],
+        feet: [[0, 15], [12, 15]],
+      }),
+    ];
+  }
+  // 龍型（炎龍 / 雷龍）：仰天吐息 / 俯身抓地
+  function upBreathFrames(el) {
+    const Wg = tint(WING_R, el), m1 = recolor(MUZZLE, { f: EL[el].v, a: EL[el].hi });
+    return [
+      mkA({ back: [[Wg, 2, 12]], arms: [[15, 6, 5], [1, 7, 5]], eyes: EYE_SQUINT, eyeAt: [[7, 6], [12, 6]], mouth: MOUTH_O, mouthAt: [10, 11] }),
+      mkA({
+        dy: -3, back: [[Wg, 1, 7]], arms: [[16, 2, 5], [0, 3, 5]],
+        eyes: EYE_SHUT, eyeAt: [[7, 6], [12, 6]], mouth: MOUTH_OPEN, mouthAt: [9, 8],
+        front: [[m1, 8, -2], [m1, 11, -10]],
+      }),
+    ];
+  }
+  function dnBreathFrames(el) {
+    const Wg = tint(WING_R, el), m1 = recolor(MUZZLE, { f: EL[el].v, a: EL[el].hi });
+    return [
+      mkA({ dy: -1, back: [[Wg, 2, 8]], arms: [[16, 4, 5], [0, 5, 5]], eyes: EYE_SQUINT, eyeAt: [[7, 6], [12, 6]], mouth: MOUTH_LINE, mouthAt: [10, 12] }),
+      mkA({
+        dy: 3, back: [[Wg, 2, 14]], arms: [[17, 11, 6], [-1, 12, 6]],
+        eyes: EYE_SHUT, eyeAt: [[7, 7], [12, 7]], mouth: MOUTH_OPEN, mouthAt: [9, 12],
+        front: [[m1, 13, 17], [m1, 21, 16]], feet: [[0, 15], [12, 15]],
+      }),
+    ];
+  }
+  const MIX2_POSE = [
+    ['flamebow', W_BOW2D, 'fire'], ['frosthammer', W_MAUL, 'ice'], ['thundersword', W_BROAD, 'spark'],
+    ['flameninja', W_KUNAI, 'fire'], ['frostninja', W_KUNAI, 'ice'], ['thundergun', wrot270w(W_CARBINE), 'spark'],
+    ['stonegiant', wrot270w(W_ROCKFIST), 'stone'], ['timebeam', W_GLASS, 'time'],
+    ['gravityblade', W_GORB, 'void'], ['hammermech', W_PISTON, 'steel'],
+  ];
+  for (const [k, w, el] of MIX2_POSE) {
+    S('kirby_attack_' + k + '_up', upFrames(w, el), { fps: 14 });
+    S('kirby_attack_' + k + '_dn', dnFrames(w, el), { fps: 14 });
+  }
+  S('kirby_attack_flamedragon_up', upBreathFrames('fire'), { fps: 12 });
+  S('kirby_attack_flamedragon_dn', dnBreathFrames('fire'), { fps: 12 });
+  S('kirby_attack_thunderdragon_up', upBreathFrames('spark'), { fps: 12 });
+  S('kirby_attack_thunderdragon_dn', dnBreathFrames('spark'), { fps: 12 });
+
+  // ==========================================================
   //  帽子：底帽（武器方）＋ 第二批專屬元素冠飾，依元素重新上色
   // ==========================================================
   const HAT_TITAN = [   // 岩冠（巨大化）

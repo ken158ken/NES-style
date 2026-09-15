@@ -53,11 +53,16 @@
   function restartAttack(p) { p.setState('idle'); p.startAttack(); }
   function startMove(p, m) { data(p).next = m; restartAttack(p); }
   function holding(p, held) { const d = p.abilityDef; return (held && d.maxHold > 0 && p.stateT < d.maxHold) || p.attackTimer > 2; }
-  function pickMode(p, air, upMode, ground) {
+  // Round 9：招式方向快照（player-input 在 startAttack 當幀寫入 p.atkDir；沒有時自己讀輸入）
+  const atkDir = p => p.atkDir || { up: down('up'), down: down('down'), air: !p.onGround };
+  // 優先序：↑X > ↓X > 空中 X > X（空中按 ↑ / ↓ 一樣出對應的招，各招內部做空中版變體）
+  function pickMode(p, air, upMode, ground, downMode) {
     const d = data(p), q = d.next; d.next = null;
     if (q) return q;
-    if (!p.onGround && air) return air;
-    if (down('up') && upMode) return upMode;
+    const a = atkDir(p);
+    if (a.up && upMode) return upMode;
+    if (a.down && downMode) return downMode;
+    if (a.air && air) return air;
     return ground;
   }
   function setup(p, o) {
@@ -135,12 +140,12 @@
     color: '#d8dce8', duration: 10, hold: true, maxHold: 600, lockMove: false, moveSpeed: P.walk, fps: 14, canJump: true,
     desc: '雙手各握一把星塵左輪，一邊走一邊把彈幕鋪滿整個房間。',
     flavour: '彈匣裡裝的是勇氣，退膛的是恐懼。',
-    moves: [['X 按住', '雙槍連射'], ['↓+X', '蓄力霰彈'], ['空中 X', '俯衝掃射'], ['↑+X', '對空三連'], ['按住 60 幀放開', '必殺・子彈時間']],
+    moves: [['X 按住', '雙槍連射'], ['↑+X', '對空三連'], ['↓+X', '蓄力霰彈'], ['空中 X', '俯衝掃射'], ['按住 60 幀放開', '必殺・子彈時間']],
     onGet(p) { const d = data(p); d.t = 0; d.charged = false; },
     onCrouchAttack(p) { startMove(p, 'shotgun'); },
     onAttack(p) {
       const d = data(p); killBox(p); d.t = 0; d.charged = false; d.fired = 0;
-      d.mode = pickMode(p, 'air', 'up', 'rapid');
+      d.mode = pickMode(p, 'air', 'up', 'rapid', 'shotgun');
       if (d.mode === 'rapid') setup(p, { anim: 'kirby_attack_gunner', dur: 10, fps: 14, lock: false, maxHold: 600 });
       else if (d.mode === 'up') setup(p, { anim: 'kirby_attack_gunner_up', dur: 26, fps: 14, lock: true, maxHold: 0 });
       else if (d.mode === 'air') setup(p, { anim: 'kirby_attack_gunner_air', dur: 36, fps: 14, lock: false, maxHold: 36 });
@@ -169,7 +174,8 @@
         slowFall(p, 0.9);
         if (holding(p, held) && d.t % 5 === 1) {
           gunShot(p, Math.PI / 2 + rnd(-0.45, 0.45), 6.2, 2, 12);
-          if (p.vy > -1.6) p.vy -= 0.62;                 // 後座力：小幅上升
+          // 後座力把卡比往上推，但一定保留下墜速度（Round 9：空中招不可懸停）
+          p.vy = Math.max(0.25, p.vy - 0.62);
         }
         return;
       }
@@ -177,13 +183,17 @@
         if (d.t === 1) aura(p, { color: '#ff9028', r: 14, frames: 10 });
         if (d.t < 9) { if (d.t % 3 === 1) KB.particles(p.cx + p.dir * 16, p.cy, ['#ff9028', '#fff8c0'], 1, { spread: 0.4, grav: 0, life: 10, up: 0.2, size: 1 }); }
         if (d.t === 9) {
-          for (let i = -3; i <= 3; i++) gunShot(p, A + i * 0.15 * (p.dir > 0 ? 1 : -1), 5.8 - Math.abs(i) * 0.25, 3, 16);
-          p.vx = -p.dir * 3.4; if (p.onGround) p.vy = -1.6;
+          // 空中版：扇形改成朝正下方（判定跟著卡比落下），地面版維持朝前
+          const air = !p.onGround, base = air ? Math.PI / 2 : A;
+          for (let i = -3; i <= 3; i++) gunShot(p, base + i * 0.15 * (p.dir > 0 ? 1 : -1), 5.8 - Math.abs(i) * 0.25, 3, 16);
+          if (air) { p.vx = -p.dir * 1.2; p.vy = Math.max(0.4, p.vy - 1.8); }
+          else { p.vx = -p.dir * 3.4; p.vy = -1.6; }
           flash('#ffffff', 6, 0.55); shake(6); hitstop(3); zoom(1.06, 12);
           ring(p.cx + p.dir * 18, p.cy - 2, { r0: 4, r1: 26, frames: 12, color: '#fff8c0', width: 2 });
           sfx('shotgun');
         }
         if (d.t > 9 && d.t < 22) p.vx += p.dir * 0.18;
+        if (!p.onGround) setAnim(p, 'kirby_attack_gunner_air');
         return;
       }
       if (d.mode === 'time') {
@@ -212,6 +222,7 @@
   // ======================================================================
   // 2. NINJA 忍者
   //    X          手裡剎三連：三枚旋轉手裡劍 + 火花拖尾
+  //    ↑+X        昇龍手裡劍：朝正上方甩出三枚手裡劍 + 頭頂近身判定（Round 9 新增）
   //    ↓+X        替身瞬移：原地留木頭 + 煙霧，瞬間移動到前方 64px
   //    空中 X      飛踢：斜下全身判定 + 紫色殘影
   //    貼牆 + 跳    壁跳：貼牆滑行減速，按跳往反方向彈起
@@ -309,17 +320,25 @@
     color: '#5460a0', duration: 26, hold: true, maxHold: 600, lockMove: false, moveSpeed: P.walk, fps: 14, canJump: true,
     desc: '身法快得只看得見殘影，手裡劍與替身術一氣呵成。',
     flavour: '影子先到，本體後到。',
-    moves: [['X', '手裡剎三連'], ['↓+X', '替身瞬移'], ['空中 X', '飛踢'], ['貼牆＋跳', '壁跳（任何牆面）'], ['蓄力放開', '必殺・影分身斬']],
+    moves: [['X', '手裡剎三連'], ['↑+X', '昇龍手裡劍'], ['↓+X', '替身瞬移'], ['空中 X', '飛踢'], ['蓄力放開', '必殺・影分身斬'], ['貼牆＋跳', '壁跳（任何牆面）']],
     onGet(p) { const d = data(p); d.t = 0; d.wallT = 0; ensureTicker(p); },
     onCrouchAttack(p) { startMove(p, 'warp'); },
     onAttack(p) {
       const d = data(p); killBox(p); d.t = 0; d.charged = false; ensureTicker(p);
-      d.mode = pickMode(p, 'kick', null, 'shuriken');
+      d.mode = pickMode(p, 'kick', 'rising', 'shuriken', 'warp');
       if (d.mode === 'shuriken') setup(p, { anim: 'kirby_attack_ninja', dur: 26, fps: 14, lock: false, maxHold: 600 });
       else if (d.mode === 'kick') {
         setup(p, { anim: 'kirby_attack_ninja_kick', dur: 34, fps: 12, lock: true, maxHold: 0 });
         p.vx = p.dir * 3.6; p.vy = 2.2;
         d.box = KB.hitbox({ x: 0, y: 0, w: 24, h: 22, dmg: 3, owner: 'player', type: 'ninja', follow: p, ox: -4, oy: -4, life: 3, rehit: 8, knock: 2, flipWithOwner: false });
+        sfx('sword');
+      } else if (d.mode === 'rising') {
+        // ↑+X 昇龍手裡劍：朝正上方連甩三枚 + 頭頂的近身判定
+        setup(p, { anim: 'kirby_attack_ninja_up', dur: 26, fps: 14, lock: true, maxHold: 0 });
+        d.box = KB.hitbox({ x: 0, y: 0, w: 22, h: 32, dmg: 3, owner: 'player', type: 'ninja', follow: p, ox: -11, oy: -30, life: 20, rehit: 0, knock: 2, flipWithOwner: false });
+        if (p.onGround) { p.vy = -2.0; p.onGround = false; }
+        slash(p.cx, p.cy - 14, 20, -Math.PI / 2, { color: '#eef2ff', width: 3, frames: 12, arc: 2.0, flip: p.dir < 0 });
+        ring(p.cx, p.y - 8, { r0: 3, r1: 24, frames: 12, color: '#b070f0', width: 2 });
         sfx('sword');
       } else if (d.mode === 'warp') setup(p, { anim: 'kirby_attack_ninja_warp', dur: 26, fps: 12, lock: true, maxHold: 0 });
       else if (d.mode === 'clone') {
@@ -342,6 +361,23 @@
         if (!held && d.charged) { startMove(p, 'clone'); return; }
         return;
       }
+      if (d.mode === 'rising') {
+        slowFall(p, 0.8); p.vx *= 0.85;
+        beat(d.box);
+        if (d.t === 3 || d.t === 8 || d.t === 13) {
+          const sp = KB.shoot({
+            spr: 'proj_shuriken', x: p.cx + (d.t - 8) * 0.6, y: p.y - 4, vx: p.dir * 0.9 + (d.t - 8) * 0.18, vy: -6.2,
+            dmg: 2, owner: 'player', life: 60, w: 9, h: 9, grav: 0, solid: true, pierce: false,
+            type: 'shuriken', dir: p.dir, fxHit: 'fx_hit', knock: 1.2, rotSpeed: 0.5 * p.dir, trail: '#b070f0',
+          });
+          sparkTrail(sp, { color: '#eef2ff', every: 2, life: 10 });
+          burst(p.cx, p.y - 4, { n: 5, colors: ['#eef2ff', '#b070f0'], speed: 1.6, life: 9, grav: 0 });
+          sfx('shuriken');
+        }
+        if (d.t % 3 === 1) KB.particles(p.cx + rnd(-7, 7), p.y - rnd(2, 26), ['#b070f0', '#eef2ff'], 1, { spread: 0.3, grav: -0.05, life: 10, up: 0.7, size: 1 });
+        if (d.box && !d.box.dead && d.t > 20) { d.box.dead = true; d.box = null; }
+        return;
+      }
       if (d.mode === 'kick') {
         p.vx = p.dir * 3.6; if (p.vy < 3.4) p.vy += 0.28;
         beat(d.box);
@@ -356,6 +392,7 @@
       }
       if (d.mode === 'warp') {
         p.vx = 0;
+        if (!p.onGround) slowFall(p, 1.2);
         if (d.t === 2) {
           KB.fx('fx_ninjalog', p.cx, p.cy + 2, { life: 34 });
           burst(p.cx, p.cy, { n: 14, colors: ['#ffffff', '#c8c8d0', '#5460a0'], speed: 2.6, life: 18, grav: -0.02 });
@@ -363,20 +400,31 @@
           sfx('teleport');
         }
         if (d.t === 9) {
-          const x0 = p.x;
-          let nx = p.x;
-          for (let i = 0; i < 8; i++) {
-            const tx = nx + p.dir * 8, probe = p.dir > 0 ? tx + p.w : tx;
-            if (solidAt(probe, p.cy) || solidAt(probe, p.y + 2) || solidAt(probe, p.bottom - 2)) break;
-            nx = tx;
+          const x0 = p.x, y0 = p.y;
+          // 空中版：往正下方瞬移（落到敵人身上），地面版維持往前
+          if (!p.onGround) {
+            let ny = p.y;
+            for (let i = 0; i < 8; i++) {
+              const ty = ny + 7;
+              if (solidAt(p.cx, ty + p.h) || solidAt(p.x + 1, ty + p.h) || solidAt(p.x + p.w - 1, ty + p.h)) break;
+              ny = ty;
+            }
+            p.y = ny; p.vy = Math.max(p.vy, 1.2);
+          } else {
+            let nx = p.x;
+            for (let i = 0; i < 8; i++) {
+              const tx = nx + p.dir * 8, probe = p.dir > 0 ? tx + p.w : tx;
+              if (solidAt(probe, p.cy) || solidAt(probe, p.y + 2) || solidAt(probe, p.bottom - 2)) break;
+              nx = tx;
+            }
+            p.x = nx;
           }
-          p.x = nx;
-          line(x0 + p.w / 2, p.cy, p.cx, p.cy, { color: '#b070f0', width: 3, frames: 8 });
+          line(x0 + p.w / 2, y0 + p.h / 2, p.cx, p.cy, { color: '#b070f0', width: 3, frames: 8 });
           afterimage(p, { frames: 16, color: '#b070f0', every: 1, alpha: 0.5 });
           burst(p.cx, p.cy, { n: 12, colors: ['#b070f0', '#ffffff'], speed: 2.2, life: 16, grav: -0.02 });
           ring(p.cx, p.cy, { r0: 2, r1: 18, frames: 10, color: '#b070f0', width: 1 });
           zoom(1.05, 10); shake(2);
-          d.box = KB.hitbox({ x: p.cx - 14, y: p.cy - 12, w: 28, h: 24, dmg: 2, owner: 'player', type: 'ninja', life: 6, rehit: 0, pierce: true, knock: 2 });
+          d.box = KB.hitbox({ x: p.cx - 16, y: p.cy - 14, w: 32, h: 30, dmg: 3, owner: 'player', type: 'ninja', life: 8, rehit: 0, pierce: true, knock: 2 });
         }
         return;
       }
@@ -414,17 +462,19 @@
   //    按住 50 放開 居合一閃：全畫面白閃 + 水平斬線，前方 160px 判定，被斬的敵人 10 幀後才倒下
   //    空中 X      落下斬：垂直俯衝，落地向左右各放一道衝擊波
   //    ↑+X        上撩斬：把敵人挑到空中
+  //    ↓+X        地摺斬：壓低重心貼地橫掃 34px（Round 9 新增；空中版 = 向下斬並加速落下）
   // ======================================================================
   def('blade', {
     color: '#eef2ff', duration: 20, hold: true, maxHold: 600, lockMove: false, moveSpeed: P.walk, fps: 12, canJump: true,
     desc: '一柄比身體還長的大太刀，出鞘的瞬間連空氣都被切開。',
     flavour: '刀在鞘中時最快。',
-    moves: [['X', '三段連斬'], ['按住 X', '居合蓄力'], ['按住 50 幀放開', '必殺・居合一閃'], ['空中 X', '落下斬'], ['↑+X', '上撩斬']],
+    moves: [['X', '三段連斬'], ['↑+X', '上撩斬'], ['↓+X', '地摺斬'], ['空中 X', '落下斬'], ['按住 50 幀放開', '必殺・居合一閃']],
     onGet(p) { const d = data(p); d.combo = 0; d.cut = []; },
+    onCrouchAttack(p) { startMove(p, 'lowcut'); },
     onAttack(p) {
       const d = data(p); killBox(p); d.t = 0; d.charging = false; d.charged = false; d.chargeT = 0;
       d.cut = d.cut || [];
-      d.mode = pickMode(p, 'fall', 'upcut', 'combo');
+      d.mode = pickMode(p, 'fall', 'upcut', 'combo', 'lowcut');
       const f = KB.game ? KB.game.frame : 0;
       if (d.mode === 'combo') {
         if (f - (d.lastCombo || -999) > 46) d.combo = 0;
@@ -448,6 +498,23 @@
         });
         if (p.onGround) { p.vy = -2.6; p.onGround = false; }
         sfx('sword');
+      } else if (d.mode === 'lowcut') {
+        // ↓+X 地摺斬：貼地橫掃 + 前滑；空中版改成向下斬（判定框移到身體下方）
+        const air = !p.onGround;
+        setup(p, { anim: 'kirby_attack_blade_down', dur: 24, fps: 12, lock: true, maxHold: 0 });
+        d.air = air;
+        if (air) {
+          d.box = KB.hitbox({ x: 0, y: 0, w: 28, h: 30, dmg: 5, owner: 'player', type: 'blade', follow: p, ox: -14, oy: 6, life: 18, rehit: 0, knock: 2.2, flipWithOwner: false });
+          p.vx = p.dir * 1.2; if (p.vy < 2.8) p.vy = 2.8;
+          slash(p.cx, p.cy + 12, 20, Math.PI / 2, { color: '#eef2ff', width: 3, frames: 11, arc: 2.0 });
+        } else {
+          d.box = KB.hitbox({ x: 0, y: 0, w: 34, h: 14, dmg: 5, owner: 'player', type: 'blade', follow: p, ox: -4, oy: 6, life: 18, rehit: 0, knock: 2.4 });
+          p.vx = p.dir * 2.8;
+          slash(p.cx + p.dir * 10, p.bottom - 5, 20, p.dir > 0 ? 0 : Math.PI, { color: '#eef2ff', width: 3, frames: 11, arc: 1.2, flip: p.dir < 0 });
+          shockwave(p.cx + p.dir * 8, p.bottom, { dir: p.dir, speed: 3.4, frames: 18, w: 12, h: 13, color: '#eef2ff' });
+        }
+        afterimage(p, { frames: 22, color: '#eef2ff', every: 2, alpha: 0.45 });
+        hitstop(2); shake(3); sfx('sword');
       } else if (d.mode === 'fall') {
         setup(p, { anim: 'kirby_attack_blade_fall', dur: 60, fps: 12, lock: true, maxHold: 0 });
         p.vy = 6; p.vx = 0;
@@ -506,7 +573,14 @@
         }
         return;
       }
-      if (d.mode === 'upcut') { if (d.t === 3) { slash(p.cx + p.dir * 8, p.cy - 16, 22, -1.4, { color: '#eef2ff', width: 2, frames: 10, arc: 1.8, flip: p.dir < 0 }); hitstop(2); } return; }
+      if (d.mode === 'lowcut') {
+        if (p.onGround) { p.vx = p.dir * Math.max(0.7, 2.8 - d.t * 0.16); }
+        else if (p.vy < 1.4) p.vy = 1.4;
+        if (d.t >= 1 && d.t <= 14) KB.particles(p.cx + p.dir * rnd(6, 26), p.bottom - rnd(1, 10), ['#ffffff', '#eef2ff'], 1, { spread: 0.25, grav: 0.04, life: 9, up: 0.2, size: 1 });
+        if (d.box && !d.box.dead && d.t > 17) { d.box.dead = true; d.box = null; }
+        return;
+      }
+      if (d.mode === 'upcut') { if (!p.onGround) slowFall(p, 0.9); if (d.t === 3) { slash(p.cx + p.dir * 8, p.cy - 16, 22, -1.4, { color: '#eef2ff', width: 2, frames: 10, arc: 1.8, flip: p.dir < 0 }); hitstop(2); } return; }
       if (d.mode === 'fall') {
         if (!p.onGround) {
           p.vy = Math.max(p.vy, 6); p.vx = 0; beat(d.box);
@@ -553,7 +627,7 @@
         return;
       }
     },
-    onEnd(p) { killBox(p); clearAnim(p); const d = data(p); d.mode = null; d.charging = false; d.charged = false; d.landed = false; },
+    onEnd(p) { killBox(p); clearAnim(p); const d = data(p); d.mode = null; d.charging = false; d.charged = false; d.landed = false; d.air = false; },
     onLose(p) { killBox(p); clearAnim(p); const d = data(p); d.cut = []; d.combo = 0; },
   });
 
@@ -563,6 +637,7 @@
   //    按住 40 放開 貫穿箭：直線高速、可貫穿、白色拖尾
   //    按住 80 放開 必殺・流星箭：letterbox + 一支巨箭 beam 穿越全畫面
   //    空中 X      箭雨：朝下扇形 5 支
+  //    ↑+X        對空連射：朝正上方扇形三連射 + 弓身近身判定（Round 9 新增）
   //    ↓+X        陷阱箭：插在地上 180 幀，敵人踩到爆炸
   // ======================================================================
   class BowTrap extends KB.Entity {
@@ -629,13 +704,14 @@
     color: '#48c048', duration: 22, hold: true, maxHold: 600, lockMove: false, moveSpeed: P.walk, fps: 12, canJump: true,
     desc: '精靈之弓拉滿時會把周圍的光都吸進箭尖，放手就是一道流星。',
     flavour: '風會告訴你該瞄哪裡。',
-    moves: [['X', '射箭'], ['蓄力 40', '貫穿箭'], ['蓄力 80', '必殺・流星箭'], ['空中 X', '箭雨'], ['↓+X', '陷阱箭']],
+    moves: [['X', '射箭'], ['↑+X', '對空連射'], ['↓+X', '陷阱箭'], ['空中 X', '箭雨'], ['蓄力 40', '貫穿箭'], ['蓄力 80', '必殺・流星箭']],
     onGet(p) { const d = data(p); d.lv = 0; },
     onCrouchAttack(p) { startMove(p, 'trap'); },
     onAttack(p) {
       const d = data(p); killBox(p); d.t = 0; d.lv = 0;
-      d.mode = pickMode(p, 'rain', null, 'shot');
+      d.mode = pickMode(p, 'rain', 'upshot', 'shot', 'trap');
       if (d.mode === 'shot') setup(p, { anim: 'kirby_attack_bow', dur: 22, fps: 12, lock: false, maxHold: 600 });
+      else if (d.mode === 'upshot') setup(p, { anim: 'kirby_attack_bow_up', dur: 26, fps: 12, lock: true, maxHold: 0 });
       else if (d.mode === 'rain') setup(p, { anim: 'kirby_attack_bow_rain', dur: 34, fps: 12, lock: false, maxHold: 0 });
       else if (d.mode === 'trap') setup(p, { anim: 'kirby_attack_bow_trap', dur: 26, fps: 10, lock: true, maxHold: 0 });
       else if (d.mode === 'pierce') setup(p, { anim: 'kirby_attack_bow_charge', dur: 28, fps: 10, lock: true, maxHold: 0 });
@@ -653,6 +729,26 @@
           if (d.t % 3 === 0) KB.particles(p.cx + rnd(-14, 14), p.cy + rnd(-12, 12), d.lv > 1 ? ['#ffffff', '#fff8c0'] : ['#fff8c0', '#48c048'], 1, { spread: 0.3, grav: -0.06, life: 14, up: 0.5, size: 1 });
         }
         if (!held && d.lv > 0) { startMove(p, d.lv > 1 ? 'meteor' : 'pierce'); return; }
+        return;
+      }
+      if (d.mode === 'upshot') {
+        slowFall(p, 0.8); p.vx *= 0.85;
+        if (d.t === 1) {
+          // 弓身本身的近身判定（頭頂），確保近距離的敵人也打得到
+          d.box = KB.hitbox({ x: 0, y: 0, w: 22, h: 26, dmg: 3, owner: 'player', type: 'bow', follow: p, ox: -11, oy: -24, life: 16, rehit: 0, knock: 1.8, flipWithOwner: false });
+          aura(p, { color: '#fff8c0', r: 14, frames: 12 });
+        }
+        if (d.t === 5) {
+          for (let i = -1; i <= 1; i++) {
+            const a = -Math.PI / 2 + i * 0.22;
+            const ar = fireArrow(p, Math.cos(a) * 6.4 + p.dir * 0.4, Math.sin(a) * 6.4, { grav: 0.05, oy: -6, dmg: 3, life: 60 });
+            ar.rot = a;
+          }
+          burst(p.cx, p.y - 4, { n: 8, colors: ['#48c048', '#fff8c0', '#ffffff'], speed: 2, life: 12, grav: 0 });
+          ring(p.cx, p.y - 6, { r0: 3, r1: 22, frames: 12, color: '#fff8c0', width: 2 });
+          shake(2); sfx('bow'); sfx('arrow');
+        }
+        if (d.t % 3 === 1) KB.particles(p.cx + rnd(-7, 7), p.y - rnd(2, 24), ['#48c048', '#fff8c0'], 1, { spread: 0.3, grav: -0.05, life: 10, up: 0.7, size: 1 });
         return;
       }
       if (d.mode === 'rain') {

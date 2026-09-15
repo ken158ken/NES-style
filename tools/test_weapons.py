@@ -15,7 +15,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import enemy_test as ET
 from enemy_test import (Harness, HOOK_JS, TEST_LEVEL, INDEX, GROUND_TOP, PLAYER_H,
                         spawned_of, run_move, inhale_until)
-from test_charge import run_charge
+from test_charge import run_charge, run_move_table, BASIC_KEYS, WEAPON_KEYS
 
 try:
     sys.stdout.reconfigure(encoding='utf-8')
@@ -103,6 +103,127 @@ def phase_moves(h, only):
                 ok = False; desc += ' ' + repr(ex_)
             check(nm + ': ' + desc, ok, dict(projs=sorted(set(x['spr'] for x in sp if x['type'] == 'proj')),
                                              boxes=[(x['kind'], x['w']) for x in sp if x['type'] == 'hitbox' and x['owner'] == 'player'][:8]))
+
+
+# ---------------------------------------------------------------------------
+# Round 9：12 能力 × {↑X 地面 / ↓X 地面 / ↑X 空中 / ↓X 空中 / 空中 X}
+#   每一招都要：命中 waddledee 會死（或凍結）、收招後回到正常狀態、
+#   空中出招期間 y 必須遞增（會下墜，不可懸停）—— def.hover 例外。
+#   擺位用像素直接擺（不靠地圖）：ah = 卡比離地高度，dx = 敵人相對卡比的 x 位移，
+#   eair = 敵人浮在卡比頭頂上方幾 px（0 = 站在地面）。
+# ---------------------------------------------------------------------------
+R9_ABILITIES = ['fire', 'sword', 'beam', 'cutter', 'spark', 'stone', 'ice', 'hammer',
+                'gunner', 'ninja', 'blade', 'bow']
+R9_CASES = ['up_g', 'down_g', 'up_a', 'down_a', 'air_x']
+R9_LABEL = {'up_g': '↑+X（地面）', 'down_g': '↓+X（地面）', 'up_a': '↑+X（空中）',
+            'down_a': '↓+X（空中）', 'air_x': '空中 X'}
+R9_KEYS = {
+    'up_g': [('up', 2), ('up,attack', 2)],
+    'down_g': [('down', 2), ('down,attack', 2)],
+    'up_a': [('up', 2), ('up,attack', 2)],
+    'down_a': [('down', 2), ('down,attack', 2)],
+    'air_x': [(None, 2), ('attack', 2)],
+}
+# 各 case 的預設擺位
+R9_DEF = {
+    'up_g':   dict(ah=0,  dx=4,  eair=14, wait=70),
+    'down_g': dict(ah=0,  dx=18, eair=0,  wait=80),
+    'up_a':   dict(ah=44, dx=4,  eair=14, wait=80),
+    'down_a': dict(ah=26, dx=0,  eair=0,  wait=80),
+    'air_x':  dict(ah=26, dx=0,  eair=0,  wait=80),
+}
+# 招式特性造成的擺位覆寫（前衝型要把敵人放遠一點、環繞型要靠近一點）
+R9_FIX = {
+    ('fire', 'air_x'): dict(ah=20),
+    ('sword', 'air_x'): dict(ah=20),
+    ('ice', 'air_x'): dict(ah=20),
+    ('ninja', 'down_g'): dict(dx=70),          # 替身瞬移往前 64px，敵人要放在落點
+    ('ninja', 'air_x'): dict(ah=36, dx=24),    # 飛踢是斜前下衝
+    ('bow', 'down_a'): dict(dx=14, wait=150),  # 陷阱箭放在腳邊、等敵人踩爆
+    ('bow', 'down_g'): dict(wait=150),
+    ('gunner', 'down_g'): dict(dx=44),         # 霰彈是遠程扇形，槍口在 cx+16
+    ('stone', 'up_a'): dict(ah=44, dx=0, eair=0),   # 彗星落石是往下砸 → 敵人放地面
+}
+# 石頭不會回 idle（維持 stone 形態直到再按 X），另外收招後補一次解除
+R9_STATES = dict(NORMAL_STATES=NORMAL_STATES)
+
+_R9_PLACE = """(o)=>{
+  const p = KB.player, e = window.__te, G = 160, PH = 15;
+  p.dir = 1; p.vx = 0; p.vy = 0;
+  p.x = 96; p.y = G - PH - (o.ah | 0);
+  if (o.ah > 0) { p.onGround = false; p.coyoteT = 0; }
+  e.vx = 0; e.vy = 0; e.freezeT = 0;
+  e.x = p.x + o.dx;
+  e.y = o.eair ? (p.y - o.eair - e.h) : (G - e.h);
+  e.onGround = !o.eair && !o.ah;
+  __kb.step(1);
+  return { px: +p.x.toFixed(1), py: +p.y.toFixed(1), ex: +e.x.toFixed(1), ey: +e.y.toFixed(1), onGround: p.onGround };
+}"""
+
+
+def r9_run(h, ability, case):
+    """跑一次方向招，回傳 (samples, spawned, placed, y0)"""
+    spec = dict(R9_DEF[case]); spec.update(R9_FIX.get((ability, case), {}))
+    h.goto(6, 9, ability=ability, immune=True)
+    h.spawn('waddledee', 9, 9, d=-1)
+    h.run(6, 6)                                    # 讓敵人落地站穩
+    placed = h.ev(_R9_PLACE, dict(ah=spec['ah'], dx=spec['dx'], eair=spec['eair']))
+    y0 = h.ev("()=>+KB.player.y.toFixed(2)")
+    ymid = None
+    for keys, n in R9_KEYS[case]:
+        h.run(n, n, keys=keys)
+        if ymid is None and keys and 'attack' in keys:
+            ymid = h.ev("()=>+KB.player.y.toFixed(2)")
+    h.release()
+    S = h.run(spec['wait'], 4)
+    return S, h.spawned(), placed, (ymid if ymid is not None else y0), spec
+
+
+def phase_round9(h, only):
+    for ability in R9_ABILITIES:
+        if only and ability not in only: continue
+        ok_states = NORMAL_STATES + (('stone',) if ability == 'stone' else ())
+        for case in R9_CASES:
+            nm = f'{ability} [{R9_LABEL[case]}]'
+            try:
+                S, sp, placed, ystart, spec = r9_run(h, ability, case)
+            except Exception as ex_:
+                check(nm + ': raised', False, repr(ex_)); continue
+            e = S[-1]['e']; st = S[-1]['p']['state']
+            killed = e['dead'] or e['freezeT'] > 0
+            check(nm + ': 命中 waddledee（死亡 / 凍結）', killed,
+                  dict(hp=e['hp'], dead=e['dead'], freeze=e['freezeT'], ex=e['x'], ey=e['y'],
+                       px=S[-1]['p']['x'], py=S[-1]['p']['y'], placed=placed))
+            check(nm + ': 收招回到正常狀態', st in ok_states, st)
+            if case in ('up_a', 'down_a', 'air_x'):
+                # 空中出招期間必須持續下墜（y 遞增）；能力標了 def.hover 才可以懸停
+                hover = h.ev("(k)=>!!(KB.ABILITIES[k] && KB.ABILITIES[k].hover)", ability)
+                ys = [s['p']['y'] for s in S[:8]]
+                ymax = max(ys + [S[-1]['p']['y']])
+                check(nm + ': 空中出招會下墜（y 遞增）', hover or ymax > ystart,
+                      dict(y_at_attack=ystart, y_after=ys, hover=hover))
+            if ability == 'stone':
+                h.ev("()=>{const p=KB.player; if(p.state==='stone'){p.stoneT=99; __kb.press({attack:true}); __kb.step(2); __kb.release(); __kb.step(4);} }")
+
+
+def phase_round9_defs(h, only):
+    """新招式一定要有專屬動畫幀（kirby_attack_*_up / _down / 空中版）且沒有缺圖。"""
+    want = {
+        'fire': ['kirby_attack_fire_up'],
+        'sword': ['kirby_attack_sword_down'],
+        'beam': ['kirby_attack_beam_up', 'kirby_attack_beam_star'],
+        'cutter': ['kirby_attack_cutter_drill'],
+        'spark': ['kirby_attack_spark_up', 'kirby_attack_spark_down', 'kirby_attack_spark_dive'],
+        'ice': ['kirby_attack_ice_up'],
+        'hammer': ['kirby_attack_hammer_up'],
+        'ninja': ['kirby_attack_ninja_up'],
+        'blade': ['kirby_attack_blade_down'],
+        'bow': ['kirby_attack_bow_up'],
+    }
+    names = [n for k, v in want.items() if not only or k in only for n in v]
+    got = h.ev("(ns)=>ns.map(n=>[n, KB.has(n), KB.SPR[n] ? KB.SPR[n].n : 0])", names)
+    for n, has, frames in got:
+        check(f'sprite {n}: 存在且 ≥ 2 幀', bool(has) and frames >= 2, dict(has=has, frames=frames))
 
 
 # ---------------------------------------------------------------------------
@@ -261,6 +382,17 @@ def main():
         print('-' * 8, 'charge')
         try: phase_charge(h, [o for o in only if o in ('gunner', 'blade', 'bow')])
         except Exception as ex: check('charge: raised', False, repr(ex))
+        r9only = [o for o in only if o in R9_ABILITIES]
+        if not only or r9only or 'r9' in only:
+            print('-' * 8, 'Round 9 招式表')
+            try: run_move_table(h, BASIC_KEYS + WEAPON_KEYS, check)
+            except Exception as ex: check('Round 9 moves table: raised', False, repr(ex))
+            print('-' * 8, 'Round 9 新動畫幀')
+            try: phase_round9_defs(h, r9only)
+            except Exception as ex: check('Round 9 sprites: raised', False, repr(ex))
+            print('-' * 8, 'Round 9 四方向招式（12 能力 × 5）')
+            try: phase_round9(h, r9only)
+            except Exception as ex: check('Round 9 dir moves: raised', False, repr(ex))
         if not only or 'ninja' in only:
             print('-' * 8, 'wallkick')
             try: phase_wallkick(h)

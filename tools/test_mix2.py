@@ -109,6 +109,80 @@ MOVES = [
     ('hammermech', '蓄力 軌道砲鎚', 'waddledee', 8, 9, [('attack', 56), (None, 2)], 130, 3, 9),
 ]
 
+# ---------------------------------------------------------------------------
+# Round 9：每組補齊 ↑+X / ↓+X / 空中 X，且 ↑X / ↓X 在空中也要能用。
+#   加上上面 MOVES 既有的地面招，12 組 × { ↑X 地、↓X 地、↑X 空、↓X 空、空中 X } 全有測試。
+# ---------------------------------------------------------------------------
+UP_G = [('up,attack', 3), (None, 2)]
+DN_G = [('down', 2), ('down,attack', 3), (None, 2)]
+UP_A = lambda h=40: [AIR(h), ('up,attack', 3), (None, 2)]
+DN_A = lambda h=40: [AIR(h), ('down,attack', 3), (None, 2)]
+AIR_X = lambda h, n=8: [AIR(h), ('attack', n), (None, 2)]
+
+MOVES9 = [
+    # ---- flamebow（原本就有 空中 X）----
+    ('flamebow', '↑+X 烈陽仰射', 'waddledee', 4, 9, UP_G, 80, 3, 9),
+    ('flamebow', '↓+X 地火箭列', 'waddledee', 4, 9, DN_G, 90, 3, 9),
+    ('flamebow', '空中 ↑+X 烈陽仰射', 'waddledee', 4, 9, UP_A(), 90, 3, 9),
+    ('flamebow', '空中 ↓+X 地火箭列', 'waddledee', 4, 9, DN_A(), 90, 3, 9),
+    # ---- frosthammer（原本就有 ↓+X）----
+    ('frosthammer', '↑+X 冰鎚上擊', 'waddledee', 4, 9, UP_G, 70, 3, 9),
+    ('frosthammer', '空中 ↑+X 冰鎚上擊', 'waddledee', 4, 9, UP_A(), 80, 3, 9),
+    ('frosthammer', '空中 ↓+X 冰柱群', 'waddledee', 6, 9, DN_A(), 90, 3, 9),
+    ('frosthammer', '空中 X 霜墜鎚', 'waddledee', 4, 9, AIR_X(46, 6), 80, 3, 9),
+    # ---- thundersword（原本就有 空中 X）----
+    ('thundersword', '↑+X 雷昇斬', 'waddledee', 4, 9, UP_G, 60, 3, 9),
+    ('thundersword', '↓+X 落雷插劍', 'waddledee', 4, 9, DN_G, 70, 3, 9),
+    ('thundersword', '空中 ↑+X 雷昇斬', 'waddledee', 4, 9, UP_A(), 70, 3, 9),
+    ('thundersword', '空中 ↓+X 落雷插劍', 'waddledee', 4, 9, DN_A(), 80, 3, 9),
+    # ---- flameninja（原本就有 ↓+X）----
+    ('flameninja', '↑+X 火遁天輪手裡劍', 'waddledee', 4, 9, UP_G, 70, 3, 9),
+    ('flameninja', '空中 ↑+X 火遁天輪手裡劍', 'waddledee', 4, 9, UP_A(), 80, 3, 9),
+    ('flameninja', '空中 ↓+X 火焰替身爆', 'waddledee', 6, 9, DN_A(), 80, 3, 9),
+    ('flameninja', '空中 X 炎舞亂投', 'waddledee', 5, 9, AIR_X(44, 26), 80, 3, 9),
+    # ---- frostninja（原本就有 ↓+X）----
+    ('frostninja', '↑+X 冰柱天梯', 'waddledee', 4, 9, UP_G, 70, 3, 9),
+    ('frostninja', '空中 ↑+X 冰柱天梯', 'waddledee', 4, 9, UP_A(), 80, 3, 9),
+    ('frostninja', '空中 ↓+X 冰鏡瞬移', 'waddledee', 6, 9, DN_A(), 80, 3, 9),
+    ('frostninja', '空中 X 霰針亂舞', 'waddledee', 5, 9, AIR_X(44, 24), 80, 3, 9),
+    # ---- thundergun（原本就有 ↓+X）----
+    ('thundergun', '↑+X 對空電漿彈', 'waddledee', 4, 9, UP_G, 80, 3, 9),
+    ('thundergun', '空中 ↑+X 對空電漿彈', 'waddledee', 4, 9, UP_A(), 90, 3, 9),
+    ('thundergun', '空中 ↓+X 電網霰彈', 'waddledee', 6, 9, DN_A(), 90, 3, 9),
+    ('thundergun', '空中 X 滯空掃射', 'waddledee', 5, 9, AIR_X(44, 26), 90, 3, 9),
+    # ---- stonegiant（原本就有 ↓+X）----
+    ('stonegiant', '↑+X 擎天岩柱', 'waddledee', 4, 9, UP_G, 80, 3, 9),
+    ('stonegiant', '空中 ↑+X 擎天岩柱', 'waddledee', 4, 9, UP_A(), 90, 3, 9),
+    ('stonegiant', '空中 ↓+X 滾石衝撞', 'waddledee', 9, 9, DN_A(), 90, 3, 9),
+    ('stonegiant', '空中 X 巨人墜擊', 'waddledee', 4, 9, AIR_X(48, 6), 80, 3, 9),
+    # ---- flamedragon（原本就有 空中 X）----
+    ('flamedragon', '↑+X 焚天吐息', 'waddledee', 4, 9, UP_G, 80, 3, 9),
+    ('flamedragon', '↓+X 熔岩爪痕', 'waddledee', 4, 9, DN_G, 80, 3, 9),
+    ('flamedragon', '空中 ↑+X 焚天吐息', 'waddledee', 4, 9, UP_A(), 90, 3, 9),
+    ('flamedragon', '空中 ↓+X 熔岩爪痕', 'waddledee', 4, 9, DN_A(), 90, 3, 9),
+    # ---- thunderdragon（原本就有 空中 X）----
+    ('thunderdragon', '↑+X 雷鳴嘶吼', 'waddledee', 4, 9, UP_G, 80, 3, 9),
+    ('thunderdragon', '↓+X 地脈雷爪', 'waddledee', 4, 9, DN_G, 80, 3, 9),
+    ('thunderdragon', '空中 ↑+X 雷鳴嘶吼', 'waddledee', 4, 9, UP_A(), 90, 3, 9),
+    ('thunderdragon', '空中 ↓+X 地脈雷爪', 'waddledee', 4, 9, DN_A(), 90, 3, 9),
+    # ---- timebeam（原本就有 ↑+X）----
+    ('timebeam', '↓+X 時砂沙漏', 'waddledee', 4, 9, DN_G, 90, 3, 9),
+    ('timebeam', '空中 ↑+X 時間裂縫', 'waddledee', 6, 9, UP_A(), 100, 3, 9),
+    ('timebeam', '空中 ↓+X 時砂沙漏', 'waddledee', 4, 9, DN_A(), 90, 3, 9),
+    ('timebeam', '空中 X 逆行光環', 'waddledee', 4, 9, AIR_X(40, 28), 90, 3, 9),
+    # ---- gravityblade（原本就有 ↓+X）----
+    ('gravityblade', '↑+X 反重力昇刃', 'waddledee', 4, 9, UP_G, 80, 3, 9),
+    ('gravityblade', '空中 ↑+X 反重力昇刃', 'waddledee', 4, 9, UP_A(), 90, 3, 9),
+    ('gravityblade', '空中 ↓+X 引力回收刃', 'waddledee', 7, 9, DN_A(), 100, 3, 9),
+    ('gravityblade', '空中 X 墜壓刃', 'waddledee', 4, 9, AIR_X(44, 6), 80, 3, 9),
+    # ---- hammermech（原本就有 ↑+X）----
+    ('hammermech', '↓+X 地錨衝擊', 'waddledee', 4, 9, DN_G, 90, 3, 9),
+    ('hammermech', '空中 ↑+X 飛彈鎚', 'waddledee', 9, 9, UP_A(), 110, 3, 9),
+    ('hammermech', '空中 ↓+X 地錨衝擊', 'waddledee', 4, 9, DN_A(), 90, 3, 9),
+    ('hammermech', '空中 X 噴射迴旋鎚', 'waddledee', 4, 9, AIR_X(40, 28), 90, 3, 9),
+]
+MOVES += MOVES9
+
 
 def has_proj(spr, n=1):
     return lambda sp: len(spawned_of(sp, type='proj', spr=spr, owner='player')) >= n
@@ -186,6 +260,63 @@ EXTRA = {
               both(has_box(46, 36, 1, 'mech'), has_box(60, 30, 1, 'mech'))),
     '↑+X 飛彈鎚': ('2 枚 Mix2Homing 飛彈', has_cls('Mix2Homing', 2)),
     '蓄力 軌道砲鎚': ('70×230 軌道砲柱', has_box(70, 230, 1, 'mech')),
+    # ---- Round 9 新招 ----
+    '↑+X 烈陽仰射': ('50×50 烈陽炸裂', has_box(50, 50, 1, 'fire')),
+    '空中 ↑+X 烈陽仰射': ('空中一樣炸出 50×50 烈陽', has_box(50, 50, 1, 'fire')),
+    '↓+X 地火箭列': ('3 根 18×46 火柱', has_box(18, 46, 3, 'fire')),
+    '空中 ↓+X 地火箭列': ('空中一樣立起 3 根火柱', has_box(18, 46, 3, 'fire')),
+    '↑+X 冰鎚上擊': ('32×54 上擊 + 2 片冰刃',
+                 lambda sp: has_box(32, 54, 1, 'ice')(sp) and has_proj('proj_mix2_shard_ice', 2)(sp)),
+    '空中 ↑+X 冰鎚上擊': ('空中升招的地面餘波（ice）', has_box(44, 22, 1, 'ice')),
+    '空中 ↓+X 冰柱群': ('空中一樣豎起 5 根冰柱', has_proj('proj_mix2_shard_ice', 5)),
+    '空中 X 霜墜鎚': ('落地 68×34 凍結判定', has_box(68, 34, 1, 'ice')),
+    '↑+X 雷昇斬': ('24×68 雷昇斬', has_box(24, 68, 1, 'spark')),
+    '空中 ↑+X 雷昇斬': ('空中升招的地面餘波（spark）', has_box(44, 22, 1, 'spark')),
+    '↓+X 落雷插劍': ('84×22 地面落雷', has_box(84, 22, 1, 'spark')),
+    '空中 ↓+X 落雷插劍': ('空中一樣打出 84×22 地面落雷', has_box(84, 22, 1, 'spark')),
+    '↑+X 火遁天輪手裡劍': ('30×56 昇焰 + 3 枚上飛手裡劍',
+                    lambda sp: has_box(30, 56, 1, 'fire')(sp) and has_proj('proj_mix2_star_fire', 3)(sp)),
+    '空中 ↑+X 火遁天輪手裡劍': ('空中升招的地面餘波（fire）', has_box(44, 22, 1, 'fire')),
+    '空中 ↓+X 火焰替身爆': ('空中一樣留下替身爆（54×46）', has_box(54, 46, 1, 'fire')),
+    '空中 X 炎舞亂投': ('≥ 5 枚下壓手裡劍', has_proj('proj_mix2_star_fire', 5)),
+    '↑+X 冰柱天梯': ('28×58 冰梯 + 3 根上飛冰刃',
+                 lambda sp: has_box(28, 58, 1, 'ice')(sp) and has_proj('proj_mix2_shard_ice', 3)(sp)),
+    '空中 ↑+X 冰柱天梯': ('空中升招的地面餘波（ice）', has_box(44, 22, 1, 'ice')),
+    '空中 ↓+X 冰鏡瞬移': ('空中一樣瞬移並留下碎鏡冰片', has_proj('proj_mix2_shard_ice', 2)),
+    '空中 X 霰針亂舞': ('≥ 6 支下壓冰針', has_proj('proj_mix2_arrow_ice', 6)),
+    '↑+X 對空電漿彈': ('46×46 電網雲', has_box(46, 46, 1, 'spark')),
+    '空中 ↑+X 對空電漿彈': ('空中一樣張開 46×46 電網雲', has_box(46, 46, 1, 'spark')),
+    '空中 ↓+X 電網霰彈': ('空中一樣打出電網霰彈', has_proj('proj_mix2_star_spark', 7)),
+    '空中 X 滯空掃射': ('≥ 4 發下壓電擊彈', has_proj('proj_mix2_orb_spark', 4)),
+    '↑+X 擎天岩柱': ('32×62 岩柱 + 2 塊上飛岩',
+                 lambda sp: has_box(32, 62, 1, 'stone')(sp) and has_proj('proj_mix2_shard_stone', 2)(sp)),
+    '空中 ↑+X 擎天岩柱': ('空中升招的地面餘波（stone）', has_box(44, 22, 1, 'stone')),
+    '空中 ↓+X 滾石衝撞': ('空中一樣滾出 stone 判定', has_box(30, 24, 1, 'stone')),
+    '空中 X 巨人墜擊': ('落地 96×36 巨人震地', has_box(96, 36, 1, 'stone')),
+    '↑+X 焚天吐息': ('28×68 仰天炎息', has_box(28, 68, 1, 'fire')),
+    '空中 ↑+X 焚天吐息': ('空中一樣吐出 28×68 炎息', has_box(28, 68, 1, 'fire')),
+    '↓+X 熔岩爪痕': ('72×24 熔岩爪 + 火海', lambda sp: has_box(72, 24, 1, 'fire')(sp) and has_box(44, 22, 1, 'fire')(sp)),
+    '空中 ↓+X 熔岩爪痕': ('空中一樣抓出 72×24 熔岩爪', has_box(72, 24, 1, 'fire')),
+    '↑+X 雷鳴嘶吼': ('26×70 雷吼', has_box(26, 70, 1, 'spark')),
+    '空中 ↑+X 雷鳴嘶吼': ('空中一樣吼出 26×70 雷吼', has_box(26, 70, 1, 'spark')),
+    '↓+X 地脈雷爪': ('76×24 地脈電流', has_box(76, 24, 1, 'spark')),
+    '空中 ↓+X 地脈雷爪': ('空中一樣打出 76×24 地脈電流', has_box(76, 24, 1, 'spark')),
+    '↓+X 時砂沙漏': ('66×42 時砂場 + proj_mix2_ring_time',
+                 lambda sp: has_box(66, 42, 1, 'beam')(sp) and has_proj('proj_mix2_ring_time', 1)(sp)),
+    '空中 ↓+X 時砂沙漏': ('空中一樣張開 66×42 時砂場', has_box(66, 42, 1, 'beam')),
+    '空中 ↑+X 時間裂縫': ('空中一樣撕開 3 道時間裂縫', has_proj('proj_mix2_ring_time', 3)),
+    '空中 X 逆行光環': ('44×44 逆行光環', has_box(44, 44, 1, 'beam')),
+    '↑+X 反重力昇刃': ('30×58 昇刃 + 2 枚上飛刃',
+                  lambda sp: has_box(30, 58, 1, 'cutter')(sp) and has_proj('proj_mix2_star_void', 2)(sp)),
+    '空中 ↑+X 反重力昇刃': ('空中升招的地面餘波（cutter）', has_box(44, 22, 1, 'cutter')),
+    '空中 ↓+X 引力回收刃': ('空中一樣丟出 Mix2Return 回收刃', has_cls('Mix2Return', 1)),
+    '空中 X 墜壓刃': ('落地 64×32 重力壓', has_box(64, 32, 1, 'cutter')),
+    '↓+X 地錨衝擊': ('80×28 地錨 + 2 枚橫飛火箭',
+                 lambda sp: has_box(80, 28, 1, 'mech')(sp) and has_proj('proj_mix2_rocket_steel', 2)(sp)),
+    '空中 ↓+X 地錨衝擊': ('空中一樣砸出 80×28 地錨', has_box(80, 28, 1, 'mech')),
+    '空中 ↑+X 飛彈鎚': ('空中一樣射出 2 枚 Mix2Homing', has_cls('Mix2Homing', 2)),
+    '空中 X 噴射迴旋鎚': ('44×40 迴旋判定 + 2 枚火箭',
+                   lambda sp: has_box(44, 40, 1, 'mech')(sp) and has_proj('proj_mix2_rocket_steel', 2)(sp)),
 }
 
 
@@ -400,6 +531,9 @@ def phase_defs(h):
           hat: KB.has(d.hat), icon: KB.has(d.icon), mini: KB.has(d.icon + '_mini'),
           anim: KB.has('kirby_attack_' + k), animN: (KB.SPR['kirby_attack_' + k]||{}).n || 0,
           ult: KB.has('kirby_attack_' + k + '_ult'),
+          animUp: KB.has('kirby_attack_' + k + '_up'), animDn: KB.has('kirby_attack_' + k + '_dn'),
+          mvKeys: (d.moves || []).map(m => String(m[0])),
+          slots: ['m1', 'up', 'dn', 'air', 'ult'].filter(x => d.mv && d.mv[x]),
           iconW: (KB.SPR[d.icon]||{}).w || 0, iconH: (KB.SPR[d.icon]||{}).h || 0,
         } : null;
       }
@@ -410,8 +544,15 @@ def phase_defs(h):
         check(f'{k}: 註冊完整（KEYS / 名稱 / HUD）', v is not None and v['inKeys'] and v['name'] and v['hud'], v)
         if not v:
             continue
-        check(f'{k}: 3 招（每招都有按鍵 + 招式名）+ desc + flavour + color',
-              v['moves'] == 3 and v['movesOk'] and v['desc'] and v['flavour'] and v['color'], v)
+        check(f'{k}: 5 招（每招都有按鍵 + 招式名）+ desc + flavour + color',
+              v['moves'] == 5 and v['movesOk'] and v['desc'] and v['flavour'] and v['color'], v)
+        mk = v['mvKeys']
+        check(f'{k}: 招式表固定順序 X / ↑+X / ↓+X / 空中 X / 蓄力',
+              len(mk) == 5 and mk[0] == 'X' and '↑' in mk[1] and '↓' in mk[2] and '空中' in mk[3] and '按住' in mk[4], mk)
+        check(f'{k}: 招式表同時含 ↑ 與 ↓', any('↑' in x for x in mk) and any('↓' in x for x in mk), mk)
+        check(f'{k}: 五個招式槽齊全（m1 / up / dn / air / ult）',
+              v['slots'] == ['m1', 'up', 'dn', 'air', 'ult'], v['slots'])
+        check(f'{k}: ↑X / ↓X 專屬姿勢圖（_up / _dn）', v['animUp'] and v['animDn'], v)
         check(f'{k}: mix == {list(want[k])} + mixEl + transform',
               v['mix'] == list(want[k]) and bool(v['mixEl']) and v['transform'], v)
         check(f'{k}: hat / icon / mini / 招式動畫 / 必殺動畫都有圖',
@@ -445,6 +586,36 @@ def phase_defs(h):
       return miss;
     }""")
     check('42 個 proj_mix2_* 投射物精靈全部註冊', spr == [], spr)
+
+
+# ---------------------------------------------------------------------------
+# G. Round 9：空中出招時人物要持續下墜（不可以懸停）
+# ---------------------------------------------------------------------------
+_FALL_JS = """([keys, n]) => {
+  const p = KB.player;
+  p.x = 3 * 16; p.bottom = 160 - 64; p.vx = 0; p.vy = 0;
+  __kb.step(1);
+  const y0 = p.y;
+  __kb.press(keys);
+  const ys = [];
+  for (let i = 0; i < n; i++) { __kb.step(1); ys.push(+p.y.toFixed(2)); }
+  __kb.release();
+  let stall = 0, maxStall = 0, prev = y0;
+  for (const y of ys) { if (y <= prev + 0.001) stall++; else stall = 0; maxStall = Math.max(maxStall, stall); prev = y; }
+  return { y0: +y0.toFixed(2), y1: ys[ys.length - 1], drop: +(ys[ys.length - 1] - y0).toFixed(2), maxStall, state: p.state };
+}"""
+
+
+def phase_airfall(h, only):
+    for key in KEYS:
+        if only and key not in only:
+            continue
+        for label, keys in (('空中 X', {'attack': True}), ('空中 ↑X', {'up': True, 'attack': True}),
+                            ('空中 ↓X', {'down': True, 'attack': True})):
+            h.goto(3, 9, ability=key, immune=True)
+            o = h.ev(_FALL_JS, [keys, 26])
+            check(f'{key} [{label}]: 空中出招仍持續下墜（26 幀掉 ≥ 6px）', o['drop'] >= 6, o)
+            check(f'{key} [{label}]: 沒有懸停（連續不下墜 < 30 幀）', o['maxStall'] < 30, o)
 
 
 def main():
@@ -482,6 +653,10 @@ def main():
             print('-' * 8, 'hold')
             try: phase_hold(h)
             except Exception as ex: check('hold: raised', False, repr(ex))
+        if not only or 'airfall' in only or move_only:
+            print('-' * 8, 'airfall')
+            try: phase_airfall(h, move_only)
+            except Exception as ex: check('airfall: raised', False, repr(ex))
         if not only or move_only:
             print('-' * 8, 'moves'); phase_moves(h, move_only)
         missing = pg.evaluate("()=>__kb.missing()")

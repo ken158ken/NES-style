@@ -602,6 +602,148 @@
   ], { fps: 12 });
 
   // ============================================================
+  //  Round 9：↑+X / ↓+X / 空中 X 補齊用的新姿勢（每招 2 幀）
+  // ============================================================
+  // ---- 火焰：↑+X 火焰噴泉（向上噴出火柱）----
+  const fireCol = k => {
+    const outer = blob(24, 38, [ell(7, 0 + k, 10, 13), ell(8, 8, 8, 12), ell(9, 14 - k, 6, 8)],
+      { fill: 'f', edge: 'k', hi: 'y', lo: 'F', shade: false });
+    const inner = blob(24, 38, [ell(9, 3 + k, 6, 10), ell(10, 11, 4, 8)], { fill: 'y', edge: 'f', shade: false });
+    return paste(outer, inner, 0, 0);
+  };
+  const fireUpK = o => kirby(Object.assign({
+    w: 24, h: 38, ox: 2, oy: 18, eyes: EYE_SQUINT, eyeAt: [[7, 6], [12, 6]],
+    mouth: mouthBig(6, 5), mouthAt: [9, 9], cheeks: null, arms: [[16, 3, 5], [-1, 3, 5]], feet: [[1, 15], [11, 15]],
+  }, o));
+  S('kirby_attack_fire_up', [
+    fireUpK({ back: [[fireCol(0), -2, -18]] }),
+    fireUpK({ dy: -1, back: [[fireCol(2), -2, -18]] }),
+  ], { fps: 12 });
+
+  // ---- 劍：↓+X 掃堂斬（壓低重心、貼地橫掃）----
+  const lowK = o => kirby(Object.assign({
+    w: 34, h: 22, ox: 7, oy: 2, eyes: EYE_SQUINT, eyeAt: [[7, 7], [12, 7]],
+    mouth: MOUTH_OPEN, mouthAt: [9, 11], cheekAt: [[4, 11], [15, 11]],
+    arms: [[15, 11, 5], [0, 10, 5]], feet: [[0, 15], [11, 15]],
+  }, o));
+  S('kirby_attack_sword_down', [
+    lowK({ front: [[SWORD_S_R, 14, 9]] }),
+    lowK({ dy: 1, front: [[SWORD_S_R, 18, 12]], back: [[arcLayer(34, 22, 17, 17, 12, -35, 35, 'w'), -7, -2]] }),
+  ], { fps: 12 });
+
+  // ---- 光束：↑+X 天頂光柱（雙手上舉射出光柱）----
+  const beamCol = k => {
+    const o1 = blob(24, 40, [ell(7, 0, 10, 20), ell(8, 14 + k, 8, 12)], { fill: 'y', edge: 'Y', shade: false });
+    const o2 = blob(24, 40, [ell(9, 2, 6, 16), ell(10, 14 + k, 4, 10)], { fill: 'e', edge: 'y', shade: false });
+    return paste(o1, o2, 0, 0);
+  };
+  const beamUpK = o => kirby(Object.assign({
+    w: 24, h: 40, ox: 2, oy: 20, eyeAt: [[7, 4], [12, 4]], mouth: MOUTH_O, mouthAt: [9, 11],
+    arms: [[15, 1, 5], [1, 1, 5]], feet: [[1, 15], [11, 15]],
+  }, o));
+  S('kirby_attack_beam_up', [
+    beamUpK({ back: [[beamCol(0), -2, -20]] }),
+    beamUpK({ dy: -1, back: [[beamCol(3), -2, -20]], eyes: EYE_SQUINT, eyeAt: [[7, 5], [12, 5]] }),
+  ], { fps: 12 });
+
+  // ---- 光束：空中 X 光星墜（腳下旋轉的星環）----
+  const STAR4 = ['..k..', '.kyk.', 'kyyyk', '.kyk.', '..k..'];
+  const starRing = a => {
+    let f = blank(30, 30);
+    for (let i = 0; i < 4; i++) {
+      const t = a + i * 90;
+      f = paste(f, STAR4, Math.round(12 + Math.cos(t * Math.PI / 180) * 11), Math.round(18 + Math.sin(t * Math.PI / 180) * 9));
+    }
+    return f;
+  };
+  const starK = o => kirby(Object.assign({
+    w: 30, h: 30, ox: 5, oy: 8, eyes: EYE_SQUINT, eyeAt: [[7, 6], [12, 6]], mouth: MOUTH_O, mouthAt: [9, 12],
+    arms: [[16, 10, 5], [-1, 10, 5]], feet: [[1, 15], [11, 15]],
+  }, o));
+  S('kirby_attack_beam_star', [
+    starK({ front: [[starRing(0), -5, -8]] }),
+    starK({ dy: -1, front: [[starRing(45), -5, -8]] }),
+  ], { fps: 12 });
+
+  // ---- 刀刃：空中 X 錐旋刃（抱刃頭下旋轉俯衝）----
+  const drillK = o => kirby(Object.assign({
+    w: 26, h: 26, ox: 3, oy: 5, body: [2, 2, 16], arms: [], eyes: EYE_SQUINT, eyeAt: [[7, 6], [12, 6]],
+    mouth: MOUTH_LINE, mouthAt: [9, 13], cheekAt: [[4, 11], [15, 11]], feet: [[2, 15], [10, 15]],
+  }, o));
+  S('kirby_attack_cutter_drill', [
+    drillK({ front: [[BLADE_V, 11, 17]], back: [[arcLayer(26, 26, 13, 13, 11, -180, 180, 'e'), -3, -5]] }),
+    drillK({ dy: 1, front: [[BLADE_V, 11, 18]], back: [[arcLayer(26, 26, 13, 13, 10, -180, 180, 'w'), -3, -5]] }),
+  ], { fps: 14 });
+
+  // ---- 電擊：↑+X 雷擊柱（雙手上舉導出電柱）----
+  const boltCol = k => {
+    let f = blank(24, 38);
+    for (let i = 0; i < 6; i++) f = paste(f, BOLT, 10 + ((i + k) % 2 ? 2 : -2), 1 + i * 5);
+    return f;
+  };
+  const sparkUpK = o => kirby(Object.assign({
+    w: 24, h: 38, ox: 2, oy: 18, eyes: EYE_SQUINT, eyeAt: [[7, 6], [12, 6]], mouth: MOUTH_O, mouthAt: [9, 12],
+    arms: [[15, 1, 5], [1, 1, 5]], feet: [[1, 15], [11, 15]],
+  }, o));
+  S('kirby_attack_spark_up', [
+    sparkUpK({ back: [[boltCol(0), -2, -18]] }),
+    sparkUpK({ dy: -1, back: [[boltCol(1), -2, -18]] }),
+  ], { fps: 12 });
+
+  // ---- 電擊：↓+X 落雷（手往下拍，電流沿地面竄）----
+  const BOLT_H = rot90(BOLT);
+  const boltRow = k => {
+    let f = blank(36, 22);
+    for (let i = 0; i < 5; i++) f = paste(f, BOLT_H, 2 + i * 7, 15 + ((i + k) % 2 ? 1 : -2));
+    return f;
+  };
+  const sparkDownK = o => kirby(Object.assign({
+    w: 36, h: 22, ox: 8, oy: 2, eyes: EYE_SQUINT, eyeAt: [[7, 7], [12, 7]], mouth: MOUTH_O, mouthAt: [9, 12],
+    arms: [[15, 11, 5], [0, 11, 5]], feet: [[1, 15], [11, 15]],
+  }, o));
+  S('kirby_attack_spark_down', [
+    sparkDownK({ front: [[boltRow(0), -8, -2]] }),
+    sparkDownK({ dy: -1, front: [[boltRow(1), -8, -2]] }),
+  ], { fps: 12 });
+
+  // ---- 電擊：空中 X 電光衝（電球裹身斜下衝）----
+  const sdiveK = o => kirby(Object.assign({
+    w: 32, h: 28, ox: 6, oy: 6, body: [2, 2, 16], arms: [[0, 4, 5], [1, 8, 5]],
+    eyes: EYE_SQUINT, eyeAt: [[8, 5], [13, 5]], mouth: MOUTH_OPEN, mouthAt: [10, 10],
+    cheekAt: [[5, 10], [15, 10]], feet: [[13, 14], [15, 11]],
+  }, o));
+  S('kirby_attack_spark_dive', [
+    sdiveK({ back: [[boltRing(10), -6, -6]] }),
+    sdiveK({ dy: 1, back: [[boltRing(13), -6, -6]] }),
+  ], { fps: 14 });
+
+  // ---- 冰凍：↑+X 冰柱噴泉（向上長出冰柱）----
+  const iceCol = k => {
+    let f = blob(24, 38, [ell(8, 2 + k, 8, 18), ell(9, 16, 6, 12)], { fill: 'i', edge: 'I', shade: false });
+    for (let i = 0; i < 3; i++) f = paste(f, CRYSTAL, 10 + ((i + k) % 2 ? 3 : -3), 3 + i * 8);
+    return f;
+  };
+  const iceUpK = o => kirby(Object.assign({
+    w: 24, h: 38, ox: 2, oy: 18, eyeAt: [[7, 4], [12, 4]], cheeks: CHEEK_BIG, cheekAt: [[3, 10], [14, 10]],
+    mouth: MOUTH_O, mouthAt: [9, 10], arms: [[16, 3, 5], [-1, 3, 5]], feet: [[1, 15], [11, 15]],
+  }, o));
+  S('kirby_attack_ice_up', [
+    iceUpK({ back: [[iceCol(0), -2, -18]] }),
+    iceUpK({ dy: -1, back: [[iceCol(2), -2, -18]] }),
+  ], { fps: 12 });
+
+  // ---- 鐵鎚：↑+X 擎天鎚（由下往上掄過頭頂）----
+  const hammerUpK = o => kirby(Object.assign({
+    w: 34, h: 38, ox: 7, oy: 18, eyes: EYE_SQUINT, eyeAt: [[7, 6], [12, 6]],
+    mouth: MOUTH_OPEN, mouthAt: [9, 11], cheekAt: [[4, 10], [15, 10]], feet: [[1, 15], [11, 15]],
+  }, o));
+  S('kirby_attack_hammer_up', [
+    hammerUpK({ arms: [[16, 10, 5], [0, 10, 5]], front: [[HAMMER_R, 3, 8]] }),
+    hammerUpK({ dy: -1, arms: [[15, -1, 5], [1, -1, 5]], front: [[HAMMER_U, 12, -16]],
+      back: [[arcLayer(34, 38, 17, 22, 15, -150, -30, 'w'), -7, -18]] }),
+  ], { fps: 10, loop: false });
+
+  // ============================================================
   //  帽子（anchor bottom，最底列＝帽緣，程式畫在頭頂）
   // ============================================================
   // 火焰王冠 2 幀（20×12）：紅色頭帶 + 跳動的橘黃火焰

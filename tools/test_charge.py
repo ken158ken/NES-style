@@ -116,6 +116,41 @@ def run_charge_lv3(h, keys, chk=None):
         check(f'{key} [{name}]: Lv3 只按住 {m - 6} 幀 → 必殺不觸發', not off, off)
 
 
+# ---------------------------------------------------------------------------
+# Round 9：招式表（moves）格式檢查
+#   固定順序 X → ↑+X → ↓+X → 空中 X →（蓄力 / 其他），最多 6 列；
+#   ↑ 與 ↓ 各恰好一列、空中至少一列；desc 不可消失。
+#   暫停卡 / 圖鑑就是照這張表逐列印出來的，所以順序與列數要鎖住。
+# ---------------------------------------------------------------------------
+BASIC_KEYS = ['fire', 'sword', 'beam', 'cutter', 'spark', 'stone', 'ice', 'hammer']
+WEAPON_KEYS = ['gunner', 'ninja', 'blade', 'bow']
+
+_TABLE_JS = """(keys)=>keys.map(k=>{
+  const d = KB.ABILITIES[k];
+  return [k, (d && d.moves) ? d.moves.map(m=>String(m[0])) : null, !!(d && d.desc), (d && d.moves) ? d.moves.length : 0];
+})"""
+
+
+def run_move_table(h, keys, chk=None):
+    """Round 9：每種能力的招式表都要有 ↑ / ↓ / 空中 各一列，且順序固定。"""
+    check = chk or ET.check
+    for key, labels, has_desc, n in h.ev(_TABLE_JS, keys):
+        if not check(f'{key} [moves]: 招式表存在', bool(labels), labels):
+            continue
+        check(f'{key} [moves]: 最多 6 列（暫停卡放得下）', n <= 6, labels)
+        ups = [i for i, l in enumerate(labels) if '↑' in l]
+        dns = [i for i, l in enumerate(labels) if '↓' in l]
+        airs = [i for i, l in enumerate(labels) if '空中' in l]
+        check(f'{key} [moves]: 恰有一列 ↑+X', len(ups) == 1, labels)
+        check(f'{key} [moves]: 恰有一列 ↓+X', len(dns) == 1, labels)
+        check(f'{key} [moves]: 恰有一列 空中 X', len(airs) == 1, labels)
+        if len(ups) == 1 and len(dns) == 1 and len(airs) == 1:
+            check(f'{key} [moves]: 順序 X → ↑+X → ↓+X → 空中 X',
+                  0 < ups[0] < dns[0] < airs[0], labels)
+        check(f'{key} [moves]: 招式名稱不重複', len(set(labels)) == len(labels), labels)
+        check(f'{key} [moves]: desc 仍在', has_desc, has_desc)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--only', default='')
@@ -138,6 +173,8 @@ def main():
         run_charge(h, only)
         print('-' * 8, 'charge Lv3 (×0.8)', ','.join(only))
         run_charge_lv3(h, only)
+        print('-' * 8, 'moves table (Round 9)')
+        run_move_table(h, BASIC_KEYS + WEAPON_KEYS)
         check('charge: no page errors', not logs, logs[:3])
         b.close()
     print('---')

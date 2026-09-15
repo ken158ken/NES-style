@@ -4169,11 +4169,126 @@ Round 8 QA（qa8）問題修正 —— agent: fix8（2026-09-12）。負責 R8-P
 ## abilities-basic
 （agent 在此追加）
 
+### API / 介面
+- 共用 helper（abilities.js、abilities_weapons.js 各一份，寫法相同）：
+  `const atkDir = p => p.atkDir || { up: down('up'), down: down('down'), air: !p.onGround };`
+  `pickMode(p, air, upMode, ground, downMode)` —— 優先序 **↑X > ↓X > 空中 X > X**（`data.next` 最優先，蹲攻 / 蓄力放開用）。
+  兩種讀法都支援：player.js 有寫 `p.atkDir` 就用它，沒有就即時讀 KB.input。
+- **石頭例外**：stone 不經過 startAttack 的 onAttack（player.js 直接 `startStone()`），變化型在 `onStoneStart(p, box)`
+  裡以「變身當幀的實際按鍵」判斷（`down('up')` / `down('down')`），結果與 p.atkDir 相同。
+- 空中版慣例：招式內部用 `!p.onGround` 分支 →（a）判定框改用 `follow: p` 並移到身體下方、（b）`slowFall(p, v)` 緩降，
+  招式長度一律 ≤ 34 幀且不會把 vy 壓成負值（不可懸停）。地面衝擊波類（掃堂斬 / 落雷 / 地摺斬 / 巨鎚敲擊）都做了空中變體。
+
+### 進度
+- [Round 9] 完成 fire / sword / beam：fire 補 ↑X「火焰噴泉」（頭頂火柱長到 38px）、↓X 火焰衝刺加空中版「火焰俯衝」（斜下衝 + 落地爆燃 48×16 判定）；
+  sword 補 ↓X「掃堂斬」（貼地橫掃 30×14 + 前滑；空中版改向下斜斬）；beam 補 ↑X「天頂光柱」（18×38 貫穿）與空中 X「光星墜」（腳下旋轉星環 32×26）。
+  另修 `captureHit`：抓不到的目標（沒能力 / 不可吸入）改成直接 dmg 3（原本 dmg 0 的光環會先種 6 幀無敵，要先 `e.invuln = 0` 才打得進去）。
+  驗證：`tools/test_weapons.py`（Round 9 段）、shots/agent_abil/r9_fire.png、r9_sword.png、r9_beam.png。
+- [Round 9] 完成 cutter / spark / stone：cutter 把「↓+X / 空中 X 下劈」拆開 —— ↓X 維持下劈（空中版判定框下移），空中 X 新增「錐旋刃」（抱刃旋轉俯衝 + 落地 52×16 衝擊）；
+  spark 一次補三招 ↑X「雷擊柱」（20×38）、↓X「落雷」（地面 52×16 向兩側竄 / 空中版改腳下 20×34 電柱）、空中 X「電光衝」（電球斜下衝 + 落地 68×18）；
+  stone 以變身方向做變化型 ↑X「彗星落石」（先彈起再以 maxFall 砸下、落地 68×18 dmg 9 + CRASH!）、↓X「地滾衝刺」（落地即以滾速 3.6 衝出，撞擊 dmg 8），並補 `onCrouchAttack` 讓蹲下也能變石。
+  驗證：shots/agent_abil/r9_cutter.png、r9_spark.png、r9_stone.png。
+- [Round 9] 完成 ice / hammer / gunner：ice 補 ↑X「冰柱噴泉」（38px 冰柱、一樣 freeze），↓X 冰塊飛踢空中版改成朝斜下踢冰彈 + 22×22 近身判定；
+  hammer 補 ↑X「擎天鎚」（26×34 由下往上、knock 3.2），↓X 巨鎚敲擊空中版判定框移到身體下方並加速下砸；
+  gunner 四招本來就齊，改兩處：空中連射的後座力改成 `p.vy = Math.max(0.25, p.vy - 0.62)`（保證下墜、不再懸停 36 幀），↓X 霰彈空中版扇形改朝正下方並切 `kirby_attack_gunner_air` 動畫。
+  驗證：shots/agent_abil/r9_ice.png、r9_hammer.png、r9_gunner.png。
+- [Round 9] 完成 ninja / blade / bow：ninja 補 ↑X「昇龍手裡劍」（朝正上方三連射 + 頭頂 22×32 判定），↓X 替身瞬移空中版改成「往正下方瞬移」（落點 32×30 dmg 3）；
+  blade 補 ↓X「地摺斬」（貼地 34×14 + 前滑；空中版向下斬）並補上 `onCrouchAttack`；bow 補 ↑X「對空連射」（朝上扇形 3 箭 + 弓身 22×26 近身判定）。
+  驗證：shots/agent_abil/r9_ninja.png、r9_blade.png、r9_bow.png。
+- [Round 9] 收工：12 能力 × 4 招齊全，招式表統一成「X → ↑+X → ↓+X → 空中 X →（蓄力 / 其他）」且 ≤ 6 列（暫停卡實拍 shots/agent_abil/pause_stone.png、pause_ninja.png）。
+  新增 13 組 2 幀動畫（art/kirby.js 10 組、art/kirby_weapons.js 3 組），`--scene sheet --filter kirby_attack` 無洋紅、`__kb.missing()` 空。
+  測試：`test_weapons.py` **370/370**（其中 Round 9 新增 141 項：招式表 84 + 動畫幀 13 + 12 能力 × 5 方向 × 2~3 檢查）、
+  `test_charge.py` **115/115**（新增招式表檢查）、`engine_test.py` 153/153、`enemy_test.py` 393/393、
+  `playthrough.py --level w1 --ability sword` cleared、`build.py` OK。
+
+### 新招式一覽（★ = Round 9 新增）
+| 能力 | X | ↑+X | ↓+X | 空中 X | 蓄力 / 其他 |
+|---|---|---|---|---|---|
+| fire 火焰 | 噴火 | ★火焰噴泉 | 火焰衝刺（★空中版 火焰俯衝） | 火焰旋轉 | — |
+| sword 劍 | 揮砍 | 上挑斬 | ★掃堂斬 | 迴旋斬 | 滿血 X 劍氣 |
+| beam 光束 | 甩光束 | ★天頂光柱 | 牽星光環（★空中版 全身光環 + 打傷） | ★光星墜 | 按住 45 星潮光束 |
+| cutter 刀刃 | 迴旋刃 | 上拋刃 | 下劈（★空中版判定下移） | ★錐旋刃 | — |
+| spark 電擊 | 放電 | ★雷擊柱 | ★落雷 | ★電光衝 | 按住 45 電擊波 |
+| stone 石頭 | 變石 | ★彗星落石 | ★地滾衝刺 | 急速落石 | 斜坡滾石 / 再按 X 解除 |
+| ice 冰凍 | 噴冰 | ★冰柱噴泉 | 冰塊飛踢（★空中版斜下踢） | 冰晶散射 | — |
+| hammer 鐵鎚 | 掄鎚 | ★擎天鎚 | 巨鎚敲擊（★空中版下砸） | 落地震 | 按住 40 大迴旋 |
+| gunner 槍手 | 雙槍連射 | 對空三連 | 蓄力霰彈（★空中版朝下） | 俯衝掃射（★改保證下墜） | 按住 60 子彈時間 |
+| ninja 忍者 | 手裡剎三連 | ★昇龍手裡劍 | 替身瞬移（★空中版往正下方） | 飛踢 | 蓄力 影分身斬 / 壁跳 |
+| blade 居合 | 三段連斬 | 上撩斬 | ★地摺斬 | 落下斬 | 按住 50 居合一閃 |
+| bow 弓 | 射箭 | ★對空連射 | 陷阱箭 | 箭雨 | 蓄力 40 貫穿箭 / 80 流星箭 |
+
+### 跨檔需求（給總控）
+1. **無阻塞需求**：本輪只動自己的 6 個檔（abilities.js、abilities_weapons.js、art/kirby.js、art/kirby_weapons.js、
+   tools/test_weapons.py、tools/test_charge.py），沒有改 player.js / index.html（沒有新檔）。
+2. 給 player-input：`p.atkDir` 已如約定使用；**石頭路徑**（`startAttack` 在 stoneLike 分支之前就寫 atkDir）請維持現狀，
+   abilities 的 `onStoneStart` 目前讀即時輸入，兩者同幀等價。
+3. 給 qa9：12 能力 × 5 種方向組合的自動驗收在 `tools/test_weapons.py` 的「Round 9 四方向招式」段
+   （`--only r9` 可單跑）；招式表格式檢查在 `tools/test_charge.py` 的 `run_move_table()`，magic / forms / mix 系
+   要沿用直接 `from test_charge import run_move_table` 即可。
+4. 已知取捨：gunner 的霰彈槍口在 `cx + 16`，緊貼身體（< 16px）的敵人打不到——維持原設計沒改，測試改成把敵人放在 44px 外。
+
+
 ## abilities-magic-forms
 （agent 在此追加）
 
 ## abilities-mix
-（agent 在此追加）
+> 檔案：`src/abilities_mix.js`、`src/abilities_mix2.js`、`src/art/kirby_mix.js`、`src/art/kirby_mix2.js`、
+> `tools/test_mix.py`、`tools/test_mix2.py`（**沒有動 player.js 或任何別人的檔案**）。截圖：`shots/agent_abilities-mix/`。
+
+### 介面 / 實作約定（其他 agent 讀這段就好）
+| 項目 | 說明 |
+|---|---|
+| 五招槽 | `build()` 內部改成 `MV = { m1, up, dn, air, ult }`；舊寫法 `m2 + m2move` 會自動塞進對應槽（向後相容） |
+| 方向判定 | `atkDir(p)`：`p.atkDir`（player-input 在 startAttack 當幀快照 `{up,down,air}`）存在就用，否則退回 `KB.input.down('up'/'down')` + `!p.onGround` |
+| 優先序 | `pickMode`：佇列招（`d.next`）> ↑X > ↓X > 空中 X > X；某方向沒有專用招時自動往下一順位退（地面 / 空中同一套） |
+| 地面 ↓X | `onCrouchAttack` 改成**每個混合能力都掛**（走 player.js 的蹲下分支 → `startMove(p,'dn')`） |
+| 招式動畫 | `up` / `dn` 自動取 `kirby_attack_<key>_up` / `_dn`（新增 48 張 2 幀姿勢圖），其餘沿用原本的 `kirby_attack_<key>` |
+| 補招 API | `addMoves(key, { up, dn, air }, moves5)`：把新招塞進 `KB.ABILITIES[key].mv` 並換上 5 招招式表（順序固定 X / ↑+X / ↓+X / 空中 X / 蓄力） |
+| 空中規則 | ↑X 一律有「地面餘波」`echo()`（空中版範圍 / 傷害較大、地面版 ×0.75）；↓X 一律以 `groundY(p)` 為基準；滯空招只用 `slowFall` 且招式長度 ≤ 30 幀（不懸停）。蓄力門檻（50 幀 × `KB.PROG.holdMul`）與 `mix_<key>` 音效**完全沒動** |
+
+### 進度
+- [09-15 R9-MIX-1] 完成：`build()` 五招槽重構（`MV` / `atkDir` / `pickMode` / `animOf` / `addMoves`）+ 兩張 art 檔的
+  ↑X / ↓X 共用 2 幀姿勢（`upFrames` / `dnFrames` / 龍型 `upBreathFrames` / `dnBreathFrames`，共 48 張新圖）；
+  **炎劍 / 冰劍 / 雷刀 / 火焰槍** 補齊（昇炎斬・熔劍地脈斬 / 霜牙裂地・冰華回旋墜 / 天雷居合・空蟬雷斬 / 曳火信號彈・浮空火力壓制）。
+  驗證：`tools/test_mix.py --only defs,airfall,flamesword,frostsword,thunderblade,flamegun` 全 PASS。
+- [09-15 R9-MIX-2] 完成：**冰彈槍 / 雷弓 / 火鎚 / 岩鎚**（凍空曳彈・霜降掃射 / 穿雲雷矢・地走雷弦 /
+  噴焰昇鎚・熔岩震地 / 碎岩斷層・落磐衝擊）。驗證：`tools/test_mix.py --only frostgun,thunderbow,flamehammer,stonehammer`。
+- [09-15 R9-MIX-3] 完成：**影刃 / 星光法師 / 冰龍 / 雷電機甲**（影月輪・暗墜十字斬 / 星塵魔法陣・墜星彈幕 /
+  凍天吐息・霜爪裂地 / 磁軌踏擊・浮空推進炮）→ 第一批 12 組全部五招齊全。
+  另外給 **雷刀 ↓X 雷步瞬移斬** 加了空中變體（沿身體把電導到腳下地面），否則空中 ↓X 打不到地面敵人。
+  驗證：`tools/test_mix.py` **509/509 PASS**。
+- [09-15 R9-MIX-4] 完成：**焰弓 / 冰鎚 / 雷劍 / 火忍**（烈陽仰射・地火箭列 / 冰鎚上擊・霜墜鎚 /
+  雷昇斬・落雷插劍 / 火遁天輪手裡劍・炎舞亂投）。驗證：`tools/test_mix2.py --only defs,airfall,flamebow,frosthammer,thundersword,flameninja`。
+- [09-15 R9-MIX-5] 完成：**冰忍 / 雷槍 / 岩巨人 / 炎龍**（冰柱天梯・霰針亂舞 / 對空電漿彈・滯空掃射 /
+  擎天岩柱・巨人墜擊 / 焚天吐息・熔岩爪痕）。另外給 **火忍 ↓X 火焰替身爆**、**冰忍 ↓X 冰鏡瞬移** 加了空中變體
+  （在腳下的地面炸開 / 立起碎鏡冰刃）。驗證：`tools/test_mix2.py --only flameninja,frostninja,thundergun,stonegiant,flamedragon`。
+- [09-15 R9-MIX-6] 完成：**雷龍 / 時光束 / 重力刃 / 鎚機甲**（雷鳴嘶吼・地脈雷爪 / 時砂沙漏・逆行光環 /
+  反重力昇刃・墜壓刃 / 地錨衝擊・噴射迴旋鎚）→ 24 組 × 5 招全部到齊（新增 48 招）。
+  驗證：`tools/test_mix2.py` **607/607 PASS**、`tools/test_mix.py` **509/509 PASS**（合計 1116）。
+- [09-15 R9-MIX-7] 完成：測試擴充 —— 兩個測試檔各加
+  ① `MOVES9`（12 組 × 4 條，補上原本沒測到的方向；與既有列合起來＝ 24 組 ×{↑X 地 / ↓X 地 / ↑X 空 / ↓X 空 / 空中 X}）、
+  ② 每招的專屬證據（判定框尺寸 / 專屬投射物）、
+  ③ `phase_airfall`（24 × 3 種空中招：26 幀至少掉 6px、連續不下墜 < 30 幀 → 不會懸停）、
+  ④ `phase_defs` 改測 5 招 + 招式表固定順序 + 同時含 ↑ / ↓ + 五個招式槽齊全 + `_up` / `_dn` 姿勢圖。
+  驗證：`shots/agent_abilities-mix/moves9_<key>.png`（24 張，每張 3 招 × 3 幀連拍）、
+  `sheet_up_0~3.png` / `sheet_dn_0~3.png`（48 張新姿勢圖，無洋紅、MISSING SPRITES 空）、
+  `pause_flamesword.png` / `pause_hammermech.png`（暫停卡 5 招排版正常，menu.js `compact` 自動生效）、
+  `playthrough --level w1 --ability flamesword --godmode` → cleared=True / deaths=0 / 6985 幀 / missing []。
+  回歸：`test_charge 115/115`、`test_awaken 237/237`。
+
+### 跨檔需求 / 給其他 agent
+1. **player-input**：本區已經照約定實作 `p.atkDir`（有就用、沒有就退回讀 `KB.input`），不需要為混合能力做任何特例。
+   地面 ↓X 仍然走 `player.js` 的蹲下分支 → `abilityDef.onCrouchAttack`，請保留這個鉤子。
+2. **ui / menu**：混合能力的 `moves` 從 3 變 5；`menu.js` 的 `slice(0, 6)` 與 `compact = n >= 5` 已經涵蓋，實測排版正常。
+3. **qa9**：空中 ↑X 的設計是「升招 + 腳下地面餘波」，所以空中對地面敵人也打得到；
+   ↓X 一律打在 `groundY(p)`（人在空中也會打到下方地面），這是刻意的規格。
+
+### 已知問題 / 未完成
+1. 沒有跑 `tools/build.py`（Round 9 其他 agent 還在改 player.js / abilities*.js，等總控收工再打包；比照 Round 6 / 7 的慣例）。
+2. `p.atkDir` 目前還沒有人提供（player-input 尚未收工），所以現在跑的是 fallback 路徑（直接讀 `KB.input`）；
+   等 player.js 提供欄位後不需要改本區程式，但建議 qa9 再跑一次 `test_mix` / `test_mix2`。
+3. 測試裡「↑X 地」用的是「同一幀按住 ↑ + X」（只按 1~3 幀），避免將來「長按 ↑ = 飛行」把卡比先彈起來而改變測試語意。
+
 
 ## qa9
 （agent 在此追加）

@@ -59,12 +59,18 @@
   // hold 型能力：是否仍在噴射中（按住且未超過 maxHold，或最短噴射時間尚未用完）
   // maxHold 由各招式動態改寫：非按住型招式會設成 0，讓 player.js 的續命條件失效
   function holding(p, held) { const d = p.abilityDef; return (held && d.maxHold > 0 && p.stateT < d.maxHold) || p.attackTimer > 2; }
-  // 取出本次攻擊的招式：優先用 data.next（蹲攻 / 蓄力放開），否則依「空中 / 上鍵 / 地面」判斷
-  function pickMode(p, air, upMode, ground) {
+  // Round 9：招式方向快照。player-input 會在 startAttack 當幀寫入 p.atkDir = {up, down, air}；
+  //   舊版 player.js（或 onStoneStart 這種不經過 startAttack 的路徑）沒有時就自己讀輸入，兩種都支援。
+  const atkDir = p => p.atkDir || { up: down('up'), down: down('down'), air: !p.onGround };
+  // 取出本次攻擊的招式：優先用 data.next（蹲攻 / 蓄力放開），否則依優先序「↑X > ↓X > 空中 X > X」判斷。
+  //   空中按 ↑ / ↓ 一樣出對應的招（各招自己在內部做「空中版」變體：判定框跟著卡比 + slowFall 緩降）。
+  function pickMode(p, air, upMode, ground, downMode) {
     const d = data(p), q = d.next; d.next = null;
     if (q) return q;
-    if (!p.onGround && air) return air;
-    if (down('up') && upMode) return upMode;
+    const a = atkDir(p);
+    if (a.up && upMode) return upMode;
+    if (a.down && downMode) return downMode;
+    if (a.air && air) return air;
     return ground;
   }
   // 設定本招的動畫 / 長度 / 移動鎖（player.js 讀 def.anim、p.attackTimer、p.attackLock、p.attackFps）
@@ -79,24 +85,37 @@
   // ======================================================================
   // 1. 火焰 FIRE
   //    X      噴火    ：按住最多 90 幀，前方火焰柱伸長到 40px，每 8 幀重複判定 dmg 1
+  //    ↑+X    火焰噴泉：頭頂噴出火柱（伸長到 38px），判定跟著卡比、空中緩降（Round 9 新增）
   //    ↓+X    火焰衝刺：變成火球水平衝 40 幀，全身判定 dmg 3、可撞破星星 / 炸彈方塊
+  //             （空中版 = 火焰俯衝：斜下俯衝、落地爆燃）
   //    空中 X 火焰旋轉：身體被火環包覆旋轉 30 幀，範圍判定 dmg 2、緩降
   // ======================================================================
   def('fire', {
     color: '#f04020', duration: 12, hold: true, maxHold: 90, lockMove: true, canJump: false, fps: 10,
     desc: '把火焰之心含在嘴裡，一張口就是熊熊烈焰。',
-    moves: [['X', '噴火'], ['↓+X', '火焰衝刺'], ['空中 X', '火焰旋轉']],
+    moves: [['X', '噴火'], ['↑+X', '火焰噴泉'], ['↓+X', '火焰衝刺'], ['空中 X', '火焰旋轉']],
     hatOffset: { attack: [0, 0] },
     onGet(p) { data(p).t = 0; },
     onCrouchAttack(p) { startMove(p, 'dash'); },
     onAttack(p) {
       const d = data(p); killBox(p); d.t = 0;
-      d.mode = pickMode(p, 'spin', null, 'breath');
-      if (d.mode === 'dash') {
+      d.mode = pickMode(p, 'spin', 'pillar', 'breath', 'dash');
+      if (d.mode === 'pillar') {
+        // ↑+X 火焰噴泉：頭頂的火柱慢慢長高（判定框跟著卡比，空中也能放）
+        setup(p, { anim: 'kirby_attack_fire_up', dur: 26, fps: 12, lock: true });
+        d.box = KB.hitbox({ x: 0, y: 0, w: 16, h: 12, dmg: 2, owner: 'player', type: 'fire', follow: p, ox: -8, oy: -10, life: 3, rehit: 7, knock: 1.6, flipWithOwner: false, breakBlocks: true });
+        p.vx *= 0.4;
+        vx('ring', p.cx, p.y - 2, { r0: 3, r1: 22, frames: 14, color: '#ffb040', width: 2 });
+        vx('burst', p.cx, p.y - 2, { n: 12, colors: ['#ffe040', '#ff9020', '#ff4010'], speed: 2.4, life: 22, grav: -0.06, size: 2, dir: -Math.PI / 2, spread: 0.7 });
+        vx('shake', 2);
+      } else if (d.mode === 'dash') {
+        const air = !p.onGround;
         setup(p, { anim: 'kirby_attack_fire_dash', dur: 40, fps: 12, lock: true });
-        d.box = KB.hitbox({ x: 0, y: 0, w: 24, h: 20, dmg: 3, owner: 'player', type: 'fire', follow: p, ox: -12, oy: -3, life: 3, rehit: 8, knock: 2, flipWithOwner: false, breakBlocks: true });
+        d.dive = air;               // 空中版：火焰俯衝（判定框往下移，斜下衝）
+        d.box = KB.hitbox({ x: 0, y: 0, w: 24, h: air ? 24 : 20, dmg: 3, owner: 'player', type: 'fire', follow: p, ox: -12, oy: air ? 2 : -3, life: 3, rehit: 8, knock: 2, flipWithOwner: false, breakBlocks: true });
         d.box.breakHard = true;     // 火焰衝刺可撞破硬磚 X（mechanics）
-        p.vx = p.dir * 3.4;
+        p.vx = p.dir * (air ? 2.8 : 3.4);
+        if (air) p.vy = 3.2;
         // 特效：橘色殘影 + 火星拖尾 + 起步爆燃
         vx('afterimage', p, { frames: 42, color: '#ff8030', every: 2, alpha: 0.55 });
         vx('sparkTrail', p, { color: ['#ffe040', '#ff9020', '#ff4010'], every: 2, life: 15, frames: 42 });
@@ -119,7 +138,36 @@
       const d = data(p), b = d.box;
       d.t++;
       light(64);                    // 火光：暗房照明半徑 64px
+      if (d.mode === 'pillar') {
+        // 火柱每幀長高 3px（最高 38px），判定框從卡比頭頂往上延伸
+        slowFall(p, 0.6);
+        if (b && !b.dead) {
+          b.h = Math.min(38, 12 + d.t * 3); b.oy = -b.h + 2; beat(b);
+        }
+        p.vx *= 0.85;
+        if (d.t % 2 === 1) KB.fx('fx_fire', p.cx + rnd(-3, 3), p.y - rnd(2, (b ? b.h : 12)), { vy: -1.6, life: 12, flip: Math.random() < 0.5, fps: 12 });
+        KB.particles(p.cx + rnd(-6, 6), p.y - rnd(0, (b ? b.h : 12)), ['#ffe040', '#ff9020', '#ff4010'], 1, { spread: 0.5, grav: -0.08, life: 14, up: 0.9, size: 1 });
+        if (d.t === 10 || d.t === 20) vx('ring', p.cx, p.y - 16, { r0: 3, r1: 20, frames: 12, color: '#ffe040', width: 2 });
+        if (d.t % 12 === 0) KB.audio.sfx('fire');
+        return;
+      }
       if (d.mode === 'dash') {
+        if (d.dive) {
+          // 空中版：斜下俯衝，落地爆燃後收招（不會懸停）
+          p.vx = p.dir * 2.8; if (p.vy < 5.4) p.vy += 0.34;
+          if (b && !b.dead) beat(b);
+          if (d.t % 2 === 1) KB.fx('fx_fire', p.cx - p.dir * 6, p.y + rnd(2, 14), { vx: -p.dir * 0.8, vy: -1.2, life: 12, flip: p.dir > 0, fps: 12 });
+          KB.particles(p.cx + rnd(-8, 8), p.cy + rnd(-4, 10), ['#ffe040', '#ff9020', '#ff4010'], 1, { spread: 0.8, grav: -0.05, life: 14, up: 0.4, size: 1 });
+          if (d.t % 14 === 0) KB.audio.sfx('fire');
+          if (p.onGround && d.t > 2) {
+            p.attackTimer = Math.min(p.attackTimer, 6); KB.game.shake = 4;
+            KB.hitbox({ x: p.cx - 24, y: p.bottom - 14, w: 48, h: 16, dmg: 3, owner: 'player', type: 'fire', life: 8, rehit: 0, pierce: true, knock: 2.4 });
+            vx('burst', p.cx, p.bottom - 2, { n: 18, colors: ['#ffe040', '#ff9020', '#ff4010'], speed: 3, life: 24, grav: 0.1, size: 2 });
+            for (const sgn of [-1, 1]) vx('shockwave', p.cx + sgn * 6, p.bottom, { dir: sgn, speed: 3.2, frames: 18, w: 12, h: 13, color: '#ffb040' });
+            vx('ring', p.cx, p.bottom - 4, { r0: 4, r1: 34, frames: 14, color: '#ffe040', width: 2 });
+          }
+          return;
+        }
         p.vx = p.dir * 3.4;
         if (b && !b.dead) beat(b);
         if (d.t % 2 === 1) KB.fx('fx_fire', p.cx - p.dir * 8, p.cy + 4, { vx: -p.dir * 1.2, vy: rnd(-0.4, 0.2), life: 12, flip: p.dir > 0, fps: 12 });
@@ -154,7 +202,7 @@
       KB.particles(p.cx + p.dir * rnd(10, 36), p.cy + rnd(-4, 6), ['#ffe040', '#ff9020', '#ff4010'], 1, { spread: 0.5, grav: -0.05, life: 12, up: 0.2, vx: p.dir * 1.4, size: 1 });
       if (d.t % 24 === 0) KB.audio.sfx('fire');
     },
-    onEnd(p) { killBox(p); clearAnim(p); data(p).mode = null; },
+    onEnd(p) { killBox(p); clearAnim(p); const d = data(p); d.mode = null; d.dive = false; },
     onLose(p) { killBox(p); clearAnim(p); },
   });
 
@@ -164,15 +212,17 @@
   //    滿血 X 劍氣    ：HP 全滿時揮砍第 6 幀射出短程劍氣（proj_swordwave，飛 80px）
   //    空中 X 迴旋斬  ：全身旋轉判定 30 幀（旋轉 2 圈）、緩降
   //    ↑+X    上挑斬  ：判定往上 28px 並小跳
+  //    ↓+X    掃堂斬  ：壓低重心貼地橫掃 30px（Round 9 新增；空中版 = 向下斜斬並加速下墜）
   // ======================================================================
   def('sword', {
     color: '#40c040', duration: 18, lockMove: false, moveSpeed: P.walk, fps: 10,
     desc: '揮舞勇者之劍，斬擊乾淨俐落；體力全滿時劍尖會射出劍氣。',
-    moves: [['X', '揮砍'], ['空中 X', '迴旋斬'], ['↑+X', '上挑斬'], ['滿血 X', '劍氣']],
+    moves: [['X', '揮砍'], ['↑+X', '上挑斬'], ['↓+X', '掃堂斬'], ['空中 X', '迴旋斬'], ['滿血 X', '劍氣']],
     hatOffset: { attack: [0, 0] },
+    onCrouchAttack(p) { startMove(p, 'low'); },
     onAttack(p) {
       const d = data(p); killBox(p);
-      d.mode = pickMode(p, 'spin', 'up', 'swing');
+      d.mode = pickMode(p, 'spin', 'up', 'swing', 'low');
       if (d.mode === 'spin') {
         setup(p, { anim: 'kirby_attack_sword_spin', dur: 30, fps: 14, lock: false });
         d.box = KB.hitbox({ x: 0, y: 0, w: 32, h: 26, dmg: 2, owner: 'player', type: 'sword', follow: p, ox: -16, oy: -13, life: 3, rehit: 9, knock: 1.2, flipWithOwner: false });
@@ -181,6 +231,22 @@
         vx('afterimage', p, { frames: 32, color: '#d0ffd0', every: 2, alpha: 0.55 });
         vx('aura', p, { color: '#40c040', r: 16, frames: 30, pulse: 0.4 });
         vx('ring', p.cx, p.cy, { r0: 8, r1: 30, frames: 14, color: '#d0ffd0', width: 2 });
+      } else if (d.mode === 'low') {
+        // ↓+X 掃堂斬：貼地橫掃 + 前滑；空中版改成向下斜斬（判定框移到身體下方並加速下墜）
+        const air = !p.onGround;
+        setup(p, { anim: 'kirby_attack_sword_down', dur: 20, fps: 12, lock: true });
+        if (air) {
+          d.box = KB.hitbox({ x: 0, y: 0, w: 26, h: 28, dmg: 4, owner: 'player', type: 'sword', follow: p, ox: -13, oy: 6, life: 16, rehit: 0, knock: 2.2, flipWithOwner: false });
+          p.vx = p.dir * 1.2; if (p.vy < 2.6) p.vy = 2.6;
+          vx('slash', p.cx, p.cy + 12, 19, Math.PI / 2, { color: '#d0ffd0', width: 3, frames: 11, arc: Math.PI * 0.9 });
+        } else {
+          d.box = KB.hitbox({ x: 0, y: 0, w: 30, h: 14, dmg: 4, owner: 'player', type: 'sword', follow: p, ox: -4, oy: 6, life: 16, rehit: 0, knock: 2.4 });
+          p.vx = p.dir * 2.4;
+          vx('slash', p.cx + p.dir * 8, p.bottom - 5, 18, p.dir > 0 ? 0 : Math.PI, { color: '#d0ffd0', width: 3, frames: 11, arc: Math.PI * 0.55, flip: p.dir < 0 });
+          vx('shockwave', p.cx + p.dir * 8, p.bottom, { dir: p.dir, speed: 3, frames: 16, w: 11, h: 12, color: '#d0ffd0' });
+        }
+        vx('afterimage', p, { frames: 20, color: '#d0ffd0', every: 2, alpha: 0.45 });
+        vx('burst', p.cx + p.dir * 10, p.bottom - 3, { n: 8, colors: ['#ffffff', '#d0ffd0'], speed: 1.8, life: 16, grav: 0.1, size: 1 });
       } else if (d.mode === 'up') {
         setup(p, { anim: 'kirby_attack_sword_up', dur: 22, fps: 12, lock: true });
         d.box = KB.hitbox({ x: 0, y: 0, w: 22, h: 30, dmg: 3, owner: 'player', type: 'sword', follow: p, ox: -11, oy: -28, life: 18, rehit: 0, knock: 2.2, flipWithOwner: false });
@@ -204,6 +270,15 @@
         // 特效：每半圈補一道大弧劍光
         if (t === 2 || t === 9 || t === 16 || t === 23) vx('slash', p.cx, p.cy, 19, a, { color: '#d0ffd0', width: 3, frames: 10, arc: Math.PI * 1.3 });
         if (t === 15) KB.audio.sfx('sword');
+        return;
+      }
+      if (d.mode === 'low') {
+        // 地面：邊掃邊往前滑（摩擦力遞減）；空中：判定框跟著卡比一起落下
+        if (p.onGround) { p.vx = p.dir * Math.max(0.6, 2.4 - t * 0.14); if (t % 3 === 0) p.footDust && p.footDust(1, -p.dir); }
+        else if (p.vy < 1.2) p.vy = 1.2;
+        if (b && !b.dead && t > 15) { b.dead = true; d.box = null; }
+        if (t >= 1 && t <= 12) KB.particles(p.cx + p.dir * rnd(6, 24), p.bottom - rnd(1, 8), ['#ffffff', '#d0ffd0'], 1, { spread: 0.3, grav: 0.04, life: 9, up: 0.2, size: 1 });
+        if (t === 3) KB.audio.sfx('sword');
         return;
       }
       if (d.mode === 'up') {
@@ -277,25 +352,36 @@
   }
   KB.BeamWhip = BeamWhip;
 
-  // 牽星光環命中：直接把敵人吞下並取得牠的能力（需 e.ability 且可吸入）
+  // 牽星光環命中：直接把敵人吞下並取得牠的能力（需 e.ability 且可吸入）。
+  //   Round 9：抓不到的目標（沒能力 / 不可吸入 / 魔王）改成直接打傷，不再完全沒作用。
   function captureHit(p, e) {
-    if (!e || e.dead || e.type !== 'enemy') return;
-    if (!e.inhalable || !e.ability || !KB.ABILITIES[e.ability]) return;
-    KB.fx('fx_sparkle', e.cx, e.cy);
-    KB.particles(e.cx, e.cy, ['#ffe040', '#ffffff'], 8, { spread: 2, grav: 0, life: 16, up: 0 });
-    e.onInhaled(p);              // 設定 p.mouth（含分數 / cappy 特例）
-    if (p.mouth) p.swallow();    // 立即吞下 → giveAbility
+    if (!e || e.dead) return false;
+    if (e.type === 'enemy' && e.inhalable && e.ability && KB.ABILITIES[e.ability]) {
+      KB.fx('fx_sparkle', e.cx, e.cy);
+      KB.particles(e.cx, e.cy, ['#ffe040', '#ffffff'], 8, { spread: 2, grav: 0, life: 16, up: 0 });
+      e.onInhaled(p);              // 設定 p.mouth（含分數 / cappy 特例）
+      if (p.mouth) p.swallow();    // 立即吞下 → giveAbility
+      return true;
+    }
+    if (e.type !== 'enemy' && e.type !== 'boss') return false;
+    // 光環本體 dmg 0 —— game.js 仍會呼叫 b.hurt(0) 並種下 6 幀無敵，
+    // 所以這裡要先清掉才打得進去（否則抓不住的敵人會完全沒反應）。
+    e.invuln = 0;
+    try { e.hurt(3, { cx: p.cx, cy: p.cy, knock: 1.6, type: 'beam' }); } catch (err) { }
+    KB.fx('fx_hit', e.cx, e.cy);
+    vx('burst', e.cx, e.cy, { n: 8, colors: ['#ffe040', '#ffffff'], speed: 2, life: 14, grav: 0 });
+    return false;
   }
 
   def('beam', {
     color: '#f0e040', duration: 20, hold: true, lockMove: true, canJump: false, fps: 10,
     desc: '揮出星光構成的光鞭；蓄滿力可放出貫穿一切的星潮光束。',
-    moves: [['X', '甩光束'], ['按住 45 幀放開', '星潮光束'], ['↓+X', '牽星光環']],
+    moves: [['X', '甩光束'], ['↑+X', '天頂光柱'], ['↓+X', '牽星光環'], ['空中 X', '光星墜'], ['按住 45 幀放開', '星潮光束']],
     hatOffset: { attack: [0, 0] },
     onCrouchAttack(p) { startMove(p, 'capture'); },
     onAttack(p) {
       const d = data(p); killBox(p);
-      d.mode = pickMode(p, null, null, 'whip'); d.charged = false;
+      d.mode = pickMode(p, 'starfall', 'upbeam', 'whip', 'capture'); d.charged = false;
       if (d.mode === 'wave') {
         setup(p, { anim: 'kirby_attack_beam_charge', dur: 24, fps: 8, lock: true });
         KB.shoot({ spr: 'proj_beamwave', x: p.cx + p.dir * 14, y: p.cy - 2, vx: p.dir * 2.6, vy: 0, dmg: 4, owner: 'player', life: 110, w: 18, h: 18,
@@ -308,11 +394,31 @@
         vx('burst', p.cx + p.dir * 8, p.cy - 2, { n: 16, colors: ['#ffe040', '#ffffff'], speed: 2.6, life: 24, grav: 0, size: 2 });
         vx('flash', '#fff8c0', 6, 0.4);
         vx('zoom', 1.1, 10);
+      } else if (d.mode === 'upbeam') {
+        // ↑+X 天頂光柱：雙手上舉射出貫穿光柱（判定框跟著卡比，空中緩降）
+        setup(p, { anim: 'kirby_attack_beam_up', dur: 22, fps: 12, lock: true, maxHold: 0 });
+        d.box = KB.hitbox({ x: 0, y: 0, w: 18, h: 38, dmg: 3, owner: 'player', type: 'beam', follow: p, ox: -9, oy: -36, life: 18, rehit: 0, pierce: true, knock: 1.6, flipWithOwner: false, breakBlocks: true });
+        KB.audio.sfx('beam');
+        vx('line', p.cx, p.y + 4, p.cx, p.y - 40, { color: '#ffe040', width: 5, frames: 16 });
+        vx('line', p.cx - 2, p.y + 4, p.cx - 2, p.y - 34, { color: '#ffffff', width: 1, frames: 14 });
+        vx('lightning', p.cx, p.y + 2, p.cx, p.y - 38, { color: '#fff0a0', frames: 14, jitter: 5, branches: 2 });
+        vx('ring', p.cx, p.y - 4, { r0: 3, r1: 26, frames: 14, color: '#ffffff', width: 2 });
+        vx('shake', 3);
+      } else if (d.mode === 'starfall') {
+        // 空中 X 光星墜：腳下張開旋轉星環往下壓（緩降 26 幀，不會懸停）
+        setup(p, { anim: 'kirby_attack_beam_star', dur: 26, fps: 12, lock: false, maxHold: 0 });
+        d.box = KB.hitbox({ x: 0, y: 0, w: 32, h: 26, dmg: 3, owner: 'player', type: 'beam', follow: p, ox: -16, oy: 6, life: 3, rehit: 8, knock: 1.4, flipWithOwner: false });
+        KB.audio.sfx('beam');
+        vx('circle', p.cx, p.y + 18, { r: 22, frames: 26, color: '#ffe040', spin: 0.2, glyphs: 8 });
+        vx('ring', p.cx, p.y + 18, { r0: 4, r1: 30, frames: 16, color: '#ffffff', width: 2 });
       } else if (d.mode === 'capture') {
+        // 空中版：光環改成包住全身（判定框跟著卡比），地面版維持往前抓
+        const air = !p.onGround;
         setup(p, { anim: 'kirby_attack_beam_capture', dur: 20, fps: 10, lock: true });
-        vx('circle', p.cx + p.dir * 14, p.cy, { r: 22, frames: 22, color: '#ffe040', spin: 0.14, glyphs: 8 });
-        d.box = KB.hitbox({ x: 0, y: 0, w: 22, h: 18, dmg: 0, owner: 'player', type: 'beam', follow: p, ox: 4, oy: -2, life: 12, rehit: 0, pierce: true,
-          breakBlocks: false, onHit: b => captureHit(p, b) });
+        vx('circle', p.cx + (air ? 0 : p.dir * 14), p.cy + (air ? 6 : 0), { r: air ? 26 : 22, frames: 22, color: '#ffe040', spin: 0.14, glyphs: 8 });
+        d.box = air
+          ? KB.hitbox({ x: 0, y: 0, w: 30, h: 30, dmg: 0, owner: 'player', type: 'beam', follow: p, ox: -15, oy: 0, life: 14, rehit: 0, pierce: true, flipWithOwner: false, breakBlocks: false, onHit: b => captureHit(p, b) })
+          : KB.hitbox({ x: 0, y: 0, w: 22, h: 18, dmg: 0, owner: 'player', type: 'beam', follow: p, ox: 4, oy: -2, life: 12, rehit: 0, pierce: true, breakBlocks: false, onHit: b => captureHit(p, b) });
         KB.audio.sfx('beam');
       } else {
         setup(p, { anim: null, dur: 20, fps: 10, lock: true, maxHold: 200 });
@@ -323,7 +429,24 @@
     },
     update(p, dt, held) {
       const d = data(p), t = p.stateT;
+      if (d.mode === 'upbeam') {
+        slowFall(p, 0.7); p.vx *= 0.85; light(80);
+        if (d.box && !d.box.dead) beat(d.box);
+        if (t % 3 === 1) KB.particles(p.cx + rnd(-6, 6), p.y - rnd(0, 36), ['#ffe040', '#ffffff'], 1, { spread: 0.3, grav: -0.05, life: 12, up: 1.0, size: 1 });
+        if (t === 8 || t === 15) vx('ring', p.cx, p.y - 20, { r0: 2, r1: 18, frames: 10, color: '#ffe040', width: 1 });
+        return;
+      }
+      if (d.mode === 'starfall') {
+        slowFall(p, 1.0); light(72);
+        if (d.box && !d.box.dead) beat(d.box);
+        const a = t * 0.34;
+        KB.particles(p.cx + Math.cos(a) * 14, p.y + 16 + Math.sin(a) * 8, ['#ffe040', '#ffffff'], 1, { spread: 0.3, grav: 0, life: 10, up: 0, size: 1 });
+        if (t % 8 === 3) vx('ring', p.cx, p.y + 18, { r0: 3, r1: 22, frames: 10, color: '#ffe040', width: 1 });
+        if (t % 12 === 0) KB.audio.sfx('beam');
+        return;
+      }
       if (d.mode === 'capture') {
+        if (!p.onGround) slowFall(p, 0.9);
         if (t >= 3 && t <= 12) KB.particles(p.cx + p.dir * rnd(8, 24), p.cy + rnd(-8, 8), ['#ffe040', '#ffffff'], 1, { spread: 0.4, grav: 0, life: 8, up: 0, size: 1 });
         return;
       }
@@ -433,18 +556,32 @@
   def('cutter', {
     color: '#e0e0e0', duration: 14, lockMove: false, moveSpeed: P.walk, fps: 10,
     desc: '把頭上的鋼刃當迴力鏢丟出去，記得接住它。',
-    moves: [['X', '迴旋刃'], ['↑+X', '上拋刃'], ['↓+X / 空中 X', '下劈']],
+    moves: [['X', '迴旋刃'], ['↑+X', '上拋刃'], ['↓+X', '下劈'], ['空中 X', '錐旋刃']],
     hatOffset: { attack: [0, 0] },
     onGet(p) { data(p).blades = []; },
     onCrouchAttack(p) { startMove(p, 'chop'); },
     onAttack(p) {
       const d = data(p); killBox(p);
       d.blades = (d.blades || []).filter(b => !b.dead);
-      d.mode = pickMode(p, 'chop', 'upthrow', 'throw');
+      d.mode = pickMode(p, 'drill', 'upthrow', 'throw', 'chop');
+      if (d.mode === 'drill') {
+        // 空中 X 錐旋刃：抱著鋼刃頭下旋轉俯衝，落地彈起碎光（Round 9 新增）
+        setup(p, { anim: 'kirby_attack_cutter_drill', dur: 30, fps: 14, lock: true });
+        d.landed = false;
+        p.vx = p.dir * 0.9; if (p.vy < 2.6) p.vy = 2.6;
+        d.box = KB.hitbox({ x: 0, y: 0, w: 20, h: 26, dmg: 3, owner: 'player', type: 'cutter', follow: p, ox: -10, oy: 0, life: 3, rehit: 7, knock: 1.8, flipWithOwner: false });
+        KB.audio.sfx('cutter');
+        vx('afterimage', p, { frames: 30, color: '#ffffff', every: 2, alpha: 0.5 });
+        vx('sparkTrail', p, { color: ['#ffffff', '#e0e0e0'], every: 2, life: 12, frames: 30 });
+        vx('ring', p.cx, p.cy, { r0: 4, r1: 24, frames: 12, color: '#ffffff', width: 2 });
+        return;
+      }
       if (d.mode === 'chop') {
+        // 空中版：判定框往下移，整套動作跟著卡比落下
+        const air = !p.onGround;
         setup(p, { anim: 'kirby_attack_cutter_chop', dur: 24, fps: 10, lock: false });
-        d.hit2 = false;
-        d.box = KB.hitbox({ x: 0, y: 0, w: 18, h: 14, dmg: 2, owner: 'player', type: 'cutter', follow: p, ox: 2, oy: -16, life: 7, rehit: 0, knock: 1.2 });
+        d.hit2 = false; d.air = air;
+        d.box = KB.hitbox({ x: 0, y: 0, w: 18, h: 14, dmg: 2, owner: 'player', type: 'cutter', follow: p, ox: 2, oy: air ? -6 : -16, life: 7, rehit: 0, knock: 1.2 });
         KB.audio.sfx('cutter');
         // 特效：下劈上段的白色刃弧
         vx('slash', p.cx + p.dir * 6, p.cy - 10, 17, p.dir > 0 ? -1.4 : Math.PI + 1.4, { color: '#ffffff', width: 2, frames: 9, arc: Math.PI * 0.7, flip: p.dir < 0 });
@@ -462,11 +599,29 @@
     },
     update(p) {
       const d = data(p), t = p.stateT;
+      if (d.mode === 'drill') {
+        if (!p.onGround) {
+          if (p.vy < 5.6) p.vy += 0.3;
+          p.vx = p.dir * 0.9;
+          if (d.box && !d.box.dead) beat(d.box);
+          if (t % 2 === 0) KB.particles(p.cx + rnd(-9, 9), p.cy + rnd(-8, 8), ['#ffffff', '#e0e0e0'], 1, { spread: 0.4, grav: 0, life: 9, up: 0, size: 1 });
+          if (t % 10 === 5) KB.audio.sfx('cutter');
+        } else if (!d.landed) {
+          d.landed = true; killBox(p);
+          KB.hitbox({ x: p.cx - 26, y: p.bottom - 14, w: 52, h: 16, dmg: 3, owner: 'player', type: 'cutter', life: 8, rehit: 0, pierce: true, knock: 2.4 });
+          KB.game.shake = 4; KB.audio.sfx('cutter');
+          vx('burst', p.cx, p.bottom - 2, { n: 16, colors: ['#ffffff', '#e0e0e0', '#c8c8d0'], speed: 2.8, life: 20, grav: 0.14, size: 2 });
+          for (const sgn of [-1, 1]) vx('shockwave', p.cx + sgn * 6, p.bottom, { dir: sgn, speed: 3.2, frames: 16, w: 12, h: 13, color: '#ffffff' });
+          vx('ring', p.cx, p.bottom - 4, { r0: 4, r1: 32, frames: 14, color: '#ffffff', width: 2 });
+          p.attackTimer = Math.min(p.attackTimer, 8);
+        }
+        return;
+      }
       if (d.mode === 'chop') {
         // 兩段判定：先上段撩、第 10 幀起下段劈
         if (t === 10 && !d.hit2) {
           d.hit2 = true; killBox(p);
-          d.box = KB.hitbox({ x: 0, y: 0, w: 20, h: 22, dmg: 3, owner: 'player', type: 'cutter', follow: p, ox: 2, oy: -4, life: 10, rehit: 0, knock: 2 });
+          d.box = KB.hitbox({ x: 0, y: 0, w: 20, h: d.air ? 28 : 22, dmg: 3, owner: 'player', type: 'cutter', follow: p, ox: 2, oy: d.air ? 4 : -4, life: 10, rehit: 0, knock: 2 });
           KB.audio.sfx('cutter');
           KB.particles(p.cx + p.dir * 12, p.cy + 6, ['#ffffff', '#e0e0e0'], 4, { spread: 1.2, grav: 0.05, life: 12, up: 0.3, size: 1 });
           // 特效：下段劈的大刃弧 + 火花
@@ -478,21 +633,25 @@
       }
       if (t >= 8 && KB.input.pressed('attack')) restartAttack(p);
     },
-    onEnd(p) { killBox(p); clearAnim(p); const d = data(p); d.mode = null; d.blades = (d.blades || []).filter(b => !b.dead); },
+    onEnd(p) { killBox(p); clearAnim(p); const d = data(p); d.mode = null; d.air = false; d.landed = false; d.blades = (d.blades || []).filter(b => !b.dead); },
     onLose(p) { killBox(p); clearAnim(p); /* 已丟出的刀刃會自行飛回卡比後消失 */ },
   });
 
   // ======================================================================
   // 5. 電擊 SPARK：按住時卡比周圍 44×40 電場（rehit 6，dmg 1），不能移動、不能跳；放開即停
+  //    ↑+X 雷擊柱：頭頂導出 38px 電柱（Round 9 新增）
+  //    ↓+X 落雷  ：電流沿地面向兩側竄（空中版 = 腳下的下擊電柱）（Round 9 新增）
+  //    空中 X 電光衝：電球裹身斜下衝，落地放電（Round 9 新增）
   // ======================================================================
   def('spark', {
     color: '#60c0ff', duration: 10, hold: true, maxHold: 150, lockMove: false, moveSpeed: 0.5, canJump: false, fps: 12,
     desc: '全身通電，放電時還能拖著電場慢慢走；蓄滿再放開會炸開巨大電擊波。',
-    moves: [['X', '放電（44px 電場）'], ['放電中 ←→', '帶電慢走'], ['按住 45 幀放開', '電擊波（96px）']],
+    moves: [['X', '放電（44px 電場）'], ['↑+X', '雷擊柱'], ['↓+X', '落雷'], ['空中 X', '電光衝'], ['按住 45 幀放開', '電擊波（96px）']],
     hatOffset: { attack: [0, 0] },
+    onCrouchAttack(p) { startMove(p, 'quake'); },
     onAttack(p) {
       const d = data(p); killBox(p); d.t = 0;
-      d.mode = pickMode(p, null, null, 'field'); d.charged = false;
+      d.mode = pickMode(p, 'dive', 'bolt', 'field', 'quake'); d.charged = false; d.landed = false;
       if (d.mode === 'burst') {
         setup(p, { anim: 'kirby_attack_spark_burst', dur: 20, fps: 12, lock: true });
         d.box = KB.hitbox({ x: 0, y: 0, w: 96, h: 80, dmg: 3, owner: 'player', type: 'spark', follow: p, ox: -48, oy: -32, life: 20, rehit: 7, flipWithOwner: false, pierce: true });
@@ -508,6 +667,42 @@
         vx('flash', '#ffffff', 5, 0.45);
         vx('ring', p.cx, p.cy, { r0: 6, r1: 54, frames: 18, color: '#ffffff', width: 2 });
         vx('zoom', 1.12, 10);
+      } else if (d.mode === 'bolt') {
+        // ↑+X 雷擊柱：頭頂導出電柱（判定框跟著卡比，空中緩降）
+        setup(p, { anim: 'kirby_attack_spark_up', dur: 24, fps: 12, lock: true });
+        d.box = KB.hitbox({ x: 0, y: 0, w: 20, h: 38, dmg: 3, owner: 'player', type: 'spark', follow: p, ox: -10, oy: -36, life: 3, rehit: 8, knock: 1.6, flipWithOwner: false, pierce: true });
+        KB.audio.sfx('spark'); KB.game.shake = 3;
+        for (let i = 0; i < 3; i++) vx('lightning', p.cx + rnd(-4, 4), p.y + 4, p.cx + rnd(-8, 8), p.y - rnd(26, 38), { color: '#c0f0ff', frames: 14, jitter: 5, branches: 2 });
+        vx('ring', p.cx, p.y - 6, { r0: 3, r1: 24, frames: 14, color: '#ffffff', width: 2 });
+        vx('circle', p.cx, p.y - 18, { r: 16, frames: 20, color: '#80d0ff', spin: 0.2, glyphs: 6 });
+      } else if (d.mode === 'quake') {
+        // ↓+X 落雷：地面版沿地面向兩側竄；空中版改成腳下的下擊電柱
+        const air = !p.onGround;
+        setup(p, { anim: 'kirby_attack_spark_down', dur: 26, fps: 12, lock: true });
+        d.air = air;
+        d.box = air
+          ? KB.hitbox({ x: 0, y: 0, w: 20, h: 34, dmg: 3, owner: 'player', type: 'spark', follow: p, ox: -10, oy: 8, life: 3, rehit: 8, knock: 1.4, flipWithOwner: false, pierce: true })
+          : KB.hitbox({ x: 0, y: 0, w: 52, h: 16, dmg: 3, owner: 'player', type: 'spark', follow: p, ox: -26, oy: 4, life: 3, rehit: 8, knock: 2, flipWithOwner: false, pierce: true });
+        KB.audio.sfx('spark'); KB.game.shake = 4;
+        if (air) {
+          vx('lightning', p.cx, p.y + 10, p.cx + rnd(-6, 6), p.y + 40, { color: '#c0f0ff', frames: 14, jitter: 5, branches: 2 });
+          vx('ring', p.cx, p.y + 22, { r0: 3, r1: 22, frames: 14, color: '#80d0ff', width: 2 });
+        } else {
+          for (const sgn of [-1, 1]) {
+            vx('shockwave', p.cx + sgn * 6, p.bottom, { dir: sgn, speed: 3.4, frames: 20, w: 12, h: 13, color: '#c0f0ff' });
+            vx('lightning', p.cx, p.bottom - 3, p.cx + sgn * 26, p.bottom - 3, { color: '#c0f0ff', frames: 12, jitter: 4, branches: 1 });
+          }
+          vx('ring', p.cx, p.bottom - 3, { r0: 4, r1: 34, frames: 16, color: '#ffffff', width: 2 });
+        }
+      } else if (d.mode === 'dive') {
+        // 空中 X 電光衝：電球裹身斜下衝，落地放電
+        setup(p, { anim: 'kirby_attack_spark_dive', dur: 34, fps: 14, lock: true });
+        p.vx = p.dir * 2.6; if (p.vy < 3.0) p.vy = 3.0;
+        d.box = KB.hitbox({ x: 0, y: 0, w: 28, h: 26, dmg: 3, owner: 'player', type: 'spark', follow: p, ox: -14, oy: -4, life: 3, rehit: 7, knock: 1.8, flipWithOwner: false });
+        KB.audio.sfx('spark');
+        vx('afterimage', p, { frames: 34, color: '#80d0ff', every: 2, alpha: 0.5 });
+        vx('aura', p, { color: '#80d0ff', r: 16, frames: 34, pulse: 0.4 });
+        vx('ring', p.cx, p.cy, { r0: 4, r1: 26, frames: 12, color: '#c0f0ff', width: 2 });
       } else {
         setup(p, { anim: null, dur: 10, fps: 12, lock: false, maxHold: 150 });
         d.box = KB.hitbox({ x: 0, y: 0, w: 44, h: 40, dmg: 1, owner: 'player', type: 'spark', follow: p, ox: -22, oy: -12, life: 3, rehit: 6, flipWithOwner: false });
@@ -528,6 +723,48 @@
         }
         if (d.t % 3 === 0) KB.fx('fx_spark_field', p.cx + rnd(-42, 42), p.cy + rnd(-30, 30) + 6, { life: 5, flip: Math.random() < 0.5, fps: 15 });
         if (d.t % 7 === 0) KB.audio.sfx('spark');
+        return;
+      }
+      if (d.mode === 'bolt') {
+        slowFall(p, 0.7); p.vx *= 0.85;
+        if (b && !b.dead) beat(b);
+        if (d.t % 4 === 1) vx('lightning', p.cx + rnd(-4, 4), p.y + 2, p.cx + rnd(-9, 9), p.y - rnd(20, 36), { color: '#c0f0ff', frames: 8, jitter: 4, branches: 1 });
+        if (d.t % 2 === 0) KB.fx('fx_spark_field', p.cx + rnd(-8, 8), p.y - rnd(4, 34), { life: 4, flip: Math.random() < 0.5, fps: 15 });
+        KB.particles(p.cx + rnd(-8, 8), p.y - rnd(0, 36), ['#ffffff', '#80d0ff', '#c0f0ff'], 1, { spread: 0.6, grav: -0.05, life: 10, up: 0.8, size: 1 });
+        if (d.t % 10 === 0) KB.audio.sfx('spark');
+        return;
+      }
+      if (d.mode === 'quake') {
+        if (d.air) { if (p.vy < 1.4) p.vy = 1.4; } else p.vx *= 0.7;
+        if (b && !b.dead) beat(b);
+        if (d.t % 3 === 0) {
+          const ox = d.air ? rnd(-8, 8) : rnd(-24, 24), oy = d.air ? rnd(10, 38) : rnd(2, 14);
+          KB.fx('fx_spark_field', p.cx + ox, p.y + oy, { life: 4, flip: Math.random() < 0.5, fps: 15 });
+        }
+        if (d.t % 6 === 2) {
+          if (d.air) vx('lightning', p.cx, p.y + 10, p.cx + rnd(-8, 8), p.y + rnd(26, 40), { color: '#c0f0ff', frames: 8, jitter: 4, branches: 1 });
+          else for (const sgn of [-1, 1]) vx('lightning', p.cx, p.bottom - 3, p.cx + sgn * rnd(14, 26), p.bottom - 3, { color: '#c0f0ff', frames: 8, jitter: 4, branches: 1 });
+        }
+        KB.particles(p.cx + (d.air ? rnd(-9, 9) : rnd(-26, 26)), p.y + (d.air ? rnd(12, 36) : rnd(4, 15)), ['#ffffff', '#80d0ff'], 1, { spread: 0.8, grav: 0, life: 10, up: 0.2, size: 1 });
+        if (d.t % 10 === 0) KB.audio.sfx('spark');
+        return;
+      }
+      if (d.mode === 'dive') {
+        if (!p.onGround) {
+          p.vx = p.dir * 2.6; if (p.vy < 5.4) p.vy += 0.3;
+          if (b && !b.dead) beat(b);
+          if (d.t % 2 === 0) KB.fx('fx_spark_field', p.cx + rnd(-12, 12), p.cy + rnd(-10, 10), { life: 4, flip: Math.random() < 0.5, fps: 15 });
+          KB.particles(p.cx + rnd(-12, 12), p.cy + rnd(-10, 10), ['#ffffff', '#80d0ff', '#c0f0ff'], 1, { spread: 0.8, grav: 0, life: 9, up: 0, size: 1 });
+          if (d.t % 9 === 4) KB.audio.sfx('spark');
+        } else if (!d.landed) {
+          d.landed = true; killBox(p);
+          KB.hitbox({ x: p.cx - 34, y: p.bottom - 16, w: 68, h: 18, dmg: 4, owner: 'player', type: 'spark', life: 8, rehit: 0, pierce: true, knock: 2.6 });
+          KB.game.shake = 6; KB.audio.sfx('spark');
+          for (const sgn of [-1, 1]) vx('shockwave', p.cx + sgn * 6, p.bottom, { dir: sgn, speed: 3.6, frames: 18, w: 13, h: 14, color: '#c0f0ff' });
+          vx('ring', p.cx, p.bottom - 4, { r0: 5, r1: 42, frames: 16, color: '#ffffff', width: 2 });
+          vx('burst', p.cx, p.bottom - 2, { n: 16, colors: ['#ffffff', '#80d0ff', '#c0f0ff'], speed: 2.8, life: 20, grav: 0.1, size: 2 });
+          p.attackTimer = Math.min(p.attackTimer, 10);
+        }
         return;
       }
       const on = holding(p, held);
@@ -553,13 +790,15 @@
         if (d.t % 4 === 0) KB.particles(p.cx, p.y - 6, ['#ffffff', '#ffe040'], 2, { spread: 1, grav: 0, life: 12, up: 0.4, size: 1 });
       } else if (p.stateT >= 12 && p.stateT % 8 === 0) sfx('charge');
     },
-    onEnd(p) { killBox(p); clearAnim(p); const d = data(p); d.mode = null; d.charged = false; },
+    onEnd(p) { killBox(p); clearAnim(p); const d = data(p); d.mode = null; d.charged = false; d.air = false; d.landed = false; },
     onLose(p) { killBox(p); clearAnim(p); },
   });
 
   // ======================================================================
   // 6. 石頭 STONE：player.js 的 startStone / updateStone 處理（無敵、重落、壓扁敵人、再按攻擊解除）
   //    本檔額外負責：變身時隨機外觀（岩石 / 石像 / 鐵塊）＋ 斜坡自動滾動（加速、dmg 8）
+  //    Round 9：變身當幀的方向鍵決定變化型 —— ↑+X 彗星落石（先小跳再以最高速砸下、落地大衝擊）、
+  //             ↓+X 地滾衝刺（落地就以滾速 3.6 衝出去，撞擊 dmg 8）。方向鍵沒按就是原本的變石。
   //    掛勾：entity.js 的 Hitbox 在收到 {stone:true, owner:'player'} 時呼叫 onStoneStart，
   //          並每幀呼叫 hitbox.onUpdate（判定框在玩家之後更新，可安全改寫 p.vx）
   // ======================================================================
@@ -569,15 +808,30 @@
   def('stone', {
     color: '#a0a0a8', stoneLike: true,
     desc: '變成堅硬的石塊，無敵又能壓扁敵人；在斜坡上會越滾越快。',
-    moves: [['X', '變石（無敵、下壓）'], ['斜坡上', '滾石衝撞'], ['再按 X', '解除變身']],
+    moves: [['X', '變石（無敵、下壓）'], ['↑+X', '彗星落石'], ['↓+X', '地滾衝刺'], ['空中 X', '急速落石'], ['斜坡上', '滾石衝撞'], ['再按 X', '解除變身']],
     hatOffset: { stone: [0, 99] },
     onGet(p) { p.stoneT = 0; },
-    // 每次變身：隨機外觀 + 重設滾動速度
+    // ↓+X（蹲下按攻擊）也要能變石 —— player.js 的蹲下分支只會呼叫 onCrouchAttack
+    onCrouchAttack(p) { p.startStone(); },
+    // 每次變身：隨機外觀 + 重設滾動速度 + 讀方向鍵決定變化型
     onStoneStart(p, box) {
       const d = data(p);
       d.form = STONE_FORMS[(Math.random() * STONE_FORMS.length) | 0];
       if (KB.SPR[d.form]) KB.SPR.kirby_stone = KB.SPR[d.form];
-      d.roll = 0;
+      d.roll = 0; d.pendRoll = 0;
+      // 石頭不經過 startAttack（player.js 直接走 startStone），p.atkDir 可能是上一招的舊值 →
+      // 這裡以「變身當幀的實際按鍵」為準，兩種讀法結果相同（atkDir 本來就是同一幀的快照）。
+      d.variant = down('up') ? 'comet' : down('down') ? 'rolldash' : null;
+      if (d.variant === 'comet') {
+        if (p.onGround) { p.vy = -3.2; p.onGround = false; }   // 先彈起再以最高速砸下
+        vx('ring', p.cx, p.cy, { r0: 4, r1: 26, frames: 12, color: '#ffe040', width: 2 });
+        vx('sparkTrail', p, { color: ['#ffe040', '#ffffff', '#a0a0a8'], every: 2, life: 14, frames: 120 });
+        vx('textPop', p.cx, p.y - 18, 'COMET!', { color: '#ffe040', frames: 30 });
+      } else if (d.variant === 'rolldash') {
+        if (p.onGround) d.roll = p.dir * 3.6; else d.pendRoll = p.dir * 3.6;
+        vx('afterimage', p, { frames: 40, color: '#c8c8d0', every: 3, alpha: 0.45 });
+        vx('ring', p.cx, p.cy, { r0: 4, r1: 24, frames: 12, color: '#c8c8d0', width: 2 });
+      }
       KB.particles(p.cx, p.cy, STONE_DUST[d.form] || '#a0a0a8', 8, { spread: 2, life: 20 });
       // 特效：變石瞬間 → 震動 + 碎石噴發 + 白閃 + zoom punch
       // 註：這裡「不」放 hitstop —— 變石的停格會吃掉「再按 X 解除」的按鍵邊緣，
@@ -606,6 +860,22 @@
         for (const s of [-1, 1]) vx('shockwave', p.cx + s * 6, p.bottom, { dir: s, speed: 3, frames: 18, w: 12, h: 13, color: dust2 });
         vx('ring', p.cx, p.bottom - 4, { r0: 4, r1: 34, frames: 14, color: dust2, width: 2 });
       }
+      // 彗星落石：離地時直接吃滿下落速度（updateStone 每幀 maxFall = 7）
+      if (d.variant === 'comet' && !p.onGround && p.vy > -0.5) p.vy = 7;
+      // 落地大衝擊（彗星落石）／落地才開跑（地滾衝刺）
+      if (p.onGround && !d.wasGround) {
+        if (d.variant === 'comet') {
+          const dc = STONE_DUST[d.form] || '#a0a0a8';
+          KB.hitbox({ x: p.cx - 34, y: p.bottom - 16, w: 68, h: 18, dmg: 9, owner: 'player', type: 'stone', life: 8, rehit: 0, pierce: true, knock: 3.4, breakBlocks: true });
+          vx('shake', 9); vx('hitstop', 3); vx('zoom', 1.16, 10);
+          vx('burst', p.cx, p.bottom - 2, { n: 20, colors: [dc, '#ffffff', '#ffe040'], speed: 3.4, life: 26, grav: 0.24, size: 3 });
+          for (const sgn of [-1, 1]) vx('shockwave', p.cx + sgn * 8, p.bottom, { dir: sgn, speed: 4, frames: 22, w: 14, h: 16, color: dc });
+          vx('ring', p.cx, p.bottom - 4, { r0: 6, r1: 52, frames: 18, color: '#ffe040', width: 3 });
+          vx('textPop', p.cx, p.bottom - 26, 'CRASH!', { color: '#ffe040', frames: 34 });
+          d.variant = null;
+        }
+        if (d.pendRoll) { d.roll = d.pendRoll; d.pendRoll = 0; }
+      }
       d.wasGround = p.onGround; d.fallV = p.vy;
       let r = d.roll || 0;
       if (sdir) r = Math.max(-4.6, Math.min(4.6, r + sdir * 0.34));
@@ -624,24 +894,34 @@
     },
     onLose(p) {
       if (p.stoneBox) { p.stoneBox.dead = true; p.stoneBox = null; }
-      data(p).roll = 0;
+      const d = data(p); d.roll = 0; d.pendRoll = 0; d.variant = null;
     },
   });
 
   // ======================================================================
   // 7. 冰凍 ICE：按住噴冰霧（前方 32px，rehit 10，freeze:true → 敵人變冰塊，entity.js 處理）
+  //    ↑+X 冰柱噴泉：頭頂長出 38px 冰柱、一樣會凍結（Round 9 新增）
+  //    ↓+X 冰塊飛踢的空中版：改成朝斜下方踢出冰彈
   // ======================================================================
   def('ice', {
     color: '#a0e8ff', duration: 12, hold: true, maxHold: 90, lockMove: true, canJump: false, fps: 10,
     desc: '吐出刺骨寒霧凍住敵人，再一腳把冰塊飛踢飛出去。',
-    moves: [['X', '噴冰'], ['↓+X', '冰塊飛踢'], ['空中 X', '冰晶散射']],
+    moves: [['X', '噴冰'], ['↑+X', '冰柱噴泉'], ['↓+X', '冰塊飛踢'], ['空中 X', '冰晶散射']],
     hatOffset: { attack: [0, 0] },
     onGet(p) { data(p).t = 0; },
     onCrouchAttack(p) { startMove(p, 'kick'); },
     onAttack(p) {
       const d = data(p); killBox(p); d.t = 0;
-      d.mode = pickMode(p, 'burst', null, 'breath');
-      if (d.mode === 'kick') {
+      d.mode = pickMode(p, 'burst', 'pillar', 'breath', 'kick');
+      if (d.mode === 'pillar') {
+        // ↑+X 冰柱噴泉：頭頂的冰柱慢慢長高，命中一樣會凍結
+        setup(p, { anim: 'kirby_attack_ice_up', dur: 26, fps: 12, lock: true });
+        d.box = KB.hitbox({ x: 0, y: 0, w: 16, h: 12, dmg: 1, owner: 'player', type: 'ice', follow: p, ox: -8, oy: -10, life: 3, rehit: 9, freeze: true, knock: 1.2, flipWithOwner: false, breakBlocks: true });
+        p.vx *= 0.4;
+        KB.audio.sfx('ice');
+        vx('ring', p.cx, p.y - 2, { r0: 3, r1: 22, frames: 14, color: '#a0e8ff', width: 2 });
+        vx('burst', p.cx, p.y - 2, { n: 12, colors: ['#ffffff', '#c0f0ff', '#80d0ff'], speed: 2.2, life: 22, grav: 0.04, size: 2, dir: -Math.PI / 2, spread: 0.7 });
+      } else if (d.mode === 'kick') {
         setup(p, { anim: 'kirby_attack_ice_kick', dur: 20, fps: 10, lock: true });
         d.kicked = false;
       } else if (d.mode === 'burst') {
@@ -692,12 +972,24 @@
             vx('burst', best.cx, best.cy, { n: 14, colors: ['#ffffff', '#c0f0ff', '#80d0ff'], speed: 2.4, life: 24, grav: 0.08, size: 3 });
             vx('textPop', best.cx, best.cy - 16, 'ICE KICK!', { color: '#a0e8ff', frames: 34 });
           } else {
-            KB.shoot({ spr: 'proj_ice', x: p.cx + p.dir * 10, y: p.cy - 1, vx: p.dir * 3.4, vy: 0, dmg: 2, owner: 'player', life: 24, w: 10, h: 10,
+            // 空中版：往斜下方踢（判定跟著卡比落下，不會停在半空）
+            const air = !p.onGround;
+            KB.shoot({ spr: 'proj_ice', x: p.cx + p.dir * (air ? 6 : 10), y: p.cy - 1 + (air ? 6 : 0), vx: p.dir * (air ? 2.2 : 3.4), vy: air ? 4.2 : 0, dmg: 2, owner: 'player', life: air ? 40 : 24, w: 10, h: 10,
               grav: 0, solid: true, pierce: false, freeze: true, type: 'ice', dir: p.dir, fxHit: 'fx_ice', trail: '#c0f0ff', breakBlocks: true });
+            if (air) KB.hitbox({ x: 0, y: 0, w: 22, h: 22, dmg: 2, owner: 'player', type: 'ice', follow: p, ox: -11, oy: 8, life: 10, rehit: 0, freeze: true, knock: 1.4, flipWithOwner: false });
           }
           KB.audio.sfx('ice');
           KB.particles(p.cx + p.dir * 14, p.bottom - 4, ['#ffffff', '#c0f0ff'], 6, { spread: 1.4, grav: 0.05, life: 14, up: 0.4, size: 1 });
         }
+        return;
+      }
+      if (d.mode === 'pillar') {
+        slowFall(p, 0.6); p.vx *= 0.85;
+        if (b && !b.dead) { b.h = Math.min(38, 12 + d.t * 3); b.oy = -b.h + 2; beat(b); }
+        if (d.t % 2 === 1) KB.fx('fx_ice', p.cx + rnd(-3, 3), p.y - rnd(2, (b ? b.h : 12)), { vy: -1.2, life: 12, flip: Math.random() < 0.5, fps: 12 });
+        KB.particles(p.cx + rnd(-6, 6), p.y - rnd(0, (b ? b.h : 12)), ['#ffffff', '#c0f0ff', '#80d0ff'], 1, { spread: 0.5, grav: -0.04, life: 14, up: 0.7, size: 1 });
+        if (d.t === 10 || d.t === 20) vx('ring', p.cx, p.y - 16, { r0: 3, r1: 18, frames: 12, color: '#a0e8ff', width: 1 });
+        if (d.t % 12 === 0) KB.audio.sfx('ice');
         return;
       }
       if (d.mode === 'burst') {
@@ -726,18 +1018,29 @@
   // ======================================================================
   // 8. 鐵鎚 HAMMER：掄鎚 26 幀，判定由頭頂掃到前方（26×28，dmg 6，knock 2.5），揮到底時地面震動 + 塵土
   //    空中：判定較小（20×22，dmg 5）。蹲下＋攻擊：原地大力敲擊（34×30，dmg 8，shake 5）
+  //    ↑+X 擎天鎚：由下往上掄過頭頂（26×34，dmg 6，把敵人打飛）（Round 9 新增）
+  //    ↓+X 巨鎚敲擊的空中版：判定框移到身體下方並加速下砸
   // ======================================================================
   def('hammer', {
     color: '#e08040', duration: 26, hold: true, lockMove: true, canJump: false, fps: 7,
     desc: '扛起沉重的木槌，一擊就能把星星方塊與敵人砸扁。',
-    moves: [['X', '掄鎚'], ['按住 40 幀放開', '大迴旋'], ['空中 X', '落地震'], ['↓+X', '巨鎚敲擊']],
+    moves: [['X', '掄鎚'], ['↑+X', '擎天鎚'], ['↓+X', '巨鎚敲擊'], ['空中 X', '落地震'], ['按住 40 幀放開', '大迴旋']],
     hatOffset: { attack: [0, 0] },
     onCrouchAttack(p) { startMove(p, 'smash'); },
     onAttack(p) {
       const d = data(p); killBox(p);
-      d.mode = pickMode(p, 'drop', null, 'swing');
+      d.mode = pickMode(p, 'drop', 'rise', 'swing', 'smash');
       d.hits = 0; d.charge = 0; d.ready = false; d.landed = false;
-      if (d.mode === 'smash') {
+      if (d.mode === 'rise') {
+        // ↑+X 擎天鎚：由下往上掄過頭頂，判定框在頭上（空中沿用，緩降）
+        setup(p, { anim: 'kirby_attack_hammer_up', dur: 24, fps: 10, lock: true });
+        d.box = KB.hitbox({ x: 0, y: 0, w: 26, h: 34, dmg: 6, owner: 'player', type: 'hammer', follow: p, ox: -13, oy: -32, life: 18, rehit: 0, knock: 3.2, flipWithOwner: false, breakBlocks: true });
+        if (p.onGround) { p.vy = -2.2; p.onGround = false; }
+        p.vx *= 0.4;
+        vx('slash', p.cx, p.cy - 14, 22, -Math.PI / 2, { color: '#f0e0c0', width: 4, frames: 13, arc: Math.PI * 1.1, flip: p.dir < 0 });
+        vx('ring', p.cx, p.y - 12, { r0: 4, r1: 30, frames: 14, color: '#f0e0c0', width: 2 });
+        vx('shake', 4);
+      } else if (d.mode === 'smash') {
         setup(p, { anim: null, dur: 34, fps: 6, lock: true });
         p.vx = 0;
       } else if (d.mode === 'drop') {
@@ -783,6 +1086,17 @@
         if (t > 80) { p.grav = P.grav; p.maxFall = P.maxFall; }
         return;
       }
+      // ---- 擎天鎚 ----
+      if (d.mode === 'rise') {
+        slowFall(p, 0.8); p.vx *= 0.85;
+        if (t >= 2 && t <= 14) {
+          const a = Math.PI * 0.2 + (t - 2) / 12 * Math.PI * 0.7;
+          KB.particles(p.cx + p.dir * Math.cos(a) * 16, p.cy - 4 - Math.sin(a) * 16, ['#f0e0c0', '#ffffff'], 1, { spread: 0.25, grav: 0, life: 9, up: 0, size: 1 });
+        }
+        if (t === 4) { KB.audio.sfx('hammer'); vx('hitstop', 2); }
+        if (d.box && !d.box.dead && t > 16) { d.box.dead = true; d.box = null; }
+        return;
+      }
       // ---- 蓄力大迴旋：連續三段判定，邊轉邊前進 ----
       if (d.mode === 'spin') {
         p.vx = p.dir * 1.5;
@@ -806,7 +1120,9 @@
       const swingT = smash ? 7 : 5, hitT = smash ? 15 : 13;   // 揮下開始 / 揮到底
       if (t === swingT) {
         killBox(p);
-        if (smash) d.box = KB.hitbox({ x: 0, y: 0, w: 34, h: 30, dmg: 8, owner: 'player', type: 'hammer', follow: p, ox: -4, oy: -14, life: 16, rehit: 0, knock: 3 });
+        // 空中版巨鎚敲擊：判定框移到身體下方（打腳下的敵人），並加速下砸
+        if (smash && !p.onGround) { d.box = KB.hitbox({ x: 0, y: 0, w: 32, h: 30, dmg: 8, owner: 'player', type: 'hammer', follow: p, ox: -16, oy: 6, life: 16, rehit: 0, knock: 3, flipWithOwner: false }); if (p.vy < 3.2) p.vy = 3.2; }
+        else if (smash) d.box = KB.hitbox({ x: 0, y: 0, w: 34, h: 30, dmg: 8, owner: 'player', type: 'hammer', follow: p, ox: -4, oy: -14, life: 16, rehit: 0, knock: 3 });
         else if (!p.onGround) d.box = KB.hitbox({ x: 0, y: 0, w: 20, h: 22, dmg: 5, owner: 'player', type: 'hammer', follow: p, ox: 2, oy: -8, life: 14, rehit: 0, knock: 2 });
         else d.box = KB.hitbox({ x: 0, y: 0, w: 26, h: 28, dmg: 6, owner: 'player', type: 'hammer', follow: p, ox: 2, oy: -12, life: 16, rehit: 0, knock: 2.5 });
       }

@@ -342,6 +342,42 @@
   ], { fps: 10 });
 
   // ==========================================================
+  //  Round 9：↑+X / ↓+X 補齊用的新姿勢（每招 2 幀）
+  // ==========================================================
+  // ---- 忍者：↑+X 昇龍手裡劍（手往頭頂上甩）----
+  const ninjaUpK = o => kirby(Object.assign({
+    w: 26, h: 30, ox: 3, oy: 10, eyeAt: [[7, 4], [12, 4]], mouth: MOUTH_LINE, mouthAt: [10, 12],
+    arms: [[15, 2, 5], [0, 8, 5]], feet: [[1, 15], [11, 15]],
+  }, o));
+  S('kirby_attack_ninja_up', [
+    ninjaUpK({ front: [[SHURIKEN_S, 14, 1]], eyes: EYE_SQUINT, eyeAt: [[7, 5], [12, 5]] }),
+    ninjaUpK({ dy: -1, arms: [[15, -2, 5], [0, 8, 5]], front: [[SHURIKEN_S, 16, -8]],
+      mouth: MOUTH_OPEN, mouthAt: [9, 11], back: [[arcLayer(26, 30, 14, 14, 11, -160, -40, 'e'), -3, -10]] }),
+  ], { fps: 14 });
+
+  // ---- 居合：↓+X 地摺斬（壓低重心、貼地橫掃）----
+  const bladeLowK = o => kirby(Object.assign({
+    w: 36, h: 24, ox: 8, oy: 4, eyes: EYE_SQUINT, eyeAt: [[7, 8], [12, 8]],
+    mouth: MOUTH_OPEN, mouthAt: [9, 12], cheekAt: [[4, 12], [15, 12]],
+    arms: [[15, 12, 5], [0, 12, 5]], feet: [[0, 15], [11, 15]],
+  }, o));
+  S('kirby_attack_blade_down', [
+    bladeLowK({ front: [[KATANA_S_R, 13, 11]] }),
+    bladeLowK({ dy: 1, front: [[KATANA_R, 6, 14]], back: [[slashArc(36, 24, 17, 19, 13, -30, 40), -8, -4]] }),
+  ], { fps: 12 });
+
+  // ---- 弓：↑+X 對空連射（弓轉成橫向、箭尖朝上）----
+  const BOW_UP_D = rot270(BOW_DRAWN), BOW_UP_L = rot270(BOW_LOOSE), ARROW_UP = rot270(ARROW_ON);
+  const bowUpK = o => kirby(Object.assign({
+    w: 30, h: 32, ox: 5, oy: 12, eyeAt: [[7, 4], [12, 4]], mouth: MOUTH_LINE, mouthAt: [10, 12],
+    arms: [[13, 2, 5], [4, 4, 5]], feet: [[1, 15], [11, 15]],
+  }, o));
+  S('kirby_attack_bow_up', [
+    bowUpK({ front: [[BOW_UP_D, -1, -10], [ARROW_UP, 6, -4]], eyes: EYE_SQUINT, eyeAt: [[7, 5], [12, 5]] }),
+    bowUpK({ dy: -1, front: [[BOW_UP_L, -1, -11], [ARROW_UP, 6, -13]], mouth: MOUTH_OPEN, mouthAt: [9, 11] }),
+  ], { fps: 12 });
+
+  // ==========================================================
   //  帽子（anchor bottom：最後一列貼著 player.y）
   // ==========================================================
   // 牛仔帽 20×8
