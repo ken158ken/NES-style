@@ -1775,3 +1775,228 @@ $PY tools/playthrough.py --challenge tower --seed 1 --godmode --until-floor 3
 - **挑戰**：`ch/menu.png`、`menu_1~4.png`、`menu_world.png`、`menu_arena.png`、`time_hud(2).png`、`nohit_hud.png`、`nohit_fail.png`、`tower_f1|f5|f10(.b).png`、`tower_timed.png`、`daily_f1.png`、`arena_extra_pick.png`、`arena_all7.png`、`records_challenge.png`、`_crop_all7_badge.png`、`_crop_failtitle.png`
 - **效能**：`perf/skin.png`、`helper2_skin.png`、`all.png`
 - **原始數據 / log**：`t4_awakenmix.json`、`t4b_range.json`、`t8b.json`、`t10.json`、`t13.json`、`tests/*.log`、`tests_summary.txt`、`playthrough_summary.txt`
+
+---
+
+# Round 9 驗收（qa9 · 2026-09-15）
+
+> 範圍：player-input（↑ 長按飛行、漂浮中出招、空中出招保持下墜、招式後自動回飛行、`p.atkDir` / `p.dirHold`）、
+> abilities-basic（12 基本 / 武器）、abilities-magic-forms（8）、abilities-mix（24 混合）—— **44 能力 × 5 招**、
+> 以及 UI（暫停能力卡 / 圖鑑 / 操作說明 / 16px 字集）與全套測試 / 通關 / 效能。
+> 所有截圖在 `shots/agent_qa9/`，**44 張能力矩陣蒙太奇與所有飛行 / UI 截圖都用 Read 工具實際看過**。
+> src 全程唯讀，只寫本檔、`docs/PROGRESS.md` 的 `## qa9` 區段與 `shots/agent_qa9/`。
+
+## R9-0. 結論
+
+| 項目 | 結果 | 備註 |
+|---|---|---|
+| **飛行手感（↑ 長按）** | **OK（2 個問題）** | 地面按住 ↑ 第 **4 幀**進 `float`（`vy=-1.6`），完全符合 `KB.PHYS.flyHoldGround=4`；**門口優先**（站在 w1 r0 的門上按 ↑ → `state='door'`，連按住 14 幀都不會起飛）；**梯子優先**（w2 r1 梯子上按 ↑ → `state='climb'`，每幀 −1px 往上爬）；空中（jump / fall）按 ↑ **當幀**就 `float`；漂浮中按住 ↑ 每 9 幀自動拍動一次，y **單調遞減**（60 幀上升 68px，`vy` 在 −1.6 → −1.06 之間鋸齒）；放開 ↑ 後 5 幀內 `vy` 由 −1.06 轉正開始下降；實心天花板下 y 夾在 352、`vy=0.2` 反覆微彈；水中（`state='swim'`）與含物（`state='full'`）按住 ↑ 14 幀完全不起飛。**但龍化地面按 ↑ 不飛 → R9-P1-01；開放天空可無限飛出畫面 → R9-P1-02** |
+| **空中出招** | **OK（1 個問題）** | 漂浮中按 X：**有能力 → 直接 `startAttack`**（`hb=1`、不進 `exhale`、`exhaleLockT=0`），**無能力 → `exhale`**，無能力 + ↓X → 維持 `float` 不吐氣，有能力 + ↓X → 照樣出招；空中 X / ↑X / ↓X **44 能力全部出得來**且出招期間 y 遞增（淨下墜 6~56px，見 R9-2c）；招式結束時 ↑ 仍按著 → 自動回 `float`（sword / fire / flamesword / mage 四種路徑都驗過），放開 ↑ 則停在 `fall` / `idle` 不會亂飛；覺醒（地面 / 空中 / 混合能力）、時停（`timeStopT=179` 且敵人座標 50 幀不動、時停中 X 變 `punch`）、滑鏟 ↓+跳、單向平台 ↓+跳穿下、梯子上 X 吐氣彈、水中 **全部未壞**。**但漂浮中跳+攻不會覺醒 → R9-P2-01** |
+| **44 能力 × 7 招矩陣** | **44 / 44 OK** | 每能力拍 X / ↑X / ↓X / 空中X / 蓄力 / 空中↑X / 空中↓X 共 7 招 × 3 連拍 = 21 張，合成 7×3 蒙太奇逐張 Read。動畫幀齊全且七招互不相同、判定框位置與招名相符、特效（VFX / textPop / 粒子）都有、**0 洋紅像素**、`__kb.missing()` **全空**、**0 console error**、招後全部回 `idle` / `fall`（石頭維持 `stone` 是設計）、160 幀後**無殘留判定框 / 投射物 / VFX** |
+| **44 能力招式表** | **OK（1 個例外）** | 44 種都符合 X → ↑+X → ↓+X → 空中 X → 蓄力 的固定順序、≤ 6 列、鍵位標籤與招名皆不重複、`desc` 都在。**ghost 多一列「穿牆中 ↑↓」使 ↑ / ↓ 各出現 2 次 → R9-P2-03**（內容正確，只是不合 `run_move_table` 的規則） |
+| **UI** | **OK（2 個問題）** | 暫停能力卡 4 / 5 / 6 列（fire 4、ghost 5、stone 6、mech 6、giant 6、flamesword 5、hammermech 5…）排版全部沒有溢出、六列時自動不畫風味文字；能力圖鑑 **44/44 發現、6 頁**、詳情頁完整顯示五招表、0 missing / 0 error；操作說明 **2 頁**（第 1 頁 10 列，含「跳躍（空中再按＝飛行）」「按住 ↑ ／ 持續飛行（可一直上升）」「↑X / ↓X ／ 空中也能出招」；第 2 頁 10 列，含「按住 ↑ ／ 漂浮飛行（連按跳亦可）」「空中 X ／ 空中也能出招 ↑X／↓X」），無重疊無截斷。**但武器四能力的風味文字只畫出一個字 → R9-P2-02；說明沒寫「4 幀」與「門 / 梯不起飛」→ R9-P2-05** |
+| **16px 標題字缺字** | **OK（0 缺字）** | `KB.FONTS.loaded = {px12:true, px16:true}`、`zh = {px12:true, px16:true}`、`TEXT_CFG.pixelMap = [[13,'px12',12],[999,'px16',16]]`、`boldFrom16 = 16`。用 `KB.fontHasAll({key:'px16',…}, s)` 掃 **639 串**（44 能力的 name / hudName / desc / 5 招標籤與招名 / flavour ＋ 7 世界與所有房名 ＋ HELP / HELP2 ＋ 覺醒招名 ＋ 40 成就）→ **badN = 0、缺字清單為空**；`tools/font_subset.py --check` 也回「src 用到的字全部都在子集裡」（1848 字 / 非 ASCII 1753）。總控重做的子集已涵蓋本輪新字（怨愣枷鑽捶…） |
+| **全套測試** | **全綠** | engine **153/153**、enemy **393/393**、boss `--runs 3` **ALL PASS**（含 kracko fight 3/3，本輪沒有出現已知的 2/3 WARN）、weapons **370/370**、charge **115/115**、magic **192/192**、forms **226/226**、mix **509/509**、mix2 **607/607**、helper **131/131**、awaken **237/237**、elements **96/96**、progression **101/101**、extra **53/53**、challenge **93/93**、saves **67/67**、skins **67/67**、`level_check`（含 `--extra`）**0 error / 1 warning**、`audio_check` 全部通過。全部 exit 0，數字與各 agent 交件時完全一致 |
+| **playthrough** | **OK** | w1~w7 **7 個世界全部 `cleared=True` / `deaths=0` / `missing []` / `bossDamage=100%`**；幀數 5835 / 7294 / 7468 / 6749 / 8452 / 8304 / 9578。機器人進門只按 3 幀（< 4 幀門檻）且門口一律不起飛，**沒有任何一關被新的飛行卡住** |
+| **效能** | **OK（大量餘裕）** | 「按住 ↑ 飛行 + 每 6 幀放一次空中招」連續 **300 幀**：sword 0.56 / flamegun 0.57 / flamebow 0.57 / starmage 0.41 / mech 0.44 / hammermech **0.36 ms/幀**（純 step 基準 0.31~0.34 ms/幀），最重的 flamebow 用掉 16.7ms 預算的 **3.4%**；峰值實體 45→67、判定框 ≤5、投射物 ≤3，180 幀後**全部回到基準值（hb / proj / vfx 皆 0）**、JS heap 16~18MB 無成長 |
+
+問題統計：**P0 × 0、P1 × 2、P2 × 7**（其中 P2-02 / P2-07 是既有問題，非本輪造成）。沒有任何一項阻擋出貨。
+
+## R9-1. 問題列表
+
+| 編號 | 等級 | 位置 | 現象 | 重現 | 截圖 / 數據 | 建議負責人 |
+|---|---|---|---|---|---|---|
+| **R9-P1-01** | P1 | `src/abilities_forms.js` dragon `formUpdate`（`if (p.onGround) { if (p.vy > 0) p.vy = 0; return false; }`）＋ `src/player.js` `canFloatNow()`（`form.fly` 一律回 false） | **龍化在地面按住 ↑ 完全不會起飛**。按住 ↑ 連續 40 幀，`y` 恆為 145、`state` 恆為 `idle`、`flyHoldT` 一路數到 40 也沒有反應；必須先按一次跳離地，之後按住 ↑ 才會拍翅上升（離地後 40 幀 y 129.7 → 58.9，正常）。原因是 `form.fly` 讓 `canFloatNow()` 回 false（player 不接手），而 dragon 自己的 `formUpdate` 在 `p.onGround` 時直接 `return false`，只有離地後才讀 `p.dirHold.up`。Round 9 的使用者需求是「一直按 ↑ = 一直按跳」，44 種能力裡只有龍化做不到，手感斷層最明顯。**mech 是另一種不一致**：mech 沒有 `form.fly`，按住 ↑ 走的是**一般漂浮**（40 幀 145 → 97.7），比按住跳的噴射跳（145 → 40.8）弱一倍多，同一顆鍵在同一個變身上有兩種上升速度。 | `shots/agent_qa9/fly.py` 的 F10：`goto game w1 r0 ability=dragon` → step 120（等變身完成）→ 把卡比擺在 (200,145) → 連續 40 幀 `press {up:true}` → 讀 `state` / `y`；對照組改按 `jump` | `fly.json` 的 `F10_dragon_up`（8 個取樣點全部 `idle` / y=145）、`F10_dragon_minY = 145` vs `F10_dragon_jump_minY = 66.94`、`F10_mech_minY = 97.72` vs `F10_mech_jump_minY = 40.75`；截圖 `fly/f10_dragon.png`、`f10_dragon_airup.png`、`f10_mech.png` | **magic-forms**：dragon 的 `formUpdate` 在 `p.onGround` 時，若 `KB.input.down('jump') \|\| p.dirHold.up` 就給一個起飛初速（等同 `doJump`）再往下走；mech 則建議「漂浮中也加噴射」或「↑ 直接走噴射跳」二選一，讓同一顆鍵只有一種上升速度 |
+| **R9-P1-02** | P1 | `src/player.js` `updateFloat()` / `physics()`（沒有房間上緣夾制） | **在沒有天花板的房間（w1 r0 這種開放天空）按住 ↑ 可以無限上升，一路飛出畫面外、卡比完全消失**。從地面起飛後按住 ↑ 200 幀，`y` 一路跑到 **−120**（地圖高度只有 192px，等於在地圖頂端上方 120px），`KB.game.cam.y` 夾在 0 不再跟，畫面上**看不到任何卡比**（`f7d_offscreen.png` 整張圖只有背景與敵人）；放開 ↑ 後要 240 幀才落回 y=65。這在 Round 9 之前需要玩家連續狂點跳鍵才辦得到，現在只要把 ↑ 按著不放就會自動發生，踩到的機率高很多。實心天花板的房間（w2 r1）則完全正常（y 夾在 352、`vy=0.2`）。**gravity 的 ↑X「浮空 240 幀」同源**：在同一個房間放這招，160 幀後 y=3.69 仍在空中往上飄。 | `shots/agent_qa9/fly3.py`：`goto game w1 r0` → 擺在 (200,145) → `tap jump 2` → 連續 180 幀 `press {up:true}` → 讀 `y` / `cam.y` 並截圖 | `fly2.json` 的 `F7_minY = -120.3`、`F7_mapTopY = {rows:12, h:192}`；`fly3.json` 的 `sky_state = {s:'float', y:-99.08, cam:0}`；截圖 **`fly/f7d_offscreen.png`**（畫面上沒有卡比）、`fly/f7d_offscreen_after.png`、對照 `fly/f7c_solid_ceiling.png` | **player**：在 `updateFloat` / `afterPhysics` 加一道「`y` 不低於 `-(KB.VIEW_H - 房間高度)` 或直接不低於 `-8`」的夾制（碰到就比照天花板 `vy = 0.2`），或讓相機在卡比高於房間頂端時跟著往上（兩者擇一即可） |
+| **R9-P2-01** | P2 | `src/player.js` `updateFloat()`（沒有呼叫 `KB.AWAKEN.tryTrigger`） | **漂浮中按「跳＋攻擊」不會發動覺醒，會變成普通招式**。Lv4 + 量表 100 的 sword，站在地上按跳+攻 → `AWAKEN.active() = true`、招名「百斬星光劍」；跳起來（`state='jump'`）按跳+攻 → 也正常發動；但先按住 ↑ 進 `float` 再按跳+攻 → `state` 變 `attack`、`AWAKEN.active() = false`、`moveName` 為空，量表白白留著。`tryTrigger` 只掛在 player.js 的一般分支（L259）與 `updateAttack`（L625），`updateFloat` 整段都沒掛。這條在 Round 9 之前就存在，但那時「漂浮」是要連點跳才進得去的短暫狀態；Round 9 把「按住 ↑」變成主要飛行方式之後，玩家有很大比例的時間都待在 `float`，在空中想開大絕會直接落空。 | `shots/agent_qa9/air2.py` 的 A5c：`ability=sword` → `abilityLv=4` + `AWAKEN.add(100)` → `tap jump 2` → 按住 ↑ 8 幀（進 float）→ `press {jump:true, attack:true}` 1 幀 → 讀 `AWAKEN.active()` | `air2.json` 的 `A5c_float = {state:'attack', active:false, move:'', ready:true}`，對照 `A5_trigger` / `A5b_air` 皆 `active:true`；截圖 `air/a5_awaken.png`、`a5_awaken_mid.png`、`a5b_air_awaken.png` | **player**：`updateFloat()` 開頭（在 `pressed('jump')` 的拍動判斷之前）補一行 `if (KB.AWAKEN && KB.AWAKEN.tryTrigger && KB.AWAKEN.tryTrigger(this)) return;` |
+| **R9-P2-02** | P2 | `src/abilities_weapons.js` L142 / L322 / L470 / L706（`flavour` 寫成字串）＋ `src/menu.js` L127 `(info.flavour \|\| []).slice(0, flN)`、L365 `(info.flavour \|\| [])[0]` | **gunner / ninja / blade / bow 四種能力的暫停卡與圖鑑，風味文字只畫出一個字**。它們的 `def.flavour` 是**字串**（`'彈匣裡裝的是勇氣，退膛的是恐懼。'`）而不是陣列，`UI.abilityInfo()` 優先採用 `d.flavour`，menu.js 再對它做 `.slice(0, 1)` / `[0]` —— 對字串就是取**第一個字元**。實拍結果：槍手卡片上只有「**彈**」、居合只有「**刀**」、忍者「**影**」、弓「**風**」，看起來像是文字被截斷的 bug。其餘 40 種（8 基本用 menu.js 的 `ABILITY_HELP` 備援、mage 系是陣列、24 混合在 `abilities_mix2.js` L235 會 `Array.isArray ? … : [String(…)]` 正規化）都正常。CLAUDE.md 明寫「def 需含 `moves / desc / flavour(陣列)`」，這四個是既有的違規（Round 5 起），非本輪造成。 | `goto game w1 r0 ability=gunner` → step 200 → `tap start 2` → 截圖；或 `KB.UI.abilityInfo('gunner').flavour` → 回傳 string 而非 array | **`ui/card_gunner.png`**（名稱下方只有「彈」）、`ui/card_blade.png`（「刀」）、`ui/card_ninja.png`、`ui/card_bow.png`，對照 `ui/card_fire.png`（完整兩句）、`ui/card_hammermech.png`（完整一句）；`ui.json` 的 `flavour_nonarray = ['gunner','ninja','blade','bow']` | **abilities-basic**：把這四行改成陣列（一句就 `['…']`）；或 **ui-menu** 在 `UI.abilityInfo` 加 `Array.isArray(f) ? f : [String(f)]` 的正規化（兩邊都做最保險） |
+| **R9-P2-03** | P2 | `src/abilities_forms.js` ghost 的 `moves`（多一列 `['穿牆中 ↑↓', '上下飄浮']`） | **ghost 的招式表裡 ↑ / ↓ 各出現 2 次**，不符合 `tools/test_charge.py` `run_move_table()` 的「恰有一列 ↑+X」「恰有一列 ↓+X」規則。實際內容與排版都正確（5 列、暫停卡放得下、前 4 列順序是 X → ↑+X → ↓+X → 空中 X），只是第 5 列的說明文字裡帶了箭頭符號。目前 `test_charge.py` 只對 `BASIC_KEYS + WEAPON_KEYS` 跑 `run_move_table`，所以 115/115 全綠也驗不出來；我把同一套規則套到 44 種上時，只有 ghost 這一種不合。 | `.venv/bin/python -c` 讀 `KB.ABILITIES.ghost.moves` 的鍵位標籤；或把 `run_move_table(h, ['ghost'])` 加進 test_charge | `shots/agent_qa9/abilities.json` 的 ghost 條目；截圖 `ui/card_ghost.png` | **magic-forms**：把第 5 列的標籤改成不含箭頭（例如「穿牆中方向鍵 / 上下飄浮」）；或 **總控**把 `run_move_table` 的規則改成只看**前 4 列**，並把 44 種全部納入檢查 |
+| **R9-P2-04** | P2 | `src/player.js` `updateSwim()`（只讀 `jump` 與 `down`，完全不讀 `up`） | **水中按住 ↑ 沒有任何作用，卡比照樣往下沉**。在 w1 r0 的水域按住 ↑ 20 幀，`state` 維持 `swim`、`y` 從 148.2 一路掉到 161（沉到底），`flyHoldT` 數到 17 也沒反應；要上浮只能按跳（按跳 1 次 `vy = -2.12`，6 幀升 9px）。`canFloatNow()` 擋掉水中起飛是**正確的**（規格如此，也符合「水中不起飛」的驗收項），但 Round 9 把 ↑ 定義成「上升 / 飛行」之後，唯獨水裡 ↑ 完全沒反應，會讓玩家以為卡住了。 | `shots/agent_qa9/fly2.py` 的 F11：`goto game w1 r0` → 擺在 (848,146)（w1 r0 的水域，tile 50~57 / row 9~10）→ 連續 20 幀 `press {up:true}` → 讀 `y`；再按 `jump` 對照 | `fly2.json` 的 `F11_water_up`（y 148.9 → 161，全程 `swim`）與 `F11_water_jump`（y 158.9 → 149.5）；截圖 `fly/f8_water.png` | **player**：`updateSwim()` 裡把 `inp.down('up')` 當成上浮輸入（例如 `this.vy -= 0.1`，與現有 `inp.down('down')` 的 `+0.1` 對稱），不需要動 `canFloatNow()` |
+| **R9-P2-05** | P2 | `src/ui.js` `UI.HELP2` 第 4 列（`['按住 ↑', '漂浮飛行（連按跳亦可）']`） | **操作說明沒有寫出「地面要按住 4 幀」與「門口 / 梯子上不會起飛」**。player-input 在 `KB.input.HELP2_ADD` 準備的字串是 `['按住 ↑', '地面按住 4 幀也會起飛']`，但併進 `UI.HELP2` 時被換成了「漂浮飛行（連按跳亦可）」——「連按跳亦可」是既有操作的重述，真正的新規則（4 幀門檻、門 / 梯優先）兩頁都查不到。玩家站在門口按著 ↑ 沒飛起來時，說明頁給不出答案。第 1 頁的「按住 ↑ ／ 持續飛行（可一直上升）」同樣沒提門檻。 | `KB.setScene(new KB.TitleScene())` → `KB.UI.helpPage = 1` → 截圖；或直接讀 `KB.UI.HELP2` 與 `KB.input.HELP2_ADD` 比對 | **`ui/help_p1.png`**（第 4 列）、`ui/help_p0.png`；`ui.json` 的 `HELP2` / `HELP2_ADD` | **ui**：第 2 頁那列改回 `['按住 ↑', '地面按住 4 幀起飛']`，再補一列 `['門口 / 梯子', '按 ↑ 是進門 / 爬梯']`（`UI.HELP2` 目前 10 列，`drawHelp` 的行距會自動收） |
+| **R9-P2-06** | P2 | `src/abilities_magic.js` gravity 的 ↑+X「浮空」（`p.abilityDef.hover = true` 期間） | **重力的 ↑+X 浮空在開放天空房會把卡比一路推出畫面**。在 w1 r0 空中放這招，30 幀內 y 由 105 升到 71，160 幀後 y = **3.69** 且 `onGround = false`（已經貼到地圖頂端），期間玩家對高度沒有控制權。這是 `def.hover` 的設計（240 幀反重力），單獨看沒錯，但和 R9-P1-02 疊在一起就會直接飛出視野。若 P1-02 補上高度夾制，這條會一併解決；若不補，建議這招自己限制上升上限。 | `shots/agent_qa9/matrix.py --only gravity`：跳起 → `press {up:true, attack:true}` 2 幀 → 讀 30 幀 y 曲線與 160 幀後的 `post` | `matrix.json` 的 `gravity.moves.aux`（`curve` y 86.4 → 71.0、`post = {s:'fall', y:3.69, og:false}`）；蒙太奇 `matrix/gravity.png` 第 6 列 | **player**（高度夾制，優先）或 **magic-forms**（`flip` 模式加 `y` 下限） |
+| **R9-P2-07** | P2 | `src/player.js` `ladderPuff()`（`solid: true` 的吐氣彈生在 `cx + dir*10`）＋ 關卡地形 | **貼牆的梯子上按 X，吐氣彈在生成的當幀就撞牆消失**。w2 r1（螺旋塔）的梯子右側緊鄰 `#` 牆，按 X 時 `ladderAtkT` 有正常設成 14（代表 `ladderPuff()` 真的被呼叫），但 `KB.game.entities` 裡的 `proj` 數量**下一幀就是 0**——投射物 `solid:true` 在出生點就判定撞牆而 `dead`，玩家只聽得到音效、看不到彈。同一個動作在 w2 r0（x=529）與 w2 r3（x=465）的開放式梯子上完全正常（`proj = 1`，狀態維持 `climb`）。`git diff a43b5c8 HEAD -- src/player.js` 顯示梯子相關程式碼本輪**一行都沒改**，是既有的地形相依問題。 | `goto game w2 r1 ability=fire` → 把卡比擺到梯子 (321,336) → 按住 ↑ 6 幀進 `climb` → `press {attack:true}` 1 幀 → 讀 `ladderAtkT`（=14）與 `proj`（=0）；對照 w2 r0 / r3 | `shots/agent_qa9/air/a9_ladder_w20.png`（w2 r0，正常）、`a9_ladder_w23.png`（w2 r3，正常）、`a9_ladder_attack.png`（w2 r1，看不到彈） | **player**：`ladderPuff()` 的出生點改成 `cx + dir*4`（貼身）或加 `pierce`/先檢查前方一格是否為實心，撞牆時至少播一次 `fx_poof` |
+
+### 觀察（不列入問題）
+
+- **招式落地後只要 ↑ 還按著就會立刻再起飛**：空中 ↑X 出招 → 落地 → 招式結束 → `flyHoldT` 已經 ≥ 4 → 下一幀直接 `startFloat()`（實測 `A4_sword` 在 fh=24 時 `state='float'` 且 `onGround=true`）。這是「地面按住 ↑ 4 幀起飛」的必然結果、也符合「一路飛一路出招」的設計意圖，但玩家若想「落地後站著連段」就必須放開 ↑。規格沒說要抑制，維持現狀。
+- **`def.hover` 的粒度**：magic-forms 用「在 `onAttack` 內改寫 `p.abilityDef.hover`」來做逐招懸停（只有 gravity ↑X 用），能 work 但是 side-effect。他們自己在 PROGRESS「跨檔需求 1」已提出改成 `p.hoverT` 的建議，我確認現況沒有殘留（招後 `hover` 有關掉，其他招在空中都正常下墜）。
+- **ghost 的空中三招不下墜是設計**：`noclip`（穿牆）期間 `onGround` 幾乎恆為 false 且無重力，所以 `air` / `adx` 的 y 曲線是平的。我照 magic-forms 交代的前提（先關穿牆再測空中招）複驗過，關掉穿牆後會正常下墜。
+- **44 能力空中三招的淨下墜量**：最小 6.0px（giant 空中X 屁股墜落，因為起手就幾乎貼地）、最大 56.1px（mech 空中↓X 鑽頭），中位數約 22px。只有 gravity `aux`（−18.7，浮空）與 ghost（0 / −28.8，穿牆）是負值，兩者都是文件化的例外。
+- **蓄力那一列有 11 種是空的**（fire / cutter / ice / stone 之外的 time / gravity / clone / giant / dragon / ghost 等），因為它們的招式表本來就沒有「按住 n 幀放開」這一列（改成被動 / 限時 / 再按 X 解除）。連拍看到的是普通攻擊或站立，**不是漏招**。
+- **kracko `fight` 這次是 3/3 全勝**（過往記錄的已知 WARN 是 2/3）。RNG 序列問題，不代表已修好。
+- `p.atkDir` 快照在所有情境下都正確：地面 X = `[false,false,false]`、↑X = `[true,false,false]`、空中 ↑X = `[true,false,true]`、漂浮中 X = `[false,false,true]`、漂浮中 ↓X = `[false,true,true]`。
+- 我一開始用「改寫 `e.update` / `e.grav` / `e.hp=40`」的方式做傷害驗證會全部得到 0 傷害（是 harness 的問題，不是招式的問題）；改用預設的 `KB.ENEMIES.waddledee` 就正常。**招式命中與否請以 `tools/test_weapons.py` / `test_magic.py` / `test_forms.py` / `test_mix.py` / `test_mix2.py` 的「kills waddledee」為準**，我只對「連拍沒抓到判定框」的 16 組做了獨立複驗（見 `dmg.json`，16/16 都有效果；其中 `time` X 時間停止與 `ghost` X 穿牆開關本來就不造成傷害）。
+
+## R9-2. 各系統驗收明細
+
+### R9-2a. 飛行手感（`shots/agent_qa9/fly.py` / `fly2.py` / `fly3.py` / `fly4.py`）
+
+| # | 驗收項 | 結果 | 實測數據 |
+|---|---|---|---|
+| F1 | 地面按住 ↑ 4 幀起飛 | **PASS** | `flyHoldT` 1/2/3 → `idle`；**第 4 幀** → `state='float'`、`vy=-1.6`；第 5 幀起離地，y 145 → 136.7（10 幀）。截圖 `fly/f1_seq_00~05.png` |
+| F2 | 門口按 ↑ 進門、不起飛 | **PASS** | 站在 w1 r0 的門上（`doorAt = true`）按住 ↑ **14 幀**：`state` 全程 `door`、`y` 恆 145、`flyHoldT` 數到 14 也沒起飛。截圖 `fly/f2_door.png` |
+| F3 | 梯子上按 ↑ 爬梯 | **PASS** | w2 r1 梯子 (321,336)：按住 ↑ 12 幀 → `state='climb'`、y 每幀 −1（336.2 → 325.2）、`onGround=false`。截圖 `fly/f3_ladder.png`、`f3_seq_00~03.png` |
+| F4 | 空中按住 ↑ 即時漂浮 | **PASS** | `state='jump'`（y 132.96）→ 按 ↑ **第 1 幀**就 `float`、`vy=-1.6`。截圖 `fly/f4_airfloat.png` |
+| F5 | 漂浮中按住 ↑ 持續上升 | **PASS** | 60 幀連拍 y 單調遞減 130.3 → 62.6（**68px**），`flyFlapT` 每數到 9 就重置且 `vy` 跳回 −1.54（= 自動拍動），中間 `vy` 線性衰減 −1.54 → −1.06。截圖 `fly/f5_rise_00~09.png` |
+| F6 | 放開 ↑ 下降 | **PASS** | 放開後 `vy` −1.06 → −0.82 → −0.58 → −0.34 → −0.10 → **+0.14**（5 個取樣點內轉正），y 由 43.68 開始回升。截圖 `fly/f6_drop.png` |
+| F7 | 天花板 | **PASS（實心）** / **見 R9-P1-02（開放天空）** | w2 r1 實心天花板下：y 夾在 **352**、碰到當幀 `vy=0.2`，之後 352 ↔ 354.5 微彈不會穿。w1 r0 無天花板：200 幀飛到 **y=−120**（地圖高 192）、`cam.y=0`、畫面上看不到卡比。截圖 `fly/f7c_solid_ceiling.png`、`f7d_offscreen.png` |
+| F8 | 水中不起飛 | **PASS** | `state='swim'`、按住 ↑ 14 幀 y 148.9 → 161（下沉到底），`canFloatNow()` 因 `inWater` 回 false。截圖 `fly/f8_water.png`（另見 R9-P2-04） |
+| F9 | 含物不起飛 | **PASS** | 吸入 waddledee 後 `state='full'`、按住 ↑ 14 幀 y 恆 145、`vy` 恆 0。截圖 `fly/f9_full.png` |
+| F10 | 龍化 / 機甲按住 ↑ 飛行 | **FAIL（dragon）/ 部分（mech）** | dragon 地面 40 幀 y 恆 145（見 R9-P1-01）、離地後正常（129.7 → 58.9）；mech 地面按 ↑ 進**一般 float**（145 → 97.7），離地後按 ↑ 也是 float 而不是噴射（按跳才 40.8）。截圖 `fly/f10_dragon*.png`、`f10_mech*.png` |
+
+### R9-2b. 空中出招與相容性（`shots/agent_qa9/air.py` / `air2.py`）
+
+| # | 驗收項 | 結果 | 實測數據 |
+|---|---|---|---|
+| A1 | 漂浮中按 X（有能力）→ 出招不吐氣 | **PASS** | fire 在 `float`（y 126.8）按 X → `state='attack'`、`hb=1`、`exhaleLockT=0`、`atkDir=[false,false,true]`。截圖 `air/a1_float_attack.png` |
+| A1b | 漂浮中 ↓+X（有能力） | **PASS** | sword → `state='attack'`、`atkDir=[false,true,true]`、`hb=1`（照樣出招，不吐氣） |
+| A2 | 漂浮中按 X（無能力）→ 吐氣 | **PASS** | `state='exhale'`、`exhaleLockT=8`。截圖 `air/a2_exhale.png` |
+| A2b | 漂浮中 ↓+X（無能力）→ 不吐氣 | **PASS** | 維持 `float`、`vy=-1.24`（規則保留） |
+| A3 | 空中 X / ↑X / ↓X 出招期間 y 遞增 | **PASS（44/44）** | 見 R9-2c；連續未下降幀數最長 29（只有 gravity `aux` 浮空與 ghost 穿牆，兩者皆為文件化例外） |
+| A4 | 招式結束 ↑ 仍按著 → 回漂浮 | **PASS** | sword / fire / flamesword / mage 四條路徑都在招後轉回 `float` 並繼續上升（y 129 → 81.7）；放開 ↑ 的對照組停在 `idle` 不再起飛。截圖 `air/a4_*.png` |
+| A5 | 覺醒 跳+攻 | **PASS（地面 / 空中 / 混合）** | 地面：`active=true`、`activeT=299`、招名「百斬星光劍」；空中（`jump`）：同樣發動；flamesword：「炎帝百斬」。300 幀後 `active=false`、`ready=false`（量表歸零）。截圖 `air/a5_awaken.png`、`a5_awaken_mid.png`、`a5b_air_awaken.png`。**漂浮中除外 → R9-P2-01** |
+| A6 | 時停 | **PASS** | X → `timeStopT=179`、`mode='stop'`；11 隻敵人的 x 座標在 50 幀內**完全不變**；時停中再按 X → `mode='punch'`、`timeStopT=128`（繼續倒數）；260 幀後 `timeStopT=0`、`state='idle'`；時停中空中 ↑X 也能出（`mode='punch'`）。截圖 `air/a6_timestop.png`、`a6_punch.png` |
+| A7 | 滑鏟 ↓+跳 | **PASS** | `state='slide'`、y 151、60 幀後回 `idle`。截圖 `air/a7_slide.png` |
+| A8 | 單向平台 ↓+跳 穿下 | **PASS** | 站在 `=` 平台 (689,81) → ↓+跳 → `state='fall'`、y 81 → 121（穿過去）。截圖 `air/a8_dropdown.png` |
+| A9 | 梯子上 X 攻擊 | **PASS** | w2 r0 / w2 r3 的梯子：按 X → `proj=1`（吐氣彈）、`ladderAtkT=14`、**`state` 維持 `climb`**（不離開梯子）、按 ↑ 仍是爬梯。截圖 `air/a9_ladder_w20.png`、`a9_ladder_w23.png`。w2 r1 貼牆梯子見 R9-P2-07 |
+| A10 | 水中 | **PASS** | 水裡按 X 不會出招也不會吐氣（`state` 維持 `swim`，`updateSwim` 在攻擊分支之前 return）—— 與 Round 9 之前一致，未壞 |
+
+### R9-2c. 44 能力 × 7 招矩陣（`shots/agent_qa9/matrix.py`、蒙太奇 `shots/agent_qa9/matrix/<key>.png`）
+
+方法：每個能力 `goto game w1 r0 ability=<key>` → 等 180 幀（變身類 300 幀，確保開場橫幅與變身演出都結束）→ `hitbox(true)` → 在身體左右與頭頂生 3 隻 waddledee → 依序跑 7 個腳本
+（`X` / `↑+X` / `↓+X` / `jump 9 + step 7 + X` / `按住 X 104 幀放開` / `jump 9 + step 7 + ↑X` / `jump 9 + step 7 + ↓X`），
+每招連拍 3 張（間隔 7 幀）+ 記 30 幀逐幀曲線 + 再跑 160 幀查殘留，最後合成 7 列 × 3 欄的蒙太奇逐張 Read。
+
+**結果：44 / 44 OK，0 個問題。** 每一項檢查的統計：
+
+| 檢查 | 通過 | 說明 |
+|---|---|---|
+| 七招都真的發動（`state='attack'` / `stone` 或有判定框 / 投射物 / `mode`） | **44/44**（蓄力列除外，11 種本來就沒有蓄力招） | 見「觀察」第 5 點 |
+| 動畫幀存在、七招互不相同 | **44/44** | 逐張 Read；例：stone 的 `COMET!` / `CRASH!`、hammer 的 `SMASH!`、mech 的白色鑽頭、clone 的分身塔、ghost 的怨靈墜擊、flamebow 的鳳凰箭 |
+| 判定框位置合理（↑X 在頭頂、↓X 貼地 / 身體下方、空中招跟著卡比） | **44/44** | hitbox 疊圖確認；例：beam ↑X 是 18×38 直立框、spark ↓X 是貼地 52×16 向兩側、mech ↓X 12 個 rehit 框沿地面推進 |
+| 特效（VFX / 粒子 / textPop） | **44/44** | 每招都有可辨識的視覺回饋 |
+| 招後回 `idle` / `fall` | **44/44** | 160 幀後 `post.s` 全部是 `idle`（stone 維持 `stone` 是設計：再按 X 或 900 幀才解除） |
+| 無殘留判定框 / 投射物 / VFX | **44/44** | `post.hb=0`、`post.proj≤2`、`post.vfx≤6`（stone 除外，同上） |
+| 無洋紅 | **44/44** | 3×7 = 21 張逐張數 `(255,0,255)` 像素，全部 0 |
+| `__kb.missing()` 空 | **44/44** | |
+| 0 console error / pageerror | **44/44** | |
+| `moves` 表順序 X→↑→↓→空中→蓄力、≤6 列、招名不重複、`desc` 在 | **43/44** | 只有 ghost 的第 5 列標籤含 ↑↓ → R9-P2-03 |
+
+空中三招的淨下墜（`ymax − y起招`，正值 = 有下墜）節錄：
+
+| 能力 | 空中 X | 空中 ↑X | 空中 ↓X | 能力 | 空中 X | 空中 ↑X | 空中 ↓X |
+|---|---|---|---|---|---|---|---|
+| fire | 21.8 | 22.1 | 18.0 | flamegun | 21.8 | 22.1 | 38.1 |
+| sword | 21.8 | 22.1 | 18.9 | thunderbow | 21.8 | 22.1 | 22.1 |
+| stone | 37.8 | 37.7 | 21.7 | flameninja | 21.8 | 22.1 | 21.8 |
+| giant | 6.0 | 8.2 | 22.4 | stonegiant | 21.8 | 21.8 | 38.1 |
+| dragon | 32.8 | 37.8 | 6.7 | flamedragon | 21.8 | 22.1 | 17.7 |
+| mech | 42.2 | 45.2 | **56.1** | hammermech | 21.8 | 22.1 | 17.6 |
+| **time** | 0（回溯瞬移回原點） | 22.1 | 22.1 | **gravity** | 21.8 | **−18.7（浮空，`def.hover`）** | 22.1 |
+| **ghost** | 0（穿牆） | −28.8（穿牆） | 0（穿牆） | thunderblade | 0.3（起招前已落地） | 22.1 | 21.8 |
+
+### R9-2d. UI（`shots/agent_qa9/ui.py`）
+
+- **暫停能力卡**：10 種取樣（fire 4 列 / beam 5 / ghost 5 / flamesword 5 / hammermech 5 / gravityblade 5 / stone 6 / mech 6 / giant 6 / 無能力 0）。
+  4 列 → 2 行風味文字、5 列 → 1 行、6 列 → 不畫風味文字，**全部沒有超出卡片高度、沒有和下方選單重疊**。
+  giant 的 ↑+X 正確顯示成「上勾拳（按住＝大口吸）」（magic-forms 在 PROGRESS 提醒的文案已同步）。
+- **能力圖鑑**：`發現 44/44`、`6 頁`（每頁 8 個縮圖）、標題列 / 頁碼 / Lv 與熟練度條都正確；抽樣 8 個詳情頁（fire / hammer / mage / ghost / flamesword / stonehammer / flameninja / hammermech）**五招表完整顯示**、大預覽正確、`__kb.missing()` 空、0 error。
+- **操作說明**：`UI.HELP_PAGES = 2`。第 1 頁 = `KB.input.HELP` **10 列**，第 2 頁 = `UI.HELP2` **10 列**；兩頁都沒有重疊或截斷（player-input 為此把「跳躍（空中再按 / 按住 ↑ ＝飛行）」拆成兩列，右欄 12px 上限 138px）。飛行相關文字見 R9-0 表與 R9-P2-05。
+- **16px 字集**：0 缺字（詳見 R9-0 表）。
+
+### R9-2e. 測試與 playthrough（log 在 `shots/agent_qa9/tests/`）
+
+| 測試 | 結果 | 測試 | 結果 |
+|---|---|---|---|
+| `engine_test.py` | **153/153** | `test_awaken.py` | **237/237** |
+| `enemy_test.py` | **393/393** | `test_elements.py` | **96/96** |
+| `boss_test.py --runs 3` | **ALL PASS**（kracko fight 3/3） | `test_progression.py` | **101/101** |
+| `test_weapons.py` | **370/370** | `test_extra.py` | **53/53** |
+| `test_charge.py` | **115/115** | `test_challenge.py` | **93/93** |
+| `test_magic.py` | **192/192** | `test_saves.py` | **67/67** |
+| `test_forms.py` | **226/226** | `test_skins.py` | **67/67** |
+| `test_mix.py` | **509/509** | `node level_check.js`（含 `--extra`） | **0 error / 1 warning** |
+| `test_mix2.py` | **607/607** | `node audio_check.js` | **全部通過** |
+| `test_helper.py` | **131/131** | `font_subset.py --check` | **無缺字（1848 字）** |
+
+playthrough（`--ability sword --godmode`）：
+
+| 關卡 | 幀數 | cleared | deaths | bossDamage | missing |
+|---|---|---|---|---|---|
+| w1 | 5835 | True | 0 | 100% | [] |
+| w2 | 7294 | True | 0 | 100% | [] |
+| w3 | 7468 | True | 0 | 100% | [] |
+| w4 | 6749 | True | 0 | 100% | [] |
+| w5 | 8452 | True | 0 | 100% | [] |
+| w6 | 8304 | True | 0 | 100% | [] |
+| w7 | 9578 | True | 0 | 100% | [] |
+
+### R9-2f. 效能（`shots/agent_qa9/perf.py`）
+
+情境：卡比在 w1 r0 起飛後，**連續 300 幀按住 ↑**（持續飛行 + 自動拍動 + 粒子），並且**每 6 幀同時按一次 X**（空中招連發）。
+
+| 能力 | 純 step 300 | 飛行＋連發 300 | 每幀 | 峰值存活實體 / 判定框 / 投射物 | 180 幀後 | heap |
+|---|---|---|---|---|---|---|
+| sword | 0.31 ms/f | 168 ms | **0.56 ms/f** | 46 / 1 / 0 | 45 / 0 / 0 | 16 MB |
+| flamegun | 0.34 ms/f | 171 ms | **0.57 ms/f** | 63 / 4 / 1 | 45 / 0 / 0 | 16 MB |
+| flamebow | 0.33 ms/f | 171 ms | **0.57 ms/f** | **67** / 5 / 1 | 45 / 0 / 0 | 16 MB |
+| starmage | 0.33 ms/f | 123 ms | **0.41 ms/f** | 50 / 0 / 3 | 45 / 0 / 0 | 16 MB |
+| mech | 0.31 ms/f | 132 ms | **0.44 ms/f** | 45 / 0 / 2 | 42 / 0 / 0 | 16 MB |
+| hammermech | 0.32 ms/f | 108 ms | **0.36 ms/f** | 49 / 0 / 3 | 45 / 0 / 0 | 18 MB |
+
+最重的 flamebow 用掉 16.7ms 預算的 **3.4%**；每個情境在停手 180 幀後判定框 / 投射物 / VFX **全部歸零**，實體數回到基準，JS heap 無成長 → **沒有洩漏**。
+
+## R9-3. 重現指令總表
+
+```bash
+cd "/home/ken150ken150/桌面/我的專案/遊戲開發/卡比之星"
+PY=.venv/bin/python
+
+# 飛行手感（F1~F11）
+$PY shots/agent_qa9/fly.py      # 地面 4 幀 / 門 / 梯 / 空中 / 上升曲線 / 放開 / 水 / 含物 / dragon / mech
+$PY shots/agent_qa9/fly2.py     # 天花板長程、dragon / mech 離地後、水中 ↑ vs 跳
+$PY shots/agent_qa9/fly3.py     # 實心天花板搜尋 + 開放天空飛出畫面
+$PY shots/agent_qa9/fly4.py     # 實心天花板 90 幀夾制複驗
+
+# 空中出招 / 相容性（A1~A10）
+$PY shots/agent_qa9/air.py      # 漂浮中 X / ↓X、自動回漂浮、滑鏟、平台下穿、梯子、水中
+$PY shots/agent_qa9/air2.py     # 覺醒（地面 / 空中 / 漂浮 / 混合）、時停、梯子吐氣彈
+
+# 44 能力 × 7 招矩陣（約 25 分鐘；蒙太奇在 shots/agent_qa9/matrix/）
+$PY shots/agent_qa9/ablist.py > shots/agent_qa9/abilities.json
+$PY shots/agent_qa9/matrix.py                 # 全部 44 種
+$PY shots/agent_qa9/matrix.py --only fire,ghost
+$PY shots/agent_qa9/dmg.py                    # 對「連拍沒抓到判定框」的 16 組做獨立命中複驗
+
+# UI（能力卡 / 圖鑑 / 說明 / 16px 字集）
+$PY shots/agent_qa9/ui.py
+
+# 效能
+$PY shots/agent_qa9/perf.py
+
+# 全套測試（log 在 shots/agent_qa9/tests/）
+bash -c 'for t in engine_test enemy_test test_weapons test_charge test_magic test_forms test_mix test_mix2 \
+  test_helper test_awaken test_elements test_progression test_extra test_challenge test_saves test_skins; \
+  do $PY tools/$t.py; done'
+$PY tools/boss_test.py --runs 3
+node tools/level_check.js ; node tools/level_check.js --extra ; node tools/audio_check.js
+$PY tools/font_subset.py --check
+for w in w1 w2 w3 w4 w5 w6 w7; do $PY tools/playthrough.py --level $w --ability sword --godmode; done
+```
+
+### 截圖索引（`shots/agent_qa9/`）
+
+- **飛行**：`fly/f1_takeoff.png`、`f1_seq_00~05.png`（地面起飛連拍）、`f2_door.png`、`f3_ladder.png` + `f3_seq_00~03.png`、
+  `f4_airfloat.png`、`f5_rise_00~09.png`（上升 y 曲線連拍）、`f6_drop.png`、`f7_ceiling.png`、`f7b_ceiling_room.png`、
+  **`f7c_solid_ceiling.png`**（實心天花板夾制）、**`f7d_offscreen.png`**（飛出畫面，R9-P1-02）、`f7d_offscreen_after.png`、
+  `f8_water.png`、`f9_full.png`、**`f10_dragon.png`** / `f10_dragon_seq_00~03.png` / `f10_dragon_airup.png`（R9-P1-01）、
+  `f10_mech.png` / `f10_mech_seq_00~03.png` / `f10_mech_airup.png`
+- **空中出招**：`air/a1_float_attack.png`、`a2_exhale.png`、`a4_sword|fire|flamesword|mage.png`、
+  `a5_awaken.png`、`a5_awaken_mid.png`、`a5b_air_awaken.png`、`a6_timestop.png`、`a6_punch.png`、
+  `a7_slide.png`、`a8_dropdown.png`、`a9_ladder_w20.png`、`a9_ladder_w23.png`、`a9_ladder_attack.png`、`a10_water_attack.png`
+- **44 能力矩陣**：`matrix/<key>.png` ×44（每張 768×1568，7 列 = 七招 × 3 欄 = 三連拍），原始單張在 `mv/<key>_<mid>_0~2.png` 與 `mv/<key>_<mid>_post.png`
+- **UI**：`ui/card_<10 種>.png`（暫停能力卡）、`ui/card_gunner|ninja|blade|bow.png`（R9-P2-02）、
+  `ui/gal_p0~p5.png`（圖鑑 6 頁）、`ui/gal_detail_<8 種>.png`、**`ui/help_p0.png`** / **`ui/help_p1.png`**
+- **效能**：`perf/<6 種>.png`
+- **原始數據 / log**：`fly.json`、`fly2.json`、`fly3.json`、`air.json`、`air2.json`、`matrix.json`、`abilities.json`、
+  `dmg.json`、`ui.json`、`perf.json`、`tests/*.log`、`tests/play_w1~w7.log`、`matrix_run.log`
