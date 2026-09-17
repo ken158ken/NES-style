@@ -2000,3 +2000,288 @@ for w in w1 w2 w3 w4 w5 w6 w7; do $PY tools/playthrough.py --level $w --ability 
 - **效能**：`perf/<6 種>.png`
 - **原始數據 / log**：`fly.json`、`fly2.json`、`fly3.json`、`air.json`、`air2.json`、`matrix.json`、`abilities.json`、
   `dmg.json`、`ui.json`、`perf.json`、`tests/*.log`、`tests/play_w1~w7.log`、`matrix_run.log`
+
+---
+
+# Round 10 驗收（qa10 · 2026-09-17）
+
+> 範圍：Round 10「貼身招判定加倍」—— 總控的核心（`src/const.js` `KB.PHYS.meleeScale = 2`、`src/entity.js` Hitbox 自動放大規則）
+> 與四個 agent（melee-basic / melee-weapons / melee-magic-forms / melee-mix）的逐招標注。
+> **獨立驗收：不採信任何 agent 的自述數字，全部自己重跑**；判定框尺寸一律用 playwright 逐招逐幀實測。
+> 「改動前」對照組＝把 `git HEAD`（Round 9 收工狀態）整份 `git archive` 到暫存目錄跑同一支腳本，**工作區全程沒有動過**
+> （沒有 `git stash` / `checkout` / `reset`）。
+> 本輪 qa10 只寫 `docs/QA_REPORT.md`、`docs/PROGRESS.md` 的 `## qa10` 區段、`shots/agent_qa10/`，並執行 `tools/build.py`（本輪 build 歸 qa10）。
+> 截圖全部用 Read 工具實際打開看過。
+
+## R10-0. 結論
+
+**可以出貨。使用者的核心需求（貼身攻擊判定大一倍、含 ↑X / ↓X、遠程維持）確實做到了，而且非無敵實測有可量化的巨大改善。**
+
+| 項目 | 結果 | 備註 |
+|---|---|---|
+| **貼身招 ×2** | **OK（0 例外瑕疵）** | 44 能力 × 5 招實測共 **713 個 owner='player' 判定框**，其中 **459 個 `meleeScaled == 2`**；**全部 459 個都是 `w == 2×w0` 且 `h == 2×h0`**，沒有任何一個「只放大寬度 / 只放大高度」的不對稱框 |
+| **第 10 幀不縮回** | **OK** | 713 個框裡有 **241 個活到第 10 幀**（其中 108 個是 ms=2）。**沒有任何一個在第 10 幀縮回原尺寸**（`meleeScaled` / `w==2×w0` / `h==2×h0` 全部維持）——melee-basic 的 `fitBox()` 與 melee-magic-forms 的龍息逐幀重算都正確 |
+| **遠程投射物不變** | **OK（0 差異）** | 同一支腳本跑「目前」與「git HEAD」兩份，44 能力的 **395 個 `proj`** 逐一比對 `(招, kind, w, h)` 集合 → **44 / 44 能力零差異**，沒有任何一種投射物被誤放大或消失 |
+| **使用者點名的 sword** | **五招全部達標** | X 44×32（22×16 ×2）、↑X 44×60、↓X 60×28、空中 X 64×52 —— 四個貼身招都 ms=2；第 5 招「滿血 X 劍氣」**本來就是 `proj_swordwave` 遠程**（12×16 不變），照規格不該放大。**sword 沒有例外** |
+| **使用者點名的 spark** | **四招達標、蓄力 1 招是例外** | X 88×80（44×40 ×2）、↑X 40×76、↓X 104×32、空中 X 56×52 + 落地 136×36 —— 全部 ms=2。**唯獨蓄力「電擊波」維持 96×80（`melee:false`）**：招式表寫明「96px」、本來就是全身巨框，×2 = 192×160 會蓋掉 256×192 遊戲區的 62%。**這是唯一一個「使用者點名卻沒放大」的招，列在例外清單第 1 條請使用者裁決** |
+| **非無敵實戰體感** | **大幅變好** | 見 R10-2d。w1 sword、w2 spark、w4 blade 各跑 2 次，**目前 6 / 6 全部 `cleared=True`**（deaths 0 / 0 / 0 / 0 / 2 / 2）；同樣的 6 次跑在 **git HEAD 只有 1 次通關**（其餘 5 次 `deaths=4` 未通關）。使用者說的「劍、雷擊常被打死」在改動後測不出來了 |
+| **全套測試** | **17 支全綠、1 支紅字** | engine 167/167、enemy 393/393（`--extra` 79/79）、boss `--runs 3` **ALL PASS**（含 `--extra` ALL PASS；kracko fight 這次 3/3 沒有出現已知 WARN）、weapons 417/417、magic 248/248、forms 315/315、charge 140/140、mix 701/701、mix2 801/801、helper 131/131、elements 96/96、progression 101/101、awaken 270/270、extra 53/53、challenge 93/93、saves 67/67、skins 67/67；`level_check`（含 `--extra`）**0 error / 1 warning**（洛洛洛出生點，既有）、`audio_check` 全部通過。**`font_subset.py --check` 退出碼 1、缺 3 字 → R10-P1-01** |
+| **playthrough --godmode** | **7 / 7 cleared** | w1~w7 全部 `cleared=True` / `deaths=0` / `missing []`；幀數 5341 / 5814 / 7056 / 6864 / 8908 / 5675 / 8703 |
+| **地形破壞迴歸** | **OK（沒有隔空破壞、沒有新的硬磚穿透）** | 見 R10-2e。硬磚 X 對照實驗：**能破的（hammer / stone / fire 衝刺 / blade ↓X / mech 鑽頭）與不能破的（sword / beam / cutter / ice / spark / ninja）名單和 HEAD 完全一致**，沒有任何一種能力「本來打不破硬磚、現在打得破」。破壞範圍確實變大（同一距離 hammer 由破 0 塊→破 3 塊），但逐格核對 **每一塊被破的磚都與放大後的判定框真實重疊**（最誇張的 giant ↓X 也只是剛好蓋到上一列磚的下緣 4px），**不是隔空** |
+| **視覺對齊** | **需要美術跟進（P2）** | 見 R10-2f。spark X（電場魔法陣 r=38）與 dragon X（火焰跟著 `b.w` 伸長）對得很好；**sword X 起手、blade X 第 1 段最明顯超框**；所有貼身框因為「高度置中放大」會往腳下沉入地面 10~20px。列 **R10-P2-02** |
+| **過大框** | **48 招（w≥120 或 h≥96）** | 最大 `stonegiant` 空中 X **192×72**（畫面寬只有 256）、`giant` ↑X **80×128**（畫面高只有 192）。全清單在 R10-2g，**請使用者決定要不要收斂** |
+| **效能** | **OK（比 R9 還快）** | 招式密集 300 幀：blade **0.247** / hammermech 0.278 / starmage 0.346 / flamegun 0.356 / sword 0.361 / mech 0.441 / spark 0.481 / flamebow **0.536 ms/幀**，對照 R9 的 **0.36~0.57** → 沒有退步。停手 180 幀後判定框 / 投射物**全部歸零**、實體數回到 43~45 基準，JS heap 9~21MB 無成長趨勢 |
+| **說明頁 / 圖鑑** | **1 處文案過期** | 44 種能力的招式表掃過一遍，**只有 spark 的 X 寫死了尺寸「放電（44px 電場）」而實際已是 88px** → R10-P2-01（同一張卡的「電擊波（96px）」仍然正確，因為那招沒放大）。能力卡排版 4 / 5 / 6 列全部沒有溢出，不受本輪影響 |
+| **build / dist** | **OK** | `tools/build.py` → `dist/卡比之星.html` **3328 KB**（3,611,299 bytes；上一版 3,585,035 bytes，+26 KB）。用 playwright 開 dist 實跑：`GameScene`、能力 sword、`__kb.missing() = []`、`KB.FONTS.loaded = {px12:true, px16:true}`、**0 console error / 0 pageerror**，截圖 `dist_game.png` 可玩 |
+
+**問題統計：P0 × 0、P1 × 1、P2 × 5。沒有任何一項阻擋出貨。**
+
+## R10-1. 問題列表
+
+| 編號 | 等級 | 位置 | 現象 | 重現指令 | 數據 / 截圖 | 建議負責人 |
+|---|---|---|---|---|---|---|
+| **R10-P1-01** | P1 | `assets/fonts/unifont16-subset.woff2` + `assets/fonts/unifont_chars.txt`（子集字集） | **`font_subset.py --check` 退出碼 1，缺 3 個字「宣 稽 遍」**，違反 STATUS 的「品質基準：font_subset --check 無缺字」。`git HEAD` 跑同一支工具是 **`OK：src 用到的字全部都在子集裡`（1848 字）**，所以這是 Round 10 造成的新缺口——三個 agent 在 `src/*.js` 新增的註解帶進了新字（`abilities_weapons.js:5`「稽核」、`abilities_mix.js:132/998`「宣告」、`abilities_magic.js:668`「掃一遍」）。**實際遊戲影響為零**（`grep` 確認這 3 個字只出現在 `//` 註解，沒有任何 `moves` / `desc` / `flavour` / UI 字串用到），`build.py` 也已經把 1848 字的清單內嵌（比 src 掃到的 1851 少 3）。但工具是紅的、而且下次有人真的用到這 3 個字時那一整串會默默退回 12px。 | `cd 專案 && .venv/bin/python tools/font_subset.py --check`（→ exit 1、`子集缺字： 宣稽遍`）；對照 `.venv/bin/python <HEAD 副本>/tools/font_subset.py --check`（→ exit 0） | `shots/agent_qa10/tests/font.log` | **總控**：跑一次 `.venv/bin/python tools/font_subset.py`（不加 `--check`）重做子集並重新 `build.py`；或請三個 agent 把註解裡的「稽核 / 宣告 / 一遍」換成已在字集內的字。前者一行指令、後者零資產改動，兩者擇一 |
+| **R10-P2-01** | P2 | `src/abilities.js:667`（spark 的 `moves`） | **招式表寫死的尺寸數字過期**：暫停能力卡上 spark 的第 1 列寫「放電（44px 電場）」，但這招的判定已經是 **88×80**（44×40 ×2）。同一列的第 5 招「電擊波（96px）」**仍然正確**（那招標了 `melee:false` 沒放大），所以卡片上會出現「44px 的招其實 88px、96px 的招真的 96px」這種不一致。掃過 44 種能力的全部 `moves` / `desc` 標籤，**只有這一處寫死了尺寸數字**，其餘沒有需要更新的文案。 | `.venv/bin/python tools/shot.py --scene game --level w1 --room 0 --ability spark --script "step 30; tap start 2; step 20" --out shots/x/card.png` 後開圖看第 1 列 | `shots/agent_qa10/ui_card_spark.png`（卡片上「放電（44px 電場）」清晰可見）；`survey.json` 的 `spark.X` = `88×80 ms2 from 44×40` | **melee-basic**（`src/abilities.js` 擁有者）：改成「放電（88px 電場）」或直接拿掉數字寫「放電（全身電場）」 |
+| **R10-P2-02** | P2 | `src/abilities.js`（sword 揮砍）、`src/abilities_weapons.js`（blade 三段連斬）、`src/abilities_forms.js`（giant ↑X）與全部貼身招的「高度置中放大」 | **判定框明顯超出特效，需要美術跟進**。三個具體程度：① **sword X 起手幀**（44×32）畫面上只有一道細白弧線在框的左上角，框的其餘 3/4 是空的（`vis_sword_X_01.png`）；劈下幀（48×52）刀光橫向對得上，但框的下緣**沉進地面約 20px**（`vis_sword_X_02.png`）。② **blade X 第 1 段**（52×40）最誇張——可見特效只有一道約 12px 的白色短劃，框卻有 52px 寬（`vis_blade_X_01.png`）。③ **giant ↑X**（80×128）上勾拳的圓弧特效大致包住框，但框頂比拳頭高出約 40px（`vis_giant_upX_01.png`）。**對得好的反例**：spark X 的電場魔法陣（r=38）幾乎內接 88×80 的框（`vis_spark_X_02.png`）、dragon X 的火焰跟著 `b.w` 伸長、整條吐息都填滿（`vis_dragon_X_02.png`）——證明「特效同步放大」是做得到的，只是沒有做完。另外**所有**貼身框因為高度是置中放大，下緣一律沉入地面 10~20px，除錯畫面上看起來像「打得到地板下面」（實際上地板 `#` 不可破，沒有功能影響）。 | `.venv/bin/python tools/shot.py --scene game --level w1 --room 0 --ability sword --script "step 20; tap attack 1; step 2" --seq 4:3 --hitbox --out shots/x/sword.png`（blade 換 `--level w2`、giant 換 `--script "step 160; press up 3; press up,attack 2; press up 6"`） | `vis_sword_X_00~03.png`、`vis_blade_X_00~03.png`、`vis_giant_X_00~03.png`、`vis_giant_upX_00~03.png`、`vis_dragon_X_00~03.png`、`vis_spark_X_00~03.png`、`vis_sword_upX_00~02.png`、`vis_spark_downX_00~02.png` | **美術 / 各 abilities 擁有者**（優先序：blade 第 1 段 > sword 起手 > giant ↑X）。三個 agent 都在自己的 PROGRESS 已知問題裡承認了這點，本輪是刻意取捨（要打得到），**不阻擋出貨**，交由使用者決定要不要開一輪美術跟進 |
+| **R10-P2-03** | P2 | 48 招（全清單在 R10-2g） | **過大貼身框**：`w ≥ 120` 或 `h ≥ 96` 的貼身框共 **48 招**（依「能力 × 招」去重後）。最大的幾個：`stonegiant` 空中 X **192×72**、`stonegiant` X / 蓄力 **180×64**、`flamehammer` ↓X **180×52**、`stonehammer` 空中 X **168×72**、`thundersword` ↓X **168×44**、`thundersword` 空中 X **160×80**、`hammermech` ↓X **160×56**、`giant` ↑X **80×128**。遊戲區只有 **256×192**，所以 192 寬 = 畫面的 75%、128 高 = 畫面的 67%。這些全是「落地衝擊波 / ↓X 地面斬 / ↑X 直立柱」，持續 8~18 幀且要先付俯衝或蓄招硬直，所有測試與 9 次 playthrough 都沒有異常，**不是 bug**，但視覺上很有壓迫感。 | `.venv/bin/python shots/agent_qa10/survey.py "$PWD" /tmp/s.json` 後用 `shots/agent_qa10/an.py` 的 E 段列出 | `shots/agent_qa10/survey.json`（完整 44×5 原始資料） | **使用者裁決**。要收斂的話 melee-mix 已寫好改法：把那幾行的 `mbox(p, …)` 改回 `abox(…)` 就恢復 Round 9 尺寸（一行一個招、互不影響）；`giant` ↑X 則是把那一行的 `melee: true` 拿掉 |
+| **R10-P2-04** | P2 | `src/abilities.js`（spark 電擊波）等 54 個「整招都沒有 2× 框」的格子 | **例外清單需要使用者裁決**：44×5 = 220 個格子裡，有 **54 個格子整招沒有任何 ms=2 的框**（全清單與分類在 R10-2c）。其中最需要使用者看一眼的是 **spark 蓄力「電擊波」**——使用者點名了 spark 的五招，而這一招是唯一沒放大的。其餘 53 個絕大多數理由充分（遠程投射物的落點爆炸、全畫面必殺、以卡比為中心但本來就 ≥56px 的光環、石頭變身本體、0×0 工具框）。**每一個 `melee: false` 在程式裡都寫了理由註解**（逐行核對 41 處 `melee:false` + 34 處 `melee:true`，無一例外）。 | 見 R10-2c 各條的重現指令 | `shots/agent_qa10/survey.json`、`survey_forms.json` | **使用者裁決**；改法各 agent 已寫在自己的 PROGRESS「旋鈕」段（拿掉對應那一行的 `melee:false` 即可，每招各一行） |
+| **R10-P2-05** | P2 | `tools/enemy_test.py` 的 `HOOK_JS`、`src/main.js` 的 `__kb.entities()` | **驗判定框的工具缺欄位**：`enemy_test.py` 的 `HOOK_JS` 只記 `w/h`，`__kb.entities()` 連 `w/h` 都沒有，**都沒有 `w0 / h0 / meleeScaled`**。結果是 melee-basic、melee-weapons、melee-mix、melee-magic-forms **四個 agent 各自另外掛了一層 `KB.spawn` hook**，qa10 也得再寫一份（`shots/agent_qa10/survey.py`）。四個 agent 都在自己的「跨檔需求」提了這件事，但本輪授權都寫明「僅修尺寸斷言」，所以沒有人有權改。 | — | 四個 agent 的 PROGRESS「跨檔需求」段 | **總控**：把 `w0 / h0 / meleeScaled` 加進 `enemy_test.py` 的 `HOOK_JS`，並讓 `__kb.entities()` 回傳 `w / h / w0 / h0 / meleeScaled`。下一輪要再驗判定框就不用每個人重寫一份 |
+
+## R10-2. 逐項明細
+
+### R10-2a. 全套測試（自己重跑，數字為本機實測）
+
+| 測試 | 結果 | 對照 STATUS 品質基準 |
+|---|---|---|
+| `engine_test.py` | **167 / 167** | 167 ✓ |
+| `enemy_test.py` | **393 / 393** | 393 ✓ |
+| `enemy_test.py --extra` | **79 / 79** | 79 ✓ |
+| `boss_test.py --runs 3` | **ALL PASS**（whispywoods / lololo / kracko / metaknight / dedede / shadowkirby / nightmarecore 的 idle・intro・fight・phase2・phase3・mid 全 PASS，29s）| ALL PASS ✓（**kracko fight 這次 3/3，沒有出現既有的 2/3 WARN**）|
+| `boss_test.py --runs 3 --extra` | **ALL PASS**（7 魔王 extra 全 PASS，9s）| ✓ |
+| `test_weapons.py` | **417 / 417** | 基準 378 → 本輪 melee-weapons 加了 39 條尺寸斷言 |
+| `test_magic.py` | **248 / 248** | 基準 192 → +56 |
+| `test_forms.py` | **315 / 315** | 基準 263 → +52 |
+| `test_charge.py` | **140 / 140** | 基準 115 → +25 |
+| `test_mix.py` | **701 / 701** | 基準 509 → +192 |
+| `test_mix2.py` | **801 / 801** | 基準 607 → +194 |
+| `test_awaken.py` | **270 / 270** | 基準 240 → +30 |
+| `test_helper.py` | **131 / 131** | 131 ✓ |
+| `test_elements.py` | **96 / 96** | 96 ✓ |
+| `test_progression.py` | **101 / 101** | 101 ✓ |
+| `test_extra.py` | **53 / 53** | 53 ✓ |
+| `test_challenge.py` | **93 / 93** | 93 ✓ |
+| `test_saves.py` | **67 / 67** | 67 ✓ |
+| `test_skins.py` | **67 / 67** | 67 ✓ |
+| `node tools/level_check.js` | **0 error / 1 warning** | ✓（warning = `w2 r4 拉拉拉預設出生點 (0,2) 不可用`，既有，非本輪）|
+| `node tools/level_check.js --extra` | **0 error / 1 warning** | ✓ |
+| `node tools/audio_check.js` | **全部通過** | ✓ |
+| `.venv/bin/python tools/font_subset.py --check` | **exit 1：缺字「宣 稽 遍」** | ✗ **紅字 → R10-P1-01** |
+
+全部原始 log 在 `shots/agent_qa10/tests/`。
+
+### R10-2b. 44 能力 × 5 招 判定框普查（本輪的主要證據）
+
+腳本：`shots/agent_qa10/survey.py`（`?debug=1` 的 `__kb.goto / press / step / release` 逐招驅動，每幀掃 `KB.game.entities` 取 `owner === 'player'` 的 `hitbox` / `proj`，記錄每個實體**出現當幀（第 1 幀）**與**出現後第 10 幀**的 `w / h / w0 / h0 / meleeScaled / dmg / follow.type`）。
+輸出：`shots/agent_qa10/survey.json`（目前版本）與 `survey_base.json`（**同一支腳本跑 `git HEAD` 副本**）。
+`shots/agent_qa10/survey_forms.json` 是變身系（giant / dragon / mech / ghost / time / clone / bow / beam / stone / cutter）**把暖機從 4 幀拉長到 150 幀**的補測——變身需要約 120 幀才完成，短暖機會漏掉 `giant` 的 X / 蓄力。
+
+**總量**：44 能力、220 個「能力 × 招」格子、**713 個 player 判定框 + 395 個 player 投射物**、pageerror **0**。
+
+| 檢查 | 方法 | 結果 |
+|---|---|---|
+| **A. 貼身框 w、h 是否皆 ≈2×** | 對 459 個 `meleeScaled == 2` 的框逐一驗 `w == 2×w0 && h == 2×h0` | **459 / 459 通過，0 不對稱** |
+| **B. 第 10 幀有沒有縮回** | 241 個活到第 10 幀的框（108 個 ms=2）比對第 1 幀與第 10 幀 | **0 個縮回**（`fitBox` / 龍息逐幀重算正確） |
+| **C. 遠程投射物與 HEAD 一致** | 目前 vs HEAD 的 `(招, kind, w, h)` 集合逐能力比對 | **44 / 44 能力零差異**（沒有新增、沒有消失、沒有尺寸改變） |
+| **D. 例外（無 2× 框的格子）** | 見 R10-2c | 54 / 220 個格子 |
+| **E. 過大框** | `w ≥ 120 或 h ≥ 96` 且 ms=2 | 48 招（見 R10-2g） |
+
+**使用者點名的兩種能力（逐招實測值）**
+
+| 能力 | 招 | 判定框（第 1 幀） | 原尺寸 | ms | 判定 |
+|---|---|---|---|---|---|
+| sword | X 揮砍 | **44×32**（劈下幀 48×52） | 22×16（24×26） | 2 | ✓ |
+| sword | ↑X 上挑斬 | **44×60** | 22×30 | 2 | ✓ |
+| sword | ↓X 掃堂斬 | **60×28** | 30×14 | 2 | ✓ |
+| sword | 空中 X 迴旋斬 | **64×52** | 32×26 | 2 | ✓ |
+| sword | 滿血 X 劍氣 | proj 12×16（不變） | — | — | ✓ **這招本來就是遠程投射物**，照規格不放大 |
+| spark | X 放電電場 | **88×80** | 44×40 | 2 | ✓ |
+| spark | ↑X 雷擊柱 | **40×76** | 20×38 | 2 | ✓ |
+| spark | ↓X 落雷 | **104×32** | 52×16 | 2 | ✓（52 > 48 門檻，靠手動 `melee:true`）|
+| spark | 空中 X 電光衝 | **56×52** ＋ 落地 **136×36** | 28×26 / 68×18 | 2 | ✓ |
+| spark | 蓄力 電擊波 | **96×80（不變）** | 96×80 | **0** | ⚠ **唯一的點名例外**，見例外清單第 1 條 |
+
+### R10-2c. 例外清單（請使用者裁決）
+
+**54 個「整招沒有任何 2× 框」的格子**（`survey.json` + `survey_forms.json` 實測）。按「該不該讓使用者裁決」分四級：
+
+**第 1 級 — 使用者點名、建議親自看一眼（1 條）**
+
+| # | 能力 / 招 | 目前尺寸 | agent 的理由 | 放大後會變成 | 改法（一行） |
+|---|---|---|---|---|---|
+| E1 | **spark 蓄力「電擊波」** | 96×80 | 招式表寫明「96px」、本來就是全身巨框 | 192×160 = 遊戲區（256×192）的 **62%** | `src/abilities.js:675` 附近拿掉 `melee: false` |
+
+**第 2 級 — 「貼身但被判為已經夠大 / 光環」，理由成立但可以翻案（9 條）**
+
+| # | 能力 / 招 | 目前尺寸 | 理由 | 備註 |
+|---|---|---|---|---|
+| E2 | time ↑X 時震環 | 56×40 | 全向光環，正好等於一般貼身框 ×2（28×20→56×40） | 合理 |
+| E3 | time ↓X 時之枷 | 72×48 | 比貼身 ×2 更大 | 合理 |
+| E4 | time 空中 X 回溯 | 56×67 | 同上 | 合理 |
+| E5 | gravity ↑X 重力波 | 64×48 | 以卡比為中心的全向重力場，已大於貼身 ×2 | 合理 |
+| E6 | gravity ↓X 反重力 | 64×56 | 同上 | 合理 |
+| E7 | gravity 蓄力 奇點 | 56×56 | 同上 | 合理 |
+| E8 | clone ↑X 分身塔 | 26×60 | 總控指示：框＝柱子外觀 | 合理（但這是唯一「follow 卡比、≤48 寬卻不放大」的招）|
+| E9 | ghost 空中 X 幽靈哀嚎 | 80×68 | 對應 76px 的 stun 半徑 | 合理 |
+| E10 | stone X / ↓X / 空中 X / 蓄力（變石本體）| 18×17 | 判定框在 `player.js startStone`、`stone:true` 自動排除 | 合理（石頭本體＝無敵撞擊，放大會變成「站著就打死一片」）|
+
+**第 3 級 — 遠程 / 全畫面 / 召喚落點，不該放大（本輪指示明確，41 條）**
+
+`beam` X + 蓄力（甩光鞭 13×31，判定每幀依 6 段絕對座標重算＝遠程）、`mage` X 火球爆炸 30×30 / ↓X 雷擊召喚 24×132（前方 48px 召喚）/ 蓄力 元素風暴 272×208（全畫面）、`mech` ↑X + 蓄力 追蹤飛彈爆風 32×28（可能離卡比半個畫面）、`thunderblade` X + 蓄力 雷光一閃 272×28（全畫面橫掃）、`starmage` X 星光束 96×18 / ↑X 星雨 / ↓X 星塵魔法陣 / 蓄力 銀河爆 230×180、`timebeam` X 凍結光束 110×20 / ↑X 時間裂縫 / ↓X 時砂 / 蓄力 260×190、`thunderbow` ↑X 24×120 / ↓X / 空中X / 蓄力 44×210、`thundergun` ↓X / 蓄力 220×26、`frostgun` ↓X / 空中X / 蓄力 210×22、`flamegun` X / ↓X / 空中X / 蓄力、`flamebow` X / ↓X / 空中X / 蓄力 90×72、`flameninja` X / 空中X / 蓄力 170×120、`frostninja` 蓄力 200×140、`gravityblade` 蓄力 150×130、`shadowblade` 蓄力 120×96、`thundermech` ↑X 40×34、`gravity` X 黑洞 / 空中X 隕石。
+
+> 其中 **7 種「元素 + 遠程」混合能力**（`flamegun` / `frostgun` / `thunderbow` / `thundergun` / `flamebow` / `starmage` / `timebeam`）的 X 與 ↓X 幾乎原封不動 —— 這是照「遠程維持」做的。**若使用者實測後覺得「連槍 / 弓的貼身防身招也該變大」**，melee-mix 已寫好改法：把各自的持續場地框從 `abox` 改成 `mbox`（一行一個招）。
+
+**第 4 級 — 不是攻擊框（1 條）**
+
+| # | 能力 / 招 | 尺寸 | 說明 |
+|---|---|---|---|
+| E11 | ghost ↑X 隱身 | 0×0 dmg 0 | 清 alert 用的工具框，不是攻擊 |
+
+**理由是否合理的核對**：逐行看過 src 裡全部 **41 處 `melee: false`** 與 **34 處 `melee: true`**，**每一處都在同一行或上方 1~4 行寫了中文理由註解**（`abilities_magic.js` 的兩處在 `pbox` / `abox` 共用函式上，規則寫在檔頭註解）。`src/awaken.js` 的 `mkbox` 寫成 `melee: !!o.melee`（預設 false，行為與 Round 9 完全相同）；`src/helper.js` 的夥伴靠 `follow.type === 'ally'` 天然不吃自動規則、又在 `mbox` 用 `p.type === 'player'` 再擋一層。**沒有找到任何「標了旗標卻沒寫理由」或「理由與實際尺寸對不上」的情況。**
+
+### R10-2d. 實戰體感（非無敵 playthrough，目前 vs `git HEAD`）
+
+工作區全程唯讀：對照組是把 `git archive HEAD 卡比之星` 解到暫存目錄，用專案 venv 跑**那一份**的 `tools/playthrough.py`。R9 的 QA 紀錄只有 `--godmode` 的數字（`QA_REPORT.md:1800`），沒有這三組非無敵基準，所以直接用 HEAD 實跑補齊。
+
+| 關卡 / 能力 | 目前 run1 | 目前 run2 | HEAD run1 | HEAD run2 |
+|---|---|---|---|---|
+| **w1 sword** | **cleared**・deaths **0**・6075 幀・boss 100% | **cleared**・deaths **0**・6102 幀・boss 100% | cleared・deaths 0・6249 幀 | **未通關**・deaths **4**・只到 r1 |
+| **w2 spark** | **cleared**・deaths **0**・10488 幀・boss 100% | **cleared**・deaths **0**・10581 幀・boss 100% | **未通關**・deaths **4**・只到 r2 | **未通關**・deaths **4**・boss 只打掉 20/30 |
+| **w4 blade** | **cleared**・deaths **2**・14065 幀・boss 100% | **cleared**・deaths **2**・12282 幀・boss 100% | **未通關**・deaths **4**・只到 r3 | **未通關**・deaths **4** |
+
+**目前 6 / 6 全部通關（總 deaths 4），HEAD 6 次只有 1 次通關（總 deaths 20）。** 使用者回報的「劍、雷擊常被打死」在改動後用同一支機器人量不出來了。`missing sprites` 全部 `[]`。
+
+**`--godmode` w1~w7（sword）**：**7 / 7 `cleared=True`、`deaths=0`、`missing []`**，幀數 5341 / 5814 / 7056 / 6864 / 8908 / 5675 / 8703。
+
+### R10-2e. 地形破壞迴歸
+
+**(1) 破壞位置量測**（`shots/agent_qa10/destroy.py`）：hook `KB.TileMap.prototype.breakBlock`，記錄**每一塊磚被打掉的當下**卡比中心到該磚中心的 `dx / dy`（不是出招前的位置，所以衝刺類的位移不會灌水）。12 個案例（w1 / w2 / w3 各 2 個有磚塊的房間 × giant 衝撞 / mech 鑽頭 / fire 衝刺 / hammer），同一支腳本也跑了 HEAD 對照。
+
+| 案例 | 目前：破 n 塊 / 出招當下最遠 | HEAD：破 n 塊 / 最遠 | 判定 |
+|---|---|---|---|
+| w1r0 fire ↓X（火焰衝刺） | 8 / **34px** | 8 / 25px | 框由 24×20 → 48×40，reach +9px，**吻合** |
+| w1r0 hammer X | 6 / **59px** | 2 / 37px | 框由 26×28 → 52×56，多破了右邊一列（dx 49，磚左緣 41）**與框真實重疊** |
+| w2r2 giant ↓X（衝撞） | 2 / 54px | 0 / — | 框 76×60，上緣 = 卡比中心 −30；被破的磚 dy = −34（磚體 −42~−26）→ **重疊 4px，不是隔空** |
+| w3r1 giant ↓X | 1 / 43px | 0 / — | 同上 |
+| w3r2 fire ↓X | 1 / 64px（`byBomb=true`） | 1 / 95px（`byBomb=true`） | **炸彈方塊連鎖**，HEAD 傳得更遠，非本輪造成 |
+| 其餘 7 案例 | 0 塊 | 0 塊 | 卡比擺位沒站到磚旁（房間地形所致），無資訊 |
+
+**(2) 硬磚 X 專項對照**（`shots/agent_qa10/hard.py`）：在 w1 r0 程式化鋪一面 2×4 的硬磚牆貼在卡比右邊，12 種能力 × (X / ↓X) 各打一次，數牆還剩幾塊；同一腳本跑 HEAD。
+
+| 能力 | 目前 X / ↓X 破的塊數 | HEAD X / ↓X | 判定 |
+|---|---|---|---|
+| sword / beam / cutter / ice / spark / ninja / giant | 0 / 0 | 0 / 0 | **完全一致**，沒有任何一種「本來打不破硬磚、現在打得破」 |
+| hammer | 3 / 3 | 0 / 0 | reach 變長（規則沒變，是框變大打得到了） |
+| stone | 0 / 2 | 0 / 2 | 一致 |
+| fire | 0 / 4 | 0 / 4 | 一致 |
+| blade | 0 / 2 | 0 / 1 | reach 變長 |
+| mech | 0 / 4 | 0 / 2 | reach 變長 |
+
+> `src/tilemap.js` 本輪**一個字都沒改**（`git status` 的修改清單只有 `abilities*.js` / `awaken.js` / `const.js` / `entity.js` / `helper.js` 與 7 支測試檔），而硬磚的破壞條件 `TileMap.hardBreakable(a)` 只看 `kind === 'hammer' | 'stone'`、`breakHard`、`dmg >= 5` —— **完全不看尺寸**。所以「能破硬磚的招」名單在數學上就不可能改變，實測也確認一致。
+
+**(3) 看圖判斷**（`--hitbox`，出招**進行中**第 2 / 6 / 10（或 6 / 14 / 24）幀，全部用 Read 打開看過）：
+`terr_w1r0_hammer_X_f02/06/10.png` — 鎚框（52×56）把左邊那一列星星方塊整個蓋住後才破，上方的硬磚 X 三塊完好；
+`terr_w1r0_fire_downX_f04/10/18.png` — 火焰填滿框，只有與框重疊的兩列破掉，上方硬磚完好；
+`terr_w2r2_giant_downX_f06/14/24.png` — 巨人框緊貼身體，破掉的是框上緣剛好蓋到的那一列；
+`terr_w2r2_mech_downX_f06/14/24.png`、`terr_w3r1_giant_downX_*.png`、`terr_w3r1_hammer_X_*.png`、`terr_w2r0_hammer_X_*.png`、`terr_w2r0_sword_X_*.png` 同樣沒有異常。
+**結論：沒有「隔空砸穿地板」、沒有「打穿不該破的硬磚 X」。** 唯一要提醒使用者的是「破壞半徑確實跟著變大」（hammer 在同一距離由 0 塊 → 3 塊），這是判定加倍的直接後果、不是 bug。
+
+### R10-2f. 視覺對齊（`--hitbox`，判斷是否需要美術跟進）
+
+| 能力 / 招 | 判定框 | 特效 | 超出程度 | qa 判斷 |
+|---|---|---|---|---|
+| **sword X 起手** | 44×32 | 一道細白弧線，只佔框的左上角 | **框的約 3/4 是空的** | **需要跟進**（R10-P2-02 ①）|
+| sword X 劈下 | 48×52 | 刀光橫幅對得上 | 框下緣沉入地面約 20px | 可接受 |
+| sword ↑X | 44×60 | 白色上挑線終點已從 −34 拉到 −48 | 小幅超出 | 可接受 |
+| **blade X 第 1 段** | 52×40 | 約 12px 的白色短劃 | **最誇張**：框寬是特效的 4 倍 | **需要跟進**（R10-P2-02 ②）|
+| **spark X** | 88×80 | 電場魔法陣 r=38 + 散射粒子 | **幾乎內接，對得最好** | 不必跟進（其他招可以照抄這個做法）|
+| spark ↓X | 104×32 | 落雷 | 略寬 | 可接受 |
+| **giant ↑X** | 80×128 | 上勾拳圓弧特效 | 框頂比拳頭高約 40px | **可跟進**（R10-P2-02 ③）|
+| giant X | 88×36 | 踩踏衝擊波 | 對得上 | 可接受 |
+| **dragon X** | 112~156×56~60 | 火焰長度跟著 `b.w` 逐幀伸長，整條填滿 | **對得很好** | 不必跟進 |
+
+共同現象：**高度一律置中放大**，所以每個貼身框的下緣都會沉入地面 10~20px、上緣長到卡比頭頂上方。功能上沒有影響（地板 `#` 不可破），只是除錯畫面難看。
+
+### R10-2g. 過大框清單（w ≥ 120 或 h ≥ 96，依「能力 × 招」去重，同招逐幀伸長者取最大值）
+
+| # | 能力 | 招 | 放大後 | 原尺寸 | # | 能力 | 招 | 放大後 | 原尺寸 |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | stonegiant | 空中X | **192×72** | 96×36 | 25 | thunderblade | ↑X | 52×148 | 26×74 |
+| 2 | thundersword | 空中X | **160×80** | 80×40 | 26 | flamedragon | ↑X | 56×136 | 28×68 |
+| 3 | stonehammer | 空中X | **168×72** | 84×36 | 27 | flamesword | ↑X | 64×116 | 32×58 |
+| 4 | flameninja | ↓X | **120×96** | 60×48 | 28 | frostdragon | ↑X | 56×132 | 28×66 |
+| 5 | stonegiant | X | **180×64** | 90×32 | 29 | thundersword | ↓X | 168×44 | 84×22 |
+| 6 | stonegiant | 蓄力 | **180×64** | 90×32 | 30 | thunderdragon | ↓X | 152×48 | 76×24 |
+| 7 | flamedragon | 空中X | **148×76** | 74×38 | 31 | thunderdragon | ↑X | 52×140 | 26×70 |
+| 8 | **giant** | **↑X** | **80×128** | 40×64 | 32 | hammermech | X | 120×60 | 60×30 |
+| 9 | flamesword | 空中X | 140×72 | 70×36 | 33 | hammermech | 蓄力 | 120×60 | 60×30 |
+| 10 | thunderdragon | 空中X | 140×72 | 70×36 | 34 | stonehammer | ↓X | 128×56 | 64×28 |
+| 11 | frostdragon | 空中X | 132×72 | 66×36 | 35 | gravityblade | ↑X | 60×116 | 30×58 |
+| 12 | flamehammer | ↓X | **180×52** | 90×26 | 36 | frosthammer | ↑X | 64×108 | 32×54 |
+| 13 | flamedragon | X | 156×60 | 78×30 | 37 | flamedragon | ↓X | 144×48 | 72×24 |
+| 14 | flamedragon | 蓄力 | 156×60 | 78×30 | 38 | flamesword | ↓X | 156×44 | 78×22 |
+| 15 | frosthammer | 空中X | 136×68 | 68×34 | 39 | frostdragon | ↓X | 140×48 | 70×24 |
+| 16 | hammermech | ↓X | **160×56** | 80×28 | 40 | flameninja | ↑X | 60×112 | 30×56 |
+| 17 | frostsword | 空中X | 128×64 | 64×32 | 41 | thundersword | ↑X | 48×136 | 24×68 |
+| 18 | gravityblade | 空中X | 128×64 | 64×32 | 42 | frostninja | ↑X | 56×116 | 28×58 |
+| 19 | shadowblade | ↑X | 68×120 | 34×60 | 43 | frostdragon | X | 124×52 | 62×26 |
+| 20 | thundermech | ↓X | 156×52 | 78×26 | 44 | frostdragon | 蓄力 | 124×52 | 62×26 |
+| 21 | flamehammer | ↑X | 72×112 | 36×56 | 45 | frostsword | ↓X | 148×40 | 74×20 |
+| 22 | stonegiant | ↑X | 64×124 | 32×62 | 46 | spark | 空中X | 136×36 | 68×18 |
+| 23 | thunderdragon | X | 140×56 | 70×28 | 47 | stone | ↑X | 136×36 | 68×18 |
+| 24 | thunderdragon | 蓄力 | 140×56 | 70×28 | 48 | mage | ↑X | 48×96 | 24×48 |
+
+**參考尺度：遊戲區 256×192、卡比本體約 16×16、一格磁磚 16×16。** 192 寬 = 12 格 = 畫面的 75%；128 高 = 8 格 = 畫面的 67%。
+
+### R10-2h. 效能（招式密集 300 幀，與 R9 對照）
+
+情境沿用 qa9 的「按住 ↑ 飛行 + 每 6 幀放一次空中招」，連續 300 幀（3 輪取最快），每輪前有 60 幀暖機。
+
+| 能力 | 300 幀 (ms) | **ms/幀** | R9 基準 | 峰值實體 / 判定框 / 投射物 | 停手 180 幀後 | heap (MB) |
+|---|---|---|---|---|---|---|
+| blade | 74.1 | **0.247** | — | 46 / 1 / 0 | 45 / 0 / 0 | 12 → 15 |
+| hammermech | 83.3 | **0.278** | 0.36 | 50 / 1 / 4 | 43 / 0 / 0 | 16 → 13 |
+| starmage | 103.8 | **0.346** | 0.41 | 55 / 3 / 5 | 45 / 0 / 0 | 15 → 12 |
+| flamegun | 106.8 | **0.356** | 0.57 | 73 / 8 / 5 | 45 / 0 / 0 | 9 → 12 |
+| sword | 108.3 | **0.361** | 0.56 | 46 / 1 / 0 | 45 / 0 / 0 | 16 → 21 |
+| mech | 132.3 | **0.441** | 0.44 | 49 / 2 / 4 | 43 / 0 / 0 | 13 → 15 |
+| spark | 144.2 | **0.481** | — | 48 / 1 / 0 | 45 / 0 / 0 | 13 → 11 |
+| flamebow | 160.9 | **0.536** | 0.57 | 79 / 11 / 6 | 45 / 0 / 0 | 12 → 15 |
+
+**最重的 flamebow 0.536 ms/幀 = 16.7ms 幀預算的 3.2%**，與 R9 的 0.36~0.57 同級（多數還更快）。**判定框變大不影響幀時間**（碰撞是 AABB，成本與尺寸無關；峰值判定框數 ≤ 11）。停手 180 幀後 **8 / 8 情境的 hitbox 與 proj 都歸零**、實體數回到 43~45 基準，**heap 沒有單向成長**（有升有降，落在 9~21MB 的既有區間）→ **沒有洩漏**。
+
+### R10-2i. 說明頁 / 圖鑑
+
+- 掃 44 種能力全部 `moves` 標籤與招名、`desc`、`flavour`，找「寫死尺寸數字」：**只有 1 處**——`spark` 的 X 寫「放電（44px 電場）」（實際已 88px）→ **R10-P2-01**。同一張卡的「電擊波（96px）」**仍然正確**。`說明.md` 與 `docs/SPEC.md` 裡的 px 只有字型與磁磚尺寸，與本輪無關。
+- 能力卡截圖確認**不受本輪影響**：`ui_card_sword.png`（5 列）、`ui_card_spark.png`（5 列，**過期文案在這張圖上看得到**）、`ui_card_blade.png`、`ui_card_giant.png`（6 列，含「被動 / 限時」）—— 排版、行距、風味文字、HUD 一切正常，沒有溢出或截斷。`ui_help_p2.png` 為操作說明頁，內容與 Round 9 相同（本輪沒有改說明文案，也沒有需要改的）。
+
+### R10-2j. build / dist
+
+```
+.venv/bin/python tools/build.py
+  embedded px16 char list: 1848 chars      ← 比 src 掃到的 1851 少 3（＝ R10-P1-01 的三個字）
+  embedded fonts: px12, px16 1281 KB (base64)
+  written dist/卡比之星.html 3328 KB
+```
+`dist/卡比之星.html` = **3,611,299 bytes**（上一版 3,585,035，**+26 KB**），符合品質基準「約 3.2MB」。
+playwright 直接開 dist 實跑（`shots/agent_qa10/dist.py`）：`scene = GameScene`、`ability = sword`、走了 60 幀再揮一刀 → `x = 125`、`hp = 6`、**`__kb.missing() = []`**、`KB.FONTS = {px12:true, px16:true, ready:true, failed:false}`、**0 console error / 0 pageerror**。截圖 `dist_game.png`（中文關名「翠綠草原」、HUD「劍」、卡比揮劍動作全部正常）。
+
+## R10-3. 截圖索引（`shots/agent_qa10/`）
+
+- **判定框普查（原始數據 + 腳本）**：`survey.json`（目前 44×5）、`survey_base.json`（**git HEAD 對照**）、`survey_forms.json`（變身系長暖機補測）、`survey.py` / `survey2.py`（採集）、`an.py`（比對分析，A~G 七段）
+- **視覺對齊（`--hitbox`，每組 3~4 連拍）**：`vis_sword_X_00~03.png`、`vis_sword_upX_00~02.png`、`vis_spark_X_00~03.png`、`vis_spark_downX_00~02.png`、`vis_blade_X_00~03.png`、`vis_giant_X_00~03.png`、`vis_giant_upX_00~03.png`、`vis_dragon_X_00~03.png`
+- **地形破壞（出招進行中，`--hitbox`）**：`terr_w1r0_hammer_X_f02/06/10.png`、`terr_w1r0_fire_downX_f04/10/18.png`、`terr_w2r2_giant_downX_f06/14/24.png`、`terr_w2r2_mech_downX_f06/14/24.png`、`terr_w3r1_hammer_X_f02/06/10.png`、`terr_w3r1_giant_downX_f06/14/24.png`、`terr_w2r0_hammer_X_f02/06/10.png`、`terr_w2r0_sword_X_f02/06/10.png`
+- **地形破壞（出招後結果 + 量測數據）**：`terrain_<12 案例>.png`、`destroy.json` / `destroy_base.json`（破壞當下的 dx/dy）、`hardblock.json` / `hardblock_base.json`（硬磚 12 能力對照）、`destroy.py` / `hard.py` / `terrshot.py`
+- **UI**：`ui_card_sword.png`、**`ui_card_spark.png`**（過期文案 R10-P2-01）、`ui_card_blade.png`、`ui_card_giant.png`、`ui_help_p2.png`
+- **dist**：`dist_game.png`、`dist.py`
+- **效能**：`perf.json`、`perf.py`
+- **測試 log**：`tests/`（`all_tests.log` 16 支、`checks.log` boss / level / audio / font、`playthrough_nogod.log` 目前 vs HEAD 12 次、`playthrough_godmode.log` w1~w7、各測試單檔 log）

@@ -263,6 +263,24 @@
       this.onHit = o.onHit || null; this.dir = o.dir || 1;
       this.onUpdate = o.onUpdate || null;   // 每幀回呼（判定框在擁有者之後更新，可安全改寫擁有者速度）
       this.stone = !!o.stone;
+      // Round 10：近戰判定加倍（使用者回饋：劍 / 雷擊等貼身招範圍太小常被打死；遠程維持）。
+      //   自動規則：owner 'player'、跟隨卡比本體（follow.type === 'player'）、原尺寸 ≤ 48×48、非 stone → 乘 KB.PHYS.meleeScale。
+      //   建立時傳 melee:true / false 可強制開 / 關：絕對座標（不 follow）的貼身招請傳 melee:true；
+      //   全畫面 / 持續光環 / 分身本體之類不該放大的傳 melee:false。
+      //   放大方式：方向框（flipWithOwner）3/4 往前、1/4 往後；對稱框左右置中；高度一律置中；絕對框以原中心置中。
+      //   保留 w0 / h0（原尺寸）與 meleeScaled（倍率）給測試與除錯 API 查驗。
+      this.w0 = this.w; this.h0 = this.h; this.meleeScaled = 0;
+      {
+        const ms = (KB.PHYS && KB.PHYS.meleeScale) || 1;
+        let melee = o.melee;
+        if (melee === undefined) melee = this.owner === 'player' && !!o.follow && o.follow.type === 'player' && !this.stone && o.w <= 48 && o.h <= 48;
+        if (melee && ms !== 1) {
+          const w2 = Math.round(o.w * ms), h2 = Math.round(o.h * ms), dw = w2 - o.w, dh = h2 - o.h;
+          if (o.follow) { this.ox = this.flipWithOwner ? this.ox - Math.round(dw / 4) : this.ox - Math.round(dw / 2); this.oy -= Math.round(dh / 2); }
+          else { this.x -= Math.round(dw / 2); this.y -= Math.round(dh / 2); }
+          this.w = w2; this.h = h2; this.meleeScaled = ms;
+        }
+      }
       // 石頭變身掛勾：player.js 的 startStone 會產生 {stone:true, owner:'player'} 判定框，
       // 以此通知 abilities.js（隨機外觀 / 斜坡滾動），避免動到 player.js
       if (this.stone && this.owner === 'player' && KB.ABILITIES && KB.ABILITIES.stone && KB.ABILITIES.stone.onStoneStart) {

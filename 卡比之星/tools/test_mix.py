@@ -320,6 +320,7 @@ def phase_moves(h, only):
         e = S[-1]['e']; st = S[-1]['p']['state']
         check(nm + ': kills waddledee', e['dead'], dict(hp=e['hp'], ex=e['x'], px=S[-1]['p']['x'], state=st))
         check(nm + ': player returns to a normal state', st in NORMAL_STATES, st)
+        check_melee(nm, ability, sp)        # Round 10：貼身 ×2 / 遠程不變
         if label in EXTRA:
             desc, fn = EXTRA[label]
             try:
@@ -745,6 +746,160 @@ def phase_airfall(h, only):
             check(f'{key} [{label}]: 沒有懸停（連續不下墜 < 30 幀）', o['maxStall'] < 30, o)
 
 
+
+# ---------------------------------------------------------------------------
+# G. Round 10：貼身判定加倍（KB.PHYS.meleeScale = 2）
+#    ‧ 貼身框（fbox 自動 / mbox 明確 melee）→ meleeScaled === 2 且 w/h 剛好是 w0/h0 的兩倍
+#    ‧ 遠程（KB.shoot / MixHoming / MixOrbit / Mix2Return…）與全畫面 / 場地框 → 完全不動
+#    ‧ 招式中段（≥ 10 幀）仍是 2×：龍吐息每幀重建且長度會變，跨過 entity.js 的 48px
+#      自動門檻時不能「越吐越短」
+#    ‧ 夥伴（KB.Helper，type 'ally'）用同一份招式定義時判定框維持 Round 9 尺寸
+# ---------------------------------------------------------------------------
+# 在 enemy_test 的 KB.spawn 掛勾外面再包一層，把判定框的原尺寸補進 __spawned 記錄
+MELEE_HOOK = r"""() => {
+  if (window.__meleeHooked) return true;
+  const prev = KB.spawn;
+  KB.spawn = function (e) {
+    const r = prev.apply(this, arguments);
+    const sp = window.__spawned;
+    if (sp && sp.length && e && e.w0 !== undefined) {
+      const rec = sp[sp.length - 1];
+      rec.w0 = e.w0; rec.h0 = e.h0; rec.ms = e.meleeScaled || 0;
+    }
+    return r;
+  };
+  window.__meleeHooked = true;
+  return true;
+}"""
+
+# 逐幀取樣「活著的玩家判定框」
+_LIVE_BOXES_JS = r"""([keys, frames]) => {
+  const out = [];
+  __kb.release(); if (keys && Object.keys(keys).length) __kb.press(keys);
+  for (let i = 0; i < frames; i++) {
+    __kb.step(1);
+    const g = KB.game; if (!g) break;
+    for (const e of g.entities) {
+      if (e.dead || e.type !== 'hitbox' || e.owner !== 'player') continue;
+      out.push({ f: i, k: e.kind || '', w: Math.round(e.w), h: Math.round(e.h),
+                 w0: e.w0 === undefined ? null : Math.round(e.w0),
+                 h0: e.h0 === undefined ? null : Math.round(e.h0), ms: e.meleeScaled || 0 });
+    }
+  }
+  __kb.release();
+  return out;
+}"""
+
+# 夥伴出招時的判定框（fromHelper）：只裝一次的記錄器，短命的招式也抓得到
+_HELPER_REC_JS = r"""() => {
+  if (window.__mhbInstalled) return true;
+  window.__mhbInstalled = true; window.__mhb = [];
+  const prev = KB.spawn;
+  KB.spawn = function (e) {
+    if (e && e.fromHelper && (e.type === 'hitbox' || e.type === 'proj')) {
+      window.__mhb.push({ t: e.type, w: Math.round(e.w), h: Math.round(e.h),
+                          w0: e.w0 === undefined ? null : Math.round(e.w0), ms: e.meleeScaled || 0 });
+    }
+    return prev.apply(this, arguments);
+  };
+  return true;
+}"""
+
+MELEE_SEEN = {}          # ability → 該能力所有招式產生過的「放大過的貼身框」數量
+
+
+def check_melee(nm, ability, sp):
+    """每個招式都要通過：放大的框剛好 ×2、遠程投射物完全不受影響"""
+    boxes = [x for x in sp if x['type'] == 'hitbox' and x['owner'] == 'player']
+    scaled = [x for x in boxes if x.get('ms')]
+    bad = [x for x in scaled if not (x['ms'] == 2 and x['w'] == x['w0'] * 2 and x['h'] == x['h0'] * 2)]
+    check(nm + ': 貼身框 meleeScaled == 2 且 w/h 剛好 ×2', not bad,
+          [(x['kind'], x['w'], x['h'], x['w0'], x['h0'], x['ms']) for x in bad[:3]])
+    prj = [x for x in sp if x['type'] == 'proj' and x.get('ms')]
+    check(nm + ': 遠程投射物不受 meleeScale 影響', not prj,
+          [(x['spr'], x['w'], x['h']) for x in prj[:3]])
+    MELEE_SEEN[ability] = MELEE_SEEN.get(ability, 0) + len(scaled)
+
+
+def phase_melee(h, only):
+    # 1) 每個混合能力至少有一招的貼身框被放大（純遠程型例外，見 RANGED_ONLY）
+    for key in (KEYS if MELEE_SEEN else []):
+        if only and key not in only:
+            continue
+        n = MELEE_SEEN.get(key, 0)
+        if key in RANGED_ONLY:
+            check(f'{key}: 純遠程混合，判定維持原樣（0 個放大框）', n == 0, n)
+        else:
+            check(f'{key}: 至少一招的貼身判定被放大（×2）', n > 0, n)
+    if only:
+        return
+    # 2) 招式中段仍是 2×：龍吐息每幀重建、長度會一路變長（跨過 entity.js 的 48px 自動門檻）
+    for key, kind, minw0 in BREATH:
+        h.goto(3, 9, ability=key, immune=True)
+        rows = h.ev(_LIVE_BOXES_JS, [{'attack': True}, 34])
+        br = [r for r in rows if r['k'] == kind and r['w0']]
+        mid = [r for r in br if r['f'] >= 10]
+        check(f'{key} [X 吐息]: 中段（≥10 幀）判定框仍是 2×',
+              bool(mid) and all(r['ms'] == 2 and r['w'] == r['w0'] * 2 and r['h'] == r['h0'] * 2 for r in mid),
+              [(r['f'], r['w'], r['w0'], r['ms']) for r in mid[:3]])
+        big = [r for r in br if r['w0'] > 48]
+        check(f'{key} [X 吐息]: 長度超過 48px 之後也沒有縮回原尺寸',
+              bool(big) and all(r['ms'] == 2 for r in big),
+              dict(maxw0=max([r['w0'] for r in br], default=0), n=len(big)))
+        check(f'{key} [X 吐息]: 吐息越吐越長（w0 單調不減）',
+              bool(br) and all(b['w0'] >= a['w0'] for a, b in zip(br, br[1:])),
+              [r['w0'] for r in br[:8]])
+    # 3) 持續 / 全畫面 / 遠程框維持原樣（Round 9 行為）
+    for key, keys, frames, kept in KEEP:
+        h.goto(3, 9, ability=key, immune=True)
+        rows = h.ev(_LIVE_BOXES_JS, [keys, frames])
+        for w, h0, why in kept:
+            got = [r for r in rows if r['w'] == w and r['h'] == h0]
+            check(f'{key}: {why}（{w}×{h0}）維持原尺寸、沒有被放大',
+                  bool(got) and all(r['ms'] == 0 for r in got),
+                  dict(found=len(got), sizes=sorted(set((r['w'], r['h']) for r in rows))[:8]))
+    # 4) 夥伴（type 'ally'）用同一份混合招式定義 → 判定框不放大（流程照 test_helper 的 phase_attack）
+    h.goto(3, 9, ability=HELPER_KEY, immune=True)
+    h.ev(_HELPER_REC_JS)
+    ok = h.ev("(k)=>{const p=KB.player; if(!KB.Helper) return false; KB.Helper.clear();"
+              " p.ability=k; p.abilityData={}; return !!KB.Helper.spawn(p);}", HELPER_KEY)
+    check(f'夥伴 [{HELPER_KEY}]: KB.Helper.spawn() 成功', ok is True, ok)
+    if ok:
+        h.run(10, 10)
+        h.ev("()=>{window.__mhb = [];}")
+        h.spawn('waddledee', 7, 9, d=-1)
+        rows = []
+        for _ in range(30):
+            h.run(10, 10)
+            rows = h.ev("()=>window.__mhb || []")
+            if rows:
+                break
+        check(f'夥伴 [{HELPER_KEY}]: 有出招（產生 fromHelper 判定框 / 投射物）', len(rows) > 0, len(rows))
+        # 混合能力的 def 帶 transform:true，helper.js 的 simpleOf() 會走「退化成吐星」路徑，
+        # 所以夥伴根本不會跑到混合招式的貼身框；不論走哪條路，夥伴的框都不該被 meleeScale 放大。
+        check(f'夥伴 [{HELPER_KEY}]: 判定框 / 投射物維持 Round 9 尺寸（沒有被 meleeScale 放大）',
+              bool(rows) and all(r['ms'] == 0 for r in rows), [r for r in rows if r['ms']][:3])
+        simple = h.ev("()=>{const e=KB.Helper.get(); return e && e.simple ? Object.keys(e.simple) : null;}")
+        check(f'夥伴 [{HELPER_KEY}]: 混合能力走 helper.js 的簡化 / 退化路徑（不吃玩家貼身框）',
+              simple is not None, simple)
+        h.ev("()=>{KB.Helper.clear();}")
+
+
+# 純遠程混合（五招都是投射物 / 遠處落點 / 全畫面）：一個放大框都不該有
+RANGED_ONLY = ('thunderbow', 'starmage')
+# 吐息型：(能力, 判定 kind, 最短長度)
+BREATH = [('frostdragon', 'ice', 48)]
+# 應該維持原尺寸的框：(能力, 按鍵, 幀數, [(w, h, 說明)])
+KEEP = [
+    ('thunderblade', {'attack': True}, 12, [(272, 28, 'X 雷光一閃全畫面')]),
+    ('flamegun', {'down': True, 'attack': True}, 18, [(26, 46, '↓X 火牆（持續場地框）')]),
+    ('frostgun', {'down': True, 'attack': True}, 18, [(62, 40, '↓X 冰霧（持續場地框）')]),
+    ('starmage', {'attack': True}, 12, [(96, 18, 'X 星光束（遠程光束）')]),
+    ('thunderbow', {'up': True, 'attack': True}, 22, [(24, 120, '↑X 落雷柱（打在敵人 / 遠處落點）')]),
+]
+HELPER_KEY = 'flamesword'
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--only', default='')
@@ -765,6 +920,7 @@ def main():
         pg.wait_for_function('()=>window.__kb && KB.LEVELS')
         pg.evaluate(TEST_LEVEL)
         pg.evaluate(HOOK_JS)
+        pg.evaluate(MELEE_HOOK)          # Round 10：__spawned 記錄補上 w0 / h0 / meleeScaled
         h = Harness(pg, a.shots, a.hitbox)
         if not only or 'defs' in only:
             print('-' * 8, 'defs'); phase_defs(h)
@@ -790,6 +946,10 @@ def main():
             except Exception as ex: check('airfall: raised', False, repr(ex))
         if not only or move_only:
             print('-' * 8, 'moves'); phase_moves(h, move_only)
+        if not only or move_only or 'melee' in only:
+            print('-' * 8, 'melee')
+            try: phase_melee(h, move_only)
+            except Exception as ex: check('melee: raised', False, repr(ex))
         missing = pg.evaluate("()=>__kb.missing()")
         b.close()
     print('---')

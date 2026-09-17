@@ -1,6 +1,17 @@
 // 魔法系能力：mage 元素法師 / time 時間 / gravity 重力 / clone 分身（Round 5 變身大爆發）
 // 介面與 src/abilities.js 相同：KB.ABILITIES[key] = { duration, hold, maxHold, lockMove, fps, onAttack, update, onEnd, onLose ... }
 // 特效一律透過 V('xxx', ...) 呼叫 KB.VFX（vfx agent 實作中，未載入時自動略過，另有像素圖 / 粒子備援）。
+// ---------------------------------------------------------------------------
+// Round 10（melee-magic-forms）：貼身招判定 ×2（KB.PHYS.meleeScale，entity.js Hitbox 自動規則）。
+//   本檔每個 KB.hitbox 都標注了「貼身 / 遠程 / 不放大」的理由：
+//     · follow: p 且 ≤48×48 的框 → 自動 ×2（不用寫 melee，註解註明「自動 ×2」）
+//     · 絕對座標的近身框（交換星爆 / 墊腳 / 百裂分身 / 冰牆冰刺）→ melee: true 強制 ×2
+//     · 遠程（火球 / 風刃 / 隕石 / 黑洞 / 天雷 / 小星）與全畫面 / 大範圍光環 / 分身柱本體 → melee: false 維持
+//   判定框上留有 w0 / h0 / meleeScaled 供 tools/test_magic.py 的「Round 10」段查驗。
+//   ※ 本檔沒有「招式進行中逐幀改寫 b.w / b.ox」的招（那種寫法會洗掉建構子的放大，見
+//     src/abilities.js / abilities_forms.js 的 fitBox）；唯一會變尺寸的是 time 回溯的路徑框，
+//     而它是在 onAttack 當幀一次算好、之後不再改。
+// ---------------------------------------------------------------------------
 (function () {
   'use strict';
   KB.ABILITIES = KB.ABILITIES || {};
@@ -105,18 +116,22 @@
     return best;
   }
   // 全畫面判定框（必殺用）
+  // Round 10：melee:false —— 這已經是「整個畫面」（272×208），再 ×2 只會溢出鏡頭外、
+  //   讓元素風暴 / 奇點打到還沒進畫面的敵人。必殺的範圍本來就是滿版，維持原樣。
   function screenHit(kind, dmg, life) {
     if (!KB.game) return null;
     const c = KB.game.cam;
     return KB.hitbox({ x: c.x - 8, y: c.y - 8, w: KB.W + 16, h: KB.VIEW_H + 16, dmg: dmg, owner: 'player', type: kind,
-      life: life || 10, rehit: 0, pierce: true, knock: 2, breakBlocks: false });
+      melee: false, life: life || 10, rehit: 0, pierce: true, knock: 2, breakBlocks: false });
   }
   // 爆炸：判定框 + 粒子 + 環
+  // Round 10：melee:false —— boom() 的呼叫者都是**遠程**命中點（火球落點 / 隕石落點 / 百裂分身收尾的爆風），
+  //   爆炸半徑 30~44 本來就是「爆炸範圍」而不是卡比的手長；遠程維持現狀（使用者需求 ②）。
   function boom(x, y, o) {
     o = o || {};
     const r = o.r || 30;
     KB.hitbox({ x: x - r / 2, y: y - r / 2, w: r, h: r, dmg: o.dmg === undefined ? 4 : o.dmg, owner: 'player', type: o.kind || 'fire',
-      life: o.life || 8, rehit: 0, pierce: true, knock: o.knock === undefined ? 2 : o.knock, breakBlocks: o.breakBlocks !== false });
+      melee: false, life: o.life || 8, rehit: 0, pierce: true, knock: o.knock === undefined ? 2 : o.knock, breakBlocks: o.breakBlocks !== false });
     const cols = o.colors || ['#ffe040', '#ff9020', '#ff4010', '#ffffff'];
     KB.particles(x, y, cols, o.n || 14, { spread: o.spread || 2.6, grav: 0.02, life: 22, up: 0.2 });
     KB.fx('fx_hit', x, y);
@@ -218,7 +233,7 @@
       this.cxp = tx * T + T / 2; this.cyp = (by - 1) * T + T / 2;
       KB.fx('fx_icewall', this.cxp, this.cyp);
       for (let i = 0; i < 3; i++) KB.particles(this.cxp, (by - i) * T + 8, ['#ffffff', '#c0f0ff', '#80d0ff'], 6, { spread: 1.6, grav: 0.04, life: 20, up: 0.6 });
-      V('ring', this.cxp, this.cyp, { r0: 4, r1: 28, frames: 14, color: '#c0f0ff', width: 2 });
+      V('ring', this.cxp, this.cyp, { r0: 4, r1: 46, frames: 14, color: '#c0f0ff', width: 2 });   // Round 10：跟著 48×96 的冰刺框放大
       V('lightning', this.cxp, (by - 2) * T, this.cxp, (by + 1) * T, { color: '#ffffff', frames: 8, jitter: 3 });
       shake(3);
     }
@@ -262,7 +277,10 @@
     strike() {
       this.strikes++;
       const top = this.gy - 120;
-      KB.hitbox({ x: this.x0 - 12, y: top, w: 24, h: 132, dmg: 3, owner: 'player', type: 'spark', life: 7, rehit: 0, pierce: true, knock: 2, breakBlocks: true });
+      // Round 10：melee:false —— 天雷是「前方 48px 召喚」的遠程招（魔法陣落點與卡比無關），
+      //   而且 24×132 已經是一整根貫穿畫面高度的雷柱（h 遠超過自動規則的 48 門檻）。遠程維持。
+      KB.hitbox({ x: this.x0 - 12, y: top, w: 24, h: 132, dmg: 3, owner: 'player', type: 'spark', melee: false,
+        life: 7, rehit: 0, pierce: true, knock: 2, breakBlocks: true });
       V('lightning', this.x0, top, this.x0, this.gy, { color: '#c0f0ff', frames: 10, jitter: 7, branches: 3 });
       V('flash', '#ffffff', 4);
       KB.particles(this.x0, this.gy - 6, ['#ffffff', '#c0f0ff', '#80d0ff'], 12, { spread: 2.4, grav: 0.05, life: 20, up: 0.8 });
@@ -322,7 +340,9 @@
         d.wall = KB.spawn(new IceWall(p));
         sfx('icewall', 'ice');
         // Round 9：冰牆是從地面「刺」出來的 —— 牆的位置本身就有一道冰屬性判定（dmg 3）
-        KB.hitbox({ x: d.wall.x - 4, y: d.wall.y, w: T + 8, h: T * 3, dmg: 3, owner: 'player', type: 'ice',
+        // Round 10：melee:true —— 冰牆蓋在卡比前方 20px（貼身距離），是 mage 的 ↑X 攻擊判定，
+        //   24×48 → 48×96（以冰牆中心置中）：冰刺往兩側與上下各多長出半格，貼著牆走的敵人打得到了。
+        KB.hitbox({ x: d.wall.x - 4, y: d.wall.y, w: T + 8, h: T * 3, dmg: 3, owner: 'player', type: 'ice', melee: true,
           life: 10, rehit: 0, pierce: true, knock: 1.5, breakBlocks: false });
         // 空中變體「冰階」：冰牆蓋在腳邊高度，緩降 28 幀方便踩上去（之後照常下墜）
         if (!p.onGround) {
@@ -572,6 +592,8 @@
       } else if (mode === 'punch') {
         setup(p, { anim: 'kirby_attack_time_punch', dur: 14, fps: 14, lock: false });
         const stopped = !!(g && g.timeStopT > 0);
+        // Round 10：貼身近身拳 —— follow: p 且 20×16 ≤ 48×48 ⇒ entity.js 自動 ×2 → 40×32（3/4 往前）。
+        //   這是 time 唯一真正的貼身招，也是時停中唯一的輸出手段，放大後不用貼到臉上才打得到。
         d.box = KB.hitbox({ x: 0, y: 0, w: 20, h: 16, dmg: stopped ? 0 : 3, owner: 'player', type: 'time', follow: p, ox: 4, oy: -2,
           life: 8, rehit: 0, knock: stopped ? 0 : 1.5,
           onHit: (b) => {
@@ -594,7 +616,9 @@
         KB.fx('fx_gear', p.cx, p.cy - 16, { life: 40 });
         sfx('slowmo', 'charge');
         // Round 9：慢動作本身也是一招 —— 身邊 ±36px 的「時之枷」把敵人的時間直接擰斷（dmg 3）
-        d.box = KB.hitbox({ x: p.cx - 36, y: p.cy - 24, w: 72, h: 48, dmg: 3, owner: 'player', type: 'time',
+        // Round 10：melee:false —— 72×48 已經比「放大後的貼身框」還大（例：近身拳 ×2 = 40×32、
+        //   劍系 ×2 ≈ 56×40），而且它是以卡比為中心的全向光環，再 ×2 會變成 144×96（超過半個畫面）。維持。
+        d.box = KB.hitbox({ x: p.cx - 36, y: p.cy - 24, w: 72, h: 48, dmg: 3, owner: 'player', type: 'time', melee: false,
           life: 12, rehit: 0, pierce: true, knock: 1.4, breakBlocks: false });
         V('ring', p.cx, p.cy, { r0: 4, r1: 40, frames: 16, color: '#d8b0ff', width: 2 });
       } else if (mode === 'haste') {
@@ -605,7 +629,9 @@
         V('afterimage', p, { color: '#ffe040', frames: 120, alpha: 0.4 });
         sfx('slowmo', 'charge_ready');
         // Round 9：起手的「時震環」—— 加速到旁人看不見的瞬間，周圍 ±28px 被時間亂流刮傷（dmg 3）
-        d.box = KB.hitbox({ x: p.cx - 28, y: p.cy - 20, w: 56, h: 40, dmg: 3, owner: 'player', type: 'time',
+        // Round 10：melee:false —— 56×40 正好就是一般貼身框 ×2 之後的尺寸（28×20 → 56×40），
+        //   而且是全向光環（左右都打得到），已經達標，不再疊乘。
+        d.box = KB.hitbox({ x: p.cx - 28, y: p.cy - 20, w: 56, h: 40, dmg: 3, owner: 'player', type: 'time', melee: false,
           life: 10, rehit: 0, pierce: true, knock: 2, breakBlocks: false });
         V('ring', p.cx, p.cy, { r0: 2, r1: 34, frames: 14, color: '#ffe040', width: 2 });
         KB.particles(p.cx, p.cy, ['#ffe040', '#ffffff'], 10, { spread: 2.2, grav: 0, life: 16 });
@@ -639,7 +665,13 @@
         // Round 9：逆放的殘影會把路徑上的敵人一起「倒帶」掉（dmg 3）——空中 X 也是一招，不只是位移
         const bx0 = Math.min(p.cx, tgt[0] + 7), bx1 = Math.max(p.cx, tgt[0] + 7);
         const by0 = Math.min(p.cy, tgt[1] + 7), by1 = Math.max(p.cy, tgt[1] + 7);
-        KB.hitbox({ x: bx0 - 14, y: by0 - 14, w: (bx1 - bx0) + 28, h: (by1 - by0) + 28, dmg: 3, owner: 'player', type: 'time',
+        // Round 10：回溯是「沿著 60 幀前的路徑掃一次」的貼身斬（空中 X）。
+        //   框的長度＝路徑長度（可能上百 px），整個 ×2 會變成半個畫面，所以改成把**厚度**加倍：
+        //   padding 14 → 28 ⇒ 最小框 28×28 → 56×56（正好 2×），路徑很長時也只是變粗、不會誇張延長。
+        //   厚度已自行加倍，故 melee:false 不再疊乘。
+        const RW_PAD = 28;
+        KB.hitbox({ x: bx0 - RW_PAD, y: by0 - RW_PAD, w: (bx1 - bx0) + RW_PAD * 2, h: (by1 - by0) + RW_PAD * 2,
+          dmg: 3, owner: 'player', type: 'time', melee: false,
           life: 8, rehit: 0, pierce: true, knock: 1.5, breakBlocks: false });
         p.x = tgt[0]; p.y = tgt[1]; p.vx = 0; p.vy = 0;
         if (p.clampToRoom) p.clampToRoom();               // fix5 保險：歷史座標若曾在房間外，回溯不把卡比送出地圖
@@ -727,14 +759,17 @@
         const ang = a + i * Math.PI, rr = r * 0.55;
         KB.particles(cx + Math.cos(ang) * rr, cy + Math.sin(ang) * rr * 0.7, ['#a860f0', '#d8b0ff'], 1, { spread: 0.2, grav: 0, life: 12, up: 0, size: 1 });
       }
-      if (this.t * 60 % 20 < 1) KB.hitbox({ x: cx - 14, y: cy - 14, w: 28, h: 28, dmg: 1, owner: 'player', type: 'gravity', life: 3, rehit: 0, pierce: true, knock: 0, breakBlocks: false });
+      // Round 10：melee:false —— 黑洞是「前方 48px 召喚」的遠程引力點，這是它核心的持續刮傷判定，
+      //   範圍必須貼著 proj_blackhole 的外觀（28×28）才不會打到吸力範圍外的敵人。遠程維持。
+      if (this.t * 60 % 20 < 1) KB.hitbox({ x: cx - 14, y: cy - 14, w: 28, h: 28, dmg: 1, owner: 'player', type: 'gravity', melee: false, life: 3, rehit: 0, pierce: true, knock: 0, breakBlocks: false });
       if (this.life <= 0) this.explode();
     }
     explode() {
       if (this.dead) return;
       this.dead = true;
       const r = this.big ? 90 : 56;
-      KB.hitbox({ x: this.cx - r / 2, y: this.cy - r / 2, w: r, h: r, dmg: this.big ? 8 : 5, owner: 'player', type: 'gravity', life: 10, rehit: 0, pierce: true, knock: 3, breakBlocks: true });
+      // Round 10：melee:false —— 遠程黑洞的內爆（56 / 奇點 90），本來就是大範圍爆炸，維持。
+      KB.hitbox({ x: this.cx - r / 2, y: this.cy - r / 2, w: r, h: r, dmg: this.big ? 8 : 5, owner: 'player', type: 'gravity', melee: false, life: 10, rehit: 0, pierce: true, knock: 3, breakBlocks: true });
       KB.particles(this.cx, this.cy, ['#a860f0', '#d8b0ff', '#ffffff', '#6028a8'], 26, { spread: 4, grav: 0.02, life: 28 });
       KB.fx('fx_hit', this.cx, this.cy);
       V('ring', this.cx, this.cy, { r0: 4, r1: r, frames: 16, color: '#d8b0ff', width: 3 });
@@ -788,7 +823,9 @@
         }
         d.lifted = targets;
         // Round 9：近距離（±32px）的重力擠壓 dmg 2；遠一點的只被拉起來（既有手感不變）
-        d.box = KB.hitbox({ x: p.cx - 32, y: p.cy - 28, w: 64, h: 56, dmg: 2, owner: 'player', type: 'gravity',
+        // Round 10：melee:false —— 64×56 是以卡比為中心的重力場（總控指示：56~72px 級的大範圍維持），
+        //   且拉起敵人的判定是 ±72 / ±56 的迴圈（不是這個框）；框再放大就會超過「被拉起來的範圍」。
+        d.box = KB.hitbox({ x: p.cx - 32, y: p.cy - 28, w: 64, h: 56, dmg: 2, owner: 'player', type: 'gravity', melee: false,
           life: 10, rehit: 0, pierce: true, knock: 0, breakBlocks: false });
         V('ring', p.cx, p.cy, { r0: 8, r1: 76, frames: 18, color: '#d8b0ff', width: 2 });
         V('textPop', p.cx, p.y - 16, '反重力', { color: '#d8b0ff', frames: 45 });
@@ -825,7 +862,9 @@
         KB.particles(p.cx, p.cy, ['#a860f0', '#d8b0ff'], 16, { spread: 2.6, grav: -0.05, life: 26, up: 1 });
         sfx('gravity_lift', 'beam');
         // Round 9：起手的重力波 —— 翻轉重力的瞬間，身邊 ±32px 的空間被壓扁（dmg 3）
-        d.box = KB.hitbox({ x: p.cx - 32, y: p.cy - 24, w: 64, h: 48, dmg: 3, owner: 'player', type: 'gravity',
+        // Round 10：melee:false —— 同上，64×48 的全向重力場已經大於一般貼身框 ×2（56×40）；
+        //   浮空招又會持續 240 幀在空中移動，再放大會變成「飛過去就清場」。維持。
+        d.box = KB.hitbox({ x: p.cx - 32, y: p.cy - 24, w: 64, h: 48, dmg: 3, owner: 'player', type: 'gravity', melee: false,
           life: 10, rehit: 0, pierce: true, knock: 2.4, breakBlocks: false });
         tick(p, 'flip', {
           life: 240,
@@ -1081,9 +1120,11 @@
           p.x = nx - p.w / 2; p.y = ny - p.h / 2;
           p.vx = 0; p.vy = 0;
           // Round 9：交換不只是位移 —— 卡比離開的位置留下一顆星爆（dmg 3），空中一樣打得到
-          KB.hitbox({ x: ox - 16, y: oy - 14, w: 32, h: 28, dmg: 3, owner: 'player', type: 'star',
+          // Round 10：melee:true —— 這是 clone 的 ↓X，星爆就炸在「卡比剛剛站的位置」（貼身），
+          //   只是因為要留在原地才用絕對座標。32×28 → 64×56（以原中心置中）。
+          KB.hitbox({ x: ox - 16, y: oy - 14, w: 32, h: 28, dmg: 3, owner: 'player', type: 'star', melee: true,
             life: 10, rehit: 0, pierce: true, knock: 2, breakBlocks: true });
-          V('ring', ox, oy, { r0: 2, r1: 30, frames: 14, color: '#ffe040', width: 2 });
+          V('ring', ox, oy, { r0: 2, r1: 48, frames: 14, color: '#ffe040', width: 2 });   // Round 10：跟著 64×56 的星爆框放大
           KB.fx('fx_hit', ox, oy);
           V('textPop', p.cx, p.y - 16, '交換', { color: '#ffb0d0', frames: 36 });
           sfx('clone_swap', 'swallow');
@@ -1094,7 +1135,10 @@
         d.tower = 0;
         p.vx *= 0.3;
         if (!p.onGround) slowFall(p, 0.4);
-        d.box = KB.hitbox({ x: 0, y: 0, w: 26, h: 60, dmg: 4, owner: 'player', type: 'clone', follow: p,
+        // Round 10：melee:false（總控指示）—— 26×60 是「兩個分身疊起來的柱子本體」，
+        //   框＝柱子的實際外觀（寬 26 ≈ 分身寬、高 60 ≈ 卡比 + 2 隻分身）。放大成 52×120 就會變成
+        //   打到柱子旁邊的空氣、而且 h 60 本來就超過自動規則 48 的門檻（不標也不會被放大，這裡寫明理由）。
+        d.box = KB.hitbox({ x: 0, y: 0, w: 26, h: 60, dmg: 4, owner: 'player', type: 'clone', follow: p, melee: false,
           ox: -13, oy: -48, life: 26, rehit: 10, pierce: true, knock: 2.2, breakBlocks: true, flipWithOwner: false });
         for (let i = 0; i < list.length; i++) {
           const c = list[i]; if (!c || c.dead) continue;
@@ -1114,11 +1158,13 @@
         if (c && !c.dead) {
           c.x = p.cx - c.w / 2; c.y = p.bottom - 2; c.cool = Math.max(c.cool, 20); c.flashT = 10;
           KB.particles(p.cx, p.bottom + 4, ['#ffb0d0', '#ffffff'], 10, { spread: 2, grav: 0.05, life: 16, up: 0.6 });
-          V('ring', p.cx, p.bottom + 4, { r0: 4, r1: 24, frames: 12, color: '#ffb0d0', width: 2 });
+          V('ring', p.cx, p.bottom + 4, { r0: 4, r1: 40, frames: 12, color: '#ffb0d0', width: 2 });   // Round 10：跟著 60×40 的腳下框放大
         }
         V('textPop', p.cx, p.y - 14, '墊腳', { color: '#ffe040', frames: 30 });
         // Round 9：被踩的分身會往腳下轟一發（dmg 3 + 一顆向下的小星），空中 X 也有判定
-        KB.hitbox({ x: p.cx - 15, y: p.bottom - 4, w: 30, h: 20, dmg: 3, owner: 'player', type: 'star',
+        // Round 10：melee:true —— 這是 clone 的空中 X，判定就在卡比腳下（貼身），
+        //   只是綁在「起跳那一瞬間的腳底座標」所以用絕對座標。30×20 → 60×40，踩人更容易踩到。
+        KB.hitbox({ x: p.cx - 15, y: p.bottom - 4, w: 30, h: 20, dmg: 3, owner: 'player', type: 'star', melee: true,
           life: 10, rehit: 0, pierce: true, knock: 2, breakBlocks: true });
         KB.shoot({ spr: 'proj_ministar', x: p.cx, y: p.bottom + 6, vx: 0, vy: 3.2, dmg: 2, owner: 'player', life: 36,
           w: 10, h: 10, grav: 0, solid: false, pierce: false, type: 'star', dir: p.dir, fxHit: 'fx_hit', trail: '#ffe040', rotSpeed: -0.3, knock: 1.5 });
@@ -1169,7 +1215,9 @@
           d.rush++;
           const ox = p.dir * (10 + d.rush * 6), oy = ((d.rush % 3) - 1) * 10;
           ghost(p.cx + ox, p.bottom + oy, { spr: 'kirby_run', dir: p.dir, alpha: 0.7, life: 14, vx: p.dir * 1.6, tint: d.rush % 2 ? '#ffb0d0' : '#ffffff' });
-          KB.hitbox({ x: p.cx + ox - 12, y: p.cy + oy - 12, w: 26, h: 24, dmg: 3, owner: 'player', type: 'clone', life: 8, rehit: 0, pierce: true, knock: 1.6, breakBlocks: true });
+          // Round 10：melee:true —— 百裂分身的每一道殘影斬都打在卡比身邊 ±10~58px（貼身連擊），
+          //   絕對座標是為了讓 8 道斬擊錯開排列。26×24 → 52×48（各自以原中心置中）。
+          KB.hitbox({ x: p.cx + ox - 12, y: p.cy + oy - 12, w: 26, h: 24, dmg: 3, owner: 'player', type: 'clone', melee: true, life: 8, rehit: 0, pierce: true, knock: 1.6, breakBlocks: true });
           V('slash', p.cx + ox, p.cy + oy, 18, p.dir > 0 ? -0.2 : Math.PI + 0.2, { color: '#ffffff', flip: p.dir < 0 });
           KB.particles(p.cx + ox, p.cy + oy, ['#ffffff', '#ffb0d0'], 6, { spread: 1.6, grav: 0, life: 12, up: 0, size: 1 });
           KB.fx('fx_hit', p.cx + ox, p.cy + oy);

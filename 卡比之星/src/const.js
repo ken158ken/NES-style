@@ -51,6 +51,7 @@ window.KB = window.KB || {};
     flyCeilVy: 0.2,       // 碰到房間頂時的下壓速度（與撞天花板一致）
     swimUpEvery: 12,      // 水中按住 ↑ 每 n 幀輕划一次
     swimUpHoldMul: 0.7,   // 水中按住 ↑ 的上浮初速 = swimUp × 此倍率
+    meleeScale: 2,        // Round 10：貼身招判定框放大倍率（entity.js Hitbox 依規則自動套用；遠程投射物不受影響）
   };
   // 鏡頭手感（game.js updateCamera）
   KB.CAM = {

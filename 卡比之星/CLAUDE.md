@@ -1,4 +1,4 @@
-# 卡比之星（同人版）— 開發 Context（所有 agent 必讀，2026-09-15 更新）
+# 卡比之星（同人版）— 開發 Context（所有 agent 必讀，2026-09-17 更新）
 
 > 零相依 HTML5 Canvas 平台遊戲，雙擊 `index.html` 或 `dist/卡比之星.html` 即可玩。
 > 現況總覽看 `docs/STATUS.md`（先讀這份）；規格 `docs/SPEC.md`；歷史進度 `docs/PROGRESS.md`（各輪各 agent 區段 + 每輪「總結」）；任務板 `docs/TASKS.md`；QA `docs/QA_REPORT.md`。
@@ -28,6 +28,7 @@ $PY tools/build.py                      # 打包 dist（內嵌 JS + 字型 base6
 
 ## 架構重點
 - 全域 `KB`，classic script，`index.html` 依序載入 55 個檔（新增檔案要加進 index.html；build.py 自動內嵌）。載入順序：const → gfx → input → audio → tilemap → entity → vfx → elements → art/* → skins → player → abilities*（8 基本 / weapons / magic / forms / mix / mix2）→ helper → items → enemies* → bosses*（bosses / w6 / w7）→ levels*（levels / w7 / extra）→ game → progression → awaken → records → saves → keyconfig → ui → menu → arena → challenge → main。
+- **判定框（Round 10）**：`KB.hitbox` 對 owner 'player'、follow 卡比本體、≤48×48、非 stone 的框自動乘 `KB.PHYS.meleeScale`（2）；絕對座標貼身招要傳 `melee:true`，全畫面 / 光環 / 本體傳 `melee:false`；招式中逐幀改 w/h/ox/oy 要經 `fitBox`（abilities.js / abilities_forms.js）否則會洗掉放大；mix 用 `mbox()`。投射物（KB.Projectile / KB.shoot）不受影響。
 - 內部解析度 256×224，遊戲區 256×192，HUD y 192~224；固定 60fps，`dt` 視為 1 幀；速度單位 px/frame。
 - **文字**：ASCII 走 8×8 點陣字（art/font.js）；中文用像素字型（assets/fonts：縫合像素 12px、Unifont 16px 子集）由 gfx.js `KB.loadPixelFonts` 載入、原生尺寸繪製 + 二值化，16px 假粗體；缺字整串退 12px；載入失敗退系統黑體超取樣。**字級只用 12 與 16，不要 14**。中文一律經 `KB.UI.text`（ui.js）呼叫。
 - 場景：`KB.setScene(s)`，s 有 `update / draw / enter / exit`。GameScene（game.js）、Title / Select / Result / GameOver / Ending（ui.js）、選單類（menu.js）、Arena、Challenge、Records、SaveSelect、KeyConfig。

@@ -427,6 +427,123 @@ def phase_round9(h, only=None):
 
 
 # ---------------------------------------------------------------------------
+# 階段 2.6（Round 10）：貼身招判定 ×2（KB.PHYS.meleeScale）
+#   規格：docs/TASKS.md Round 10 —— 貼身招（follow 卡比的框 / 絕對座標的近身框、含 ↑X / ↓X）最終尺寸約 2×；
+#         遠程（火箭拳 / 追蹤飛彈爆風 / 龍炎彈）、大範圍光環（幽靈哀嚎）、0 傷害工具框維持原尺寸。
+#   判定方式：entity.js 在每個 Hitbox 留下 w0 / h0（原尺寸）與 meleeScaled（倍率），逐幀掃描核對。
+#   ※ 龍息是「逐幀加長」的判定框（abilities_forms.js 的 fitBox）——
+#     直接寫 b.w 會洗掉建構子的放大，所以這裡對**每一個取樣幀**都檢查 w == w0 × ms。
+# ---------------------------------------------------------------------------
+MS = 2          # KB.PHYS.meleeScale（總控在 src/const.js 設定）
+
+HB_SCAN = ("(n)=>{const out=[];for(let i=0;i<n;i++){__kb.step(1);"
+           "for(const e of KB.game.entities){if(e.dead||e.type!=='hitbox'||e.owner!=='player')continue;"
+           "out.push({f:i,k:e.kind,w:Math.round(e.w),h:Math.round(e.h),w0:Math.round(e.w0),h0:Math.round(e.h0),"
+           "ms:e.meleeScaled|0,dmg:e.dmg});}}return out;}")
+
+
+def hb_run(h, key, seq, air=False, wait=40, phase_off=False):
+    """變身 →（ghost 先關穿牆）→（空中招先升空）→ 依序按鍵，全程逐幀取樣玩家判定框"""
+    h.goto(3, 9, ability=key, immune=True)
+    if phase_off:
+        h.run(3, 3, keys='attack'); h.run(14, 7); h.release()
+    h.ev("()=>{KB.player.dir=1;}")
+    if air:
+        p = h.player()
+        h.teleport(p['x'], GROUND_TOP - p['h'] - 48); h.run(1, 1)
+    out, base = [], 0
+    for keys, fr in seq:
+        if keys:
+            h.press(keys)
+        else:
+            h.release()
+        for e in h.ev(HB_SCAN, fr):
+            e['f'] += base; out.append(e)
+        base += fr
+    h.release()
+    for e in h.ev(HB_SCAN, wait):
+        e['f'] += base; out.append(e)
+    return out
+
+
+def hb_pick(samples, k, w0, h0):
+    """挑出符合 (kind, w0, h0) 的取樣（w0 / h0 傳 None＝不限，給會變尺寸的框用）"""
+    return [s for s in samples
+            if s['k'] == k and (w0 is None or s['w0'] == w0) and (h0 is None or s['h0'] == h0)]
+
+
+def hb_check(nm, samples, x2=(), keep=()):
+    seen = sorted({(s['k'], s['w0'], s['h0'], s['ms']) for s in samples})
+    for k, w0, h0 in x2:
+        got = hb_pick(samples, k, w0, h0)
+        ok = bool(got) and all(s['ms'] == MS and s['w'] == s['w0'] * MS and s['h'] == s['h0'] * MS for s in got)
+        check(f'{nm}: 貼身框 {k} {w0}x{h0} → {MS}×', ok, got[:1] or seen)
+    for k, w0, h0 in keep:
+        got = hb_pick(samples, k, w0, h0)
+        ok = bool(got) and all(s['ms'] == 0 and s['w'] == s['w0'] and s['h'] == s['h0'] for s in got)
+        check(f'{nm}: {k} {w0}x{h0} 維持原尺寸（遠程 / 光環 / 工具框）', ok, got[:1] or seen)
+    bad = [s for s in samples if s['ms'] not in (0, MS)]
+    check(f'{nm}: 沒有非 0 / 非 {MS} 的倍率', not bad, bad[:2])
+    bad2 = [s for s in samples if s['ms'] and (s['w'] != s['w0'] * s['ms'] or s['h'] != s['h0'] * s['ms'])]
+    check(f'{nm}: 招式進行中每一幀都維持 {MS}×（逐幀改寫不會洗掉放大）', not bad2, bad2[:2])
+
+
+# key, 標籤, 按鍵序列[(keys|None, frames)], 空中?, 等待幀數, 要 2× 的框, 要維持的框
+R10_FORMS = [
+    ('giant', 'X 巨腳踩踏（落地衝擊波）', [('attack', 3)], False, 80, [('hammer', 44, 18)], []),
+    ('giant', '↑X 上勾拳', [('up', 3), ('up,attack', 3)], False, 40, [('hammer', 40, 64)], []),
+    ('giant', '↓X 巨人衝撞（全身框）', [('down', 3), ('down,attack', 3)], False, 50, [('hammer', 38, None)], []),
+    ('giant', '空中 X 屁股墜落', [('attack', 3)], True, 90,
+     [('hammer', 34, None), ('hammer', 48, 18)], []),
+    ('dragon', 'X 龍息（逐幀加長）', [('attack', 45)], False, 20, [('fire', None, 18)], []),
+    ('dragon', '↑X 升龍尾撩', [('up', 3), ('up,attack', 3)], False, 40, [('fire', 30, 44)], []),
+    ('dragon', '↓X 尾擊（前後各一刀）', [('down', 3), ('down,attack', 3)], False, 30, [('sword', 30, 22)], []),
+    ('dragon', '空中 X 俯衝', [('attack', 3)], True, 80, [('fire', 24, None), ('hammer', 42, 18)], []),
+    ('mech', '↑X 追蹤飛彈（遠程爆風）', [('up', 3), ('up,attack', 3)], False, 130, [], [('mech', 32, 28)]),
+    ('mech', '↓X 鑽頭突進', [('down', 3), ('down,attack', 3)], False, 50, [('mech', 24, 16)], []),
+    ('mech', '空中 X 噴射墜踩', [('attack', 3)], True, 90, [('mech', 20, None), ('hammer', 44, 18)], []),
+    ('mech', '蓄力 全彈發射（遠程）', [('attack', 74)], False, 150, [], [('mech', 32, 28)]),
+    ('ghost', '↑X 隱身（0 傷害工具框）', [('up', 3), ('up,attack', 3)], False, 30, [], [('ghost', 0, 0)]),
+    ('ghost', '↓X 怨靈墜擊（含落地震波）', [('down', 3), ('down,attack', 3)], False, 70,
+     [('ghost', 28, 28), ('ghost', 48, 22)], []),
+]
+
+
+def phase_round10(h, only=None):
+    n = 'R10 '
+    for key, label, seq, air, wait, x2, keep in R10_FORMS:
+        if only and key not in only: continue
+        nm = f'{n}{key} [{label}]'
+        try:
+            hb_check(nm, hb_run(h, key, seq, air, wait), x2, keep)
+        except Exception as ex_:
+            check(nm + ': raised', False, repr(ex_))
+
+    # 幽靈哀嚎：穿牆中 X 是「穿牆開關」，要先關掉穿牆才出得來空中 X
+    if not only or 'ghost' in only:
+        nm = n + 'ghost [空中 X 幽靈哀嚎（大範圍光環）]'
+        try:
+            sm = hb_run(h, 'ghost', [('attack', 3)], air=True, wait=40, phase_off=True)
+            hb_check(nm, sm, (), [('ghost', 80, 68)])
+        except Exception as ex_:
+            check(nm + ': raised', False, repr(ex_))
+
+    # 龍息：按住到底時判定框長度要達到「原本 56px 的 2 倍」
+    if not only or 'dragon' in only:
+        nm = n + 'dragon [X 龍息 最長判定]'
+        try:
+            sm = hb_run(h, 'dragon', [('attack', 45)], False, 10)
+            fire = [s for s in sm if s['k'] == 'fire']
+            mw = max((s['w'] for s in fire), default=0)
+            check(nm + f': 噴到底 = {56 * MS}px', mw == 56 * MS, dict(maxW=mw, n=len(fire)))
+        except Exception as ex_:
+            check(nm + ': raised', False, repr(ex_))
+
+    ms = h.ev("()=>KB.PHYS.meleeScale")
+    check(n + f'KB.PHYS.meleeScale == {MS}', ms == MS, ms)
+
+
+# ---------------------------------------------------------------------------
 # 階段 3：giant 專屬
 # ---------------------------------------------------------------------------
 def phase_giant(h):
@@ -755,6 +872,7 @@ def main():
             ('form', lambda: [phase_form(h, k) for k in KEYS if not only or k in only]),
             ('moves', lambda: phase_moves(h, only)),
             ('round9', lambda: phase_round9(h, only)),
+            ('round10', lambda: phase_round10(h, only)),
             ('giant', lambda: phase_giant(h) if not only or 'giant' in only else None),
             ('dragon', lambda: phase_dragon(h) if not only or 'dragon' in only else None),
             ('mech', lambda: phase_mech(h) if not only or 'mech' in only else None),

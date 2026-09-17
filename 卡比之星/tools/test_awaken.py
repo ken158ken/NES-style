@@ -643,6 +643,60 @@ def phase_hud(h):
     check('非 Lv4 且量表 0 → 不畫量表', z == 0, z)
 
 
+# ---------------------------------------------------------------------------
+# 5c. Round 10：覺醒招「完全不受 KB.PHYS.meleeScale 影響」
+#     awaken.js 的判定框全部走 bigbox() → mkbox()，一律 melee:false：
+#     全畫面框（288×208）與追著畫面外魔王的大框（≥64×64）本來就遠大於 entity.js 的 48×48
+#     自動門檻，而且是定點 / 全畫面招，被放大只會讓判定與演出對不上。
+#     這一關就是把「行為與 Round 9 完全相同」釘住。
+# ---------------------------------------------------------------------------
+AWAKEN_BOX_REC = r"""() => {
+  if (window.__awbInstalled) return true;
+  window.__awbInstalled = true; window.__awb = [];
+  const prev = KB.spawn;
+  KB.spawn = function (e) {
+    if (e && e.type === 'hitbox' && e.owner === 'player') {
+      window.__awb.push({ aw: !!e.awaken, w: Math.round(e.w), h: Math.round(e.h),
+                          w0: e.w0 === undefined ? null : Math.round(e.w0),
+                          h0: e.h0 === undefined ? null : Math.round(e.h0), ms: e.meleeScaled || 0 });
+    }
+    return prev.apply(this, arguments);
+  };
+  return true;
+}"""
+
+MELEE_SAMPLE = ['sword', 'hammer', 'stone', 'beam', 'time', 'clone', 'giant', 'ghost',
+                'flamesword', 'thunderblade', 'stonegiant', 'timebeam', 'gravityblade', 'hammermech']
+
+
+def phase_melee(h):
+    print('-' * 8, 'Round 10 覺醒招不放大')
+    h.ev(AWAKEN_BOX_REC)
+    allbox = []
+    for key in MELEE_SAMPLE:
+        if not h.ev("(k)=>!!(KB.AWAKEN && KB.AWAKEN.moves[k])", key):
+            check(f'{key}: 有覺醒招', False, 'missing'); continue
+        h.goto(3, 9, ability=None, immune=True)
+        h.ev(RESET); h.ev(GIVE, key); h.ev(SET_LV, [key, 4])
+        h.ev("()=>{ KB.AWAKEN.reset(); KB.AWAKEN.add(100); window.__awb = []; }")
+        h.spawn('waddledee', 7, 9, d=-1)
+        h.ev("()=>{ KB.player.startAwaken(); }")
+        h.run(150, 25)
+        # 註：mkbox() 是在 KB.hitbox() 回來之後才補 hb.awaken = true，KB.spawn 掛勾看不到那個旗標，
+        #     所以這裡直接把「覺醒期間生成的玩家判定框」整批當成覺醒招的框（期間沒有其他出招）。
+        rows = h.ev("()=>window.__awb || []")
+        aw = rows
+        check(f'{key}: 覺醒招有產生判定框', len(aw) > 0, len(rows))
+        bad = [r for r in aw if r['ms'] != 0 or (r['w0'] is not None and r['w'] != r['w0'])]
+        check(f'{key}: 覺醒招判定框沒有被 meleeScale 放大（與 Round 9 相同）', not bad, bad[:3])
+        allbox += aw
+    check('覺醒招判定框最小邊 ≥ 64（全畫面 / 魔王追框，本來就超過 48×48 門檻）',
+          bool(allbox) and all(min(r['w'], r['h']) >= 64 for r in allbox),
+          sorted(set((r['w'], r['h']) for r in allbox if min(r['w'], r['h']) < 64))[:5])
+    check('覺醒招判定框 meleeScaled 一律 0', all(r['ms'] == 0 for r in allbox),
+          [r for r in allbox if r['ms']][:3])
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('-v', action='store_true')
@@ -666,7 +720,8 @@ def main():
         for name, fn in (('lv4', phase_lv4), ('gauge', phase_gauge), ('trigger', phase_trigger),
                          ('state', phase_state), ('moves', lambda hh: phase_moves(hh, a.shots)),
                          ('boss', phase_boss), ('mix', lambda hh: phase_mix(hh, a.shots)),
-                         ('mixboss', phase_mixboss), ('farboss', phase_farboss), ('hud', phase_hud)):
+                         ('mixboss', phase_mixboss), ('farboss', phase_farboss), ('hud', phase_hud),
+                         ('melee', phase_melee)):
             if only and name not in only: continue
             fn(h)
         miss = pg.evaluate("()=>[...KB.missing]")

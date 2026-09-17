@@ -8,6 +8,15 @@
 //   def.transform = true  取得能力時播放 KB.VFX.transform 大演出（一般能力不設，取得節奏不變）
 // 特效一律透過 vf() 包一層，KB.VFX 未載入時安靜跳過；音效透過 sfx()（未定義的名稱只會 console.warn）。
 // ---------------------------------------------------------------------------
+// Round 10（melee-magic-forms）：貼身招判定 ×2（KB.PHYS.meleeScale，entity.js Hitbox 自動規則）。
+//   本檔每個 KB.hitbox 都標注「貼身 / 遠程 / 不放大」的理由：
+//     · follow: p 且 ≤48×48（衝撞 / 墜擊 / 鑽頭 / 龍息 / 升龍 / 怨靈墜擊）→ 自動 ×2
+//     · 絕對座標的貼身框（地面衝擊波 groundWave、龍尾前後斬、怨靈落地震波）→ melee: true 強制 ×2
+//     · 巨人上勾拳 40×64 超過自動門檻，但它是「拳頭」→ melee: true 強制 ×2（總控指示）
+//     · 遠程（火箭拳 / 追蹤飛彈的爆風 / 龍炎彈）與大範圍光環（幽靈哀嚎 80×68）、
+//       0 傷害工具框（隱身 alert 清除器）→ melee: false 維持
+//   判定框上留有 w0 / h0 / meleeScaled 供 tools/test_forms.py 的「Round 10」段查驗。
+// ---------------------------------------------------------------------------
 (function () {
   'use strict';
   const P = KB.PHYS;
@@ -57,6 +66,20 @@
   const hitstop = n => { const g = KB.game; if (g) g.freezeT = Math.max(g.freezeT || 0, n); };
   const light = r => { const g = KB.game; if (g) { g.lightR = r; g.lightT = 180; g.lightF = g.frame; } };
   const beat = b => { if (b && !b.dead) b.life = 3; };
+  // Round 10：招式進行中改寫判定框尺寸 / 位移時一律經過這裡（與 src/abilities.js 的 fitBox 同一套規則）。
+  //   傳進來的 w / h / ox / oy 是「原始（未放大）」數值，依 b.meleeScaled 重算實際值：
+  //   方向框 3/4 往前 1/4 往後、對稱框置中、高度置中，並同步維護 w0 / h0。
+  //   少了這層，逐幀改寫 b.w 會把 entity.js 建構子放大的結果整個洗掉（龍息就是逐幀加長的）。
+  function fitBox(b, o) {
+    if (!b || b.dead) return b;
+    const s = b.meleeScaled || 1;
+    const w = o.w !== undefined ? o.w : b.w0, h = o.h !== undefined ? o.h : b.h0;
+    const w2 = Math.round(w * s), h2 = Math.round(h * s);
+    if (o.ox !== undefined) b.ox = o.ox - (b.flipWithOwner ? Math.round((w2 - w) / 4) : Math.round((w2 - w) / 2));
+    if (o.oy !== undefined) b.oy = o.oy - Math.round((h2 - h) / 2);
+    b.w0 = w; b.h0 = h; b.w = w2; b.h = h2;
+    return b;
+  }
   function killBox(p) {
     const d = data(p);
     for (const k of ['box', 'box2', 'box3']) if (d[k]) { d[k].dead = true; d[k] = null; }
@@ -123,9 +146,14 @@
     shake(o.shake || 7); hitstop(o.stop || 4);
     sfx(o.sfx || 'stomp');
     for (const s of [-1, 1]) {
+      // Round 10：melee:true —— 落地 / 踩踏 / 撞牆的雙向地面衝擊波是不折不扣的貼身招
+      //   （踩踏、屁股墜落、俯衝落地、鑽頭撞牆都靠它收尾），只是要固定在「落地的那一點」才用絕對座標。
+      //   w×18 → 2w×36（以原中心置中）：高度加倍是關鍵 —— 原本 18px 高只打得到貼著地面的敵人，
+      //   現在連小跳中 / 稍微浮空的敵人也掃得到，正面對衝不會再被同高度的敵人先打到。
+      //   ※ 兩側框放大後會在卡比腳下重疊，但 Enemy.hurt 有 invuln 6，同一幀不會被扣兩次血。
       KB.hitbox({
         x: p.cx + (s > 0 ? 2 : -2 - w), y: p.bottom - 16, w, h: 18, dmg, owner: 'player', type: o.type || 'hammer',
-        life: 12, rehit: 0, pierce: true, knock: 3, breakBlocks: true,
+        melee: true, life: 12, rehit: 0, pierce: true, knock: 3, breakBlocks: true,
       }).breakHard = !!o.breakHard;
       vf('shockwave', p.cx + s * 4, p.bottom, { dir: s, speed: 3.6, w: 14, h: 16, frames: 22, color });
       KB.particles(p.cx + s * 10, p.bottom, [color, '#ffffff', '#d8d0c0'], 8, { spread: 2.2, vx: s * 1.8, up: 1.3, life: 24 });
@@ -223,17 +251,23 @@
         setup(p, { dur: 26, fps: 10, lock: true });
         p.vy = Math.min(p.vy, -2.4); p.onGround = false;
         sfx('giant_roar'); shake(4);
+        // Round 10：melee:true —— 巨人的「拳頭」是貼身招（總控指示：巨人的拳頭 / 踩踏仍要 2×）。
+        //   40×64 的 h 超過自動規則 48 的門檻，所以必須手動標；40×64 → 80×128（置中），
+        //   打得到頭頂上方 72px 的飛行敵人，真正成為巨人的對空手段。
         d.box = KB.hitbox({
-          x: 0, y: 0, w: 40, h: 64, dmg: 6, owner: 'player', type: 'hammer', follow: p,
+          x: 0, y: 0, w: 40, h: 64, dmg: 6, owner: 'player', type: 'hammer', follow: p, melee: true,
           ox: -20, oy: -40, life: 16, rehit: 10, knock: 3.4, pierce: true, flipWithOwner: false, breakBlocks: true,
         });
-        vf('ring', p.cx, p.y - 12, { r0: 6, r1: 48, frames: 18, color: '#ffd080', width: 3 });
-        vf('slash', p.cx + p.dir * 6, p.y - 10, 26, -Math.PI / 2, { frames: 12, color: '#ffffff', width: 3 });
+        // Round 10：判定框放大成 80×128 後，光環 / 斬線也一起放大，玩家才看得出打擊範圍
+        vf('ring', p.cx, p.y - 12, { r0: 6, r1: 76, frames: 18, color: '#ffd080', width: 3 });
+        vf('slash', p.cx + p.dir * 6, p.y - 18, 42, -Math.PI / 2, { frames: 12, color: '#ffffff', width: 3 });
         KB.particles(p.cx, p.y - 6, ['#ffd080', '#ffffff', '#f0e0c0'], 12, { spread: 2.2, up: 1.6, life: 24 });
         return;
       }
       if (d.mode === 'charge') {
         setup(p, { dur: 30, fps: 10, lock: true });
+        // Round 10：貼身全身框 —— follow: p、38×30（巨人 p.w 28 / p.h 30）≤ 48×48 ⇒ 自動 ×2 → 76×60。
+        //   衝撞是 giant 的 ↓X，本來只比身體大 5px，正面對衝常常「擦過去」；放大後整個身體前後都是判定。
         d.box = KB.hitbox({
           x: 0, y: 0, w: p.w + 10, h: p.h, dmg: 6, owner: 'player', type: 'hammer', follow: p,
           ox: -p.w / 2 - 5, oy: 0, life: 3, rehit: 8, knock: 3.5, pierce: true, flipWithOwner: false, breakBlocks: true,
@@ -246,9 +280,15 @@
         setup(p, { dur: 80, fps: 8, lock: true });
         p.vy = 8; p.vx = 0; p.maxFall = 9;
         sfx('stomp');
+        // Round 10：貼身全身框（空中 X 屁股墜落）—— 34×30 ≤ 48×48 ⇒ 自動 ×2 → 68×60；
+        //   落地還會再補一發放大後的 groundWave。
         d.box = KB.hitbox({
+        // Round 10 副作用修正：全身框放大 ×2 之後會往腳底下多出半個身體，
+        //   帶著 breakBlocks 一路往下砸 = 自己挖洞把自己埋進地形（playthrough w1 mech 實測
+        //   3/3 卡在 r1 x=979 的通道裡）。破壞方塊交給落地的 groundWave（一樣是 2× 的貼身框），
+        //   下墜途中的框只負責傷害。
           x: 0, y: 0, w: p.w + 6, h: p.h, dmg: 5, owner: 'player', type: 'hammer', follow: p,
-          ox: -p.w / 2 - 3, oy: 0, life: 3, rehit: 10, knock: 2, pierce: true, flipWithOwner: false, breakBlocks: true,
+          ox: -p.w / 2 - 3, oy: 0, life: 3, rehit: 10, knock: 2, pierce: true, flipWithOwner: false, breakBlocks: false,
         });
       } else {
         setup(p, { dur: 46, fps: 8, lock: true });
@@ -307,7 +347,7 @@
 
   // ======================================================================
   //  2. 龍化 DRAGON —— 翅膀 + 尾巴 + 角，按住跳可飛行
-  //     X      龍息    ：前方 56px 持續火焰（按住最多 90 幀）；按滿 60 幀放開 → 必殺
+  //     X      龍息    ：前方 56px 持續火焰（Round 10 貼身 ×2 後 112px；按住最多 90 幀）；按滿 60 幀放開 → 必殺
   //     ↑+X    升龍尾撩：躍起 + 頭頂 30×44 火焰判定 dmg 5（Round 9 新招，空中也能接）
   //     ↓+X    尾擊    ：前後雙向斬擊
   //     空中 X  俯衝    ：斜下衝 40 幀（紅色殘影）+ 落地衝擊波
@@ -390,6 +430,7 @@
         setup(p, { dur: 30, fps: 12, lock: true });
         p.vy = -5.4; p.onGround = false; p.vx = p.dir * 1.2;
         sfx('tail_whip'); sfx('wing_flap');
+        // Round 10：貼身 ↑X —— follow: p、30×44 ≤ 48×48 ⇒ 自動 ×2 → 60×88（置中、往上涵蓋整條尾焰）。
         d.box = KB.hitbox({
           x: 0, y: 0, w: 30, h: 44, dmg: 5, owner: 'player', type: 'fire', follow: p,
           ox: -15, oy: -30, life: 24, rehit: 8, knock: 3.2, pierce: true, flipWithOwner: false, breakBlocks: true,
@@ -402,9 +443,11 @@
       } else if (d.mode === 'tail') {
         setup(p, { dur: 26, fps: 12, lock: true });
         sfx('tail_whip');
+        // Round 10：melee:true —— 尾擊（↓X）是前後各一刀的貼身斬，用絕對座標只是為了左右對稱。
+        //   30×22 → 60×44（各自以原中心置中）；兩刀在身體中央重疊，但 Enemy.hurt 的 invuln 6 保證不會雙重扣血。
         for (const s of [-1, 1]) {
-          KB.hitbox({ x: p.cx + (s > 0 ? 4 : -4 - 30), y: p.cy - 10, w: 30, h: 22, dmg: 4, owner: 'player', type: 'sword', life: 12, rehit: 0, pierce: true, knock: 3 });
-          vf('slash', p.cx + s * 16, p.cy, 20, s > 0 ? 0 : Math.PI, { frames: 12, color: '#ff8080', width: 3, flip: s < 0 });
+          KB.hitbox({ x: p.cx + (s > 0 ? 4 : -4 - 30), y: p.cy - 10, w: 30, h: 22, dmg: 4, owner: 'player', type: 'sword', melee: true, life: 12, rehit: 0, pierce: true, knock: 3 });
+          vf('slash', p.cx + s * 16, p.cy, 32, s > 0 ? 0 : Math.PI, { frames: 12, color: '#ff8080', width: 3, flip: s < 0 });   // Round 10：斬線跟著 60×44 的框放大
         }
         KB.particles(p.cx, p.cy, ['#ffffff', '#ff8080'], 8, { spread: 2, life: 18 });
         shake(3);
@@ -412,9 +455,14 @@
         setup(p, { dur: 40, fps: 10, lock: true });
         p.vx = p.dir * 4.2; p.vy = 4.2; p.maxFall = 8;
         sfx('dragon_dash');
+        // Round 10：貼身全身框（空中 X 俯衝）—— 24×19 ≤ 48×48 ⇒ 自動 ×2 → 48×38，落地再接 groundWave。
         d.box = KB.hitbox({
+        // Round 10 副作用修正：全身框放大 ×2 之後會往腳底下多出半個身體，
+        //   帶著 breakBlocks 一路往下砸 = 自己挖洞把自己埋進地形（playthrough w1 mech 實測
+        //   3/3 卡在 r1 x=979 的通道裡）。破壞方塊交給落地的 groundWave（一樣是 2× 的貼身框），
+        //   下墜途中的框只負責傷害。
           x: 0, y: 0, w: p.w + 10, h: p.h + 4, dmg: 5, owner: 'player', type: 'fire', follow: p,
-          ox: -p.w / 2 - 5, oy: -2, life: 3, rehit: 10, knock: 3, pierce: true, flipWithOwner: false, breakBlocks: true,
+          ox: -p.w / 2 - 5, oy: -2, life: 3, rehit: 10, knock: 3, pierce: true, flipWithOwner: false, breakBlocks: false,
         });
         vf('afterimage', p, { frames: 44, every: 2, color: '#ff4040', alpha: 0.55 });
         vf('sparkTrail', p, { frames: 44, every: 2, color: ['#ffe040', '#ff9020', '#ff4010'] });
@@ -429,6 +477,8 @@
       } else {
         setup(p, { dur: 14, fps: 10, lock: true, maxHold: 90 });
         d.charge = 0; d.ready = false;
+        // Round 10：貼身 X（龍息）—— follow: p、20×18 ≤ 48×48 ⇒ 自動 ×2 → 40×36；
+        //   下面 update() 的「按住加長」上限也一起 ×meleeScaled（56 → 112），火焰長度與判定同步。
         d.box = KB.hitbox({
           x: 0, y: 0, w: 20, h: 18, dmg: 2, owner: 'player', type: 'fire', follow: p,
           ox: 8, oy: -2, life: 3, rehit: 8, knock: 1, pierce: true,
@@ -490,9 +540,14 @@
       if (b && !b.dead) {
         if (!on) { b.dead = true; d.box = null; }
         else {
-          b.w = Math.min(56, 20 + d.t * 3); beat(b);
-          if (d.t % 2 === 1) KB.fx('fx_fire', p.cx + p.dir * (12 + rnd(0, 30)), p.cy + rnd(-2, 8), { vx: p.dir * 2.6, vy: rnd(-0.4, 0.2), life: 13, flip: p.dir < 0, fps: 12 });
-          KB.particles(p.cx + p.dir * rnd(12, 52), p.cy + rnd(-8, 10), ['#ffe040', '#ff9020', '#ff4010'], 2,
+          // Round 10：龍息是**逐幀加長**的判定框 —— 直接寫 b.w 會洗掉建構子的 ×2，
+          //   所以傳「原始寬度」給 fitBox，由它依 b.meleeScaled 重算（56 → 112，ox 8 也跟著往後挪 1/4）。
+          fitBox(b, { w: Math.min(56, 20 + d.t * 3), ox: 8 }); beat(b);
+          // Round 10：火焰演出的長度跟著判定框（b.w）走 —— 判定放大到 112px 之後，
+          //   如果火焰還只畫到 52px，遠端就會變成「看不見的傷害」。
+          const reach = Math.max(24, b.w - 4);
+          if (d.t % 2 === 1) KB.fx('fx_fire', p.cx + p.dir * rnd(10, reach), p.cy + rnd(-2, 8), { vx: p.dir * 2.6, vy: rnd(-0.4, 0.2), life: 13, flip: p.dir < 0, fps: 12 });
+          KB.particles(p.cx + p.dir * rnd(10, reach), p.cy + rnd(-8, 10), ['#ffe040', '#ff9020', '#ff4010'], 2,
             { spread: 0.6, grav: -0.04, life: 14, up: 0.2, vx: p.dir * 1.8, size: 1 });
           if (d.t % 20 === 0) sfx('dragon_breath');
         }
@@ -587,7 +642,9 @@
     }
     boom() {
       sfx('missile');
-      KB.hitbox({ x: this.cx - 16, y: this.cy - 14, w: 32, h: 28, dmg: this.dmg, owner: 'player', type: 'mech', life: 6, rehit: 0, pierce: true, knock: 3 });
+      // Round 10：melee:false —— 追蹤飛彈（↑X / 必殺全彈發射）的爆風是**遠程**命中點，離卡比可能半個畫面遠；
+      //   32×28 就是爆炸範圍本身。遠程維持現狀（使用者需求 ②）。
+      KB.hitbox({ x: this.cx - 16, y: this.cy - 14, w: 32, h: 28, dmg: this.dmg, owner: 'player', type: 'mech', melee: false, life: 6, rehit: 0, pierce: true, knock: 3 });
       vf('ring', this.cx, this.cy, { r0: 3, r1: 26, frames: 14, color: '#ffd080', width: 2 });
       vf('burst', this.cx, this.cy, { n: 12, colors: ['#ffe040', '#ff9020', '#ffffff'], speed: 2.4, life: 22 });
       KB.fx('fx_hit', this.cx, this.cy + 4);
@@ -681,6 +738,8 @@
         p.vx = p.dir * 2.8;
         if (!p.onGround) p.vy = Math.max(p.vy, 1.6);
         sfx('jet'); sfx('mech_step'); shake(3);
+        // Round 10：貼身 ↓X（鑽頭突進）—— follow: p、24×16 ≤ 48×48 ⇒ 自動 ×2 → 48×32（3/4 往前）。
+        //   原本 16px 高的鑽頭常常從敵人頭上／腳下擦過去，放大後整個身側都是鑽頭判定。
         d.box = KB.hitbox({
           x: 0, y: 0, w: 24, h: 16, dmg: 3, owner: 'player', type: 'mech', follow: p,
           ox: 2, oy: 2, life: 4, rehit: 6, knock: 2, pierce: true, breakBlocks: true,
@@ -695,9 +754,14 @@
         setup(p, { dur: 70, fps: 8, lock: true });
         p.vy = 7.5; p.vx = 0; p.maxFall = 9;
         sfx('jet');
+        // Round 10：貼身全身框（空中 X 噴射墜踩）—— 20×15 ≤ 48×48 ⇒ 自動 ×2 → 40×30，落地接 groundWave。
         d.box = KB.hitbox({
+        // Round 10 副作用修正：全身框放大 ×2 之後會往腳底下多出半個身體，
+        //   帶著 breakBlocks 一路往下砸 = 自己挖洞把自己埋進地形（playthrough w1 mech 實測
+        //   3/3 卡在 r1 x=979 的通道裡）。破壞方塊交給落地的 groundWave（一樣是 2× 的貼身框），
+        //   下墜途中的框只負責傷害。
           x: 0, y: 0, w: p.w + 6, h: p.h, dmg: 4, owner: 'player', type: 'mech', follow: p,
-          ox: -p.w / 2 - 3, oy: 0, life: 3, rehit: 10, knock: 2, pierce: true, flipWithOwner: false, breakBlocks: true,
+          ox: -p.w / 2 - 3, oy: 0, life: 3, rehit: 10, knock: 2, pierce: true, flipWithOwner: false, breakBlocks: false,
         });
       } else if (d.mode === 'barrage') {
         // 必殺：全彈發射
@@ -992,6 +1056,7 @@
         setup(p, { anim: 'kirby_ghost_plunge', dur: 30, fps: 10, lock: true });
         p.vx *= 0.3; p.vy = Math.max(p.vy, 5.4);
         sfx('ghost_wail');
+        // Round 10：貼身 ↓X / 空中墜擊 —— follow: p、28×28 ≤ 48×48 ⇒ 自動 ×2 → 56×56（置中）。
         d.box = KB.hitbox({
           x: 0, y: 0, w: 28, h: 28, dmg: 4, owner: 'player', type: 'ghost', follow: p,
           ox: -14, oy: -2, life: 26, rehit: 8, knock: 2, pierce: true, flipWithOwner: false, breakBlocks: false,
@@ -1016,7 +1081,9 @@
           KB.particles(e.cx, e.y - 2, ['#ffffff', '#c4ccec'], 4, { spread: 1.2, up: 0.8, life: 20 });
         }
         // 判定框：哀嚎本身也有 2 點傷害
-        d.box = KB.hitbox({ x: p.cx - 40, y: p.cy - 34, w: 80, h: 68, dmg: 2, owner: 'player', type: 'ghost', life: 10, rehit: 0, pierce: true, knock: 1, breakBlocks: false });
+        // Round 10：melee:false —— 80×68 是以卡比為中心的大範圍音波（對應上面 76px 的 stun 半徑），
+        //   已經遠大於一般貼身框 ×2；再放大成 160×136 會比 stun 範圍大一倍，表現與判定就對不上了。
+        d.box = KB.hitbox({ x: p.cx - 40, y: p.cy - 34, w: 80, h: 68, dmg: 2, owner: 'player', type: 'ghost', melee: false, life: 10, rehit: 0, pierce: true, knock: 1, breakBlocks: false });
         if (n) vf('textPop', p.cx, p.y - 6, '哀嚎！', { color: '#ffffff', frames: 34, size: 10 });
       } else if (d.mode === 'invis') {
         setup(p, { dur: 20, fps: 10, lock: true });
@@ -1036,8 +1103,10 @@
         }
         // 尾隨的 0 傷害判定框：排在敵人之後更新，負責把敵人的 alert 清掉
         if (d.guard) d.guard.dead = true;
+        // Round 10：melee:false —— 這不是攻擊框，而是 0×0 / dmg 0 的「隱身工具框」
+        //   （排在敵人之後更新、負責清掉 alert）。跟隨卡比且尺寸 ≤48 會命中自動規則，明確關掉比較保險。
         d.guard = KB.hitbox({
-          x: p.cx, y: p.cy, w: 0, h: 0, dmg: 0, owner: 'player', type: 'ghost', life: GHOST_INVIS + 4,
+          x: p.cx, y: p.cy, w: 0, h: 0, dmg: 0, owner: 'player', type: 'ghost', life: GHOST_INVIS + 4, melee: false,
           pierce: true, breakBlocks: false, follow: p, ox: 0, oy: 0,
           // 判定框排在敵人之後更新（KB.spawn 推到陣列尾端），所以這裡清掉的 alert
           // 是敵人「本幀剛設起來」的那一份 → 效果上就是「察覺不到卡比」，也不會冒驚嘆火花。
@@ -1074,8 +1143,10 @@
           if (blocked) p.vy = 0;
           if (!d.landed) {
             d.landed = true;
-            vf('ring', p.cx, p.bottom - 2, { r0: 4, r1: 44, frames: 18, color: '#ffffff', width: 2 });
-            KB.hitbox({ x: p.cx - 24, y: p.bottom - 20, w: 48, h: 22, dmg: 3, owner: 'player', type: 'ghost',
+            vf('ring', p.cx, p.bottom - 2, { r0: 4, r1: 72, frames: 18, color: '#ffffff', width: 2 });   // Round 10：跟著 96×44 的落地框放大
+            // Round 10：melee:true —— 怨靈墜擊的落地震波是貼身收尾招，固定在落地點所以用絕對座標。
+            //   48×22 → 96×44（置中）。
+            KB.hitbox({ x: p.cx - 24, y: p.bottom - 20, w: 48, h: 22, dmg: 3, owner: 'player', type: 'ghost', melee: true,
               life: 8, rehit: 0, pierce: true, knock: 2, breakBlocks: false });
             KB.particles(p.cx, p.bottom, ['#ffffff', '#c4ccec'], 10, { spread: 2.2, life: 20 });
             sfx('unpossess'); shake(4);

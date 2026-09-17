@@ -449,9 +449,14 @@
   }
   A.bosses = bosses;
   /** 覺醒招判定框（共用選項 → KB.hitbox），一律帶 awaken 旗標 */
+  // Round 10（貼身判定加倍）：覺醒招一律「不放大」——
+  //   走這裡的框全是 bigbox() 產生的全畫面框（預設 288×208）或追著畫面外魔王的大框（≥ 64×64），
+  //   本來就遠大於 entity.js 的 48×48 門檻，而且是定點 / 全畫面招，放大只會讓演出與判定對不上。
+  //   明確寫死 melee: !!o.melee（預設 false）當保險，行為與 Round 9 完全相同；
+  //   將來若真要做「貼身小框的覺醒招」，在該招的 opts 傳 melee: true 就好。
   function mkbox(x, y, w, h, o, follow) {
     const hb = KB.hitbox({
-      x, y, w, h,
+      x, y, w, h, melee: !!o.melee,
       dmg: o.dmg === undefined ? 10 : o.dmg,
       owner: 'player', type: o.type || 'awaken', life: o.life || 4,
       rehit: o.rehit || 0, pierce: true, knock: o.knock === undefined ? 2 : o.knock,

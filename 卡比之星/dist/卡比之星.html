@@ -65,6 +65,7 @@ window.KB = window.KB || {};
     flyCeilVy: 0.2,       // 碰到房間頂時的下壓速度（與撞天花板一致）
     swimUpEvery: 12,      // 水中按住 ↑ 每 n 幀輕划一次
     swimUpHoldMul: 0.7,   // 水中按住 ↑ 的上浮初速 = swimUp × 此倍率
+    meleeScale: 2,        // Round 10：貼身招判定框放大倍率（entity.js Hitbox 依規則自動套用；遠程投射物不受影響）
   };
   // 鏡頭手感（game.js updateCamera）
   KB.CAM = {
@@ -4624,6 +4625,24 @@ KB.FONT_DATA = {
       this.onHit = o.onHit || null; this.dir = o.dir || 1;
       this.onUpdate = o.onUpdate || null;   // 每幀回呼（判定框在擁有者之後更新，可安全改寫擁有者速度）
       this.stone = !!o.stone;
+      // Round 10：近戰判定加倍（使用者回饋：劍 / 雷擊等貼身招範圍太小常被打死；遠程維持）。
+      //   自動規則：owner 'player'、跟隨卡比本體（follow.type === 'player'）、原尺寸 ≤ 48×48、非 stone → 乘 KB.PHYS.meleeScale。
+      //   建立時傳 melee:true / false 可強制開 / 關：絕對座標（不 follow）的貼身招請傳 melee:true；
+      //   全畫面 / 持續光環 / 分身本體之類不該放大的傳 melee:false。
+      //   放大方式：方向框（flipWithOwner）3/4 往前、1/4 往後；對稱框左右置中；高度一律置中；絕對框以原中心置中。
+      //   保留 w0 / h0（原尺寸）與 meleeScaled（倍率）給測試與除錯 API 查驗。
+      this.w0 = this.w; this.h0 = this.h; this.meleeScaled = 0;
+      {
+        const ms = (KB.PHYS && KB.PHYS.meleeScale) || 1;
+        let melee = o.melee;
+        if (melee === undefined) melee = this.owner === 'player' && !!o.follow && o.follow.type === 'player' && !this.stone && o.w <= 48 && o.h <= 48;
+        if (melee && ms !== 1) {
+          const w2 = Math.round(o.w * ms), h2 = Math.round(o.h * ms), dw = w2 - o.w, dh = h2 - o.h;
+          if (o.follow) { this.ox = this.flipWithOwner ? this.ox - Math.round(dw / 4) : this.ox - Math.round(dw / 2); this.oy -= Math.round(dh / 2); }
+          else { this.x -= Math.round(dw / 2); this.y -= Math.round(dh / 2); }
+          this.w = w2; this.h = h2; this.meleeScaled = ms;
+        }
+      }
       // 石頭變身掛勾：player.js 的 startStone 會產生 {stone:true, owner:'player'} 判定框，
       // 以此通知 abilities.js（隨機外觀 / 斜坡滾動），避免動到 player.js
       if (this.stone && this.owner === 'player' && KB.ABILITIES && KB.ABILITIES.stone && KB.ABILITIES.stone.onStoneStart) {
@@ -19427,6 +19446,23 @@ KB.FONT_DATA = {
     if (d.whip) { d.whip.dead = true; d.whip = null; }
   }
   const beat = b => { if (b && !b.dead) b.life = 3; };                 // 心跳續命
+  // Round 10：招式進行中改寫判定框尺寸 / 位移時，一律經過這裡。
+  //   傳進來的 w / h / ox / oy 都是「原始（未放大）」數值，函式依 b.meleeScaled 重算實際值，
+  //   規則與 entity.js Hitbox 建構子完全相同（方向框 3/4 往前 1/4 往後、對稱框置中、高度置中）。
+  //   少了這層的話，逐幀改寫 b.w / b.ox 會把建構子放大的結果洗掉
+  //   （劍的揮砍、火 / 冰的噴射與柱子、鐵鎚掄下都是逐幀改寫）。
+  function fitBox(b, o) {
+    if (!b || b.dead) return b;
+    const s = b.meleeScaled || 1;
+    const w = o.w !== undefined ? o.w : b.w0, h = o.h !== undefined ? o.h : b.h0;
+    const w2 = Math.round(w * s), h2 = Math.round(h * s);
+    if (o.ox !== undefined) b.ox = o.ox - (b.flipWithOwner ? Math.round((w2 - w) / 4) : Math.round((w2 - w) / 2));
+    if (o.oy !== undefined) b.oy = o.oy - Math.round((h2 - h) / 2);
+    b.w0 = w; b.h0 = h; b.w = w2; b.h = h2;
+    return b;
+  }
+  // 判定框目前的「上緣高度」（放大後跟著變大），給頭頂柱狀招的特效用，讓火 / 冰噴到判定的邊界
+  const boxUp = (b, d) => (b && !b.dead) ? -b.oy : d;
   // 暗房照明（mechanics）：招式期間每幀呼叫，game.js 的 drawDark 讀 lightR / lightT（結束後 180 幀線性縮回 40px）
   const light = r => { const g = KB.game; if (g) { g.lightR = r; g.lightT = 180; g.lightF = g.frame; } };
   const slowFall = (p, v) => { if (!p.onGround && p.vy > v) p.vy = v; }; // 空中攻擊時緩慢下落
@@ -19520,11 +19556,11 @@ KB.FONT_DATA = {
         // 火柱每幀長高 3px（最高 38px），判定框從卡比頭頂往上延伸
         slowFall(p, 0.6);
         if (b && !b.dead) {
-          b.h = Math.min(38, 12 + d.t * 3); b.oy = -b.h + 2; beat(b);
+          const hh = Math.min(38, 12 + d.t * 3); fitBox(b, { h: hh, oy: -hh + 2 }); beat(b);
         }
         p.vx *= 0.85;
-        if (d.t % 2 === 1) KB.fx('fx_fire', p.cx + rnd(-3, 3), p.y - rnd(2, (b ? b.h : 12)), { vy: -1.6, life: 12, flip: Math.random() < 0.5, fps: 12 });
-        KB.particles(p.cx + rnd(-6, 6), p.y - rnd(0, (b ? b.h : 12)), ['#ffe040', '#ff9020', '#ff4010'], 1, { spread: 0.5, grav: -0.08, life: 14, up: 0.9, size: 1 });
+        if (d.t % 2 === 1) KB.fx('fx_fire', p.cx + rnd(-3, 3), p.y - rnd(2, boxUp(b, 12)), { vy: -1.6, life: 12, flip: Math.random() < 0.5, fps: 12 });
+        KB.particles(p.cx + rnd(-6, 6), p.y - rnd(0, boxUp(b, 12)), ['#ffe040', '#ff9020', '#ff4010'], 1, { spread: 0.5, grav: -0.08, life: 14, up: 0.9, size: 1 });
         if (d.t === 10 || d.t === 20) vx('ring', p.cx, p.y - 16, { r0: 3, r1: 20, frames: 12, color: '#ffe040', width: 2 });
         if (d.t % 12 === 0) KB.audio.sfx('fire');
         return;
@@ -19539,7 +19575,7 @@ KB.FONT_DATA = {
           if (d.t % 14 === 0) KB.audio.sfx('fire');
           if (p.onGround && d.t > 2) {
             p.attackTimer = Math.min(p.attackTimer, 6); KB.game.shake = 4;
-            KB.hitbox({ x: p.cx - 24, y: p.bottom - 14, w: 48, h: 16, dmg: 3, owner: 'player', type: 'fire', life: 8, rehit: 0, pierce: true, knock: 2.4 });
+            KB.hitbox({ x: p.cx - 24, y: p.bottom - 14, w: 48, h: 16, dmg: 3, owner: 'player', type: 'fire', life: 8, rehit: 0, pierce: true, melee: true, knock: 2.4 });
             vx('burst', p.cx, p.bottom - 2, { n: 18, colors: ['#ffe040', '#ff9020', '#ff4010'], speed: 3, life: 24, grav: 0.1, size: 2 });
             for (const sgn of [-1, 1]) vx('shockwave', p.cx + sgn * 6, p.bottom, { dir: sgn, speed: 3.2, frames: 18, w: 12, h: 13, color: '#ffb040' });
             vx('ring', p.cx, p.bottom - 4, { r0: 4, r1: 34, frames: 14, color: '#ffe040', width: 2 });
@@ -19571,13 +19607,13 @@ KB.FONT_DATA = {
       slowFall(p, 0.5);
       if (!b || b.dead) return;
       if (!on) { b.dead = true; d.box = null; return; }
-      b.w = Math.min(40, 12 + d.t * 5); beat(b);
+      fitBox(b, { w: Math.min(40, 12 + d.t * 5), ox: 6 }); beat(b);
       // 特效：噴口火星爆散（每 6 幀）
       if (d.t === 1) vx('burst', p.cx + p.dir * 12, p.cy + 4, { n: 10, colors: ['#ffe040', '#ff9020'], speed: 1.8, life: 18, grav: -0.04, size: 2, dir: p.dir > 0 ? 0 : Math.PI, spread: 0.7 });
       else if (d.t % 6 === 0) vx('burst', p.cx + p.dir * (10 + b.w * 0.7), p.cy + 5, { n: 6, colors: ['#ffe040', '#ff9020', '#ff4010'], speed: 1.4, life: 16, grav: -0.05, size: 2, dir: p.dir > 0 ? 0 : Math.PI, spread: 1 });
       // 火焰段連續飛出（fx_fire 3 幀），加上向上飄的火星粒子
       if (d.t % 2 === 1) KB.fx('fx_fire', p.cx + p.dir * 10, p.cy + 6, { vx: p.dir * 2.4, vy: rnd(-0.3, 0.1), life: 13, flip: p.dir < 0, fps: 12 });
-      KB.particles(p.cx + p.dir * rnd(10, 36), p.cy + rnd(-4, 6), ['#ffe040', '#ff9020', '#ff4010'], 1, { spread: 0.5, grav: -0.05, life: 12, up: 0.2, vx: p.dir * 1.4, size: 1 });
+      KB.particles(p.cx + p.dir * rnd(10, 10 + b.w * 0.8), p.cy + rnd(-4, 6), ['#ffe040', '#ff9020', '#ff4010'], 1, { spread: 0.5, grav: -0.05, life: 12, up: 0.2, vx: p.dir * 1.4, size: 1 });
       if (d.t % 24 === 0) KB.audio.sfx('fire');
     },
     onEnd(p) { killBox(p); clearAnim(p); const d = data(p); d.mode = null; d.dive = false; },
@@ -19607,8 +19643,8 @@ KB.FONT_DATA = {
         if (p.vy > -0.5) p.vy = -0.5;
         // 特效：迴旋斬 → 綠色殘影 + 環形劍光
         vx('afterimage', p, { frames: 32, color: '#d0ffd0', every: 2, alpha: 0.55 });
-        vx('aura', p, { color: '#40c040', r: 16, frames: 30, pulse: 0.4 });
-        vx('ring', p.cx, p.cy, { r0: 8, r1: 30, frames: 14, color: '#d0ffd0', width: 2 });
+        vx('aura', p, { color: '#40c040', r: 26, frames: 30, pulse: 0.4 });
+        vx('ring', p.cx, p.cy, { r0: 8, r1: 46, frames: 14, color: '#d0ffd0', width: 2 });
       } else if (d.mode === 'low') {
         // ↓+X 掃堂斬：貼地橫掃 + 前滑；空中版改成向下斜斬（判定框移到身體下方並加速下墜）
         const air = !p.onGround;
@@ -19616,11 +19652,11 @@ KB.FONT_DATA = {
         if (air) {
           d.box = KB.hitbox({ x: 0, y: 0, w: 26, h: 28, dmg: 4, owner: 'player', type: 'sword', follow: p, ox: -13, oy: 6, life: 16, rehit: 0, knock: 2.2, flipWithOwner: false });
           p.vx = p.dir * 1.2; if (p.vy < 2.6) p.vy = 2.6;
-          vx('slash', p.cx, p.cy + 12, 19, Math.PI / 2, { color: '#d0ffd0', width: 3, frames: 11, arc: Math.PI * 0.9 });
+          vx('slash', p.cx, p.cy + 12, 28, Math.PI / 2, { color: '#d0ffd0', width: 4, frames: 11, arc: Math.PI * 0.9 });
         } else {
           d.box = KB.hitbox({ x: 0, y: 0, w: 30, h: 14, dmg: 4, owner: 'player', type: 'sword', follow: p, ox: -4, oy: 6, life: 16, rehit: 0, knock: 2.4 });
           p.vx = p.dir * 2.4;
-          vx('slash', p.cx + p.dir * 8, p.bottom - 5, 18, p.dir > 0 ? 0 : Math.PI, { color: '#d0ffd0', width: 3, frames: 11, arc: Math.PI * 0.55, flip: p.dir < 0 });
+          vx('slash', p.cx + p.dir * 8, p.bottom - 5, 27, p.dir > 0 ? 0 : Math.PI, { color: '#d0ffd0', width: 4, frames: 11, arc: Math.PI * 0.55, flip: p.dir < 0 });
           vx('shockwave', p.cx + p.dir * 8, p.bottom, { dir: p.dir, speed: 3, frames: 16, w: 11, h: 12, color: '#d0ffd0' });
         }
         vx('afterimage', p, { frames: 20, color: '#d0ffd0', every: 2, alpha: 0.45 });
@@ -19630,8 +19666,8 @@ KB.FONT_DATA = {
         d.box = KB.hitbox({ x: 0, y: 0, w: 22, h: 30, dmg: 3, owner: 'player', type: 'sword', follow: p, ox: -11, oy: -28, life: 18, rehit: 0, knock: 2.2, flipWithOwner: false });
         if (p.onGround) { p.vy = -2.8; p.onGround = false; }
         // 特效：上挑斬 → 由下往上的弧
-        vx('slash', p.cx + p.dir * 4, p.cy - 12, 20, -Math.PI / 2, { color: '#d0ffd0', width: 3, frames: 12, arc: Math.PI * 0.9, flip: p.dir < 0 });
-        vx('line', p.cx + p.dir * 4, p.cy - 4, p.cx + p.dir * 8, p.cy - 34, { color: '#ffffff', width: 2, frames: 10 });
+        vx('slash', p.cx + p.dir * 4, p.cy - 12, 30, -Math.PI / 2, { color: '#d0ffd0', width: 4, frames: 12, arc: Math.PI * 0.9, flip: p.dir < 0 });
+        vx('line', p.cx + p.dir * 4, p.cy - 4, p.cx + p.dir * 8, p.cy - 48, { color: '#ffffff', width: 2, frames: 10 });
       } else {
         setup(p, { anim: null, dur: 18, fps: 10, lock: false });
         d.box = KB.hitbox({ x: 0, y: 0, w: 22, h: 16, dmg: 3, owner: 'player', type: 'sword', follow: p, ox: -8, oy: -18, life: 16, rehit: 0, knock: 1.5 });
@@ -19646,7 +19682,7 @@ KB.FONT_DATA = {
         const a = t * 0.42;   // 30 幀約轉 2 圈
         KB.particles(p.cx + Math.cos(a) * 15, p.cy + Math.sin(a) * 14, ['#ffffff', '#d0ffd0'], 1, { spread: 0.2, grav: 0, life: 8, up: 0, size: 1 });
         // 特效：每半圈補一道大弧劍光
-        if (t === 2 || t === 9 || t === 16 || t === 23) vx('slash', p.cx, p.cy, 19, a, { color: '#d0ffd0', width: 3, frames: 10, arc: Math.PI * 1.3 });
+        if (t === 2 || t === 9 || t === 16 || t === 23) vx('slash', p.cx, p.cy, 30, a, { color: '#d0ffd0', width: 4, frames: 10, arc: Math.PI * 1.3 });
         if (t === 15) KB.audio.sfx('sword');
         return;
       }
@@ -19668,11 +19704,11 @@ KB.FONT_DATA = {
         return;
       }
       if (b && !b.dead) {
-        if (t <= 4) { b.ox = -8; b.oy = -18; b.w = 22; b.h = 16; }   // 舉劍過頭（可打到頭上的敵人）
-        else { b.ox = 4; b.oy = -8; b.w = 24; b.h = 26; }              // 劈向前方
+        if (t <= 4) fitBox(b, { ox: -8, oy: -18, w: 22, h: 16 });   // 舉劍過頭（可打到頭上的敵人）
+        else fitBox(b, { ox: 4, oy: -8, w: 24, h: 26 });              // 劈向前方
       }
       // 特效：揮下瞬間的大斬擊弧（由上往前掃）
-      if (t === 5) vx('slash', p.cx + p.dir * 5, p.cy - 6, 21, p.dir > 0 ? -0.8 : Math.PI + 0.8, { color: '#d0ffd0', width: 3, frames: 11, arc: Math.PI * 1.05, flip: p.dir < 0 });
+      if (t === 5) vx('slash', p.cx + p.dir * 5, p.cy - 6, 32, p.dir > 0 ? -0.8 : Math.PI + 0.8, { color: '#d0ffd0', width: 4, frames: 11, arc: Math.PI * 1.05, flip: p.dir < 0 });
       // 滿血劍氣：體力全滿時揮到底射出短程斬擊波
       if (t === 6 && p.hp >= p.maxHp && !d.wave) {
         d.wave = true;
@@ -19704,7 +19740,8 @@ KB.FONT_DATA = {
       super(p.x, p.y);
       this.type = 'fx'; this.solid = false; this.grav = 0; this.z = 6; this.w = 1; this.h = 1; this.name = 'beamwhip';
       this.p = p; this.age = 0; this.dur = 16; this.n = 6; this.segs = [];
-      this.box = KB.hitbox({ x: p.x, y: p.y, w: 12, h: 12, dmg: 2, owner: 'player', type: 'beam', life: 3, rehit: 0, pierce: true, dir: p.dir });
+      // Round 10：光鞭屬「遠程」（判定框每幀依 segs 重算絕對座標），維持原大小 → melee:false
+      this.box = KB.hitbox({ x: p.x, y: p.y, w: 12, h: 12, dmg: 2, owner: 'player', type: 'beam', life: 3, rehit: 0, pierce: true, melee: false, dir: p.dir });
       this.update(0);
     }
     update(dt) {
@@ -19986,7 +20023,7 @@ KB.FONT_DATA = {
           if (t % 10 === 5) KB.audio.sfx('cutter');
         } else if (!d.landed) {
           d.landed = true; killBox(p);
-          KB.hitbox({ x: p.cx - 26, y: p.bottom - 14, w: 52, h: 16, dmg: 3, owner: 'player', type: 'cutter', life: 8, rehit: 0, pierce: true, knock: 2.4 });
+          KB.hitbox({ x: p.cx - 26, y: p.bottom - 14, w: 52, h: 16, dmg: 3, owner: 'player', type: 'cutter', life: 8, rehit: 0, pierce: true, melee: true, knock: 2.4 });
           KB.game.shake = 4; KB.audio.sfx('cutter');
           vx('burst', p.cx, p.bottom - 2, { n: 16, colors: ['#ffffff', '#e0e0e0', '#c8c8d0'], speed: 2.8, life: 20, grav: 0.14, size: 2 });
           for (const sgn of [-1, 1]) vx('shockwave', p.cx + sgn * 6, p.bottom, { dir: sgn, speed: 3.2, frames: 16, w: 12, h: 13, color: '#ffffff' });
@@ -20024,7 +20061,7 @@ KB.FONT_DATA = {
   def('spark', {
     color: '#60c0ff', duration: 10, hold: true, maxHold: 150, lockMove: false, moveSpeed: 0.5, canJump: false, fps: 12,
     desc: '全身通電，放電時還能拖著電場慢慢走；蓄滿再放開會炸開巨大電擊波。',
-    moves: [['X', '放電（44px 電場）'], ['↑+X', '雷擊柱'], ['↓+X', '落雷'], ['空中 X', '電光衝'], ['按住 45 幀放開', '電擊波（96px）']],
+    moves: [['X', '放電（88px 電場）'], ['↑+X', '雷擊柱'], ['↓+X', '落雷'], ['空中 X', '電光衝'], ['按住 45 幀放開', '電擊波（96px）']],
     hatOffset: { attack: [0, 0] },
     onCrouchAttack(p) { startMove(p, 'quake'); },
     onAttack(p) {
@@ -20032,7 +20069,8 @@ KB.FONT_DATA = {
       d.mode = pickMode(p, 'dive', 'bolt', 'field', 'quake'); d.charged = false; d.landed = false;
       if (d.mode === 'burst') {
         setup(p, { anim: 'kirby_attack_spark_burst', dur: 20, fps: 12, lock: true });
-        d.box = KB.hitbox({ x: 0, y: 0, w: 96, h: 80, dmg: 3, owner: 'player', type: 'spark', follow: p, ox: -48, oy: -32, life: 20, rehit: 7, flipWithOwner: false, pierce: true });
+        // Round 10：電擊波本來就是 96×80 的全身巨框（招式表寫「96px」），再放大會蓋掉整個畫面 → melee:false
+        d.box = KB.hitbox({ x: 0, y: 0, w: 96, h: 80, dmg: 3, owner: 'player', type: 'spark', follow: p, ox: -48, oy: -32, life: 20, rehit: 7, flipWithOwner: false, pierce: true, melee: false });
         KB.game.shake = 5; KB.audio.sfx('spark');
         KB.particles(p.cx, p.cy, ['#ffffff', '#80d0ff', '#c0f0ff'], 24, { spread: 4, grav: 0, life: 20, up: 0 });
         // 特效：隨機 6 道閃電 + 電藍魔法陣 + 一瞬藍染世界
@@ -20060,7 +20098,7 @@ KB.FONT_DATA = {
         d.air = air;
         d.box = air
           ? KB.hitbox({ x: 0, y: 0, w: 20, h: 34, dmg: 3, owner: 'player', type: 'spark', follow: p, ox: -10, oy: 8, life: 3, rehit: 8, knock: 1.4, flipWithOwner: false, pierce: true })
-          : KB.hitbox({ x: 0, y: 0, w: 52, h: 16, dmg: 3, owner: 'player', type: 'spark', follow: p, ox: -26, oy: 4, life: 3, rehit: 8, knock: 2, flipWithOwner: false, pierce: true });
+          : KB.hitbox({ x: 0, y: 0, w: 52, h: 16, dmg: 3, owner: 'player', type: 'spark', follow: p, ox: -26, oy: 4, life: 3, rehit: 8, knock: 2, flipWithOwner: false, pierce: true, melee: true });
         KB.audio.sfx('spark'); KB.game.shake = 4;
         if (air) {
           vx('lightning', p.cx, p.y + 10, p.cx + rnd(-6, 6), p.y + 40, { color: '#c0f0ff', frames: 14, jitter: 5, branches: 2 });
@@ -20107,8 +20145,8 @@ KB.FONT_DATA = {
         slowFall(p, 0.7); p.vx *= 0.85;
         if (b && !b.dead) beat(b);
         if (d.t % 4 === 1) vx('lightning', p.cx + rnd(-4, 4), p.y + 2, p.cx + rnd(-9, 9), p.y - rnd(20, 36), { color: '#c0f0ff', frames: 8, jitter: 4, branches: 1 });
-        if (d.t % 2 === 0) KB.fx('fx_spark_field', p.cx + rnd(-8, 8), p.y - rnd(4, 34), { life: 4, flip: Math.random() < 0.5, fps: 15 });
-        KB.particles(p.cx + rnd(-8, 8), p.y - rnd(0, 36), ['#ffffff', '#80d0ff', '#c0f0ff'], 1, { spread: 0.6, grav: -0.05, life: 10, up: 0.8, size: 1 });
+        if (d.t % 2 === 0) KB.fx('fx_spark_field', p.cx + rnd(-14, 14), p.y - rnd(4, boxUp(b, 34)), { life: 4, flip: Math.random() < 0.5, fps: 15 });
+        KB.particles(p.cx + rnd(-14, 14), p.y - rnd(0, boxUp(b, 36)), ['#ffffff', '#80d0ff', '#c0f0ff'], 1, { spread: 0.6, grav: -0.05, life: 10, up: 0.8, size: 1 });
         if (d.t % 10 === 0) KB.audio.sfx('spark');
         return;
       }
@@ -20136,7 +20174,7 @@ KB.FONT_DATA = {
           if (d.t % 9 === 4) KB.audio.sfx('spark');
         } else if (!d.landed) {
           d.landed = true; killBox(p);
-          KB.hitbox({ x: p.cx - 34, y: p.bottom - 16, w: 68, h: 18, dmg: 4, owner: 'player', type: 'spark', life: 8, rehit: 0, pierce: true, knock: 2.6 });
+          KB.hitbox({ x: p.cx - 34, y: p.bottom - 16, w: 68, h: 18, dmg: 4, owner: 'player', type: 'spark', life: 8, rehit: 0, pierce: true, melee: true, knock: 2.6 });
           KB.game.shake = 6; KB.audio.sfx('spark');
           for (const sgn of [-1, 1]) vx('shockwave', p.cx + sgn * 6, p.bottom, { dir: sgn, speed: 3.6, frames: 18, w: 13, h: 14, color: '#c0f0ff' });
           vx('ring', p.cx, p.bottom - 4, { r0: 5, r1: 42, frames: 16, color: '#ffffff', width: 2 });
@@ -20151,16 +20189,16 @@ KB.FONT_DATA = {
       if (!on) { b.dead = true; d.box = null; if (d.charged) startMove(p, 'burst'); return; }
       beat(b);
       // 特效：電場中不斷跳動的閃電（每 5 幀 2 道）
-      if (d.t === 1) vx('circle', p.cx, p.cy + 6, { r: 22, frames: 20, color: '#80d0ff', spin: 0.18, glyphs: 8 });
+      if (d.t === 1) vx('circle', p.cx, p.cy + 6, { r: 38, frames: 20, color: '#80d0ff', spin: 0.18, glyphs: 8 });
       if (d.t % 5 === 2) {
         for (let i = 0; i < 2; i++) {
-          const a = rnd(0, Math.PI * 2), r = rnd(14, 22);
+          const a = rnd(0, Math.PI * 2), r = rnd(18, 38);
           vx('lightning', p.cx, p.cy, p.cx + Math.cos(a) * r, p.cy + Math.sin(a) * r, { color: '#c0f0ff', frames: 7, jitter: 4, branches: 1 });
         }
       }
       // 電場隨機閃爍 + 藍白粒子
-      if (d.t % 2 === 0) KB.fx('fx_spark_field', p.cx + rnd(-20, 20), p.cy + rnd(-14, 18) + 8, { life: 4, flip: Math.random() < 0.5, fps: 15 });
-      KB.particles(p.cx + rnd(-22, 22), p.cy + rnd(-18, 18), ['#ffffff', '#80d0ff', '#c0f0ff'], 1, { spread: 1.2, grav: 0, life: 8, up: 0, size: 1 });
+      if (d.t % 2 === 0) KB.fx('fx_spark_field', p.cx + rnd(-38, 38), p.cy + rnd(-26, 30) + 8, { life: 4, flip: Math.random() < 0.5, fps: 15 });
+      KB.particles(p.cx + rnd(-40, 40), p.cy + rnd(-32, 32), ['#ffffff', '#80d0ff', '#c0f0ff'], 1, { spread: 1.2, grav: 0, life: 8, up: 0, size: 1 });
       if (d.t % 10 === 0) KB.audio.sfx('spark');
       if (p.stateT >= HOLD('spark', SPARK_BURST) - 1) {   // fix5b：實際 = 招式表的 45 幀（原本 >= 45 實測要 46 幀）
         if (!d.charged) chargeFx(p, '#60c0ff');
@@ -20244,7 +20282,7 @@ KB.FONT_DATA = {
       if (p.onGround && !d.wasGround) {
         if (d.variant === 'comet') {
           const dc = STONE_DUST[d.form] || '#a0a0a8';
-          KB.hitbox({ x: p.cx - 34, y: p.bottom - 16, w: 68, h: 18, dmg: 9, owner: 'player', type: 'stone', life: 8, rehit: 0, pierce: true, knock: 3.4, breakBlocks: true });
+          KB.hitbox({ x: p.cx - 34, y: p.bottom - 16, w: 68, h: 18, dmg: 9, owner: 'player', type: 'stone', life: 8, rehit: 0, pierce: true, melee: true, knock: 3.4, breakBlocks: true });
           vx('shake', 9); vx('hitstop', 3); vx('zoom', 1.16, 10);
           vx('burst', p.cx, p.bottom - 2, { n: 20, colors: [dc, '#ffffff', '#ffe040'], speed: 3.4, life: 26, grav: 0.24, size: 3 });
           for (const sgn of [-1, 1]) vx('shockwave', p.cx + sgn * 8, p.bottom, { dir: sgn, speed: 4, frames: 22, w: 14, h: 16, color: dc });
@@ -20363,9 +20401,9 @@ KB.FONT_DATA = {
       }
       if (d.mode === 'pillar') {
         slowFall(p, 0.6); p.vx *= 0.85;
-        if (b && !b.dead) { b.h = Math.min(38, 12 + d.t * 3); b.oy = -b.h + 2; beat(b); }
-        if (d.t % 2 === 1) KB.fx('fx_ice', p.cx + rnd(-3, 3), p.y - rnd(2, (b ? b.h : 12)), { vy: -1.2, life: 12, flip: Math.random() < 0.5, fps: 12 });
-        KB.particles(p.cx + rnd(-6, 6), p.y - rnd(0, (b ? b.h : 12)), ['#ffffff', '#c0f0ff', '#80d0ff'], 1, { spread: 0.5, grav: -0.04, life: 14, up: 0.7, size: 1 });
+        if (b && !b.dead) { const hh = Math.min(38, 12 + d.t * 3); fitBox(b, { h: hh, oy: -hh + 2 }); beat(b); }
+        if (d.t % 2 === 1) KB.fx('fx_ice', p.cx + rnd(-3, 3), p.y - rnd(2, boxUp(b, 12)), { vy: -1.2, life: 12, flip: Math.random() < 0.5, fps: 12 });
+        KB.particles(p.cx + rnd(-6, 6), p.y - rnd(0, boxUp(b, 12)), ['#ffffff', '#c0f0ff', '#80d0ff'], 1, { spread: 0.5, grav: -0.04, life: 14, up: 0.7, size: 1 });
         if (d.t === 10 || d.t === 20) vx('ring', p.cx, p.y - 16, { r0: 3, r1: 18, frames: 12, color: '#a0e8ff', width: 1 });
         if (d.t % 12 === 0) KB.audio.sfx('ice');
         return;
@@ -20379,14 +20417,14 @@ KB.FONT_DATA = {
       slowFall(p, 0.5);
       if (!b || b.dead) return;
       if (!on) { b.dead = true; d.box = null; return; }
-      b.w = Math.min(32, 12 + d.t * 4); beat(b);
+      fitBox(b, { w: Math.min(32, 12 + d.t * 4), ox: 6 }); beat(b);
       // 特效：噴冰前端的冰藍環 + 晶體碎屑
       if (d.t % 8 === 3) {
         vx('ring', p.cx + p.dir * (8 + b.w * 0.8), p.cy + 5, { r0: 2, r1: 14, frames: 12, color: '#a0e8ff', width: 1 });
         vx('burst', p.cx + p.dir * (8 + b.w * 0.7), p.cy + 5, { n: 5, colors: ['#ffffff', '#c0f0ff'], speed: 1.2, life: 18, grav: 0.05, size: 2, dir: p.dir > 0 ? 0 : Math.PI, spread: 1 });
       }
       if (d.t % 2 === 1) KB.fx('fx_ice', p.cx + p.dir * 10, p.cy + 6, { vx: p.dir * 1.9, vy: rnd(-0.2, 0.2), life: 13, flip: p.dir < 0, fps: 12 });
-      KB.particles(p.cx + p.dir * rnd(10, 30), p.cy + rnd(-5, 5), ['#ffffff', '#c0f0ff', '#80d0ff'], 1, { spread: 0.6, grav: 0.02, life: 14, up: 0.1, vx: p.dir * 1.0, size: 1 });
+      KB.particles(p.cx + p.dir * rnd(10, 10 + b.w * 0.8), p.cy + rnd(-5, 5), ['#ffffff', '#c0f0ff', '#80d0ff'], 1, { spread: 0.6, grav: 0.02, life: 14, up: 0.1, vx: p.dir * 1.0, size: 1 });
       if (d.t % 24 === 0) KB.audio.sfx('ice');
     },
     onEnd(p) { killBox(p); clearAnim(p); data(p).mode = null; },
@@ -20449,7 +20487,7 @@ KB.FONT_DATA = {
             KB.game.shake = 7; KB.audio.sfx('stone');
             // 地面兩側衝擊波
             for (const s of [-1, 1]) {
-              KB.hitbox({ x: p.cx + (s > 0 ? 4 : -40), y: p.bottom - 14, w: 36, h: 16, dmg: 6, owner: 'player', type: 'hammer', life: 10, rehit: 0, pierce: true, knock: 3 });
+              KB.hitbox({ x: p.cx + (s > 0 ? 4 : -40), y: p.bottom - 14, w: 36, h: 16, dmg: 6, owner: 'player', type: 'hammer', life: 10, rehit: 0, pierce: true, melee: true, knock: 3 });
               KB.fx('fx_hit', p.cx + s * 20, p.bottom - 4);
               KB.particles(p.cx + s * 14, p.bottom, ['#d8b890', '#f0e0c0', '#ffffff'], 9, { spread: 2.2, vx: s * 1.6, up: 1.2, life: 24 });
               // 特效：左右兩道地面衝擊波
@@ -20507,7 +20545,7 @@ KB.FONT_DATA = {
       const b = d.box;
       if (b && !b.dead && !smash) {   // 判定框從頭頂上方掃到身前
         const f = Math.min(1, (t - swingT) / (hitT - swingT));
-        b.oy = (p.onGround ? -12 : -8) - Math.round((1 - f) * 10); b.ox = 2 - Math.round((1 - f) * 8);
+        fitBox(b, { oy: (p.onGround ? -12 : -8) - Math.round((1 - f) * 10), ox: 2 - Math.round((1 - f) * 8) });
       }
       if (t === hitT && p.onGround) {
         KB.game.shake = smash ? 5 : 3; KB.audio.sfx('stone');
@@ -20556,6 +20594,24 @@ KB.FONT_DATA = {
 // 武器系能力：gunner ninja blade bow（Round 5 變身大爆發）
 // 介面與 abilities.js 相同：KB.ABILITIES[key] = { ... onAttack / update / onEnd / onCrouchAttack }
 // 特效一律透過 vfx()（內部 KB.VFX && KB.VFX.xxx 防呆），KB.VFX 尚未載入時自動退回粒子 / 震動。
+//
+// ── Round 10：貼身招判定加倍核對（melee-weapons）─────────────────────────────
+// 規則見 src/entity.js Hitbox 建構子；KB.PHYS.meleeScale = 2。
+// 「自動」= follow 卡比本體且原尺寸 ≤ 48×48 → 建構子自己 ×2（w0/h0/meleeScaled 可查）。
+//   gunner：五招（X 連射 / ↑X 對空三連 / ↓X 霰彈 / 空中 X 掃射 / 必殺 子彈時間）**全部是投射物**，
+//           一個 KB.hitbox 都沒有 → 遠程維持原樣（↓X 霰彈近身打不到是 qa9 的刻意設計）。
+//   ninja ：空中 X 飛踢 24×22→48×44（自動）、↑X 昇龍近身框 22×32→44×64（自動）、
+//           ↓X 替身瞬移落點框 32×30→64×60（絕對座標，手動 melee:true）、
+//           必殺 影分身斬 34×28→68×56（自動）；手裡劍 / 昇龍甩出的手裡劍是 KB.shoot，不受影響。
+//   blade ：連斬 1/2/3 26×20→52×40、26×26→52×52、30×32→60×64（自動）、
+//           ↑X 上撩斬 24×34→48×68（自動）、↓X 地摺斬 地面 34×14→68×28 / 空中 28×30→56×60（自動）、
+//           空中 X 落下斬 本體 18×26→36×52（自動）+ 落地左右衝擊 40×18→80×36（絕對座標，melee:true，
+//           內緣維持 cx±6、往外延伸一倍到 86px；左右兩框刻意不重疊，避免正中央被打兩次）、
+//           必殺 居合一閃 160×36 是遠程橫斬 → melee:false 維持。
+//   bow   ：↑X 對空連射的弓身近身框 22×26→44×52（自動）；其餘（射箭 / 貫穿 / 流星 / 箭雨）都是投射物，
+//           ↓X 陷阱箭是放置型爆炸（BowTrap.pop，不跟隨卡比）→ melee:false 維持 40×34。
+// 驗證：tools/test_weapons.py 的「Round 10 貼身判定」段（逐招列 w/h/w0/h0/meleeScaled）。
+// ────────────────────────────────────────────────────────────────────────────
 (function () {
   'use strict';
   const P = KB.PHYS;
@@ -20677,6 +20733,8 @@ KB.FONT_DATA = {
   //    ↑+X        對空三連：朝上三連發
   //    按住 60 放開 必殺・子彈時間：letterbox + 世界灰化 + slowMo 60 幀 + 全方位 16 發
   // ======================================================================
+  // Round 10：gunner 的五招全部走 KB.shoot（投射物），沒有任何 KB.hitbox →
+  //   自動放大規則碰不到它，遠程手感完全維持（↓X 霰彈貼臉打不到是 qa9 認可的設計）。
   function gunShot(p, ang, spd, dmg, off) {
     off = off || 12;
     const mx = p.cx + Math.cos(ang) * off, my = p.cy - 2 + Math.sin(ang) * off * 0.8;
@@ -20979,7 +21037,8 @@ KB.FONT_DATA = {
           burst(p.cx, p.cy, { n: 12, colors: ['#b070f0', '#ffffff'], speed: 2.2, life: 16, grav: -0.02 });
           ring(p.cx, p.cy, { r0: 2, r1: 18, frames: 10, color: '#b070f0', width: 1 });
           zoom(1.05, 10); shake(2);
-          d.box = KB.hitbox({ x: p.cx - 16, y: p.cy - 14, w: 32, h: 30, dmg: 3, owner: 'player', type: 'ninja', life: 8, rehit: 0, pierce: true, knock: 2 });
+          // Round 10：瞬移落點的爆風是貼身判定，但用絕對座標（不 follow）→ 手動 melee:true → 64×60
+          d.box = KB.hitbox({ x: p.cx - 16, y: p.cy - 14, w: 32, h: 30, dmg: 3, owner: 'player', type: 'ninja', life: 8, rehit: 0, pierce: true, knock: 2, melee: true });
         }
         return;
       }
@@ -21145,11 +21204,14 @@ KB.FONT_DATA = {
           d.landed = true;
           killBox(p);
           shake(7); hitstop(3); flash('#ffffff', 4, 0.35);
-          shockwave(p.cx, p.bottom, { w: 40, h: 16, dir: 1, speed: 4, frames: 20, color: '#eef2ff' });
-          shockwave(p.cx, p.bottom, { w: 40, h: 16, dir: -1, speed: 4, frames: 20, color: '#eef2ff' });
+          shockwave(p.cx, p.bottom, { w: 48, h: 22, dir: 1, speed: 4, frames: 20, color: '#eef2ff' });
+          shockwave(p.cx, p.bottom, { w: 48, h: 22, dir: -1, speed: 4, frames: 20, color: '#eef2ff' });
           ring(p.cx, p.bottom, { r0: 4, r1: 40, frames: 14, color: '#ffffff', width: 2 });
           burst(p.cx, p.bottom, { n: 16, colors: ['#ffffff', '#eef2ff', '#9aa6c0'], speed: 3, life: 18, grav: 0.12 });
-          for (const s of [1, -1]) KB.hitbox({ x: p.cx + (s > 0 ? 6 : -46), y: p.bottom - 16, w: 40, h: 18, dmg: 5, owner: 'player', type: 'blade', life: 10, rehit: 0, pierce: true, knock: 3 });
+          // Round 10：落地左右衝擊也是貼身判定（絕對座標）→ melee:true 由 entity.js 以原中心放大成 80×36。
+          //   基準 x 往外挪 20px，讓放大後的內緣仍是 cx±6、外緣延伸到 cx±86（原本 cx±46），
+          //   左右兩框剛好不重疊 —— 正中央的敵人不會被兩個框各打一次。
+          for (const s of [1, -1]) KB.hitbox({ x: p.cx + (s > 0 ? 26 : -66), y: p.bottom - 16, w: 40, h: 18, dmg: 5, owner: 'player', type: 'blade', life: 10, rehit: 0, pierce: true, knock: 3, melee: true });
           sfx('slash_big');
           p.attackTimer = Math.min(p.attackTimer, 14);
         }
@@ -21167,8 +21229,9 @@ KB.FONT_DATA = {
           slash(p.cx + p.dir * 40, p.cy, 46, 0, { color: '#ffffff', width: 4, frames: 14, arc: 1.2, flip: p.dir < 0 });
           const me = p;
           d.box = KB.hitbox({
+            // Round 10：居合一閃是橫跨 160px 的遠程斬擊（已經很大）→ melee:false 明確不放大
             x: p.cx + (p.dir > 0 ? 6 : -166), y: p.cy - 18, w: 160, h: 36, dmg: 0, owner: 'player', type: 'blade',
-            life: 8, rehit: 0, pierce: true, knock: 0, breakBlocks: true,
+            life: 8, rehit: 0, pierce: true, knock: 0, breakBlocks: true, melee: false,
             onHit(b) {
               const dd = data(me);
               dd.cut = dd.cut || [];
@@ -21222,7 +21285,8 @@ KB.FONT_DATA = {
     pop(hit) {
       if (this.dead) return; this.dead = true;
       if (hit) {
-        KB.hitbox({ x: this.cx - 20, y: this.cy - 18, w: 40, h: 34, dmg: 5, owner: 'player', type: 'bow', life: 6, rehit: 0, pierce: true, knock: 2.4 });
+        // Round 10：陷阱是「放置後遠離」的機關（判定在陷阱身上、不跟隨卡比），不是貼身招 → melee:false 維持 40×34
+        KB.hitbox({ x: this.cx - 20, y: this.cy - 18, w: 40, h: 34, dmg: 5, owner: 'player', type: 'bow', life: 6, rehit: 0, pierce: true, knock: 2.4, melee: false });
         burst(this.cx, this.cy, { n: 18, colors: ['#fff8c0', '#48c048', '#ffffff'], speed: 3, life: 18, grav: 0.1 });
         ring(this.cx, this.cy, { r0: 3, r1: 30, frames: 12, color: '#fff8c0', width: 2 });
         KB.fx('fx_poof', this.cx, this.cy + 6);
@@ -21381,6 +21445,17 @@ KB.FONT_DATA = {
 // 魔法系能力：mage 元素法師 / time 時間 / gravity 重力 / clone 分身（Round 5 變身大爆發）
 // 介面與 src/abilities.js 相同：KB.ABILITIES[key] = { duration, hold, maxHold, lockMove, fps, onAttack, update, onEnd, onLose ... }
 // 特效一律透過 V('xxx', ...) 呼叫 KB.VFX（vfx agent 實作中，未載入時自動略過，另有像素圖 / 粒子備援）。
+// ---------------------------------------------------------------------------
+// Round 10（melee-magic-forms）：貼身招判定 ×2（KB.PHYS.meleeScale，entity.js Hitbox 自動規則）。
+//   本檔每個 KB.hitbox 都標注了「貼身 / 遠程 / 不放大」的理由：
+//     · follow: p 且 ≤48×48 的框 → 自動 ×2（不用寫 melee，註解註明「自動 ×2」）
+//     · 絕對座標的近身框（交換星爆 / 墊腳 / 百裂分身 / 冰牆冰刺）→ melee: true 強制 ×2
+//     · 遠程（火球 / 風刃 / 隕石 / 黑洞 / 天雷 / 小星）與全畫面 / 大範圍光環 / 分身柱本體 → melee: false 維持
+//   判定框上留有 w0 / h0 / meleeScaled 供 tools/test_magic.py 的「Round 10」段查驗。
+//   ※ 本檔沒有「招式進行中逐幀改寫 b.w / b.ox」的招（那種寫法會洗掉建構子的放大，見
+//     src/abilities.js / abilities_forms.js 的 fitBox）；唯一會變尺寸的是 time 回溯的路徑框，
+//     而它是在 onAttack 當幀一次算好、之後不再改。
+// ---------------------------------------------------------------------------
 (function () {
   'use strict';
   KB.ABILITIES = KB.ABILITIES || {};
@@ -21485,18 +21560,22 @@ KB.FONT_DATA = {
     return best;
   }
   // 全畫面判定框（必殺用）
+  // Round 10：melee:false —— 這已經是「整個畫面」（272×208），再 ×2 只會溢出鏡頭外、
+  //   讓元素風暴 / 奇點打到還沒進畫面的敵人。必殺的範圍本來就是滿版，維持原樣。
   function screenHit(kind, dmg, life) {
     if (!KB.game) return null;
     const c = KB.game.cam;
     return KB.hitbox({ x: c.x - 8, y: c.y - 8, w: KB.W + 16, h: KB.VIEW_H + 16, dmg: dmg, owner: 'player', type: kind,
-      life: life || 10, rehit: 0, pierce: true, knock: 2, breakBlocks: false });
+      melee: false, life: life || 10, rehit: 0, pierce: true, knock: 2, breakBlocks: false });
   }
   // 爆炸：判定框 + 粒子 + 環
+  // Round 10：melee:false —— boom() 的呼叫者都是**遠程**命中點（火球落點 / 隕石落點 / 百裂分身收尾的爆風），
+  //   爆炸半徑 30~44 本來就是「爆炸範圍」而不是卡比的手長；遠程維持現狀（使用者需求 ②）。
   function boom(x, y, o) {
     o = o || {};
     const r = o.r || 30;
     KB.hitbox({ x: x - r / 2, y: y - r / 2, w: r, h: r, dmg: o.dmg === undefined ? 4 : o.dmg, owner: 'player', type: o.kind || 'fire',
-      life: o.life || 8, rehit: 0, pierce: true, knock: o.knock === undefined ? 2 : o.knock, breakBlocks: o.breakBlocks !== false });
+      melee: false, life: o.life || 8, rehit: 0, pierce: true, knock: o.knock === undefined ? 2 : o.knock, breakBlocks: o.breakBlocks !== false });
     const cols = o.colors || ['#ffe040', '#ff9020', '#ff4010', '#ffffff'];
     KB.particles(x, y, cols, o.n || 14, { spread: o.spread || 2.6, grav: 0.02, life: 22, up: 0.2 });
     KB.fx('fx_hit', x, y);
@@ -21598,7 +21677,7 @@ KB.FONT_DATA = {
       this.cxp = tx * T + T / 2; this.cyp = (by - 1) * T + T / 2;
       KB.fx('fx_icewall', this.cxp, this.cyp);
       for (let i = 0; i < 3; i++) KB.particles(this.cxp, (by - i) * T + 8, ['#ffffff', '#c0f0ff', '#80d0ff'], 6, { spread: 1.6, grav: 0.04, life: 20, up: 0.6 });
-      V('ring', this.cxp, this.cyp, { r0: 4, r1: 28, frames: 14, color: '#c0f0ff', width: 2 });
+      V('ring', this.cxp, this.cyp, { r0: 4, r1: 46, frames: 14, color: '#c0f0ff', width: 2 });   // Round 10：跟著 48×96 的冰刺框放大
       V('lightning', this.cxp, (by - 2) * T, this.cxp, (by + 1) * T, { color: '#ffffff', frames: 8, jitter: 3 });
       shake(3);
     }
@@ -21642,7 +21721,10 @@ KB.FONT_DATA = {
     strike() {
       this.strikes++;
       const top = this.gy - 120;
-      KB.hitbox({ x: this.x0 - 12, y: top, w: 24, h: 132, dmg: 3, owner: 'player', type: 'spark', life: 7, rehit: 0, pierce: true, knock: 2, breakBlocks: true });
+      // Round 10：melee:false —— 天雷是「前方 48px 召喚」的遠程招（魔法陣落點與卡比無關），
+      //   而且 24×132 已經是一整根貫穿畫面高度的雷柱（h 遠超過自動規則的 48 門檻）。遠程維持。
+      KB.hitbox({ x: this.x0 - 12, y: top, w: 24, h: 132, dmg: 3, owner: 'player', type: 'spark', melee: false,
+        life: 7, rehit: 0, pierce: true, knock: 2, breakBlocks: true });
       V('lightning', this.x0, top, this.x0, this.gy, { color: '#c0f0ff', frames: 10, jitter: 7, branches: 3 });
       V('flash', '#ffffff', 4);
       KB.particles(this.x0, this.gy - 6, ['#ffffff', '#c0f0ff', '#80d0ff'], 12, { spread: 2.4, grav: 0.05, life: 20, up: 0.8 });
@@ -21702,7 +21784,9 @@ KB.FONT_DATA = {
         d.wall = KB.spawn(new IceWall(p));
         sfx('icewall', 'ice');
         // Round 9：冰牆是從地面「刺」出來的 —— 牆的位置本身就有一道冰屬性判定（dmg 3）
-        KB.hitbox({ x: d.wall.x - 4, y: d.wall.y, w: T + 8, h: T * 3, dmg: 3, owner: 'player', type: 'ice',
+        // Round 10：melee:true —— 冰牆蓋在卡比前方 20px（貼身距離），是 mage 的 ↑X 攻擊判定，
+        //   24×48 → 48×96（以冰牆中心置中）：冰刺往兩側與上下各多長出半格，貼著牆走的敵人打得到了。
+        KB.hitbox({ x: d.wall.x - 4, y: d.wall.y, w: T + 8, h: T * 3, dmg: 3, owner: 'player', type: 'ice', melee: true,
           life: 10, rehit: 0, pierce: true, knock: 1.5, breakBlocks: false });
         // 空中變體「冰階」：冰牆蓋在腳邊高度，緩降 28 幀方便踩上去（之後照常下墜）
         if (!p.onGround) {
@@ -21952,6 +22036,8 @@ KB.FONT_DATA = {
       } else if (mode === 'punch') {
         setup(p, { anim: 'kirby_attack_time_punch', dur: 14, fps: 14, lock: false });
         const stopped = !!(g && g.timeStopT > 0);
+        // Round 10：貼身近身拳 —— follow: p 且 20×16 ≤ 48×48 ⇒ entity.js 自動 ×2 → 40×32（3/4 往前）。
+        //   這是 time 唯一真正的貼身招，也是時停中唯一的輸出手段，放大後不用貼到臉上才打得到。
         d.box = KB.hitbox({ x: 0, y: 0, w: 20, h: 16, dmg: stopped ? 0 : 3, owner: 'player', type: 'time', follow: p, ox: 4, oy: -2,
           life: 8, rehit: 0, knock: stopped ? 0 : 1.5,
           onHit: (b) => {
@@ -21974,7 +22060,9 @@ KB.FONT_DATA = {
         KB.fx('fx_gear', p.cx, p.cy - 16, { life: 40 });
         sfx('slowmo', 'charge');
         // Round 9：慢動作本身也是一招 —— 身邊 ±36px 的「時之枷」把敵人的時間直接擰斷（dmg 3）
-        d.box = KB.hitbox({ x: p.cx - 36, y: p.cy - 24, w: 72, h: 48, dmg: 3, owner: 'player', type: 'time',
+        // Round 10：melee:false —— 72×48 已經比「放大後的貼身框」還大（例：近身拳 ×2 = 40×32、
+        //   劍系 ×2 ≈ 56×40），而且它是以卡比為中心的全向光環，再 ×2 會變成 144×96（超過半個畫面）。維持。
+        d.box = KB.hitbox({ x: p.cx - 36, y: p.cy - 24, w: 72, h: 48, dmg: 3, owner: 'player', type: 'time', melee: false,
           life: 12, rehit: 0, pierce: true, knock: 1.4, breakBlocks: false });
         V('ring', p.cx, p.cy, { r0: 4, r1: 40, frames: 16, color: '#d8b0ff', width: 2 });
       } else if (mode === 'haste') {
@@ -21985,7 +22073,9 @@ KB.FONT_DATA = {
         V('afterimage', p, { color: '#ffe040', frames: 120, alpha: 0.4 });
         sfx('slowmo', 'charge_ready');
         // Round 9：起手的「時震環」—— 加速到旁人看不見的瞬間，周圍 ±28px 被時間亂流刮傷（dmg 3）
-        d.box = KB.hitbox({ x: p.cx - 28, y: p.cy - 20, w: 56, h: 40, dmg: 3, owner: 'player', type: 'time',
+        // Round 10：melee:false —— 56×40 正好就是一般貼身框 ×2 之後的尺寸（28×20 → 56×40），
+        //   而且是全向光環（左右都打得到），已經達標，不再疊乘。
+        d.box = KB.hitbox({ x: p.cx - 28, y: p.cy - 20, w: 56, h: 40, dmg: 3, owner: 'player', type: 'time', melee: false,
           life: 10, rehit: 0, pierce: true, knock: 2, breakBlocks: false });
         V('ring', p.cx, p.cy, { r0: 2, r1: 34, frames: 14, color: '#ffe040', width: 2 });
         KB.particles(p.cx, p.cy, ['#ffe040', '#ffffff'], 10, { spread: 2.2, grav: 0, life: 16 });
@@ -22019,7 +22109,13 @@ KB.FONT_DATA = {
         // Round 9：逆放的殘影會把路徑上的敵人一起「倒帶」掉（dmg 3）——空中 X 也是一招，不只是位移
         const bx0 = Math.min(p.cx, tgt[0] + 7), bx1 = Math.max(p.cx, tgt[0] + 7);
         const by0 = Math.min(p.cy, tgt[1] + 7), by1 = Math.max(p.cy, tgt[1] + 7);
-        KB.hitbox({ x: bx0 - 14, y: by0 - 14, w: (bx1 - bx0) + 28, h: (by1 - by0) + 28, dmg: 3, owner: 'player', type: 'time',
+        // Round 10：回溯是「沿著 60 幀前的路徑掃一次」的貼身斬（空中 X）。
+        //   框的長度＝路徑長度（可能上百 px），整個 ×2 會變成半個畫面，所以改成把**厚度**加倍：
+        //   padding 14 → 28 ⇒ 最小框 28×28 → 56×56（正好 2×），路徑很長時也只是變粗、不會誇張延長。
+        //   厚度已自行加倍，故 melee:false 不再疊乘。
+        const RW_PAD = 28;
+        KB.hitbox({ x: bx0 - RW_PAD, y: by0 - RW_PAD, w: (bx1 - bx0) + RW_PAD * 2, h: (by1 - by0) + RW_PAD * 2,
+          dmg: 3, owner: 'player', type: 'time', melee: false,
           life: 8, rehit: 0, pierce: true, knock: 1.5, breakBlocks: false });
         p.x = tgt[0]; p.y = tgt[1]; p.vx = 0; p.vy = 0;
         if (p.clampToRoom) p.clampToRoom();               // fix5 保險：歷史座標若曾在房間外，回溯不把卡比送出地圖
@@ -22107,14 +22203,17 @@ KB.FONT_DATA = {
         const ang = a + i * Math.PI, rr = r * 0.55;
         KB.particles(cx + Math.cos(ang) * rr, cy + Math.sin(ang) * rr * 0.7, ['#a860f0', '#d8b0ff'], 1, { spread: 0.2, grav: 0, life: 12, up: 0, size: 1 });
       }
-      if (this.t * 60 % 20 < 1) KB.hitbox({ x: cx - 14, y: cy - 14, w: 28, h: 28, dmg: 1, owner: 'player', type: 'gravity', life: 3, rehit: 0, pierce: true, knock: 0, breakBlocks: false });
+      // Round 10：melee:false —— 黑洞是「前方 48px 召喚」的遠程引力點，這是它核心的持續刮傷判定，
+      //   範圍必須貼著 proj_blackhole 的外觀（28×28）才不會打到吸力範圍外的敵人。遠程維持。
+      if (this.t * 60 % 20 < 1) KB.hitbox({ x: cx - 14, y: cy - 14, w: 28, h: 28, dmg: 1, owner: 'player', type: 'gravity', melee: false, life: 3, rehit: 0, pierce: true, knock: 0, breakBlocks: false });
       if (this.life <= 0) this.explode();
     }
     explode() {
       if (this.dead) return;
       this.dead = true;
       const r = this.big ? 90 : 56;
-      KB.hitbox({ x: this.cx - r / 2, y: this.cy - r / 2, w: r, h: r, dmg: this.big ? 8 : 5, owner: 'player', type: 'gravity', life: 10, rehit: 0, pierce: true, knock: 3, breakBlocks: true });
+      // Round 10：melee:false —— 遠程黑洞的內爆（56 / 奇點 90），本來就是大範圍爆炸，維持。
+      KB.hitbox({ x: this.cx - r / 2, y: this.cy - r / 2, w: r, h: r, dmg: this.big ? 8 : 5, owner: 'player', type: 'gravity', melee: false, life: 10, rehit: 0, pierce: true, knock: 3, breakBlocks: true });
       KB.particles(this.cx, this.cy, ['#a860f0', '#d8b0ff', '#ffffff', '#6028a8'], 26, { spread: 4, grav: 0.02, life: 28 });
       KB.fx('fx_hit', this.cx, this.cy);
       V('ring', this.cx, this.cy, { r0: 4, r1: r, frames: 16, color: '#d8b0ff', width: 3 });
@@ -22168,7 +22267,9 @@ KB.FONT_DATA = {
         }
         d.lifted = targets;
         // Round 9：近距離（±32px）的重力擠壓 dmg 2；遠一點的只被拉起來（既有手感不變）
-        d.box = KB.hitbox({ x: p.cx - 32, y: p.cy - 28, w: 64, h: 56, dmg: 2, owner: 'player', type: 'gravity',
+        // Round 10：melee:false —— 64×56 是以卡比為中心的重力場（總控指示：56~72px 級的大範圍維持），
+        //   且拉起敵人的判定是 ±72 / ±56 的迴圈（不是這個框）；框再放大就會超過「被拉起來的範圍」。
+        d.box = KB.hitbox({ x: p.cx - 32, y: p.cy - 28, w: 64, h: 56, dmg: 2, owner: 'player', type: 'gravity', melee: false,
           life: 10, rehit: 0, pierce: true, knock: 0, breakBlocks: false });
         V('ring', p.cx, p.cy, { r0: 8, r1: 76, frames: 18, color: '#d8b0ff', width: 2 });
         V('textPop', p.cx, p.y - 16, '反重力', { color: '#d8b0ff', frames: 45 });
@@ -22205,7 +22306,9 @@ KB.FONT_DATA = {
         KB.particles(p.cx, p.cy, ['#a860f0', '#d8b0ff'], 16, { spread: 2.6, grav: -0.05, life: 26, up: 1 });
         sfx('gravity_lift', 'beam');
         // Round 9：起手的重力波 —— 翻轉重力的瞬間，身邊 ±32px 的空間被壓扁（dmg 3）
-        d.box = KB.hitbox({ x: p.cx - 32, y: p.cy - 24, w: 64, h: 48, dmg: 3, owner: 'player', type: 'gravity',
+        // Round 10：melee:false —— 同上，64×48 的全向重力場已經大於一般貼身框 ×2（56×40）；
+        //   浮空招又會持續 240 幀在空中移動，再放大會變成「飛過去就清場」。維持。
+        d.box = KB.hitbox({ x: p.cx - 32, y: p.cy - 24, w: 64, h: 48, dmg: 3, owner: 'player', type: 'gravity', melee: false,
           life: 10, rehit: 0, pierce: true, knock: 2.4, breakBlocks: false });
         tick(p, 'flip', {
           life: 240,
@@ -22461,9 +22564,11 @@ KB.FONT_DATA = {
           p.x = nx - p.w / 2; p.y = ny - p.h / 2;
           p.vx = 0; p.vy = 0;
           // Round 9：交換不只是位移 —— 卡比離開的位置留下一顆星爆（dmg 3），空中一樣打得到
-          KB.hitbox({ x: ox - 16, y: oy - 14, w: 32, h: 28, dmg: 3, owner: 'player', type: 'star',
+          // Round 10：melee:true —— 這是 clone 的 ↓X，星爆就炸在「卡比剛剛站的位置」（貼身），
+          //   只是因為要留在原地才用絕對座標。32×28 → 64×56（以原中心置中）。
+          KB.hitbox({ x: ox - 16, y: oy - 14, w: 32, h: 28, dmg: 3, owner: 'player', type: 'star', melee: true,
             life: 10, rehit: 0, pierce: true, knock: 2, breakBlocks: true });
-          V('ring', ox, oy, { r0: 2, r1: 30, frames: 14, color: '#ffe040', width: 2 });
+          V('ring', ox, oy, { r0: 2, r1: 48, frames: 14, color: '#ffe040', width: 2 });   // Round 10：跟著 64×56 的星爆框放大
           KB.fx('fx_hit', ox, oy);
           V('textPop', p.cx, p.y - 16, '交換', { color: '#ffb0d0', frames: 36 });
           sfx('clone_swap', 'swallow');
@@ -22474,7 +22579,10 @@ KB.FONT_DATA = {
         d.tower = 0;
         p.vx *= 0.3;
         if (!p.onGround) slowFall(p, 0.4);
-        d.box = KB.hitbox({ x: 0, y: 0, w: 26, h: 60, dmg: 4, owner: 'player', type: 'clone', follow: p,
+        // Round 10：melee:false（總控指示）—— 26×60 是「兩個分身疊起來的柱子本體」，
+        //   框＝柱子的實際外觀（寬 26 ≈ 分身寬、高 60 ≈ 卡比 + 2 隻分身）。放大成 52×120 就會變成
+        //   打到柱子旁邊的空氣、而且 h 60 本來就超過自動規則 48 的門檻（不標也不會被放大，這裡寫明理由）。
+        d.box = KB.hitbox({ x: 0, y: 0, w: 26, h: 60, dmg: 4, owner: 'player', type: 'clone', follow: p, melee: false,
           ox: -13, oy: -48, life: 26, rehit: 10, pierce: true, knock: 2.2, breakBlocks: true, flipWithOwner: false });
         for (let i = 0; i < list.length; i++) {
           const c = list[i]; if (!c || c.dead) continue;
@@ -22494,11 +22602,13 @@ KB.FONT_DATA = {
         if (c && !c.dead) {
           c.x = p.cx - c.w / 2; c.y = p.bottom - 2; c.cool = Math.max(c.cool, 20); c.flashT = 10;
           KB.particles(p.cx, p.bottom + 4, ['#ffb0d0', '#ffffff'], 10, { spread: 2, grav: 0.05, life: 16, up: 0.6 });
-          V('ring', p.cx, p.bottom + 4, { r0: 4, r1: 24, frames: 12, color: '#ffb0d0', width: 2 });
+          V('ring', p.cx, p.bottom + 4, { r0: 4, r1: 40, frames: 12, color: '#ffb0d0', width: 2 });   // Round 10：跟著 60×40 的腳下框放大
         }
         V('textPop', p.cx, p.y - 14, '墊腳', { color: '#ffe040', frames: 30 });
         // Round 9：被踩的分身會往腳下轟一發（dmg 3 + 一顆向下的小星），空中 X 也有判定
-        KB.hitbox({ x: p.cx - 15, y: p.bottom - 4, w: 30, h: 20, dmg: 3, owner: 'player', type: 'star',
+        // Round 10：melee:true —— 這是 clone 的空中 X，判定就在卡比腳下（貼身），
+        //   只是綁在「起跳那一瞬間的腳底座標」所以用絕對座標。30×20 → 60×40，踩人更容易踩到。
+        KB.hitbox({ x: p.cx - 15, y: p.bottom - 4, w: 30, h: 20, dmg: 3, owner: 'player', type: 'star', melee: true,
           life: 10, rehit: 0, pierce: true, knock: 2, breakBlocks: true });
         KB.shoot({ spr: 'proj_ministar', x: p.cx, y: p.bottom + 6, vx: 0, vy: 3.2, dmg: 2, owner: 'player', life: 36,
           w: 10, h: 10, grav: 0, solid: false, pierce: false, type: 'star', dir: p.dir, fxHit: 'fx_hit', trail: '#ffe040', rotSpeed: -0.3, knock: 1.5 });
@@ -22549,7 +22659,9 @@ KB.FONT_DATA = {
           d.rush++;
           const ox = p.dir * (10 + d.rush * 6), oy = ((d.rush % 3) - 1) * 10;
           ghost(p.cx + ox, p.bottom + oy, { spr: 'kirby_run', dir: p.dir, alpha: 0.7, life: 14, vx: p.dir * 1.6, tint: d.rush % 2 ? '#ffb0d0' : '#ffffff' });
-          KB.hitbox({ x: p.cx + ox - 12, y: p.cy + oy - 12, w: 26, h: 24, dmg: 3, owner: 'player', type: 'clone', life: 8, rehit: 0, pierce: true, knock: 1.6, breakBlocks: true });
+          // Round 10：melee:true —— 百裂分身的每一道殘影斬都打在卡比身邊 ±10~58px（貼身連擊），
+          //   絕對座標是為了讓 8 道斬擊錯開排列。26×24 → 52×48（各自以原中心置中）。
+          KB.hitbox({ x: p.cx + ox - 12, y: p.cy + oy - 12, w: 26, h: 24, dmg: 3, owner: 'player', type: 'clone', melee: true, life: 8, rehit: 0, pierce: true, knock: 1.6, breakBlocks: true });
           V('slash', p.cx + ox, p.cy + oy, 18, p.dir > 0 ? -0.2 : Math.PI + 0.2, { color: '#ffffff', flip: p.dir < 0 });
           KB.particles(p.cx + ox, p.cy + oy, ['#ffffff', '#ffb0d0'], 6, { spread: 1.6, grav: 0, life: 12, up: 0, size: 1 });
           KB.fx('fx_hit', p.cx + ox, p.cy + oy);
@@ -22612,6 +22724,15 @@ KB.FONT_DATA = {
 //   def.transform = true  取得能力時播放 KB.VFX.transform 大演出（一般能力不設，取得節奏不變）
 // 特效一律透過 vf() 包一層，KB.VFX 未載入時安靜跳過；音效透過 sfx()（未定義的名稱只會 console.warn）。
 // ---------------------------------------------------------------------------
+// Round 10（melee-magic-forms）：貼身招判定 ×2（KB.PHYS.meleeScale，entity.js Hitbox 自動規則）。
+//   本檔每個 KB.hitbox 都標注「貼身 / 遠程 / 不放大」的理由：
+//     · follow: p 且 ≤48×48（衝撞 / 墜擊 / 鑽頭 / 龍息 / 升龍 / 怨靈墜擊）→ 自動 ×2
+//     · 絕對座標的貼身框（地面衝擊波 groundWave、龍尾前後斬、怨靈落地震波）→ melee: true 強制 ×2
+//     · 巨人上勾拳 40×64 超過自動門檻，但它是「拳頭」→ melee: true 強制 ×2（總控指示）
+//     · 遠程（火箭拳 / 追蹤飛彈的爆風 / 龍炎彈）與大範圍光環（幽靈哀嚎 80×68）、
+//       0 傷害工具框（隱身 alert 清除器）→ melee: false 維持
+//   判定框上留有 w0 / h0 / meleeScaled 供 tools/test_forms.py 的「Round 10」段查驗。
+// ---------------------------------------------------------------------------
 (function () {
   'use strict';
   const P = KB.PHYS;
@@ -22661,6 +22782,20 @@ KB.FONT_DATA = {
   const hitstop = n => { const g = KB.game; if (g) g.freezeT = Math.max(g.freezeT || 0, n); };
   const light = r => { const g = KB.game; if (g) { g.lightR = r; g.lightT = 180; g.lightF = g.frame; } };
   const beat = b => { if (b && !b.dead) b.life = 3; };
+  // Round 10：招式進行中改寫判定框尺寸 / 位移時一律經過這裡（與 src/abilities.js 的 fitBox 同一套規則）。
+  //   傳進來的 w / h / ox / oy 是「原始（未放大）」數值，依 b.meleeScaled 重算實際值：
+  //   方向框 3/4 往前 1/4 往後、對稱框置中、高度置中，並同步維護 w0 / h0。
+  //   少了這層，逐幀改寫 b.w 會把 entity.js 建構子放大的結果整個洗掉（龍息就是逐幀加長的）。
+  function fitBox(b, o) {
+    if (!b || b.dead) return b;
+    const s = b.meleeScaled || 1;
+    const w = o.w !== undefined ? o.w : b.w0, h = o.h !== undefined ? o.h : b.h0;
+    const w2 = Math.round(w * s), h2 = Math.round(h * s);
+    if (o.ox !== undefined) b.ox = o.ox - (b.flipWithOwner ? Math.round((w2 - w) / 4) : Math.round((w2 - w) / 2));
+    if (o.oy !== undefined) b.oy = o.oy - Math.round((h2 - h) / 2);
+    b.w0 = w; b.h0 = h; b.w = w2; b.h = h2;
+    return b;
+  }
   function killBox(p) {
     const d = data(p);
     for (const k of ['box', 'box2', 'box3']) if (d[k]) { d[k].dead = true; d[k] = null; }
@@ -22727,9 +22862,14 @@ KB.FONT_DATA = {
     shake(o.shake || 7); hitstop(o.stop || 4);
     sfx(o.sfx || 'stomp');
     for (const s of [-1, 1]) {
+      // Round 10：melee:true —— 落地 / 踩踏 / 撞牆的雙向地面衝擊波是不折不扣的貼身招
+      //   （踩踏、屁股墜落、俯衝落地、鑽頭撞牆都靠它收尾），只是要固定在「落地的那一點」才用絕對座標。
+      //   w×18 → 2w×36（以原中心置中）：高度加倍是關鍵 —— 原本 18px 高只打得到貼著地面的敵人，
+      //   現在連小跳中 / 稍微浮空的敵人也掃得到，正面對衝不會再被同高度的敵人先打到。
+      //   ※ 兩側框放大後會在卡比腳下重疊，但 Enemy.hurt 有 invuln 6，同一幀不會被扣兩次血。
       KB.hitbox({
         x: p.cx + (s > 0 ? 2 : -2 - w), y: p.bottom - 16, w, h: 18, dmg, owner: 'player', type: o.type || 'hammer',
-        life: 12, rehit: 0, pierce: true, knock: 3, breakBlocks: true,
+        melee: true, life: 12, rehit: 0, pierce: true, knock: 3, breakBlocks: true,
       }).breakHard = !!o.breakHard;
       vf('shockwave', p.cx + s * 4, p.bottom, { dir: s, speed: 3.6, w: 14, h: 16, frames: 22, color });
       KB.particles(p.cx + s * 10, p.bottom, [color, '#ffffff', '#d8d0c0'], 8, { spread: 2.2, vx: s * 1.8, up: 1.3, life: 24 });
@@ -22827,17 +22967,23 @@ KB.FONT_DATA = {
         setup(p, { dur: 26, fps: 10, lock: true });
         p.vy = Math.min(p.vy, -2.4); p.onGround = false;
         sfx('giant_roar'); shake(4);
+        // Round 10：melee:true —— 巨人的「拳頭」是貼身招（總控指示：巨人的拳頭 / 踩踏仍要 2×）。
+        //   40×64 的 h 超過自動規則 48 的門檻，所以必須手動標；40×64 → 80×128（置中），
+        //   打得到頭頂上方 72px 的飛行敵人，真正成為巨人的對空手段。
         d.box = KB.hitbox({
-          x: 0, y: 0, w: 40, h: 64, dmg: 6, owner: 'player', type: 'hammer', follow: p,
+          x: 0, y: 0, w: 40, h: 64, dmg: 6, owner: 'player', type: 'hammer', follow: p, melee: true,
           ox: -20, oy: -40, life: 16, rehit: 10, knock: 3.4, pierce: true, flipWithOwner: false, breakBlocks: true,
         });
-        vf('ring', p.cx, p.y - 12, { r0: 6, r1: 48, frames: 18, color: '#ffd080', width: 3 });
-        vf('slash', p.cx + p.dir * 6, p.y - 10, 26, -Math.PI / 2, { frames: 12, color: '#ffffff', width: 3 });
+        // Round 10：判定框放大成 80×128 後，光環 / 斬線也一起放大，玩家才看得出打擊範圍
+        vf('ring', p.cx, p.y - 12, { r0: 6, r1: 76, frames: 18, color: '#ffd080', width: 3 });
+        vf('slash', p.cx + p.dir * 6, p.y - 18, 42, -Math.PI / 2, { frames: 12, color: '#ffffff', width: 3 });
         KB.particles(p.cx, p.y - 6, ['#ffd080', '#ffffff', '#f0e0c0'], 12, { spread: 2.2, up: 1.6, life: 24 });
         return;
       }
       if (d.mode === 'charge') {
         setup(p, { dur: 30, fps: 10, lock: true });
+        // Round 10：貼身全身框 —— follow: p、38×30（巨人 p.w 28 / p.h 30）≤ 48×48 ⇒ 自動 ×2 → 76×60。
+        //   衝撞是 giant 的 ↓X，本來只比身體大 5px，正面對衝常常「擦過去」；放大後整個身體前後都是判定。
         d.box = KB.hitbox({
           x: 0, y: 0, w: p.w + 10, h: p.h, dmg: 6, owner: 'player', type: 'hammer', follow: p,
           ox: -p.w / 2 - 5, oy: 0, life: 3, rehit: 8, knock: 3.5, pierce: true, flipWithOwner: false, breakBlocks: true,
@@ -22850,9 +22996,15 @@ KB.FONT_DATA = {
         setup(p, { dur: 80, fps: 8, lock: true });
         p.vy = 8; p.vx = 0; p.maxFall = 9;
         sfx('stomp');
+        // Round 10：貼身全身框（空中 X 屁股墜落）—— 34×30 ≤ 48×48 ⇒ 自動 ×2 → 68×60；
+        //   落地還會再補一發放大後的 groundWave。
         d.box = KB.hitbox({
+        // Round 10 副作用修正：全身框放大 ×2 之後會往腳底下多出半個身體，
+        //   帶著 breakBlocks 一路往下砸 = 自己挖洞把自己埋進地形（playthrough w1 mech 實測
+        //   3/3 卡在 r1 x=979 的通道裡）。破壞方塊交給落地的 groundWave（一樣是 2× 的貼身框），
+        //   下墜途中的框只負責傷害。
           x: 0, y: 0, w: p.w + 6, h: p.h, dmg: 5, owner: 'player', type: 'hammer', follow: p,
-          ox: -p.w / 2 - 3, oy: 0, life: 3, rehit: 10, knock: 2, pierce: true, flipWithOwner: false, breakBlocks: true,
+          ox: -p.w / 2 - 3, oy: 0, life: 3, rehit: 10, knock: 2, pierce: true, flipWithOwner: false, breakBlocks: false,
         });
       } else {
         setup(p, { dur: 46, fps: 8, lock: true });
@@ -22911,7 +23063,7 @@ KB.FONT_DATA = {
 
   // ======================================================================
   //  2. 龍化 DRAGON —— 翅膀 + 尾巴 + 角，按住跳可飛行
-  //     X      龍息    ：前方 56px 持續火焰（按住最多 90 幀）；按滿 60 幀放開 → 必殺
+  //     X      龍息    ：前方 56px 持續火焰（Round 10 貼身 ×2 後 112px；按住最多 90 幀）；按滿 60 幀放開 → 必殺
   //     ↑+X    升龍尾撩：躍起 + 頭頂 30×44 火焰判定 dmg 5（Round 9 新招，空中也能接）
   //     ↓+X    尾擊    ：前後雙向斬擊
   //     空中 X  俯衝    ：斜下衝 40 幀（紅色殘影）+ 落地衝擊波
@@ -22994,6 +23146,7 @@ KB.FONT_DATA = {
         setup(p, { dur: 30, fps: 12, lock: true });
         p.vy = -5.4; p.onGround = false; p.vx = p.dir * 1.2;
         sfx('tail_whip'); sfx('wing_flap');
+        // Round 10：貼身 ↑X —— follow: p、30×44 ≤ 48×48 ⇒ 自動 ×2 → 60×88（置中、往上涵蓋整條尾焰）。
         d.box = KB.hitbox({
           x: 0, y: 0, w: 30, h: 44, dmg: 5, owner: 'player', type: 'fire', follow: p,
           ox: -15, oy: -30, life: 24, rehit: 8, knock: 3.2, pierce: true, flipWithOwner: false, breakBlocks: true,
@@ -23006,9 +23159,11 @@ KB.FONT_DATA = {
       } else if (d.mode === 'tail') {
         setup(p, { dur: 26, fps: 12, lock: true });
         sfx('tail_whip');
+        // Round 10：melee:true —— 尾擊（↓X）是前後各一刀的貼身斬，用絕對座標只是為了左右對稱。
+        //   30×22 → 60×44（各自以原中心置中）；兩刀在身體中央重疊，但 Enemy.hurt 的 invuln 6 保證不會雙重扣血。
         for (const s of [-1, 1]) {
-          KB.hitbox({ x: p.cx + (s > 0 ? 4 : -4 - 30), y: p.cy - 10, w: 30, h: 22, dmg: 4, owner: 'player', type: 'sword', life: 12, rehit: 0, pierce: true, knock: 3 });
-          vf('slash', p.cx + s * 16, p.cy, 20, s > 0 ? 0 : Math.PI, { frames: 12, color: '#ff8080', width: 3, flip: s < 0 });
+          KB.hitbox({ x: p.cx + (s > 0 ? 4 : -4 - 30), y: p.cy - 10, w: 30, h: 22, dmg: 4, owner: 'player', type: 'sword', melee: true, life: 12, rehit: 0, pierce: true, knock: 3 });
+          vf('slash', p.cx + s * 16, p.cy, 32, s > 0 ? 0 : Math.PI, { frames: 12, color: '#ff8080', width: 3, flip: s < 0 });   // Round 10：斬線跟著 60×44 的框放大
         }
         KB.particles(p.cx, p.cy, ['#ffffff', '#ff8080'], 8, { spread: 2, life: 18 });
         shake(3);
@@ -23016,9 +23171,14 @@ KB.FONT_DATA = {
         setup(p, { dur: 40, fps: 10, lock: true });
         p.vx = p.dir * 4.2; p.vy = 4.2; p.maxFall = 8;
         sfx('dragon_dash');
+        // Round 10：貼身全身框（空中 X 俯衝）—— 24×19 ≤ 48×48 ⇒ 自動 ×2 → 48×38，落地再接 groundWave。
         d.box = KB.hitbox({
+        // Round 10 副作用修正：全身框放大 ×2 之後會往腳底下多出半個身體，
+        //   帶著 breakBlocks 一路往下砸 = 自己挖洞把自己埋進地形（playthrough w1 mech 實測
+        //   3/3 卡在 r1 x=979 的通道裡）。破壞方塊交給落地的 groundWave（一樣是 2× 的貼身框），
+        //   下墜途中的框只負責傷害。
           x: 0, y: 0, w: p.w + 10, h: p.h + 4, dmg: 5, owner: 'player', type: 'fire', follow: p,
-          ox: -p.w / 2 - 5, oy: -2, life: 3, rehit: 10, knock: 3, pierce: true, flipWithOwner: false, breakBlocks: true,
+          ox: -p.w / 2 - 5, oy: -2, life: 3, rehit: 10, knock: 3, pierce: true, flipWithOwner: false, breakBlocks: false,
         });
         vf('afterimage', p, { frames: 44, every: 2, color: '#ff4040', alpha: 0.55 });
         vf('sparkTrail', p, { frames: 44, every: 2, color: ['#ffe040', '#ff9020', '#ff4010'] });
@@ -23033,6 +23193,8 @@ KB.FONT_DATA = {
       } else {
         setup(p, { dur: 14, fps: 10, lock: true, maxHold: 90 });
         d.charge = 0; d.ready = false;
+        // Round 10：貼身 X（龍息）—— follow: p、20×18 ≤ 48×48 ⇒ 自動 ×2 → 40×36；
+        //   下面 update() 的「按住加長」上限也一起 ×meleeScaled（56 → 112），火焰長度與判定同步。
         d.box = KB.hitbox({
           x: 0, y: 0, w: 20, h: 18, dmg: 2, owner: 'player', type: 'fire', follow: p,
           ox: 8, oy: -2, life: 3, rehit: 8, knock: 1, pierce: true,
@@ -23094,9 +23256,14 @@ KB.FONT_DATA = {
       if (b && !b.dead) {
         if (!on) { b.dead = true; d.box = null; }
         else {
-          b.w = Math.min(56, 20 + d.t * 3); beat(b);
-          if (d.t % 2 === 1) KB.fx('fx_fire', p.cx + p.dir * (12 + rnd(0, 30)), p.cy + rnd(-2, 8), { vx: p.dir * 2.6, vy: rnd(-0.4, 0.2), life: 13, flip: p.dir < 0, fps: 12 });
-          KB.particles(p.cx + p.dir * rnd(12, 52), p.cy + rnd(-8, 10), ['#ffe040', '#ff9020', '#ff4010'], 2,
+          // Round 10：龍息是**逐幀加長**的判定框 —— 直接寫 b.w 會洗掉建構子的 ×2，
+          //   所以傳「原始寬度」給 fitBox，由它依 b.meleeScaled 重算（56 → 112，ox 8 也跟著往後挪 1/4）。
+          fitBox(b, { w: Math.min(56, 20 + d.t * 3), ox: 8 }); beat(b);
+          // Round 10：火焰演出的長度跟著判定框（b.w）走 —— 判定放大到 112px 之後，
+          //   如果火焰還只畫到 52px，遠端就會變成「看不見的傷害」。
+          const reach = Math.max(24, b.w - 4);
+          if (d.t % 2 === 1) KB.fx('fx_fire', p.cx + p.dir * rnd(10, reach), p.cy + rnd(-2, 8), { vx: p.dir * 2.6, vy: rnd(-0.4, 0.2), life: 13, flip: p.dir < 0, fps: 12 });
+          KB.particles(p.cx + p.dir * rnd(10, reach), p.cy + rnd(-8, 10), ['#ffe040', '#ff9020', '#ff4010'], 2,
             { spread: 0.6, grav: -0.04, life: 14, up: 0.2, vx: p.dir * 1.8, size: 1 });
           if (d.t % 20 === 0) sfx('dragon_breath');
         }
@@ -23191,7 +23358,9 @@ KB.FONT_DATA = {
     }
     boom() {
       sfx('missile');
-      KB.hitbox({ x: this.cx - 16, y: this.cy - 14, w: 32, h: 28, dmg: this.dmg, owner: 'player', type: 'mech', life: 6, rehit: 0, pierce: true, knock: 3 });
+      // Round 10：melee:false —— 追蹤飛彈（↑X / 必殺全彈發射）的爆風是**遠程**命中點，離卡比可能半個畫面遠；
+      //   32×28 就是爆炸範圍本身。遠程維持現狀（使用者需求 ②）。
+      KB.hitbox({ x: this.cx - 16, y: this.cy - 14, w: 32, h: 28, dmg: this.dmg, owner: 'player', type: 'mech', melee: false, life: 6, rehit: 0, pierce: true, knock: 3 });
       vf('ring', this.cx, this.cy, { r0: 3, r1: 26, frames: 14, color: '#ffd080', width: 2 });
       vf('burst', this.cx, this.cy, { n: 12, colors: ['#ffe040', '#ff9020', '#ffffff'], speed: 2.4, life: 22 });
       KB.fx('fx_hit', this.cx, this.cy + 4);
@@ -23285,6 +23454,8 @@ KB.FONT_DATA = {
         p.vx = p.dir * 2.8;
         if (!p.onGround) p.vy = Math.max(p.vy, 1.6);
         sfx('jet'); sfx('mech_step'); shake(3);
+        // Round 10：貼身 ↓X（鑽頭突進）—— follow: p、24×16 ≤ 48×48 ⇒ 自動 ×2 → 48×32（3/4 往前）。
+        //   原本 16px 高的鑽頭常常從敵人頭上／腳下擦過去，放大後整個身側都是鑽頭判定。
         d.box = KB.hitbox({
           x: 0, y: 0, w: 24, h: 16, dmg: 3, owner: 'player', type: 'mech', follow: p,
           ox: 2, oy: 2, life: 4, rehit: 6, knock: 2, pierce: true, breakBlocks: true,
@@ -23299,9 +23470,14 @@ KB.FONT_DATA = {
         setup(p, { dur: 70, fps: 8, lock: true });
         p.vy = 7.5; p.vx = 0; p.maxFall = 9;
         sfx('jet');
+        // Round 10：貼身全身框（空中 X 噴射墜踩）—— 20×15 ≤ 48×48 ⇒ 自動 ×2 → 40×30，落地接 groundWave。
         d.box = KB.hitbox({
+        // Round 10 副作用修正：全身框放大 ×2 之後會往腳底下多出半個身體，
+        //   帶著 breakBlocks 一路往下砸 = 自己挖洞把自己埋進地形（playthrough w1 mech 實測
+        //   3/3 卡在 r1 x=979 的通道裡）。破壞方塊交給落地的 groundWave（一樣是 2× 的貼身框），
+        //   下墜途中的框只負責傷害。
           x: 0, y: 0, w: p.w + 6, h: p.h, dmg: 4, owner: 'player', type: 'mech', follow: p,
-          ox: -p.w / 2 - 3, oy: 0, life: 3, rehit: 10, knock: 2, pierce: true, flipWithOwner: false, breakBlocks: true,
+          ox: -p.w / 2 - 3, oy: 0, life: 3, rehit: 10, knock: 2, pierce: true, flipWithOwner: false, breakBlocks: false,
         });
       } else if (d.mode === 'barrage') {
         // 必殺：全彈發射
@@ -23596,6 +23772,7 @@ KB.FONT_DATA = {
         setup(p, { anim: 'kirby_ghost_plunge', dur: 30, fps: 10, lock: true });
         p.vx *= 0.3; p.vy = Math.max(p.vy, 5.4);
         sfx('ghost_wail');
+        // Round 10：貼身 ↓X / 空中墜擊 —— follow: p、28×28 ≤ 48×48 ⇒ 自動 ×2 → 56×56（置中）。
         d.box = KB.hitbox({
           x: 0, y: 0, w: 28, h: 28, dmg: 4, owner: 'player', type: 'ghost', follow: p,
           ox: -14, oy: -2, life: 26, rehit: 8, knock: 2, pierce: true, flipWithOwner: false, breakBlocks: false,
@@ -23620,7 +23797,9 @@ KB.FONT_DATA = {
           KB.particles(e.cx, e.y - 2, ['#ffffff', '#c4ccec'], 4, { spread: 1.2, up: 0.8, life: 20 });
         }
         // 判定框：哀嚎本身也有 2 點傷害
-        d.box = KB.hitbox({ x: p.cx - 40, y: p.cy - 34, w: 80, h: 68, dmg: 2, owner: 'player', type: 'ghost', life: 10, rehit: 0, pierce: true, knock: 1, breakBlocks: false });
+        // Round 10：melee:false —— 80×68 是以卡比為中心的大範圍音波（對應上面 76px 的 stun 半徑），
+        //   已經遠大於一般貼身框 ×2；再放大成 160×136 會比 stun 範圍大一倍，表現與判定就對不上了。
+        d.box = KB.hitbox({ x: p.cx - 40, y: p.cy - 34, w: 80, h: 68, dmg: 2, owner: 'player', type: 'ghost', melee: false, life: 10, rehit: 0, pierce: true, knock: 1, breakBlocks: false });
         if (n) vf('textPop', p.cx, p.y - 6, '哀嚎！', { color: '#ffffff', frames: 34, size: 10 });
       } else if (d.mode === 'invis') {
         setup(p, { dur: 20, fps: 10, lock: true });
@@ -23640,8 +23819,10 @@ KB.FONT_DATA = {
         }
         // 尾隨的 0 傷害判定框：排在敵人之後更新，負責把敵人的 alert 清掉
         if (d.guard) d.guard.dead = true;
+        // Round 10：melee:false —— 這不是攻擊框，而是 0×0 / dmg 0 的「隱身工具框」
+        //   （排在敵人之後更新、負責清掉 alert）。跟隨卡比且尺寸 ≤48 會命中自動規則，明確關掉比較保險。
         d.guard = KB.hitbox({
-          x: p.cx, y: p.cy, w: 0, h: 0, dmg: 0, owner: 'player', type: 'ghost', life: GHOST_INVIS + 4,
+          x: p.cx, y: p.cy, w: 0, h: 0, dmg: 0, owner: 'player', type: 'ghost', life: GHOST_INVIS + 4, melee: false,
           pierce: true, breakBlocks: false, follow: p, ox: 0, oy: 0,
           // 判定框排在敵人之後更新（KB.spawn 推到陣列尾端），所以這裡清掉的 alert
           // 是敵人「本幀剛設起來」的那一份 → 效果上就是「察覺不到卡比」，也不會冒驚嘆火花。
@@ -23678,8 +23859,10 @@ KB.FONT_DATA = {
           if (blocked) p.vy = 0;
           if (!d.landed) {
             d.landed = true;
-            vf('ring', p.cx, p.bottom - 2, { r0: 4, r1: 44, frames: 18, color: '#ffffff', width: 2 });
-            KB.hitbox({ x: p.cx - 24, y: p.bottom - 20, w: 48, h: 22, dmg: 3, owner: 'player', type: 'ghost',
+            vf('ring', p.cx, p.bottom - 2, { r0: 4, r1: 72, frames: 18, color: '#ffffff', width: 2 });   // Round 10：跟著 96×44 的落地框放大
+            // Round 10：melee:true —— 怨靈墜擊的落地震波是貼身收尾招，固定在落地點所以用絕對座標。
+            //   48×22 → 96×44（置中）。
+            KB.hitbox({ x: p.cx - 24, y: p.bottom - 20, w: 48, h: 22, dmg: 3, owner: 'player', type: 'ghost', melee: true,
               life: 8, rehit: 0, pierce: true, knock: 2, breakBlocks: false });
             KB.particles(p.cx, p.bottom, ['#ffffff', '#c4ccec'], 10, { spread: 2.2, life: 20 });
             sfx('unpossess'); shake(4);
@@ -23721,6 +23904,17 @@ KB.FONT_DATA = {
 //
 // 每個組合 3 招：地面 X / 方向鍵招 / 按住 X 50 幀放開的蓄力必殺。
 // 特效一律透過 vx()（KB.VFX 沒載入時整組 no-op），判定一律走 KB.hitbox / KB.shoot。
+// ---------------------------------------------------------------------------
+// Round 10（貼身判定加倍）：使用者回饋「貼身招判定太小常被打死」→ 卡比本體的貼身招判定 ×2
+//   ‧ fbox()（跟隨卡比、原尺寸 ≤ 48×48）由 entity.js Hitbox 建構子自動 ×KB.PHYS.meleeScale，這裡不用動；
+//   ‧ mbox()（絕對座標的貼身招：↑X 直立框、↓X 地面斬、空中 X 落地衝擊、echo 餘波）明確帶 melee:true → ×2；
+//   ‧ 維持原樣（不放大）：KB.shoot / MixHoming / MixOrbit / Mix2Return 等投射物、投射物命中 / 撞牆的爆炸框、
+//     以敵人或遠處座標生成的框、持續場地框（火海 / 火牆 / 冰霧 / 電網 / 魔法陣 / 時間裂縫）、
+//     全畫面與蓄力必殺的大框（已經很大）、starmage 96px 光束（固定長度的遠程框）；
+//   ‧ 陷阱：每幀重建且尺寸會變的框（龍吐息 len 隨時間變長）不能靠自動門檻——len 跨過 48 就突然不放大，
+//     會出現「吐得越久判定越小」，所以那三招明確寫 melee: p.type === 'player'；
+//     本檔沒有「逐幀改寫 b.w / b.h / b.ox / b.oy」的招（已全文核對），所以不需要 abilities.js 的 fitBox()；
+//   ‧ 夥伴（KB.Helper，type 'ally'）用同一份招式定義時 melee 為 false，判定維持 Round 9 尺寸。
 // ---------------------------------------------------------------------------
 (function () {
   'use strict';
@@ -23824,6 +24018,10 @@ KB.FONT_DATA = {
   const fbox = (p, o) => KB.hitbox(Object.assign({ x: 0, y: 0, owner: 'player', follow: p, life: 3, rehit: 8, pierce: true }, o));
   // 判定框：固定在世界座標（x / y 給中心點）
   const abox = (x, y, w, h, o) => KB.hitbox(Object.assign({ x: x - w / 2, y: y - h / 2, w, h, owner: 'player', life: 10, rehit: 0, pierce: true }, o || {}));
+  // Round 10 貼身判定框（絕對座標）：entity.js 的自動加倍規則只認「follow 卡比本體」的框，
+  //   所以絕對座標的貼身招要自己標明 melee。夥伴（KB.Helper，type 'ally'）用同一份招式定義時
+  //   p.type !== 'player' → melee 為 false，判定框維持 Round 9 尺寸（使用者只要求卡比本體變大）。
+  const mbox = (p, x, y, w, h, o) => abox(x, y, w, h, Object.assign({ melee: !!p && p.type === 'player' }, o || {}));
   const shoot = o => KB.shoot(Object.assign({ owner: 'player', life: 60, w: 10, h: 10, grav: 0, solid: true, fxHit: 'fx_hit', knock: 1.6 }, o));
   const parts = (x, y, cols, n, o) => KB.particles(x, y, cols, n, o);
 
@@ -23999,7 +24197,7 @@ KB.FONT_DATA = {
           d.box = fbox(p, { w: 26, h: 26, dmg: 4, type: 'fire', ox: -13, oy: -6, life: 3, rehit: 8, flipWithOwner: false });
           if (p.onGround && t > 3) {
             d.landed = true; killBox(p);
-            abox(p.cx, p.bottom - 14, 70, 36, { dmg: 7, type: 'fire', life: 14, rehit: 0, knock: 2.4, breakBlocks: true });
+            mbox(p, p.cx, p.bottom - 14, 70, 36, { dmg: 7, type: 'fire', life: 14, rehit: 0, knock: 2.4, breakBlocks: true });
             vx('shockwave', p.cx, p.bottom, { w: 40, h: 16, dir: 1, speed: 5, frames: 18, color: '#ff9020' });
             vx('shockwave', p.cx, p.bottom, { w: 40, h: 16, dir: -1, speed: 5, frames: 18, color: '#ff9020' });
             vx('ring', p.cx, p.bottom - 6, { r0: 4, r1: 44, frames: 16, color: '#ffe040', width: 3 });
@@ -24064,7 +24262,7 @@ KB.FONT_DATA = {
         if (t === 4 || t === 12 || t === 20) {
           const i = d.n++, x = p.cx + p.dir * (18 + i * 20), gy = groundY(p);
           shoot({ spr: 'proj_mix_spike_ice', x, y: gy - 18, vx: 0, vy: 0, dmg: 5, w: 12, h: 34, life: 24, solid: false, pierce: true, freeze: true, type: 'ice', destructible: false });
-          abox(x, gy - 20, 16, 40, { dmg: 5, type: 'ice', life: 8, rehit: 0, freeze: true, knock: 1.2, onHit: e => { e.vy = -4; } });
+          mbox(p, x, gy - 20, 16, 40, { dmg: 5, type: 'ice', life: 8, rehit: 0, freeze: true, knock: 1.2, onHit: e => { e.vy = -4; } });
           vx('burst', x, gy - 6, { n: 10, colors: ['#ffffff', '#b8f0ff'], speed: 2.2, life: 18, grav: 0.06, dir: -Math.PI / 2, spread: 0.8 });
           vx('ring', x, gy - 8, { r0: 2, r1: 20, frames: 12, color: '#b8f0ff', width: 2 });
           shake(3); sfx('ice');
@@ -24126,13 +24324,13 @@ KB.FONT_DATA = {
         vx('afterimage', p, { frames: 24, color: '#fff8c0', every: 1, alpha: 0.6 });
         vx('lightning', x0, y0, p.cx, p.cy, { color: '#fff8c0', frames: 12, jitter: 6, branches: 3 });
         vx('burst', x0, y0, { n: 12, colors: ['#fff8c0', '#ffffff'], speed: 2.6, life: 14, grav: 0 });
-        abox(p.cx, p.cy - 2, 40, 30, { dmg: 6, type: 'spark', life: 8, rehit: 0, knock: 2.2 });
+        mbox(p, p.cx, p.cy - 2, 40, 30, { dmg: 6, type: 'spark', life: 8, rehit: 0, knock: 2.2 });
         vx('slash', p.cx, p.cy - 2, 22, 0, { color: '#fff8c0', width: 3, frames: 10, arc: 2.4, flip: p.dir < 0 });
         // Round 9 空中變體：雷步在空中會沿著身體把電導到腳下的地面（否則空中 ↓X 打不到地面敵人）
         if (!p.onGround) {
           const gy = groundY(p);
           vx('lightning', p.cx, p.cy, p.cx, gy, { color: '#fff8c0', frames: 12, jitter: 6, branches: 3 });
-          abox(p.cx, gy - 15, 40, 30, { dmg: 6, type: 'spark', life: 8, rehit: 0, knock: 2.2 });
+          mbox(p, p.cx, gy - 15, 40, 30, { dmg: 6, type: 'spark', life: 8, rehit: 0, knock: 2.2 });
           vx('burst', p.cx, gy - 6, { n: 12, colors: ['#fff8c0', '#ffffff'], speed: 2.6, life: 16, grav: 0.04 });
         }
         shake(4); hitstop(2); sfx('teleport');
@@ -24686,7 +24884,10 @@ KB.FONT_DATA = {
         if (t <= 30) {
           const len = Math.min(62, 18 + t * 2);
           if (d.box) d.box.dead = true;
-          d.box = fbox(p, { w: len, h: 26, dmg: 2, type: 'ice', ox: 6, oy: -14, life: 3, rehit: 6, freeze: true, knock: 0.8 });
+          // Round 10：吐息框每幀重建且 len 會跨過 entity.js 的 48px 自動門檻（越吐越長 → 反而不再放大 = 突然縮水），
+          //   所以這裡明確標明 melee：卡比本體一律 ×2（和 abilities.js 的基本火焰吐息同步，混合版不能比成分還短），
+          //   夥伴（type 'ally'）維持 Round 9 長度。
+          d.box = fbox(p, { melee: p.type === 'player', w: len, h: 26, dmg: 2, type: 'ice', ox: 6, oy: -14, life: 3, rehit: 6, freeze: true, knock: 0.8 });
           for (let i = 0; i < 2; i++) {
             const dx = rnd(10, len + 8);
             parts(p.cx + p.dir * dx, p.cy - 2 + rnd(-1, 1) * dx * 0.18, ['#ffffff', '#b8f0ff', '#3f96d8'], 1, { spread: 0.4, grav: 0, life: 18, up: 0, vx: p.dir * 1.6, size: 2 });
@@ -24712,7 +24913,7 @@ KB.FONT_DATA = {
           if (p.onGround && t > 3) {
             d.landed = true; killBox(p);
             const gy = p.bottom;
-            abox(p.cx, gy - 16, 66, 36, { dmg: 6, type: 'ice', life: 12, rehit: 0, freeze: true, knock: 2 });
+            mbox(p, p.cx, gy - 16, 66, 36, { dmg: 6, type: 'ice', life: 12, rehit: 0, freeze: true, knock: 2 });
             for (const s of [-1, 1]) {
               const x = p.cx + s * 26;
               shoot({ spr: 'proj_mix_spike_ice', x, y: gy - 16, vx: 0, vy: 0, dmg: 4, w: 12, h: 30, life: 22, solid: false, pierce: true, freeze: true, type: 'ice', destructible: false });
@@ -24853,7 +25054,7 @@ KB.FONT_DATA = {
   function echo(p, o) {
     const air = !p.onGround, gy = groundY(p), x = p.cx + p.dir * 6;
     const w = air ? (o.w || 48) : Math.round((o.w || 48) * 0.75);
-    const h = abox(x, gy - 11, w, o.h || 24, {
+    const h = mbox(p, x, gy - 11, w, o.h || 24, {
       dmg: air ? (o.dmg || 4) : Math.max(2, (o.dmg || 4) - 2), type: o.type, life: 12, rehit: 0, knock: 1.2, freeze: !!o.freeze,
     });
     vx('ring', x, gy - 6, { r0: 3, r1: 26, frames: 12, color: o.color, width: 2 });
@@ -24872,7 +25073,7 @@ KB.FONT_DATA = {
       dur: 28, fps: 14, lock: true,
       start(p, d) {
         hop(p, -4.2); p.vx = p.dir * 1.1;
-        d.box = abox(p.cx + p.dir * 10, p.cy - 20, 32, 58, { dmg: 6, type: 'fire', life: 10, rehit: 0, knock: 2.2, onHit: e => { e.vy = -4.4; } });
+        d.box = mbox(p, p.cx + p.dir * 10, p.cy - 20, 32, 58, { dmg: 6, type: 'fire', life: 10, rehit: 0, knock: 2.2, onHit: e => { e.vy = -4.4; } });
         shoot({ spr: 'proj_mix_spike_fire', x: p.cx + p.dir * 10, y: p.cy - 26, vx: p.dir * 0.6, vy: -5.2, dmg: 4, w: 12, h: 30, life: 34, solid: false, pierce: true, type: 'fire', trail: '#ff9020' });
         vx('slash', p.cx + p.dir * 10, p.cy - 12, 24, -1.6, { color: '#ffb040', width: 3, frames: 12, arc: 2.4, flip: p.dir < 0 });
         vx('burst', p.cx + p.dir * 10, p.cy - 20, { n: 16, colors: ['#ffe040', '#ff9020', '#ff4010'], speed: 3, life: 22, grav: -0.04, dir: -Math.PI / 2, spread: 0.7 });
@@ -24896,7 +25097,7 @@ KB.FONT_DATA = {
         if (t === 8 && !d.done) {
           d.done = true;
           const gy = groundY(p), x = p.cx + p.dir * 28;
-          abox(x, gy - 13, 78, 22, { dmg: 6, type: 'fire', life: 16, rehit: 0, knock: 2, onHit: e => { e.vy = -3.2; } });
+          mbox(p, x, gy - 13, 78, 22, { dmg: 6, type: 'fire', life: 16, rehit: 0, knock: 2, onHit: e => { e.vy = -3.2; } });
           firePool(p.cx + p.dir * 16, gy, 48, 3);
           for (let i = 0; i < 3; i++) {
             vx('shockwave', p.cx + p.dir * (10 + i * 22), gy, { w: 30, h: 14, dir: p.dir, speed: 4.4, frames: 16, color: '#ff9020' });
@@ -24920,7 +25121,7 @@ KB.FONT_DATA = {
         if (t === 8 && !d.done) {
           d.done = true;
           const gy = groundY(p), x = p.cx + p.dir * 26;
-          abox(x, gy - 12, 74, 20, { dmg: 5, type: 'ice', life: 18, rehit: 0, freeze: true, knock: 1.2 });
+          mbox(p, x, gy - 12, 74, 20, { dmg: 5, type: 'ice', life: 18, rehit: 0, freeze: true, knock: 1.2 });
           for (let i = 0; i < 3; i++) {
             const sx = p.cx + p.dir * (16 + i * 20);
             shoot({ spr: 'proj_mix_spike_ice', x: sx, y: gy - 14, vx: 0, vy: 0, dmg: 4, w: 10, h: 26, life: 30, solid: false, pierce: true, freeze: true, type: 'ice', destructible: false, scale: 0.9 });
@@ -24947,7 +25148,7 @@ KB.FONT_DATA = {
         if (t % 2 === 0) parts(p.cx + rnd(-10, 10), p.cy + rnd(-8, 8), ['#ffffff', '#b8f0ff'], 2, { spread: 0.6, grav: 0.02, life: 14, up: 0, size: 1 });
         if (p.onGround && t > 3) {
           d.landed = true; killBox(p);
-          abox(p.cx, p.bottom - 13, 64, 32, { dmg: 7, type: 'ice', life: 14, rehit: 0, freeze: true, knock: 2 });
+          mbox(p, p.cx, p.bottom - 13, 64, 32, { dmg: 7, type: 'ice', life: 14, rehit: 0, freeze: true, knock: 2 });
           shoot({ spr: 'proj_mix_spike_ice', x: p.cx + p.dir * 22, y: p.bottom - 16, vx: 0, vy: 0, dmg: 5, w: 12, h: 30, life: 26, solid: false, pierce: true, freeze: true, type: 'ice', destructible: false });
           vx('ring', p.cx, p.bottom - 6, { r0: 4, r1: 40, frames: 16, color: '#b8f0ff', width: 3 });
           vx('burst', p.cx, p.bottom - 6, { n: 22, colors: ['#ffffff', '#b8f0ff', '#3f96d8'], speed: 3.2, life: 24, grav: 0.05, size: 2 });
@@ -24966,7 +25167,7 @@ KB.FONT_DATA = {
       start(p, d) {
         hop(p, -4.6);
         const x = p.cx + p.dir * 8;
-        d.box = abox(x, p.cy - 28, 26, 74, { dmg: 6, type: 'spark', life: 10, rehit: 0, knock: 2.4, onHit: e => { e.vy = -5; para9(e, 90); } });
+        d.box = mbox(p, x, p.cy - 28, 26, 74, { dmg: 6, type: 'spark', life: 10, rehit: 0, knock: 2.4, onHit: e => { e.vy = -5; para9(e, 90); } });
         vx('lightning', x, p.cy + 8, x, p.cy - 62, { color: '#fff8c0', frames: 14, jitter: 6, branches: 4 });
         vx('slash', x, p.cy - 14, 24, -1.7, { color: '#fff8c0', width: 3, frames: 12, arc: 2.6, flip: p.dir < 0 });
         vx('flash', '#fff8c0', 5, 0.4);
@@ -24987,7 +25188,7 @@ KB.FONT_DATA = {
         vx('afterimage', p, { frames: 22, color: '#fff8c0', every: 1, alpha: 0.6 });
         vx('lightning', x0, y0, p.cx, p.cy, { color: '#fff8c0', frames: 12, jitter: 7, branches: 3 });
         vx('lightning', p.cx, p.cy, p.cx + p.dir * 20, gy, { color: '#ffffff', frames: 10, jitter: 5, branches: 2 });
-        abox(p.cx + p.dir * 12, gy - 16, 46, 34, { dmg: 6, type: 'spark', life: 12, rehit: 0, knock: 2.2, onHit: e => para9(e, 100) });
+        mbox(p, p.cx + p.dir * 12, gy - 16, 46, 34, { dmg: 6, type: 'spark', life: 12, rehit: 0, knock: 2.2, onHit: e => para9(e, 100) });
         vx('slash', p.cx + p.dir * 10, gy - 16, 22, 0.5, { color: '#fff8c0', width: 3, frames: 10, arc: 2.4, flip: p.dir < 0 });
         vx('burst', p.cx + p.dir * 12, gy - 12, { n: 16, colors: ['#fff8c0', '#ffffff', '#4878f8'], speed: 3, life: 18, grav: 0.04 });
         shake(5); hitstop(2); sfx('teleport');
@@ -25148,7 +25349,7 @@ KB.FONT_DATA = {
       start(p, d) {
         hop(p, -4.4);
         const x = p.cx + p.dir * 10;
-        d.box = abox(x, p.cy - 20, 36, 56, { dmg: 7, type: 'fire', life: 12, rehit: 0, knock: 2.6, onHit: e => { e.vy = -5; } });
+        d.box = mbox(p, x, p.cy - 20, 36, 56, { dmg: 7, type: 'fire', life: 12, rehit: 0, knock: 2.6, onHit: e => { e.vy = -5; } });
         vx('slash', x, p.cy - 12, 26, -1.5, { color: '#ffb040', width: 4, frames: 12, arc: 2.5, flip: p.dir < 0 });
         vx('ring', x, p.cy - 10, { r0: 4, r1: 32, frames: 14, color: '#ffe040', width: 3 });
         vx('burst', x, p.cy - 18, { n: 20, colors: ['#ffe040', '#ff9020', '#ff4010'], speed: 3.2, life: 24, grav: -0.06, dir: -Math.PI / 2, spread: 0.8 });
@@ -25168,7 +25369,7 @@ KB.FONT_DATA = {
         if (t === 9 && !d.done) {
           d.done = true;
           const gy = groundY(p);
-          abox(p.cx, gy - 14, 90, 26, { dmg: 8, type: 'fire', life: 16, rehit: 0, knock: 2.6, onHit: e => { e.vy = -3.4; } });
+          mbox(p, p.cx, gy - 14, 90, 26, { dmg: 8, type: 'fire', life: 16, rehit: 0, knock: 2.6, onHit: e => { e.vy = -3.4; } });
           firePool(p.cx - 32, gy, 50, 3); firePool(p.cx + 32, gy, 50, 3);
           vx('shockwave', p.cx, gy, { w: 44, h: 18, dir: 1, speed: 5.2, frames: 18, color: '#ff9020' });
           vx('shockwave', p.cx, gy, { w: 44, h: 18, dir: -1, speed: 5.2, frames: 18, color: '#ff9020' });
@@ -25191,7 +25392,7 @@ KB.FONT_DATA = {
         if (t === 9 && !d.done) {
           d.done = true;
           const gy = groundY(p);
-          abox(p.cx + p.dir * 20, gy - 15, 64, 28, { dmg: 7, type: 'stone', life: 16, rehit: 0, knock: 2.2, onHit: e => { e.vy = -3.6; } });
+          mbox(p, p.cx + p.dir * 20, gy - 15, 64, 28, { dmg: 7, type: 'stone', life: 16, rehit: 0, knock: 2.2, onHit: e => { e.vy = -3.6; } });
           for (let i = 0; i < 3; i++) {
             const x = p.cx + p.dir * (16 + i * 20);
             shoot({ spr: 'proj_mix_spike_stone', x, y: gy - 16, vx: 0, vy: 0, dmg: 5, w: 12, h: 30, life: 28, solid: false, pierce: true, type: 'stone', destructible: false });
@@ -25217,7 +25418,7 @@ KB.FONT_DATA = {
         if (t % 3 === 0) parts(p.cx + rnd(-8, 8), p.cy, ['#c0b098', '#8a7a62'], 2, { spread: 0.5, grav: -0.04, life: 14, up: 0.3, size: 1 });
         if (p.onGround && t > 3) {
           d.landed = true; killBox(p);
-          abox(p.cx, p.bottom - 16, 84, 36, { dmg: 8, type: 'stone', life: 14, rehit: 0, knock: 2.6, breakBlocks: true });
+          mbox(p, p.cx, p.bottom - 16, 84, 36, { dmg: 8, type: 'stone', life: 14, rehit: 0, knock: 2.6, breakBlocks: true });
           for (const s of [-1, 1]) {
             shoot({ spr: 'proj_mix_orb_stone', x: p.cx + s * 12, y: p.bottom - 10, vx: s * 3.4, vy: -3.2, grav: 0.26, dmg: 5, w: 12, h: 12, life: 70, type: 'stone', bounce: 0.6, trail: '#c0b098' });
           }
@@ -25239,7 +25440,7 @@ KB.FONT_DATA = {
       start(p, d) {
         hop(p, -4);
         const x = p.cx + p.dir * 8;
-        d.box = abox(x, p.cy - 22, 34, 60, { dmg: 6, type: 'cutter', life: 10, rehit: 0, knock: 2, onHit: e => { e.vy = -4.2; } });
+        d.box = mbox(p, x, p.cy - 22, 34, 60, { dmg: 6, type: 'cutter', life: 10, rehit: 0, knock: 2, onHit: e => { e.vy = -4.2; } });
         for (const a of [-1.25, -1.6]) {
           shoot({ spr: 'proj_mix_wave_shadow', x, y: p.cy - 10, vx: Math.cos(a) * 4.2 * (p.dir < 0 ? -1 : 1), vy: Math.sin(a) * 4.6, dmg: 4, w: 12, h: 16, life: 40, type: 'cutter', pierce: true, solid: false, trail: '#b070f0' });
         }
@@ -25271,7 +25472,7 @@ KB.FONT_DATA = {
         if (t % 2 === 0) parts(p.cx + rnd(-10, 10), p.cy + rnd(-10, 10), ['#b070f0', '#6a30a8'], 1, { spread: 0.5, grav: 0, life: 12, up: 0, size: 1 });
         if (p.onGround && t > 3) {
           d.landed = true; killBox(p);
-          abox(p.cx, p.bottom - 13, 56, 26, { dmg: 6, type: 'cutter', life: 12, rehit: 0, knock: 2 });
+          mbox(p, p.cx, p.bottom - 13, 56, 26, { dmg: 6, type: 'cutter', life: 12, rehit: 0, knock: 2 });
           vx('ring', p.cx, p.bottom - 6, { r0: 3, r1: 34, frames: 14, color: '#b070f0', width: 2 });
           vx('burst', p.cx, p.bottom - 6, { n: 18, colors: ['#d8b0ff', '#b070f0', '#6a30a8'], speed: 3, life: 22, grav: 0.05 });
           shake(5); hitstop(2); sfx('cutter');
@@ -25336,7 +25537,7 @@ KB.FONT_DATA = {
       tick(p, d, t) {
         if (t === 4) {
           const x = p.cx + p.dir * 4;
-          d.box = abox(x, p.cy - 30, 28, 66, { dmg: 6, type: 'ice', life: 22, rehit: 8, freeze: true, knock: 1.2, onHit: e => { e.vy = -3.4; } });
+          d.box = mbox(p, x, p.cy - 30, 28, 66, { dmg: 6, type: 'ice', life: 22, rehit: 8, freeze: true, knock: 1.2, onHit: e => { e.vy = -3.4; } });
           vx('circle', x, p.cy - 26, { r: 22, frames: 20, color: '#b8f0ff', spin: 0.2 });
         }
         if (t >= 4 && t <= 26 && t % 2 === 0) {
@@ -25356,7 +25557,7 @@ KB.FONT_DATA = {
         if (t === 8 && !d.done) {
           d.done = true;
           const gy = groundY(p);
-          abox(p.cx + p.dir * 24, gy - 13, 70, 24, { dmg: 6, type: 'ice', life: 20, rehit: 0, freeze: true, knock: 1.6 });
+          mbox(p, p.cx + p.dir * 24, gy - 13, 70, 24, { dmg: 6, type: 'ice', life: 20, rehit: 0, freeze: true, knock: 1.6 });
           for (let i = 0; i < 3; i++) {
             const x = p.cx + p.dir * (18 + i * 22);
             shoot({ spr: 'proj_mix_spike_ice', x, y: gy - 13, vx: 0, vy: 0, dmg: 4, w: 10, h: 24, life: 26, solid: false, pierce: true, freeze: true, type: 'ice', destructible: false, scale: 0.85 });
@@ -25379,7 +25580,7 @@ KB.FONT_DATA = {
         if (t === 9 && !d.done) {
           d.done = true;
           const gy = groundY(p);
-          abox(p.cx, gy - 14, 78, 26, {
+          mbox(p, p.cx, gy - 14, 78, 26, {
             dmg: 7, type: 'spark', life: 26, rehit: 10, knock: 2, onHit: e => para9(e, 110),
             onUpdate(h) { if ((h.life & 3) === 0) vx('lightning', h.x + 2, h.y + h.h - 3, h.x + h.w - 2, h.y + h.h - 3, { color: '#fff8c0', frames: 6, jitter: 5, branches: 2 }); },
           });
@@ -25423,6 +25624,17 @@ KB.FONT_DATA = {
 // 蓄力門檻吃 KB.PROG.holdMul（Lv3 ×0.8），招式表上的數字一律是 Lv1 的門檻。
 // 特效一律透過 vx()（KB.VFX 沒載入時整組 no-op），判定一律走 KB.hitbox / KB.shoot。
 // 美術在 src/art/kirby_mix2.js（KB.MIXART2.build）。
+// ---------------------------------------------------------------------------
+// Round 10（貼身判定加倍）：使用者回饋「貼身招判定太小常被打死」→ 卡比本體的貼身招判定 ×2
+//   ‧ fbox()（跟隨卡比、原尺寸 ≤ 48×48）由 entity.js Hitbox 建構子自動 ×KB.PHYS.meleeScale，這裡不用動；
+//   ‧ mbox()（絕對座標的貼身招：↑X 直立框、↓X 地面斬、空中 X 落地衝擊、echo 餘波）明確帶 melee:true → ×2；
+//   ‧ 維持原樣（不放大）：KB.shoot / MixHoming / MixOrbit / Mix2Return 等投射物、投射物命中 / 撞牆的爆炸框、
+//     以敵人或遠處座標生成的框、持續場地框（火海 / 火牆 / 冰霧 / 電網 / 魔法陣 / 時間裂縫）、
+//     全畫面與蓄力必殺的大框（已經很大）、starmage 96px 光束（固定長度的遠程框）；
+//   ‧ 陷阱：每幀重建且尺寸會變的框（龍吐息 len 隨時間變長）不能靠自動門檻——len 跨過 48 就突然不放大，
+//     會出現「吐得越久判定越小」，所以那三招明確寫 melee: p.type === 'player'；
+//     本檔沒有「逐幀改寫 b.w / b.h / b.ox / b.oy」的招（已全文核對），所以不需要 abilities.js 的 fitBox()；
+//   ‧ 夥伴（KB.Helper，type 'ally'）用同一份招式定義時 melee 為 false，判定維持 Round 9 尺寸。
 // ---------------------------------------------------------------------------
 (function () {
   'use strict';
@@ -25514,6 +25726,10 @@ KB.FONT_DATA = {
   const fbox = (p, o) => KB.hitbox(Object.assign({ x: 0, y: 0, owner: 'player', follow: p, life: 3, rehit: 8, pierce: true }, o));
   // 判定框：固定在世界座標（x / y 給中心點）
   const abox = (x, y, w, h, o) => KB.hitbox(Object.assign({ x: x - w / 2, y: y - h / 2, w, h, owner: 'player', life: 10, rehit: 0, pierce: true }, o || {}));
+  // Round 10 貼身判定框（絕對座標）：entity.js 的自動加倍規則只認「follow 卡比本體」的框，
+  //   所以絕對座標的貼身招要自己標明 melee。夥伴（KB.Helper，type 'ally'）用同一份招式定義時
+  //   p.type !== 'player' → melee 為 false，判定框維持 Round 9 尺寸（使用者只要求卡比本體變大）。
+  const mbox = (p, x, y, w, h, o) => abox(x, y, w, h, Object.assign({ melee: !!p && p.type === 'player' }, o || {}));
   const shoot = o => KB.shoot(Object.assign({ owner: 'player', life: 60, w: 10, h: 10, grav: 0, solid: true, fxHit: 'fx_hit', knock: 1.6 }, o));
   const parts = (x, y, cols, n, o) => KB.particles(x, y, cols, n, o);
 
@@ -25837,7 +26053,7 @@ KB.FONT_DATA = {
         if (t % 6 === 4 && d.n < 5) {
           const i = d.n++, x = p.cx + p.dir * (16 + i * 22), gy = groundY(p);
           shoot({ spr: 'proj_mix2_shard_ice', x, y: gy - 20, vx: 0, vy: 0, dmg: 5, w: 14, h: 38, life: 30, solid: false, pierce: true, freeze: true, type: 'ice', destructible: false, scale: 1.2 });
-          abox(x, gy - 22, 18, 46, { dmg: 5, type: 'ice', life: 10, rehit: 0, freeze: true, knock: 1.4, onHit: e => { e.vy = -4.2; } });
+          mbox(p, x, gy - 22, 18, 46, { dmg: 5, type: 'ice', life: 10, rehit: 0, freeze: true, knock: 1.4, onHit: e => { e.vy = -4.2; } });
           vx('burst', x, gy - 8, { n: 12, colors: ['#ffffff', '#b8f0ff'], speed: 2.4, life: 20, grav: 0.05, dir: -Math.PI / 2, spread: 0.8 });
           vx('ring', x, gy - 10, { r0: 2, r1: 22, frames: 12, color: '#b8f0ff', width: 2 });
           shake(3); sfx('ice');
@@ -25912,7 +26128,7 @@ KB.FONT_DATA = {
           if (p.onGround && t > 3) {
             d.landed = true; killBox(p);
             const gy = p.bottom;
-            abox(p.cx, gy - 18, 80, 40, { dmg: 9, type: 'spark', life: 14, rehit: 0, knock: 2.8, breakBlocks: true, onHit: e => para(e, 120) });
+            mbox(p, p.cx, gy - 18, 80, 40, { dmg: 9, type: 'spark', life: 14, rehit: 0, knock: 2.8, breakBlocks: true, onHit: e => para(e, 120) });
             vx('lightning', p.cx, gy - 180, p.cx, gy, { color: '#ffffff', frames: 16, jitter: 10, branches: 5 });
             for (const s of [1, -1]) vx('shockwave', p.cx, gy, { w: 40, h: 16, dir: s, speed: 5.2, frames: 18, color: '#fff8c0' });
             vx('ring', p.cx, gy - 8, { r0: 4, r1: 50, frames: 18, color: '#ffffff', width: 3 });
@@ -25997,14 +26213,14 @@ KB.FONT_DATA = {
         const dx = dash(p, 52);
         vx('burst', ox, oy, { n: 14, colors: ['#ffe040', '#ff9020', '#c88850'], speed: 2.6, life: 18, grav: 0.05 });
         // 落點爆炎
-        abox(p.cx, p.cy - 2, 60, 48, { dmg: 7, type: 'fire', life: 12, rehit: 0, knock: 2.4, breakBlocks: true });
+        mbox(p, p.cx, p.cy - 2, 60, 48, { dmg: 7, type: 'fire', life: 12, rehit: 0, knock: 2.4, breakBlocks: true });
         vx('ring', p.cx, p.cy, { r0: 4, r1: 38, frames: 16, color: '#ffe040', width: 3 });
         vx('burst', p.cx, p.cy, { n: 22, colors: ['#ffe040', '#ff9020', '#ff4010'], speed: 3.4, life: 24, grav: 0.04, size: 2 });
         vx('flash', '#ff9020', 6, 0.45);
         // Round 9 空中變體：在空中施展時，替身的火會直接炸到腳下的地面
         if (!p.onGround) {
           const gy = groundY(p);
-          abox(p.cx, gy - 24, 60, 48, { dmg: 7, type: 'fire', life: 12, rehit: 0, knock: 2.4 });
+          mbox(p, p.cx, gy - 24, 60, 48, { dmg: 7, type: 'fire', life: 12, rehit: 0, knock: 2.4 });
           firePool(p.cx, gy, 44, 3);
           vx('ring', p.cx, gy - 10, { r0: 4, r1: 36, frames: 16, color: '#ffe040', width: 3 });
           vx('burst', p.cx, gy - 8, { n: 18, colors: ['#ffe040', '#ff9020', '#c88850'], speed: 3, life: 22, grav: 0.05 });
@@ -26017,7 +26233,7 @@ KB.FONT_DATA = {
         if (t === 12 && !d.blown) {
           d.blown = true;
           // 替身（燒起來的木頭）在原地引爆
-          abox(d.subX, d.subY, 54, 46, { dmg: 6, type: 'fire', life: 12, rehit: 0, knock: 2.2, breakBlocks: true });
+          mbox(p, d.subX, d.subY, 54, 46, { dmg: 6, type: 'fire', life: 12, rehit: 0, knock: 2.2, breakBlocks: true });
           vx('ring', d.subX, d.subY, { r0: 4, r1: 34, frames: 16, color: '#ff9020', width: 3 });
           vx('burst', d.subX, d.subY, { n: 24, colors: ['#ffe040', '#ff9020', '#c88850'], speed: 3.2, life: 24, grav: 0.06, size: 2 });
           vx('textPop', d.subX, d.subY - 16, '替身!', { color: '#ffe040', size: 8, frames: 30, rise: 0.5 });
@@ -26099,13 +26315,13 @@ KB.FONT_DATA = {
           shoot({ spr: 'proj_mix2_shard_ice', x: ox + s * 8, y: oy - 4, vx: s * 2.6, vy: -1.6, grav: 0.2, dmg: 3, w: 10, h: 20, life: 40, type: 'ice', freeze: true, destructible: false, rotSpeed: 0.2 * s });
         }
         // 落點斬擊
-        abox(p.cx, p.cy - 2, 44, 32, { dmg: 7, type: 'ice', life: 10, rehit: 0, freeze: true, knock: 2 });
+        mbox(p, p.cx, p.cy - 2, 44, 32, { dmg: 7, type: 'ice', life: 10, rehit: 0, freeze: true, knock: 2 });
         vx('slash', p.cx, p.cy - 2, 24, 0.1, { color: '#d8f4ff', width: 3, frames: 10, arc: 2.4, flip: p.dir < 0 });
         vx('flash', '#d8f4ff', 5, 0.4);
         // Round 9 空中變體：空中瞬移時在落點的地面立起兩片碎鏡冰刃
         if (!p.onGround) {
           const gy = groundY(p);
-          abox(p.cx, gy - 16, 44, 32, { dmg: 7, type: 'ice', life: 12, rehit: 0, freeze: true, knock: 2 });
+          mbox(p, p.cx, gy - 16, 44, 32, { dmg: 7, type: 'ice', life: 12, rehit: 0, freeze: true, knock: 2 });
           for (const s2 of [-1, 1]) {
             shoot({ spr: 'proj_mix2_shard_ice', x: p.cx + s2 * 14, y: gy - 14, vx: 0, vy: 0, dmg: 5, w: 12, h: 26, life: 26, solid: false, pierce: true, freeze: true, type: 'ice', destructible: false });
           }
@@ -26251,7 +26467,7 @@ KB.FONT_DATA = {
         }
         if (t === 20) {
           const gy = groundY(p);
-          abox(p.cx, gy - 14, 90, 32, { dmg: 6, type: 'stone', life: 14, rehit: 0, knock: 2.6, breakBlocks: true });
+          mbox(p, p.cx, gy - 14, 90, 32, { dmg: 6, type: 'stone', life: 14, rehit: 0, knock: 2.6, breakBlocks: true });
           for (const s of [1, -1]) {
             vx('shockwave', p.cx, gy, { w: 40, h: 16, dir: s, speed: 5, frames: 20, color: '#b0a090' });
             shoot({ spr: 'proj_mix2_shard_stone', x: p.cx + s * 30, y: gy - 14, vx: s * 1.2, vy: -3.2, grav: 0.26, dmg: 5, w: 12, h: 24, life: 50, type: 'stone', destructible: false, rotSpeed: 0.18 * s, breakBlocks: true });
@@ -26329,9 +26545,12 @@ KB.FONT_DATA = {
       start(p, d) { d.box = null; sfx('dragon_breath'); },
       tick(p, d, t) {
         if (t <= 34) {
-          const len = Math.min(78, 20 + t * 2.2);
+          const len = Math.round(Math.min(78, 20 + t * 2.2));   // Round 10：取整數，判定框放大後才會剛好 ×2（不出現半像素框）
           if (d.box) d.box.dead = true;
-          d.box = fbox(p, { w: len, h: 30, dmg: 3, type: 'fire', ox: 6, oy: -16, life: 3, rehit: 6, knock: 1 });
+          // Round 10：吐息框每幀重建且 len 會跨過 entity.js 的 48px 自動門檻（越吐越長 → 反而不再放大 = 突然縮水），
+          //   所以這裡明確標明 melee：卡比本體一律 ×2（和 abilities.js 的基本火焰吐息同步，混合版不能比成分還短），
+          //   夥伴（type 'ally'）維持 Round 9 長度。
+          d.box = fbox(p, { melee: p.type === 'player', w: len, h: 30, dmg: 3, type: 'fire', ox: 6, oy: -16, life: 3, rehit: 6, knock: 1 });
           for (let i = 0; i < 3; i++) {
             const dx = rnd(10, len + 10);
             parts(p.cx + p.dir * dx, p.cy - 2 + rnd(-1, 1) * dx * 0.2, ['#ffffff', '#ffe040', '#ff9020', '#ff4010'], 1,
@@ -26362,7 +26581,7 @@ KB.FONT_DATA = {
           if (p.onGround && t > 3) {
             d.landed = true; killBox(p);
             const gy = p.bottom;
-            abox(p.cx, gy - 18, 74, 38, { dmg: 7, type: 'fire', life: 14, rehit: 0, knock: 2.4, breakBlocks: true });
+            mbox(p, p.cx, gy - 18, 74, 38, { dmg: 7, type: 'fire', life: 14, rehit: 0, knock: 2.4, breakBlocks: true });
             for (const s of [-1, 1]) {
               const x = p.cx + s * 28;
               abox(x, gy - 24, 18, 48, { dmg: 5, type: 'fire', life: 26, rehit: 10, onUpdate(h) { if ((h.life & 3) === 0) { KB.fx('fx_fire', h.x + h.w / 2, h.y + h.h, { life: 12, fps: 12 }); parts(h.x + rnd(0, h.w), h.y + h.h - 4, ['#ffe040', '#ff9020'], 2, { spread: 0.4, grav: -0.12, life: 20, up: 1, size: 2 }); } } });
@@ -26428,7 +26647,10 @@ KB.FONT_DATA = {
         if (t <= 32) {
           const len = Math.min(70, 18 + t * 2);
           if (d.box) d.box.dead = true;
-          d.box = fbox(p, { w: len, h: 28, dmg: 3, type: 'spark', ox: 6, oy: -15, life: 3, rehit: 6, knock: 0.8, onHit: e => para(e, 60) });
+          // Round 10：吐息框每幀重建且 len 會跨過 entity.js 的 48px 自動門檻（越吐越長 → 反而不再放大 = 突然縮水），
+          //   所以這裡明確標明 melee：卡比本體一律 ×2（和 abilities.js 的基本火焰吐息同步，混合版不能比成分還短），
+          //   夥伴（type 'ally'）維持 Round 9 長度。
+          d.box = fbox(p, { melee: p.type === 'player', w: len, h: 28, dmg: 3, type: 'spark', ox: 6, oy: -15, life: 3, rehit: 6, knock: 0.8, onHit: e => para(e, 60) });
           if (t % 4 === 0) vx('lightning', p.cx + p.dir * 12, p.cy - 2, p.cx + p.dir * (len + 10), p.cy - 2 + rnd(-10, 10), { color: '#fff8c0', frames: 8, jitter: 6, branches: 2 });
           for (let i = 0; i < 2; i++) {
             const dx = rnd(10, len + 8);
@@ -26455,7 +26677,7 @@ KB.FONT_DATA = {
           if (p.onGround && t > 3) {
             d.landed = true; killBox(p);
             const gy = p.bottom;
-            abox(p.cx, gy - 18, 70, 36, { dmg: 7, type: 'spark', life: 14, rehit: 0, knock: 2.4, onHit: e => para(e, 120) });
+            mbox(p, p.cx, gy - 18, 70, 36, { dmg: 7, type: 'spark', life: 14, rehit: 0, knock: 2.4, onHit: e => para(e, 120) });
             for (const s of [-1, 1]) {
               const x = p.cx + s * 32;
               vx('lightning', x, gy - 190, x, gy, { color: '#fff8c0', frames: 14, jitter: 9, branches: 3 });
@@ -26699,7 +26921,7 @@ KB.FONT_DATA = {
         if (t === 10) {
           const gy = groundY(p);
           d.box = fbox(p, { w: 46, h: 36, dmg: 9, type: 'mech', ox: -2, oy: -19, life: 6, rehit: 0, knock: 3, breakBlocks: true, flipWithOwner: true });
-          abox(p.cx + p.dir * 24, gy - 14, 60, 30, { dmg: 6, type: 'mech', life: 12, rehit: 0, knock: 2.4, breakBlocks: true });
+          mbox(p, p.cx + p.dir * 24, gy - 14, 60, 30, { dmg: 6, type: 'mech', life: 12, rehit: 0, knock: 2.4, breakBlocks: true });
           for (const s of [1, -1]) vx('shockwave', p.cx, gy, { w: 38, h: 16, dir: s, speed: 5, frames: 18, color: '#ff9850' });
           vx('ring', p.cx + p.dir * 14, p.cy - 4, { r0: 4, r1: 40, frames: 16, color: '#ffd8a0', width: 3 });
           vx('burst', p.cx + p.dir * 20, p.cy - 4, { n: 24, colors: ['#ffd8a0', '#ff9850', '#d8dce8'], speed: 3.4, life: 24, grav: 0.06, size: 2 });
@@ -26739,7 +26961,7 @@ KB.FONT_DATA = {
         if (t === 26) {
           // 收尾：把鎚子砸回地面，順便把飛彈的煙壓下去
           const gy = groundY(p);
-          abox(p.cx + p.dir * 18, gy - 12, 48, 26, { dmg: 5, type: 'mech', life: 10, rehit: 0, knock: 2, breakBlocks: true });
+          mbox(p, p.cx + p.dir * 18, gy - 12, 48, 26, { dmg: 5, type: 'mech', life: 10, rehit: 0, knock: 2, breakBlocks: true });
           vx('shockwave', p.cx, gy, { w: 30, h: 14, dir: p.dir, speed: 4.4, frames: 14, color: '#ff9850' });
           shake(5); sfx('hammer');
         }
@@ -26795,7 +27017,7 @@ KB.FONT_DATA = {
   function echo(p, o) {
     const air = !p.onGround, gy = groundY(p), x = p.cx + p.dir * 6;
     const w = air ? (o.w || 48) : Math.round((o.w || 48) * 0.75);
-    const h = abox(x, gy - 11, w, o.h || 24, {
+    const h = mbox(p, x, gy - 11, w, o.h || 24, {
       dmg: air ? (o.dmg || 4) : Math.max(2, (o.dmg || 4) - 2), type: o.type, life: 12, rehit: 0, knock: 1.2, freeze: !!o.freeze,
       onHit: o.para ? (e => para(e, 100)) : undefined,
     });
@@ -26859,7 +27081,7 @@ KB.FONT_DATA = {
       start(p, d) {
         hop(p, -4.4);
         const x = p.cx + p.dir * 8;
-        d.box = abox(x, p.cy - 20, 32, 54, { dmg: 7, type: 'ice', life: 12, rehit: 0, freeze: true, knock: 2.4, onHit: e => { e.vy = -5; } });
+        d.box = mbox(p, x, p.cy - 20, 32, 54, { dmg: 7, type: 'ice', life: 12, rehit: 0, freeze: true, knock: 2.4, onHit: e => { e.vy = -5; } });
         for (const s of [-1, 1]) {
           shoot({ spr: 'proj_mix2_shard_ice', x, y: p.cy - 22, vx: s * 1.6, vy: -4.6, grav: 0.2, dmg: 4, w: 10, h: 20, life: 44, type: 'ice', freeze: true, destructible: false, rotSpeed: 0.22 * s });
         }
@@ -26887,7 +27109,7 @@ KB.FONT_DATA = {
         if (t % 3 === 0) parts(p.cx + rnd(-8, 8), p.cy, ['#ffffff', '#b8f0ff'], 2, { spread: 0.5, grav: 0, life: 14, up: 0, size: 1 });
         if (p.onGround && t > 3) {
           d.landed = true; killBox(p);
-          abox(p.cx, p.bottom - 15, 68, 34, { dmg: 8, type: 'ice', life: 16, rehit: 0, freeze: true, knock: 2.4 });
+          mbox(p, p.cx, p.bottom - 15, 68, 34, { dmg: 8, type: 'ice', life: 16, rehit: 0, freeze: true, knock: 2.4 });
           for (const s of [-1, 1]) {
             shoot({ spr: 'proj_mix2_shard_ice', x: p.cx + s * 26, y: p.bottom - 14, vx: 0, vy: 0, dmg: 5, w: 12, h: 26, life: 26, solid: false, pierce: true, freeze: true, type: 'ice', destructible: false });
           }
@@ -26908,7 +27130,7 @@ KB.FONT_DATA = {
       start(p, d) {
         hop(p, -4.6);
         const x = p.cx + p.dir * 8;
-        d.box = abox(x, p.cy - 26, 24, 68, { dmg: 6, type: 'spark', life: 12, rehit: 0, knock: 2.4, onHit: e => { e.vy = -4.8; para(e, 110); } });
+        d.box = mbox(p, x, p.cy - 26, 24, 68, { dmg: 6, type: 'spark', life: 12, rehit: 0, knock: 2.4, onHit: e => { e.vy = -4.8; para(e, 110); } });
         vx('lightning', x, p.cy + 8, x, p.cy - 58, { color: '#ffe860', frames: 14, jitter: 6, branches: 4 });
         vx('slash', x, p.cy - 14, 25, -1.6, { color: '#ffe860', width: 3, frames: 12, arc: 2.6, flip: p.dir < 0 });
         vx('flash', '#ffe860', 5, 0.4);
@@ -26928,7 +27150,7 @@ KB.FONT_DATA = {
         if (t === 9 && !d.done) {
           d.done = true;
           const gy = groundY(p);
-          abox(p.cx + p.dir * 18, gy - 12, 84, 22, { dmg: 7, type: 'spark', life: 18, rehit: 0, knock: 2, onHit: e => para(e, 130) });
+          mbox(p, p.cx + p.dir * 18, gy - 12, 84, 22, { dmg: 7, type: 'spark', life: 18, rehit: 0, knock: 2, onHit: e => para(e, 130) });
           for (let i = 0; i < 3; i++) {
             const x = p.cx + p.dir * (14 + i * 26);
             vx('lightning', x, gy - 4, x, gy - 34, { color: i & 1 ? '#ffffff' : '#ffe860', frames: 12, jitter: 6, branches: 3 });
@@ -26949,7 +27171,7 @@ KB.FONT_DATA = {
       start(p, d) {
         hop(p, -4.2);
         const x = p.cx + p.dir * 6;
-        d.box = abox(x, p.cy - 22, 30, 56, { dmg: 6, type: 'fire', life: 10, rehit: 0, knock: 2, onHit: e => { e.vy = -4.4; } });
+        d.box = mbox(p, x, p.cy - 22, 30, 56, { dmg: 6, type: 'fire', life: 10, rehit: 0, knock: 2, onHit: e => { e.vy = -4.4; } });
         for (let i = -1; i <= 1; i++) {
           shoot({ spr: 'proj_mix2_star_fire', x, y: p.cy - 14, vx: i * 1.8, vy: -5.4, dmg: 4, w: 12, h: 12, life: 40, type: 'fire', pierce: true, solid: false, rotSpeed: 0.4, trail: '#ff9020' });
         }
@@ -26990,7 +27212,7 @@ KB.FONT_DATA = {
       start(p, d) {
         hop(p, -4.2);
         const x = p.cx + p.dir * 6;
-        d.box = abox(x, p.cy - 24, 28, 58, { dmg: 6, type: 'ice', life: 12, rehit: 0, freeze: true, knock: 1.8, onHit: e => { e.vy = -4.2; } });
+        d.box = mbox(p, x, p.cy - 24, 28, 58, { dmg: 6, type: 'ice', life: 12, rehit: 0, freeze: true, knock: 1.8, onHit: e => { e.vy = -4.2; } });
         for (let i = 0; i < 3; i++) {
           shoot({ spr: 'proj_mix2_shard_ice', x: x + (i - 1) * 7, y: p.cy - 10 - i * 8, vx: (i - 1) * 0.9, vy: -5, dmg: 4, w: 10, h: 22, life: 38, type: 'ice', freeze: true, solid: false, pierce: true, destructible: false });
         }
@@ -27074,7 +27296,7 @@ KB.FONT_DATA = {
       start(p, d) {
         hop(p, -4);
         const x = p.cx + p.dir * 10;
-        d.box = abox(x, p.cy - 22, 32, 62, { dmg: 7, type: 'stone', life: 14, rehit: 0, knock: 2.6, onHit: e => { e.vy = -5.2; } });
+        d.box = mbox(p, x, p.cy - 22, 32, 62, { dmg: 7, type: 'stone', life: 14, rehit: 0, knock: 2.6, onHit: e => { e.vy = -5.2; } });
         for (const s of [-1, 1]) {
           shoot({ spr: 'proj_mix2_shard_stone', x: x + s * 8, y: p.cy - 24, vx: s * 1.4, vy: -4.8, grav: 0.24, dmg: 5, w: 12, h: 24, life: 50, type: 'stone', destructible: false, rotSpeed: 0.18 * s });
         }
@@ -27102,7 +27324,7 @@ KB.FONT_DATA = {
         if (t % 3 === 0) parts(p.cx + rnd(-10, 10), p.cy, ['#d8ccb8', '#a89078'], 2, { spread: 0.5, grav: -0.04, life: 14, up: 0.3, size: 2 });
         if (p.onGround && t > 3) {
           d.landed = true; killBox(p);
-          abox(p.cx, p.bottom - 16, 96, 36, { dmg: 9, type: 'stone', life: 16, rehit: 0, knock: 2.8, breakBlocks: true });
+          mbox(p, p.cx, p.bottom - 16, 96, 36, { dmg: 9, type: 'stone', life: 16, rehit: 0, knock: 2.8, breakBlocks: true });
           for (const s of [-1, 1]) {
             vx('shockwave', p.cx, p.bottom, { w: 48, h: 20, dir: s, speed: 5.4, frames: 20, color: '#c0b098' });
             shoot({ spr: 'proj_mix2_shard_stone', x: p.cx + s * 16, y: p.bottom - 12, vx: s * 2.6, vy: -3.6, grav: 0.26, dmg: 5, w: 12, h: 24, life: 50, type: 'stone', destructible: false, rotSpeed: 0.2 * s });
@@ -27125,7 +27347,7 @@ KB.FONT_DATA = {
       tick(p, d, t) {
         if (t === 4) {
           const x = p.cx + p.dir * 4;
-          d.box = abox(x, p.cy - 32, 28, 68, { dmg: 6, type: 'fire', life: 24, rehit: 8, knock: 1.4, onHit: e => { e.vy = -3.6; } });
+          d.box = mbox(p, x, p.cy - 32, 28, 68, { dmg: 6, type: 'fire', life: 24, rehit: 8, knock: 1.4, onHit: e => { e.vy = -3.6; } });
           vx('circle', x, p.cy - 28, { r: 22, frames: 22, color: '#ff9020', spin: 0.24 });
         }
         if (t >= 4 && t <= 28 && t % 2 === 0) {
@@ -27145,7 +27367,7 @@ KB.FONT_DATA = {
         if (t === 8 && !d.done) {
           d.done = true;
           const gy = groundY(p);
-          abox(p.cx + p.dir * 24, gy - 13, 72, 24, { dmg: 7, type: 'fire', life: 18, rehit: 0, knock: 2, onHit: e => { e.vy = -3; } });
+          mbox(p, p.cx + p.dir * 24, gy - 13, 72, 24, { dmg: 7, type: 'fire', life: 18, rehit: 0, knock: 2, onHit: e => { e.vy = -3; } });
           firePool(p.cx + p.dir * 18, gy, 50, 3); firePool(p.cx + p.dir * 48, gy, 50, 3);
           for (let i = 0; i < 3; i++) vx('line', p.cx, gy - 4 - i * 4, p.cx + p.dir * 60, gy - 4 - i * 4, { color: i === 1 ? '#ffe040' : '#ff5030', width: 1, frames: 12 });
           vx('burst', p.cx + p.dir * 24, gy - 6, { n: 20, colors: ['#ffe040', '#ff9020', '#ff4010'], speed: 3.2, life: 24, grav: 0.04 });
@@ -27163,7 +27385,7 @@ KB.FONT_DATA = {
       tick(p, d, t) {
         if (t === 4) {
           const x = p.cx + p.dir * 4;
-          d.box = abox(x, p.cy - 33, 26, 70, { dmg: 6, type: 'spark', life: 22, rehit: 8, knock: 1.4, onHit: e => { e.vy = -3.8; para(e, 110); } });
+          d.box = mbox(p, x, p.cy - 33, 26, 70, { dmg: 6, type: 'spark', life: 22, rehit: 8, knock: 1.4, onHit: e => { e.vy = -3.8; para(e, 110); } });
           vx('lightning', x, p.cy + 6, x, p.cy - 62, { color: '#b0d8ff', frames: 16, jitter: 7, branches: 4 });
         }
         if (t >= 4 && t <= 26 && t % 3 === 0) {
@@ -27183,7 +27405,7 @@ KB.FONT_DATA = {
         if (t === 8 && !d.done) {
           d.done = true;
           const gy = groundY(p);
-          abox(p.cx + p.dir * 24, gy - 13, 76, 24, { dmg: 7, type: 'spark', life: 20, rehit: 0, knock: 2, onHit: e => para(e, 130) });
+          mbox(p, p.cx + p.dir * 24, gy - 13, 76, 24, { dmg: 7, type: 'spark', life: 20, rehit: 0, knock: 2, onHit: e => para(e, 130) });
           for (let i = 0; i < 4; i++) {
             const x = p.cx + p.dir * (10 + i * 20);
             vx('lightning', x, gy - 3, x + p.dir * 18, gy - 3, { color: i & 1 ? '#ffffff' : '#b0d8ff', frames: 10, jitter: 5, branches: 2 });
@@ -27246,7 +27468,7 @@ KB.FONT_DATA = {
       start(p, d) {
         hop(p, -4.2);
         const x = p.cx + p.dir * 8;
-        d.box = abox(x, p.cy - 22, 30, 58, { dmg: 6, type: 'cutter', life: 14, rehit: 0, knock: 1.4, onHit: e => { e.vy = -5.4; } });
+        d.box = mbox(p, x, p.cy - 22, 30, 58, { dmg: 6, type: 'cutter', life: 14, rehit: 0, knock: 1.4, onHit: e => { e.vy = -5.4; } });
         for (const s of [-1, 1]) {
           shoot({ spr: 'proj_mix2_star_void', x, y: p.cy - 16, vx: s * 1.6, vy: -5, dmg: 4, w: 12, h: 12, life: 44, type: 'cutter', pierce: true, solid: false, rotSpeed: 0.36, trail: '#9060e0' });
         }
@@ -27287,7 +27509,7 @@ KB.FONT_DATA = {
         if (t % 2 === 0) parts(p.cx + rnd(-12, 12), p.cy + rnd(-12, 12), ['#c0a8ff', '#9060e0'], 1, { spread: 0.4, grav: 0, life: 14, up: 0, size: 1 });
         if (p.onGround && t > 3) {
           d.landed = true; killBox(p);
-          abox(p.cx, p.bottom - 15, 64, 32, { dmg: 8, type: 'cutter', life: 14, rehit: 0, knock: 2.4 });
+          mbox(p, p.cx, p.bottom - 15, 64, 32, { dmg: 8, type: 'cutter', life: 14, rehit: 0, knock: 2.4 });
           for (let i = 0; i < 3; i++) vx('ring', p.cx, p.bottom - 8, { r0: 4 + i * 10, r1: 44, frames: 16 + i * 3, color: '#c0a8ff', width: 2 });
           vx('burst', p.cx, p.bottom - 6, { n: 24, colors: ['#ffffff', '#c0a8ff', '#9060e0', '#2a1040'], speed: 3.6, life: 26, grav: 0.04 });
           vx('textPop', p.cx, p.y - 12, 'CRUSH!', { color: '#c0a8ff', size: 8, frames: 30, rise: 0.5 });
@@ -27308,7 +27530,7 @@ KB.FONT_DATA = {
         if (t === 10 && !d.done) {
           d.done = true;
           const gy = groundY(p);
-          abox(p.cx, gy - 15, 80, 28, { dmg: 8, type: 'mech', life: 18, rehit: 0, knock: 2.6, breakBlocks: true, onHit: e => { e.vy = -3.2; } });
+          mbox(p, p.cx, gy - 15, 80, 28, { dmg: 8, type: 'mech', life: 18, rehit: 0, knock: 2.6, breakBlocks: true, onHit: e => { e.vy = -3.2; } });
           for (const s of [-1, 1]) {
             vx('shockwave', p.cx, gy, { w: 42, h: 18, dir: s, speed: 5, frames: 18, color: '#ff9850' });
             shoot({ spr: 'proj_mix2_rocket_steel', x: p.cx + s * 20, y: gy - 10, vx: s * 3.6, vy: -1.2, grav: 0.2, dmg: 5, w: 16, h: 10, life: 46, type: 'mech', dir: s, trail: '#ffd8a0' });
@@ -27554,6 +27776,9 @@ KB.FONT_DATA = {
     restartAttack() { this.setState('idle'); this.startAttack(); }
 
     // 石頭系（player.js 的 startStone 走的是玩家專屬狀態機）：夥伴改成 60 幀的原地石化判定框
+    // Round 10（貼身判定加倍）：夥伴的判定框一律維持 Round 9 尺寸。
+    //   entity.js 的自動規則要求 follow.type === 'player'，夥伴是 'ally' → 不會被放大；
+    //   夥伴用玩家能力定義出招時（callDef），abilities_* 的 mbox() 也會看 p.type 而傳 melee:false。
     startStone() {
       this.setState('attack'); this.attackTimer = 60; this.attackLock = true; this.stoneMode = 60;
       this.vx = 0; sfx('stone');
@@ -27624,7 +27849,8 @@ KB.FONT_DATA = {
       KB.particles(this.cx, this.bottom, ['#f0e0c0', '#ffffff'], 6, { spread: 1.6, life: 18, up: 0.8 });
     }
 
-    /** 落地雙向衝擊波（夥伴版 groundWave；判定框 owner 'player' + fromHelper） */
+    /** 落地雙向衝擊波（夥伴版 groundWave；判定框 owner 'player' + fromHelper）
+     *  Round 10：絕對座標且 owner 'player'，但沒有 follow → entity.js 不會自動放大；夥伴維持原尺寸（40×18）。 */
     stompWave() {
       const g = KB.game;
       if (g) { g.shake = Math.max(g.shake || 0, 6); g.freezeT = Math.max(g.freezeT || 0, 3); }
@@ -27999,7 +28225,8 @@ KB.FONT_DATA = {
       if (Math.abs(dx) < 6 || this.unionT <= 0) { this.unionT = 0; this.unionFire(); }
     }
 
-    /** 合體技的必殺：把 abilityData 蓄滿 → 放開（重用各能力自己的蓄力必殺） */
+    /** 合體技的必殺：把 abilityData 蓄滿 → 放開（重用各能力自己的蓄力必殺）
+     *  Round 10：合體衝擊框同樣不放大（無 follow、且合體技本來就是大招）。 */
     unionFire() {
       const d = this.abilityDef;
       this.dir = this.unionDir >= 0 ? 1 : -1;
@@ -38431,9 +38658,14 @@ KB.FONT_DATA = {
   }
   A.bosses = bosses;
   /** 覺醒招判定框（共用選項 → KB.hitbox），一律帶 awaken 旗標 */
+  // Round 10（貼身判定加倍）：覺醒招一律「不放大」——
+  //   走這裡的框全是 bigbox() 產生的全畫面框（預設 288×208）或追著畫面外魔王的大框（≥ 64×64），
+  //   本來就遠大於 entity.js 的 48×48 門檻，而且是定點 / 全畫面招，放大只會讓演出與判定對不上。
+  //   明確寫死 melee: !!o.melee（預設 false）當保險，行為與 Round 9 完全相同；
+  //   將來若真要做「貼身小框的覺醒招」，在該招的 opts 傳 melee: true 就好。
   function mkbox(x, y, w, h, o, follow) {
     const hb = KB.hitbox({
-      x, y, w, h,
+      x, y, w, h, melee: !!o.melee,
       dmg: o.dmg === undefined ? 10 : o.dmg,
       owner: 'player', type: o.type || 'awaken', life: o.life || 4,
       rehit: o.rehit || 0, pierce: true, knock: o.knock === undefined ? 2 : o.knock,

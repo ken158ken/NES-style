@@ -5,6 +5,9 @@
   B. ninja 壁跳：貼牆 + 跳 → 反向彈起
   C. 4 敵人（pistolo / kagedee / ronin / archerwaddle）：生成站地、會攻擊、可被吸入並給對應能力、會被劍打死
   D. 全程監看 pageerror / console.error；MISSING SPRITES 必須為空
+  E. Round 10 貼身判定：4 能力每一招逐一比對判定框 w/h/w0/h0/meleeScaled ——
+     貼身招必須 meleeScaled == KB.PHYS.meleeScale（w = w0×2、h = h0×2），
+     遠程（gunner 全招 / 弓的箭 / 手裡劍）不該產生放大框，居合一閃與陷阱爆炸維持原尺寸
 用法：python tools/test_weapons.py [--only gunner,ninja,enemies] [--hitbox] [-v] [--shots]
 （測試地圖與頁面輔助函式直接沿用 tools/enemy_test.py 的 Harness / HOOK_JS / TEST_LEVEL）
 """
@@ -73,7 +76,8 @@ EXTRA = {
     'X 手裡剎三連':    ('射出 3 枚 proj_shuriken',      has_proj('proj_shuriken', 3)),
     '必殺 影分身斬':    ('產生忍者判定框',               has_box('ninja')),
     '蓄力 居合一閃':    ('產生 160px blade 判定框',       lambda sp, S: any(x['type'] == 'hitbox' and x['owner'] == 'player' and x['kind'] == 'blade' and x['w'] >= 150 for x in sp)),
-    '空中 X 落下斬':    ('落地左右各一道衝擊判定',        lambda sp, S: len([x for x in sp if x['type'] == 'hitbox' and x['owner'] == 'player' and x['kind'] == 'blade' and x['w'] == 40]) >= 2),
+    # Round 10：落地左右衝擊由 40×18 放大成 80×36（melee:true）
+    '空中 X 落下斬':    ('落地左右各一道 80px 衝擊判定',  lambda sp, S: len([x for x in sp if x['type'] == 'hitbox' and x['owner'] == 'player' and x['kind'] == 'blade' and x['w'] == 80 and x['h'] == 36]) >= 2),
     'X 射箭':          ('射出 proj_arrow',              has_proj('proj_arrow')),
     '蓄力 貫穿箭':      ('射出 proj_arrow_big',          has_proj('proj_arrow_big')),
     '必殺 流星箭':      ('射出 proj_arrow_meteor',       has_proj('proj_arrow_meteor')),
@@ -364,6 +368,109 @@ def phase_charge(h, only):
         run_charge(h, keys)
 
 
+# ---------------------------------------------------------------------------
+# E. Round 10 貼身判定加倍（melee-weapons）
+#    規則在 src/entity.js 的 Hitbox 建構子；KB.PHYS.meleeScale = 2。
+#    這裡逐招把「實際生出來的玩家判定框」抓下來，跟期望表對照：
+#      (w0, h0, w, h, meleeScaled) —— 貼身招 meleeScaled == 2 且尺寸剛好翻倍；
+#      遠程 / 全畫面 / 放置型 meleeScaled == 0 且尺寸不變。
+# ---------------------------------------------------------------------------
+R10_HOOK = r"""() => {
+  window.__mb = [];
+  const os = KB.spawn;
+  KB.spawn = e => {
+    if (e && e.type === 'hitbox' && e.owner === 'player')
+      __mb.push({ kind: e.kind, w: e.w, h: e.h, w0: e.w0, h0: e.h0, ms: e.meleeScaled || 0, follow: !!e.follow });
+    return os(e);
+  };
+  window.__mbreset = () => { __mb.length = 0; };
+  return true;
+}"""
+
+_R10_PLACE = """(o)=>{
+  const p = KB.player, G = 160, PH = 15;
+  p.dir = 1; p.vx = 0; p.vy = 0;
+  p.x = 96; p.y = G - PH - (o.ah | 0);
+  if (o.ah > 0) { p.onGround = false; p.coyoteT = 0; }
+  __kb.step(1); __mbreset();
+  return { px: +p.x.toFixed(1), py: +p.y.toFixed(1), onGround: p.onGround };
+}"""
+
+T = ('attack', 2)          # 點一下 X
+R = (None, 10)             # 放開
+# (ability, 招, 離地高度, 按鍵序列, 觀察幀數, 是否要敵人, 期望的 (w0,h0,w,h,ms) 集合)
+R10_CASES = [
+    # ---- gunner：五招全是投射物，一個判定框都不該有（遠程維持）----
+    ('gunner', 'X 雙槍連射',   0,  [('attack', 14), R],                     40, False, set()),
+    ('gunner', '↑+X 對空三連', 0,  [('up', 2), ('up,attack', 3), R],        40, False, set()),
+    ('gunner', '↓+X 蓄力霰彈', 0,  [('down', 2), ('down,attack', 3), R],    50, False, set()),
+    ('gunner', '空中 X 俯衝掃射', 46, [(None, 2), ('attack', 20), R],       60, False, set()),
+    ('gunner', '必殺 子彈時間', 0,  [('attack', 70), R],                    90, False, set()),
+    # ---- ninja ----
+    ('ninja', 'X 手裡剎三連',  0,  [('attack', 6), R],                      50, False, set()),
+    ('ninja', '↑+X 昇龍手裡劍', 0, [('up', 2), ('up,attack', 3), R],        50, False, {(22, 32, 44, 64, 2)}),
+    ('ninja', '↓+X 替身瞬移',  0,  [('down', 2), ('down,attack', 3), R],    60, False, {(32, 30, 64, 60, 2)}),
+    ('ninja', '空中 X 飛踢',   46, [(None, 2), ('attack', 3), R],           60, False, {(24, 22, 48, 44, 2)}),
+    ('ninja', '必殺 影分身斬', 0,  [('attack', 56), R],                     70, False, {(34, 28, 68, 56, 2)}),
+    # ---- blade ----
+    ('blade', 'X 三段連斬',    0,  [T, R, T, R, T, R],                      50, False,
+     {(26, 20, 52, 40, 2), (26, 26, 52, 52, 2), (30, 32, 60, 64, 2)}),
+    ('blade', '↑+X 上撩斬',    0,  [('up', 2), ('up,attack', 3), R],        50, False, {(24, 34, 48, 68, 2)}),
+    ('blade', '↓+X 地摺斬（地面）', 0, [('down', 2), ('down,attack', 3), R], 50, False, {(34, 14, 68, 28, 2)}),
+    ('blade', '↓+X 地摺斬（空中）', 30, [('down', 2), ('down,attack', 3), R], 60, False, {(28, 30, 56, 60, 2)}),
+    ('blade', '空中 X 落下斬', 46, [(None, 2), ('attack', 3), R],           80, False,
+     {(18, 26, 36, 52, 2), (40, 18, 80, 36, 2)}),
+    ('blade', '必殺 居合一閃', 0,  [('attack', 76), R],                     70, False,
+     {(26, 20, 52, 40, 2), (160, 36, 160, 36, 0)}),
+    # ---- bow ----
+    ('bow', 'X 射箭',          0,  [('attack', 6), R],                      50, False, set()),
+    ('bow', '↑+X 對空連射',    0,  [('up', 2), ('up,attack', 3), R],        50, False, {(22, 26, 44, 52, 2)}),
+    ('bow', '↓+X 陷阱箭',      0,  [('down', 2), ('down,attack', 3), R],   200, True,  {(40, 34, 40, 34, 0)}),
+    ('bow', '空中 X 箭雨',     46, [(None, 2), ('attack', 4), R],           60, False, set()),
+    ('bow', '蓄力 貫穿箭',     0,  [('attack', 48), R],                     60, False, set()),
+]
+
+
+def r10_run(h, ability, ah, seq, wait, need_enemy):
+    h.goto(6, 9, ability=ability, immune=True)
+    if need_enemy:
+        h.spawn('waddledee', 11, 9, d=-1)
+    h.run(6, 6)
+    placed = h.ev(_R10_PLACE, dict(ah=ah))
+    for keys, n in seq:
+        h.run(n, n, keys=keys)
+    h.release()
+    h.run(wait, 10)
+    return h.ev("()=>__mb.slice()"), placed
+
+
+def phase_round10(h, only):
+    ms = h.ev("()=>KB.PHYS.meleeScale")
+    check('Round 10: KB.PHYS.meleeScale == 2', ms == 2, ms)
+    for ability, label, ah, seq, wait, need_enemy, want in R10_CASES:
+        if only and ability not in only: continue
+        nm = f'{ability} [{label}]'
+        try:
+            mb, placed = r10_run(h, ability, ah, seq, wait, need_enemy)
+        except Exception as ex_:
+            check(nm + ': raised', False, repr(ex_)); continue
+        got = {(m['w0'], m['h0'], m['w'], m['h'], m['ms']) for m in mb}
+        info = dict(got=sorted(got), want=sorted(want), placed=placed)
+        if want:
+            check(nm + ': 判定框尺寸符合 Round 10 期望', got == want, info)
+        else:
+            check(nm + ': 遠程招不產生玩家判定框', not got, info)
+        # 通則：放大過的框一定剛好 ×meleeScale；沒放大的框尺寸必須等於原尺寸
+        for m in mb:
+            tag = f"{nm} {m['kind']} {m['w0']}x{m['h0']}"
+            if m['ms']:
+                check(tag + ': 貼身框 meleeScaled == 2 且尺寸翻倍',
+                      m['ms'] == ms and m['w'] == round(m['w0'] * ms) and m['h'] == round(m['h0'] * ms), m)
+            else:
+                check(tag + ': 未放大的框尺寸不變（遠程 / melee:false）',
+                      m['w'] == m['w0'] and m['h'] == m['h0'], m)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--only', default='')
@@ -383,6 +490,7 @@ def main():
         pg.wait_for_function('()=>window.__kb && KB.LEVELS')
         pg.evaluate(TEST_LEVEL)
         pg.evaluate(HOOK_JS)
+        pg.evaluate(R10_HOOK)
         h = Harness(pg, a.shots, a.hitbox)
         if not only or 'defs' in only:
             print('-' * 8, 'defs'); phase_defs(h)
@@ -402,6 +510,11 @@ def main():
             print('-' * 8, 'Round 9 四方向招式（12 能力 × 5）')
             try: phase_round9(h, r9only)
             except Exception as ex: check('Round 9 dir moves: raised', False, repr(ex))
+        r10only = [o for o in only if o in ('gunner', 'ninja', 'blade', 'bow')]
+        if not only or r10only or 'r10' in only:
+            print('-' * 8, 'Round 10 貼身判定加倍')
+            try: phase_round10(h, r10only)
+            except Exception as ex: check('Round 10 melee: raised', False, repr(ex))
         if not only or 'ninja' in only:
             print('-' * 8, 'wallkick')
             try: phase_wallkick(h)

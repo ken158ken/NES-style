@@ -10,6 +10,17 @@
 // 特效一律透過 vx()（KB.VFX 沒載入時整組 no-op），判定一律走 KB.hitbox / KB.shoot。
 // 美術在 src/art/kirby_mix2.js（KB.MIXART2.build）。
 // ---------------------------------------------------------------------------
+// Round 10（貼身判定加倍）：使用者回饋「貼身招判定太小常被打死」→ 卡比本體的貼身招判定 ×2
+//   ‧ fbox()（跟隨卡比、原尺寸 ≤ 48×48）由 entity.js Hitbox 建構子自動 ×KB.PHYS.meleeScale，這裡不用動；
+//   ‧ mbox()（絕對座標的貼身招：↑X 直立框、↓X 地面斬、空中 X 落地衝擊、echo 餘波）明確帶 melee:true → ×2；
+//   ‧ 維持原樣（不放大）：KB.shoot / MixHoming / MixOrbit / Mix2Return 等投射物、投射物命中 / 撞牆的爆炸框、
+//     以敵人或遠處座標生成的框、持續場地框（火海 / 火牆 / 冰霧 / 電網 / 魔法陣 / 時間裂縫）、
+//     全畫面與蓄力必殺的大框（已經很大）、starmage 96px 光束（固定長度的遠程框）；
+//   ‧ 陷阱：每幀重建且尺寸會變的框（龍吐息 len 隨時間變長）不能靠自動門檻——len 跨過 48 就突然不放大，
+//     會出現「吐得越久判定越小」，所以那三招明確寫 melee: p.type === 'player'；
+//     本檔沒有「逐幀改寫 b.w / b.h / b.ox / b.oy」的招（已全文核對），所以不需要 abilities.js 的 fitBox()；
+//   ‧ 夥伴（KB.Helper，type 'ally'）用同一份招式定義時 melee 為 false，判定維持 Round 9 尺寸。
+// ---------------------------------------------------------------------------
 (function () {
   'use strict';
   KB.ABILITIES = KB.ABILITIES || {};
@@ -100,6 +111,10 @@
   const fbox = (p, o) => KB.hitbox(Object.assign({ x: 0, y: 0, owner: 'player', follow: p, life: 3, rehit: 8, pierce: true }, o));
   // 判定框：固定在世界座標（x / y 給中心點）
   const abox = (x, y, w, h, o) => KB.hitbox(Object.assign({ x: x - w / 2, y: y - h / 2, w, h, owner: 'player', life: 10, rehit: 0, pierce: true }, o || {}));
+  // Round 10 貼身判定框（絕對座標）：entity.js 的自動加倍規則只認「follow 卡比本體」的框，
+  //   所以絕對座標的貼身招要自己標明 melee。夥伴（KB.Helper，type 'ally'）用同一份招式定義時
+  //   p.type !== 'player' → melee 為 false，判定框維持 Round 9 尺寸（使用者只要求卡比本體變大）。
+  const mbox = (p, x, y, w, h, o) => abox(x, y, w, h, Object.assign({ melee: !!p && p.type === 'player' }, o || {}));
   const shoot = o => KB.shoot(Object.assign({ owner: 'player', life: 60, w: 10, h: 10, grav: 0, solid: true, fxHit: 'fx_hit', knock: 1.6 }, o));
   const parts = (x, y, cols, n, o) => KB.particles(x, y, cols, n, o);
 
@@ -423,7 +438,7 @@
         if (t % 6 === 4 && d.n < 5) {
           const i = d.n++, x = p.cx + p.dir * (16 + i * 22), gy = groundY(p);
           shoot({ spr: 'proj_mix2_shard_ice', x, y: gy - 20, vx: 0, vy: 0, dmg: 5, w: 14, h: 38, life: 30, solid: false, pierce: true, freeze: true, type: 'ice', destructible: false, scale: 1.2 });
-          abox(x, gy - 22, 18, 46, { dmg: 5, type: 'ice', life: 10, rehit: 0, freeze: true, knock: 1.4, onHit: e => { e.vy = -4.2; } });
+          mbox(p, x, gy - 22, 18, 46, { dmg: 5, type: 'ice', life: 10, rehit: 0, freeze: true, knock: 1.4, onHit: e => { e.vy = -4.2; } });
           vx('burst', x, gy - 8, { n: 12, colors: ['#ffffff', '#b8f0ff'], speed: 2.4, life: 20, grav: 0.05, dir: -Math.PI / 2, spread: 0.8 });
           vx('ring', x, gy - 10, { r0: 2, r1: 22, frames: 12, color: '#b8f0ff', width: 2 });
           shake(3); sfx('ice');
@@ -498,7 +513,7 @@
           if (p.onGround && t > 3) {
             d.landed = true; killBox(p);
             const gy = p.bottom;
-            abox(p.cx, gy - 18, 80, 40, { dmg: 9, type: 'spark', life: 14, rehit: 0, knock: 2.8, breakBlocks: true, onHit: e => para(e, 120) });
+            mbox(p, p.cx, gy - 18, 80, 40, { dmg: 9, type: 'spark', life: 14, rehit: 0, knock: 2.8, breakBlocks: true, onHit: e => para(e, 120) });
             vx('lightning', p.cx, gy - 180, p.cx, gy, { color: '#ffffff', frames: 16, jitter: 10, branches: 5 });
             for (const s of [1, -1]) vx('shockwave', p.cx, gy, { w: 40, h: 16, dir: s, speed: 5.2, frames: 18, color: '#fff8c0' });
             vx('ring', p.cx, gy - 8, { r0: 4, r1: 50, frames: 18, color: '#ffffff', width: 3 });
@@ -583,14 +598,14 @@
         const dx = dash(p, 52);
         vx('burst', ox, oy, { n: 14, colors: ['#ffe040', '#ff9020', '#c88850'], speed: 2.6, life: 18, grav: 0.05 });
         // 落點爆炎
-        abox(p.cx, p.cy - 2, 60, 48, { dmg: 7, type: 'fire', life: 12, rehit: 0, knock: 2.4, breakBlocks: true });
+        mbox(p, p.cx, p.cy - 2, 60, 48, { dmg: 7, type: 'fire', life: 12, rehit: 0, knock: 2.4, breakBlocks: true });
         vx('ring', p.cx, p.cy, { r0: 4, r1: 38, frames: 16, color: '#ffe040', width: 3 });
         vx('burst', p.cx, p.cy, { n: 22, colors: ['#ffe040', '#ff9020', '#ff4010'], speed: 3.4, life: 24, grav: 0.04, size: 2 });
         vx('flash', '#ff9020', 6, 0.45);
         // Round 9 空中變體：在空中施展時，替身的火會直接炸到腳下的地面
         if (!p.onGround) {
           const gy = groundY(p);
-          abox(p.cx, gy - 24, 60, 48, { dmg: 7, type: 'fire', life: 12, rehit: 0, knock: 2.4 });
+          mbox(p, p.cx, gy - 24, 60, 48, { dmg: 7, type: 'fire', life: 12, rehit: 0, knock: 2.4 });
           firePool(p.cx, gy, 44, 3);
           vx('ring', p.cx, gy - 10, { r0: 4, r1: 36, frames: 16, color: '#ffe040', width: 3 });
           vx('burst', p.cx, gy - 8, { n: 18, colors: ['#ffe040', '#ff9020', '#c88850'], speed: 3, life: 22, grav: 0.05 });
@@ -603,7 +618,7 @@
         if (t === 12 && !d.blown) {
           d.blown = true;
           // 替身（燒起來的木頭）在原地引爆
-          abox(d.subX, d.subY, 54, 46, { dmg: 6, type: 'fire', life: 12, rehit: 0, knock: 2.2, breakBlocks: true });
+          mbox(p, d.subX, d.subY, 54, 46, { dmg: 6, type: 'fire', life: 12, rehit: 0, knock: 2.2, breakBlocks: true });
           vx('ring', d.subX, d.subY, { r0: 4, r1: 34, frames: 16, color: '#ff9020', width: 3 });
           vx('burst', d.subX, d.subY, { n: 24, colors: ['#ffe040', '#ff9020', '#c88850'], speed: 3.2, life: 24, grav: 0.06, size: 2 });
           vx('textPop', d.subX, d.subY - 16, '替身!', { color: '#ffe040', size: 8, frames: 30, rise: 0.5 });
@@ -685,13 +700,13 @@
           shoot({ spr: 'proj_mix2_shard_ice', x: ox + s * 8, y: oy - 4, vx: s * 2.6, vy: -1.6, grav: 0.2, dmg: 3, w: 10, h: 20, life: 40, type: 'ice', freeze: true, destructible: false, rotSpeed: 0.2 * s });
         }
         // 落點斬擊
-        abox(p.cx, p.cy - 2, 44, 32, { dmg: 7, type: 'ice', life: 10, rehit: 0, freeze: true, knock: 2 });
+        mbox(p, p.cx, p.cy - 2, 44, 32, { dmg: 7, type: 'ice', life: 10, rehit: 0, freeze: true, knock: 2 });
         vx('slash', p.cx, p.cy - 2, 24, 0.1, { color: '#d8f4ff', width: 3, frames: 10, arc: 2.4, flip: p.dir < 0 });
         vx('flash', '#d8f4ff', 5, 0.4);
         // Round 9 空中變體：空中瞬移時在落點的地面立起兩片碎鏡冰刃
         if (!p.onGround) {
           const gy = groundY(p);
-          abox(p.cx, gy - 16, 44, 32, { dmg: 7, type: 'ice', life: 12, rehit: 0, freeze: true, knock: 2 });
+          mbox(p, p.cx, gy - 16, 44, 32, { dmg: 7, type: 'ice', life: 12, rehit: 0, freeze: true, knock: 2 });
           for (const s2 of [-1, 1]) {
             shoot({ spr: 'proj_mix2_shard_ice', x: p.cx + s2 * 14, y: gy - 14, vx: 0, vy: 0, dmg: 5, w: 12, h: 26, life: 26, solid: false, pierce: true, freeze: true, type: 'ice', destructible: false });
           }
@@ -837,7 +852,7 @@
         }
         if (t === 20) {
           const gy = groundY(p);
-          abox(p.cx, gy - 14, 90, 32, { dmg: 6, type: 'stone', life: 14, rehit: 0, knock: 2.6, breakBlocks: true });
+          mbox(p, p.cx, gy - 14, 90, 32, { dmg: 6, type: 'stone', life: 14, rehit: 0, knock: 2.6, breakBlocks: true });
           for (const s of [1, -1]) {
             vx('shockwave', p.cx, gy, { w: 40, h: 16, dir: s, speed: 5, frames: 20, color: '#b0a090' });
             shoot({ spr: 'proj_mix2_shard_stone', x: p.cx + s * 30, y: gy - 14, vx: s * 1.2, vy: -3.2, grav: 0.26, dmg: 5, w: 12, h: 24, life: 50, type: 'stone', destructible: false, rotSpeed: 0.18 * s, breakBlocks: true });
@@ -915,9 +930,12 @@
       start(p, d) { d.box = null; sfx('dragon_breath'); },
       tick(p, d, t) {
         if (t <= 34) {
-          const len = Math.min(78, 20 + t * 2.2);
+          const len = Math.round(Math.min(78, 20 + t * 2.2));   // Round 10：取整數，判定框放大後才會剛好 ×2（不出現半像素框）
           if (d.box) d.box.dead = true;
-          d.box = fbox(p, { w: len, h: 30, dmg: 3, type: 'fire', ox: 6, oy: -16, life: 3, rehit: 6, knock: 1 });
+          // Round 10：吐息框每幀重建且 len 會跨過 entity.js 的 48px 自動門檻（越吐越長 → 反而不再放大 = 突然縮水），
+          //   所以這裡明確標明 melee：卡比本體一律 ×2（和 abilities.js 的基本火焰吐息同步，混合版不能比成分還短），
+          //   夥伴（type 'ally'）維持 Round 9 長度。
+          d.box = fbox(p, { melee: p.type === 'player', w: len, h: 30, dmg: 3, type: 'fire', ox: 6, oy: -16, life: 3, rehit: 6, knock: 1 });
           for (let i = 0; i < 3; i++) {
             const dx = rnd(10, len + 10);
             parts(p.cx + p.dir * dx, p.cy - 2 + rnd(-1, 1) * dx * 0.2, ['#ffffff', '#ffe040', '#ff9020', '#ff4010'], 1,
@@ -948,7 +966,7 @@
           if (p.onGround && t > 3) {
             d.landed = true; killBox(p);
             const gy = p.bottom;
-            abox(p.cx, gy - 18, 74, 38, { dmg: 7, type: 'fire', life: 14, rehit: 0, knock: 2.4, breakBlocks: true });
+            mbox(p, p.cx, gy - 18, 74, 38, { dmg: 7, type: 'fire', life: 14, rehit: 0, knock: 2.4, breakBlocks: true });
             for (const s of [-1, 1]) {
               const x = p.cx + s * 28;
               abox(x, gy - 24, 18, 48, { dmg: 5, type: 'fire', life: 26, rehit: 10, onUpdate(h) { if ((h.life & 3) === 0) { KB.fx('fx_fire', h.x + h.w / 2, h.y + h.h, { life: 12, fps: 12 }); parts(h.x + rnd(0, h.w), h.y + h.h - 4, ['#ffe040', '#ff9020'], 2, { spread: 0.4, grav: -0.12, life: 20, up: 1, size: 2 }); } } });
@@ -1014,7 +1032,10 @@
         if (t <= 32) {
           const len = Math.min(70, 18 + t * 2);
           if (d.box) d.box.dead = true;
-          d.box = fbox(p, { w: len, h: 28, dmg: 3, type: 'spark', ox: 6, oy: -15, life: 3, rehit: 6, knock: 0.8, onHit: e => para(e, 60) });
+          // Round 10：吐息框每幀重建且 len 會跨過 entity.js 的 48px 自動門檻（越吐越長 → 反而不再放大 = 突然縮水），
+          //   所以這裡明確標明 melee：卡比本體一律 ×2（和 abilities.js 的基本火焰吐息同步，混合版不能比成分還短），
+          //   夥伴（type 'ally'）維持 Round 9 長度。
+          d.box = fbox(p, { melee: p.type === 'player', w: len, h: 28, dmg: 3, type: 'spark', ox: 6, oy: -15, life: 3, rehit: 6, knock: 0.8, onHit: e => para(e, 60) });
           if (t % 4 === 0) vx('lightning', p.cx + p.dir * 12, p.cy - 2, p.cx + p.dir * (len + 10), p.cy - 2 + rnd(-10, 10), { color: '#fff8c0', frames: 8, jitter: 6, branches: 2 });
           for (let i = 0; i < 2; i++) {
             const dx = rnd(10, len + 8);
@@ -1041,7 +1062,7 @@
           if (p.onGround && t > 3) {
             d.landed = true; killBox(p);
             const gy = p.bottom;
-            abox(p.cx, gy - 18, 70, 36, { dmg: 7, type: 'spark', life: 14, rehit: 0, knock: 2.4, onHit: e => para(e, 120) });
+            mbox(p, p.cx, gy - 18, 70, 36, { dmg: 7, type: 'spark', life: 14, rehit: 0, knock: 2.4, onHit: e => para(e, 120) });
             for (const s of [-1, 1]) {
               const x = p.cx + s * 32;
               vx('lightning', x, gy - 190, x, gy, { color: '#fff8c0', frames: 14, jitter: 9, branches: 3 });
@@ -1285,7 +1306,7 @@
         if (t === 10) {
           const gy = groundY(p);
           d.box = fbox(p, { w: 46, h: 36, dmg: 9, type: 'mech', ox: -2, oy: -19, life: 6, rehit: 0, knock: 3, breakBlocks: true, flipWithOwner: true });
-          abox(p.cx + p.dir * 24, gy - 14, 60, 30, { dmg: 6, type: 'mech', life: 12, rehit: 0, knock: 2.4, breakBlocks: true });
+          mbox(p, p.cx + p.dir * 24, gy - 14, 60, 30, { dmg: 6, type: 'mech', life: 12, rehit: 0, knock: 2.4, breakBlocks: true });
           for (const s of [1, -1]) vx('shockwave', p.cx, gy, { w: 38, h: 16, dir: s, speed: 5, frames: 18, color: '#ff9850' });
           vx('ring', p.cx + p.dir * 14, p.cy - 4, { r0: 4, r1: 40, frames: 16, color: '#ffd8a0', width: 3 });
           vx('burst', p.cx + p.dir * 20, p.cy - 4, { n: 24, colors: ['#ffd8a0', '#ff9850', '#d8dce8'], speed: 3.4, life: 24, grav: 0.06, size: 2 });
@@ -1325,7 +1346,7 @@
         if (t === 26) {
           // 收尾：把鎚子砸回地面，順便把飛彈的煙壓下去
           const gy = groundY(p);
-          abox(p.cx + p.dir * 18, gy - 12, 48, 26, { dmg: 5, type: 'mech', life: 10, rehit: 0, knock: 2, breakBlocks: true });
+          mbox(p, p.cx + p.dir * 18, gy - 12, 48, 26, { dmg: 5, type: 'mech', life: 10, rehit: 0, knock: 2, breakBlocks: true });
           vx('shockwave', p.cx, gy, { w: 30, h: 14, dir: p.dir, speed: 4.4, frames: 14, color: '#ff9850' });
           shake(5); sfx('hammer');
         }
@@ -1381,7 +1402,7 @@
   function echo(p, o) {
     const air = !p.onGround, gy = groundY(p), x = p.cx + p.dir * 6;
     const w = air ? (o.w || 48) : Math.round((o.w || 48) * 0.75);
-    const h = abox(x, gy - 11, w, o.h || 24, {
+    const h = mbox(p, x, gy - 11, w, o.h || 24, {
       dmg: air ? (o.dmg || 4) : Math.max(2, (o.dmg || 4) - 2), type: o.type, life: 12, rehit: 0, knock: 1.2, freeze: !!o.freeze,
       onHit: o.para ? (e => para(e, 100)) : undefined,
     });
@@ -1445,7 +1466,7 @@
       start(p, d) {
         hop(p, -4.4);
         const x = p.cx + p.dir * 8;
-        d.box = abox(x, p.cy - 20, 32, 54, { dmg: 7, type: 'ice', life: 12, rehit: 0, freeze: true, knock: 2.4, onHit: e => { e.vy = -5; } });
+        d.box = mbox(p, x, p.cy - 20, 32, 54, { dmg: 7, type: 'ice', life: 12, rehit: 0, freeze: true, knock: 2.4, onHit: e => { e.vy = -5; } });
         for (const s of [-1, 1]) {
           shoot({ spr: 'proj_mix2_shard_ice', x, y: p.cy - 22, vx: s * 1.6, vy: -4.6, grav: 0.2, dmg: 4, w: 10, h: 20, life: 44, type: 'ice', freeze: true, destructible: false, rotSpeed: 0.22 * s });
         }
@@ -1473,7 +1494,7 @@
         if (t % 3 === 0) parts(p.cx + rnd(-8, 8), p.cy, ['#ffffff', '#b8f0ff'], 2, { spread: 0.5, grav: 0, life: 14, up: 0, size: 1 });
         if (p.onGround && t > 3) {
           d.landed = true; killBox(p);
-          abox(p.cx, p.bottom - 15, 68, 34, { dmg: 8, type: 'ice', life: 16, rehit: 0, freeze: true, knock: 2.4 });
+          mbox(p, p.cx, p.bottom - 15, 68, 34, { dmg: 8, type: 'ice', life: 16, rehit: 0, freeze: true, knock: 2.4 });
           for (const s of [-1, 1]) {
             shoot({ spr: 'proj_mix2_shard_ice', x: p.cx + s * 26, y: p.bottom - 14, vx: 0, vy: 0, dmg: 5, w: 12, h: 26, life: 26, solid: false, pierce: true, freeze: true, type: 'ice', destructible: false });
           }
@@ -1494,7 +1515,7 @@
       start(p, d) {
         hop(p, -4.6);
         const x = p.cx + p.dir * 8;
-        d.box = abox(x, p.cy - 26, 24, 68, { dmg: 6, type: 'spark', life: 12, rehit: 0, knock: 2.4, onHit: e => { e.vy = -4.8; para(e, 110); } });
+        d.box = mbox(p, x, p.cy - 26, 24, 68, { dmg: 6, type: 'spark', life: 12, rehit: 0, knock: 2.4, onHit: e => { e.vy = -4.8; para(e, 110); } });
         vx('lightning', x, p.cy + 8, x, p.cy - 58, { color: '#ffe860', frames: 14, jitter: 6, branches: 4 });
         vx('slash', x, p.cy - 14, 25, -1.6, { color: '#ffe860', width: 3, frames: 12, arc: 2.6, flip: p.dir < 0 });
         vx('flash', '#ffe860', 5, 0.4);
@@ -1514,7 +1535,7 @@
         if (t === 9 && !d.done) {
           d.done = true;
           const gy = groundY(p);
-          abox(p.cx + p.dir * 18, gy - 12, 84, 22, { dmg: 7, type: 'spark', life: 18, rehit: 0, knock: 2, onHit: e => para(e, 130) });
+          mbox(p, p.cx + p.dir * 18, gy - 12, 84, 22, { dmg: 7, type: 'spark', life: 18, rehit: 0, knock: 2, onHit: e => para(e, 130) });
           for (let i = 0; i < 3; i++) {
             const x = p.cx + p.dir * (14 + i * 26);
             vx('lightning', x, gy - 4, x, gy - 34, { color: i & 1 ? '#ffffff' : '#ffe860', frames: 12, jitter: 6, branches: 3 });
@@ -1535,7 +1556,7 @@
       start(p, d) {
         hop(p, -4.2);
         const x = p.cx + p.dir * 6;
-        d.box = abox(x, p.cy - 22, 30, 56, { dmg: 6, type: 'fire', life: 10, rehit: 0, knock: 2, onHit: e => { e.vy = -4.4; } });
+        d.box = mbox(p, x, p.cy - 22, 30, 56, { dmg: 6, type: 'fire', life: 10, rehit: 0, knock: 2, onHit: e => { e.vy = -4.4; } });
         for (let i = -1; i <= 1; i++) {
           shoot({ spr: 'proj_mix2_star_fire', x, y: p.cy - 14, vx: i * 1.8, vy: -5.4, dmg: 4, w: 12, h: 12, life: 40, type: 'fire', pierce: true, solid: false, rotSpeed: 0.4, trail: '#ff9020' });
         }
@@ -1576,7 +1597,7 @@
       start(p, d) {
         hop(p, -4.2);
         const x = p.cx + p.dir * 6;
-        d.box = abox(x, p.cy - 24, 28, 58, { dmg: 6, type: 'ice', life: 12, rehit: 0, freeze: true, knock: 1.8, onHit: e => { e.vy = -4.2; } });
+        d.box = mbox(p, x, p.cy - 24, 28, 58, { dmg: 6, type: 'ice', life: 12, rehit: 0, freeze: true, knock: 1.8, onHit: e => { e.vy = -4.2; } });
         for (let i = 0; i < 3; i++) {
           shoot({ spr: 'proj_mix2_shard_ice', x: x + (i - 1) * 7, y: p.cy - 10 - i * 8, vx: (i - 1) * 0.9, vy: -5, dmg: 4, w: 10, h: 22, life: 38, type: 'ice', freeze: true, solid: false, pierce: true, destructible: false });
         }
@@ -1660,7 +1681,7 @@
       start(p, d) {
         hop(p, -4);
         const x = p.cx + p.dir * 10;
-        d.box = abox(x, p.cy - 22, 32, 62, { dmg: 7, type: 'stone', life: 14, rehit: 0, knock: 2.6, onHit: e => { e.vy = -5.2; } });
+        d.box = mbox(p, x, p.cy - 22, 32, 62, { dmg: 7, type: 'stone', life: 14, rehit: 0, knock: 2.6, onHit: e => { e.vy = -5.2; } });
         for (const s of [-1, 1]) {
           shoot({ spr: 'proj_mix2_shard_stone', x: x + s * 8, y: p.cy - 24, vx: s * 1.4, vy: -4.8, grav: 0.24, dmg: 5, w: 12, h: 24, life: 50, type: 'stone', destructible: false, rotSpeed: 0.18 * s });
         }
@@ -1688,7 +1709,7 @@
         if (t % 3 === 0) parts(p.cx + rnd(-10, 10), p.cy, ['#d8ccb8', '#a89078'], 2, { spread: 0.5, grav: -0.04, life: 14, up: 0.3, size: 2 });
         if (p.onGround && t > 3) {
           d.landed = true; killBox(p);
-          abox(p.cx, p.bottom - 16, 96, 36, { dmg: 9, type: 'stone', life: 16, rehit: 0, knock: 2.8, breakBlocks: true });
+          mbox(p, p.cx, p.bottom - 16, 96, 36, { dmg: 9, type: 'stone', life: 16, rehit: 0, knock: 2.8, breakBlocks: true });
           for (const s of [-1, 1]) {
             vx('shockwave', p.cx, p.bottom, { w: 48, h: 20, dir: s, speed: 5.4, frames: 20, color: '#c0b098' });
             shoot({ spr: 'proj_mix2_shard_stone', x: p.cx + s * 16, y: p.bottom - 12, vx: s * 2.6, vy: -3.6, grav: 0.26, dmg: 5, w: 12, h: 24, life: 50, type: 'stone', destructible: false, rotSpeed: 0.2 * s });
@@ -1711,7 +1732,7 @@
       tick(p, d, t) {
         if (t === 4) {
           const x = p.cx + p.dir * 4;
-          d.box = abox(x, p.cy - 32, 28, 68, { dmg: 6, type: 'fire', life: 24, rehit: 8, knock: 1.4, onHit: e => { e.vy = -3.6; } });
+          d.box = mbox(p, x, p.cy - 32, 28, 68, { dmg: 6, type: 'fire', life: 24, rehit: 8, knock: 1.4, onHit: e => { e.vy = -3.6; } });
           vx('circle', x, p.cy - 28, { r: 22, frames: 22, color: '#ff9020', spin: 0.24 });
         }
         if (t >= 4 && t <= 28 && t % 2 === 0) {
@@ -1731,7 +1752,7 @@
         if (t === 8 && !d.done) {
           d.done = true;
           const gy = groundY(p);
-          abox(p.cx + p.dir * 24, gy - 13, 72, 24, { dmg: 7, type: 'fire', life: 18, rehit: 0, knock: 2, onHit: e => { e.vy = -3; } });
+          mbox(p, p.cx + p.dir * 24, gy - 13, 72, 24, { dmg: 7, type: 'fire', life: 18, rehit: 0, knock: 2, onHit: e => { e.vy = -3; } });
           firePool(p.cx + p.dir * 18, gy, 50, 3); firePool(p.cx + p.dir * 48, gy, 50, 3);
           for (let i = 0; i < 3; i++) vx('line', p.cx, gy - 4 - i * 4, p.cx + p.dir * 60, gy - 4 - i * 4, { color: i === 1 ? '#ffe040' : '#ff5030', width: 1, frames: 12 });
           vx('burst', p.cx + p.dir * 24, gy - 6, { n: 20, colors: ['#ffe040', '#ff9020', '#ff4010'], speed: 3.2, life: 24, grav: 0.04 });
@@ -1749,7 +1770,7 @@
       tick(p, d, t) {
         if (t === 4) {
           const x = p.cx + p.dir * 4;
-          d.box = abox(x, p.cy - 33, 26, 70, { dmg: 6, type: 'spark', life: 22, rehit: 8, knock: 1.4, onHit: e => { e.vy = -3.8; para(e, 110); } });
+          d.box = mbox(p, x, p.cy - 33, 26, 70, { dmg: 6, type: 'spark', life: 22, rehit: 8, knock: 1.4, onHit: e => { e.vy = -3.8; para(e, 110); } });
           vx('lightning', x, p.cy + 6, x, p.cy - 62, { color: '#b0d8ff', frames: 16, jitter: 7, branches: 4 });
         }
         if (t >= 4 && t <= 26 && t % 3 === 0) {
@@ -1769,7 +1790,7 @@
         if (t === 8 && !d.done) {
           d.done = true;
           const gy = groundY(p);
-          abox(p.cx + p.dir * 24, gy - 13, 76, 24, { dmg: 7, type: 'spark', life: 20, rehit: 0, knock: 2, onHit: e => para(e, 130) });
+          mbox(p, p.cx + p.dir * 24, gy - 13, 76, 24, { dmg: 7, type: 'spark', life: 20, rehit: 0, knock: 2, onHit: e => para(e, 130) });
           for (let i = 0; i < 4; i++) {
             const x = p.cx + p.dir * (10 + i * 20);
             vx('lightning', x, gy - 3, x + p.dir * 18, gy - 3, { color: i & 1 ? '#ffffff' : '#b0d8ff', frames: 10, jitter: 5, branches: 2 });
@@ -1832,7 +1853,7 @@
       start(p, d) {
         hop(p, -4.2);
         const x = p.cx + p.dir * 8;
-        d.box = abox(x, p.cy - 22, 30, 58, { dmg: 6, type: 'cutter', life: 14, rehit: 0, knock: 1.4, onHit: e => { e.vy = -5.4; } });
+        d.box = mbox(p, x, p.cy - 22, 30, 58, { dmg: 6, type: 'cutter', life: 14, rehit: 0, knock: 1.4, onHit: e => { e.vy = -5.4; } });
         for (const s of [-1, 1]) {
           shoot({ spr: 'proj_mix2_star_void', x, y: p.cy - 16, vx: s * 1.6, vy: -5, dmg: 4, w: 12, h: 12, life: 44, type: 'cutter', pierce: true, solid: false, rotSpeed: 0.36, trail: '#9060e0' });
         }
@@ -1873,7 +1894,7 @@
         if (t % 2 === 0) parts(p.cx + rnd(-12, 12), p.cy + rnd(-12, 12), ['#c0a8ff', '#9060e0'], 1, { spread: 0.4, grav: 0, life: 14, up: 0, size: 1 });
         if (p.onGround && t > 3) {
           d.landed = true; killBox(p);
-          abox(p.cx, p.bottom - 15, 64, 32, { dmg: 8, type: 'cutter', life: 14, rehit: 0, knock: 2.4 });
+          mbox(p, p.cx, p.bottom - 15, 64, 32, { dmg: 8, type: 'cutter', life: 14, rehit: 0, knock: 2.4 });
           for (let i = 0; i < 3; i++) vx('ring', p.cx, p.bottom - 8, { r0: 4 + i * 10, r1: 44, frames: 16 + i * 3, color: '#c0a8ff', width: 2 });
           vx('burst', p.cx, p.bottom - 6, { n: 24, colors: ['#ffffff', '#c0a8ff', '#9060e0', '#2a1040'], speed: 3.6, life: 26, grav: 0.04 });
           vx('textPop', p.cx, p.y - 12, 'CRUSH!', { color: '#c0a8ff', size: 8, frames: 30, rise: 0.5 });
@@ -1894,7 +1915,7 @@
         if (t === 10 && !d.done) {
           d.done = true;
           const gy = groundY(p);
-          abox(p.cx, gy - 15, 80, 28, { dmg: 8, type: 'mech', life: 18, rehit: 0, knock: 2.6, breakBlocks: true, onHit: e => { e.vy = -3.2; } });
+          mbox(p, p.cx, gy - 15, 80, 28, { dmg: 8, type: 'mech', life: 18, rehit: 0, knock: 2.6, breakBlocks: true, onHit: e => { e.vy = -3.2; } });
           for (const s of [-1, 1]) {
             vx('shockwave', p.cx, gy, { w: 42, h: 18, dir: s, speed: 5, frames: 18, color: '#ff9850' });
             shoot({ spr: 'proj_mix2_rocket_steel', x: p.cx + s * 20, y: gy - 10, vx: s * 3.6, vy: -1.2, grav: 0.2, dmg: 5, w: 16, h: 10, life: 46, type: 'mech', dir: s, trail: '#ffd8a0' });

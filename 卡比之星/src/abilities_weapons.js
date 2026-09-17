@@ -1,6 +1,24 @@
 // 武器系能力：gunner ninja blade bow（Round 5 變身大爆發）
 // 介面與 abilities.js 相同：KB.ABILITIES[key] = { ... onAttack / update / onEnd / onCrouchAttack }
 // 特效一律透過 vfx()（內部 KB.VFX && KB.VFX.xxx 防呆），KB.VFX 尚未載入時自動退回粒子 / 震動。
+//
+// ── Round 10：貼身招判定加倍核對（melee-weapons）─────────────────────────────
+// 規則見 src/entity.js Hitbox 建構子；KB.PHYS.meleeScale = 2。
+// 「自動」= follow 卡比本體且原尺寸 ≤ 48×48 → 建構子自己 ×2（w0/h0/meleeScaled 可查）。
+//   gunner：五招（X 連射 / ↑X 對空三連 / ↓X 霰彈 / 空中 X 掃射 / 必殺 子彈時間）**全部是投射物**，
+//           一個 KB.hitbox 都沒有 → 遠程維持原樣（↓X 霰彈近身打不到是 qa9 的刻意設計）。
+//   ninja ：空中 X 飛踢 24×22→48×44（自動）、↑X 昇龍近身框 22×32→44×64（自動）、
+//           ↓X 替身瞬移落點框 32×30→64×60（絕對座標，手動 melee:true）、
+//           必殺 影分身斬 34×28→68×56（自動）；手裡劍 / 昇龍甩出的手裡劍是 KB.shoot，不受影響。
+//   blade ：連斬 1/2/3 26×20→52×40、26×26→52×52、30×32→60×64（自動）、
+//           ↑X 上撩斬 24×34→48×68（自動）、↓X 地摺斬 地面 34×14→68×28 / 空中 28×30→56×60（自動）、
+//           空中 X 落下斬 本體 18×26→36×52（自動）+ 落地左右衝擊 40×18→80×36（絕對座標，melee:true，
+//           內緣維持 cx±6、往外延伸一倍到 86px；左右兩框刻意不重疊，避免正中央被打兩次）、
+//           必殺 居合一閃 160×36 是遠程橫斬 → melee:false 維持。
+//   bow   ：↑X 對空連射的弓身近身框 22×26→44×52（自動）；其餘（射箭 / 貫穿 / 流星 / 箭雨）都是投射物，
+//           ↓X 陷阱箭是放置型爆炸（BowTrap.pop，不跟隨卡比）→ melee:false 維持 40×34。
+// 驗證：tools/test_weapons.py 的「Round 10 貼身判定」段（逐招列 w/h/w0/h0/meleeScaled）。
+// ────────────────────────────────────────────────────────────────────────────
 (function () {
   'use strict';
   const P = KB.PHYS;
@@ -122,6 +140,8 @@
   //    ↑+X        對空三連：朝上三連發
   //    按住 60 放開 必殺・子彈時間：letterbox + 世界灰化 + slowMo 60 幀 + 全方位 16 發
   // ======================================================================
+  // Round 10：gunner 的五招全部走 KB.shoot（投射物），沒有任何 KB.hitbox →
+  //   自動放大規則碰不到它，遠程手感完全維持（↓X 霰彈貼臉打不到是 qa9 認可的設計）。
   function gunShot(p, ang, spd, dmg, off) {
     off = off || 12;
     const mx = p.cx + Math.cos(ang) * off, my = p.cy - 2 + Math.sin(ang) * off * 0.8;
@@ -424,7 +444,8 @@
           burst(p.cx, p.cy, { n: 12, colors: ['#b070f0', '#ffffff'], speed: 2.2, life: 16, grav: -0.02 });
           ring(p.cx, p.cy, { r0: 2, r1: 18, frames: 10, color: '#b070f0', width: 1 });
           zoom(1.05, 10); shake(2);
-          d.box = KB.hitbox({ x: p.cx - 16, y: p.cy - 14, w: 32, h: 30, dmg: 3, owner: 'player', type: 'ninja', life: 8, rehit: 0, pierce: true, knock: 2 });
+          // Round 10：瞬移落點的爆風是貼身判定，但用絕對座標（不 follow）→ 手動 melee:true → 64×60
+          d.box = KB.hitbox({ x: p.cx - 16, y: p.cy - 14, w: 32, h: 30, dmg: 3, owner: 'player', type: 'ninja', life: 8, rehit: 0, pierce: true, knock: 2, melee: true });
         }
         return;
       }
@@ -590,11 +611,14 @@
           d.landed = true;
           killBox(p);
           shake(7); hitstop(3); flash('#ffffff', 4, 0.35);
-          shockwave(p.cx, p.bottom, { w: 40, h: 16, dir: 1, speed: 4, frames: 20, color: '#eef2ff' });
-          shockwave(p.cx, p.bottom, { w: 40, h: 16, dir: -1, speed: 4, frames: 20, color: '#eef2ff' });
+          shockwave(p.cx, p.bottom, { w: 48, h: 22, dir: 1, speed: 4, frames: 20, color: '#eef2ff' });
+          shockwave(p.cx, p.bottom, { w: 48, h: 22, dir: -1, speed: 4, frames: 20, color: '#eef2ff' });
           ring(p.cx, p.bottom, { r0: 4, r1: 40, frames: 14, color: '#ffffff', width: 2 });
           burst(p.cx, p.bottom, { n: 16, colors: ['#ffffff', '#eef2ff', '#9aa6c0'], speed: 3, life: 18, grav: 0.12 });
-          for (const s of [1, -1]) KB.hitbox({ x: p.cx + (s > 0 ? 6 : -46), y: p.bottom - 16, w: 40, h: 18, dmg: 5, owner: 'player', type: 'blade', life: 10, rehit: 0, pierce: true, knock: 3 });
+          // Round 10：落地左右衝擊也是貼身判定（絕對座標）→ melee:true 由 entity.js 以原中心放大成 80×36。
+          //   基準 x 往外挪 20px，讓放大後的內緣仍是 cx±6、外緣延伸到 cx±86（原本 cx±46），
+          //   左右兩框剛好不重疊 —— 正中央的敵人不會被兩個框各打一次。
+          for (const s of [1, -1]) KB.hitbox({ x: p.cx + (s > 0 ? 26 : -66), y: p.bottom - 16, w: 40, h: 18, dmg: 5, owner: 'player', type: 'blade', life: 10, rehit: 0, pierce: true, knock: 3, melee: true });
           sfx('slash_big');
           p.attackTimer = Math.min(p.attackTimer, 14);
         }
@@ -612,8 +636,9 @@
           slash(p.cx + p.dir * 40, p.cy, 46, 0, { color: '#ffffff', width: 4, frames: 14, arc: 1.2, flip: p.dir < 0 });
           const me = p;
           d.box = KB.hitbox({
+            // Round 10：居合一閃是橫跨 160px 的遠程斬擊（已經很大）→ melee:false 明確不放大
             x: p.cx + (p.dir > 0 ? 6 : -166), y: p.cy - 18, w: 160, h: 36, dmg: 0, owner: 'player', type: 'blade',
-            life: 8, rehit: 0, pierce: true, knock: 0, breakBlocks: true,
+            life: 8, rehit: 0, pierce: true, knock: 0, breakBlocks: true, melee: false,
             onHit(b) {
               const dd = data(me);
               dd.cut = dd.cut || [];
@@ -667,7 +692,8 @@
     pop(hit) {
       if (this.dead) return; this.dead = true;
       if (hit) {
-        KB.hitbox({ x: this.cx - 20, y: this.cy - 18, w: 40, h: 34, dmg: 5, owner: 'player', type: 'bow', life: 6, rehit: 0, pierce: true, knock: 2.4 });
+        // Round 10：陷阱是「放置後遠離」的機關（判定在陷阱身上、不跟隨卡比），不是貼身招 → melee:false 維持 40×34
+        KB.hitbox({ x: this.cx - 20, y: this.cy - 18, w: 40, h: 34, dmg: 5, owner: 'player', type: 'bow', life: 6, rehit: 0, pierce: true, knock: 2.4, melee: false });
         burst(this.cx, this.cy, { n: 18, colors: ['#fff8c0', '#48c048', '#ffffff'], speed: 3, life: 18, grav: 0.1 });
         ring(this.cx, this.cy, { r0: 3, r1: 30, frames: 12, color: '#fff8c0', width: 2 });
         KB.fx('fx_poof', this.cx, this.cy + 6);

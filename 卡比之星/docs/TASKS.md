@@ -180,3 +180,15 @@
 | abilities-magic-forms | src/abilities_magic.js、src/abilities_forms.js、src/art/kirby_magic.js、src/art/kirby_forms.js、tools/test_magic.py、tools/test_forms.py | 8 種同上 |
 | abilities-mix | src/abilities_mix.js、src/abilities_mix2.js、src/art/kirby_mix.js、src/art/kirby_mix2.js、tools/test_mix.py、tools/test_mix2.py | 24 混合：每種補齊 ↑X / ↓X / 空中 X（現在只有 3 招） |
 | qa9（第二波） | docs/QA_REPORT.md | 44 能力 × 4 方向 × 地面 / 空中 驗收、飛行手感、通關 |
+
+---
+# Round 10：貼身招判定加倍（2026-09-17）
+使用者需求：整體武器 / 變身的貼身攻擊範圍太小（劍、雷擊常被打死），**攻擊怪物的判定要大一倍左右，包含 ↑X / ↓X**；遠程攻擊維持現狀。
+總控已改核心（勿再動）：`src/const.js` 尾端 `KB.PHYS.meleeScale = 2`；`src/entity.js` Hitbox 建構子自動規則：owner 'player' 且 `follow.type === 'player'`、原尺寸 ≤ 48×48、非 stone → w/h ×2（方向框 3/4 往前 1/4 往後、對稱框置中、高度置中；絕對框以原中心置中）。建立時 `melee:true` 強制放大（絕對座標的貼身招要加）、`melee:false` 強制不放大（全畫面 / 持續光環 / 分身本體 / 已經很大的）。判定框保留 `w0 / h0 / meleeScaled`。
+| agent | 擁有檔案 | 內容 |
+|---|---|---|
+| melee-basic | src/abilities.js、tools/test_charge.py、tools/enemy_test.py（僅修尺寸斷言） | 8 基本能力（fire sword beam cutter spark stone ice hammer）五招逐一核對：貼身框都 ≈2×、遠程投射物不變、不該放大的標 melee:false、絕對座標貼身框加 melee:true；--hitbox 截圖看圖 |
+| melee-weapons | src/abilities_weapons.js、tools/test_weapons.py | gunner ninja blade bow 同上（gunner 遠程維持；ninja / blade 貼身要 2×） |
+| melee-magic-forms | src/abilities_magic.js、src/abilities_forms.js、tools/test_magic.py、tools/test_forms.py | mage time gravity clone / giant dragon mech ghost 同上（time 全畫面、clone 本體標 melee:false） |
+| melee-mix | src/abilities_mix.js、src/abilities_mix2.js、src/awaken.js、src/helper.js、tools/test_mix.py、tools/test_mix2.py、tools/test_awaken.py、tools/test_skins.py（僅修尺寸斷言） | 24 混合能力貼身招同上；覺醒招 / 夥伴只核對不誤放大（夥伴 follow 非 player 不會自動放大，維持） |
+| qa10（第二波，總控派） | docs/QA_REPORT.md | 全測試 + playthrough w1~w7 + 截圖對照 + build |

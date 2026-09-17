@@ -4396,3 +4396,529 @@ Round 8 QA（qa8）問題修正 —— agent: fix8（2026-09-12）。負責 R8-P
 - 說明頁更新、flavour 統一陣列、幽靈招式表整理、梯子吐氣彈不再貼牆消失。
 ## 已知 / 下一輪
 - 說明頁第 1 頁飛行描述可再精修；def.hover 粒度；atkDir 工具收斂到 const.js；qa9 提到 gunner 霰彈近身打不到（刻意）。
+
+---
+## melee-weapons
+> Round 10（2026-09-17）貼身招判定加倍 — gunner / ninja / blade / bow。
+> 擁有檔案：`src/abilities_weapons.js`、`tools/test_weapons.py`。核心規則由總控放在 `src/entity.js` Hitbox 建構子（`KB.PHYS.meleeScale = 2`），本 agent 只負責逐招核對 + 補 `melee:true` / `melee:false`。
+
+- [17:45] 完成：4 能力 × 每招（X / ↑X / ↓X / 空中 X / 蓄力，含空中變體）逐一核對 15 個 `KB.hitbox`；貼身招全部 2×、遠程 0 改動；驗證：`tools/test_weapons.py` **417/417**、`engine_test.py` 167/167、`playthrough --level w2 --ability blade --godmode` cleared=True / deaths=0 / bossDamage=100%；截圖 `shots/agent_melee_weapons/`；下一步：交 qa10 做 w1~w7 回歸。
+
+### 判定框對照表（原尺寸 → 新尺寸）
+| 能力 | 招 | 原尺寸 w×h | 新尺寸 w×h | meleeScaled | 備註 |
+|---|---|---|---|---|---|
+| gunner | X 雙槍連射 | — | — | — | 全是 `KB.shoot` 投射物，**沒有任何判定框**；遠程維持 |
+| gunner | ↑+X 對空三連 | — | — | — | 同上（投射物） |
+| gunner | ↓+X 蓄力霰彈 | — | — | — | 同上；貼臉打不到是 qa9 認可的刻意設計，**不動** |
+| gunner | 空中 X 俯衝掃射 | — | — | — | 同上（投射物） |
+| gunner | 蓄力 必殺・子彈時間 | — | — | — | 同上（16 發全方位投射物） |
+| ninja | X 手裡剎三連 | — | — | — | 3 枚 `proj_shuriken`，遠程維持 |
+| ninja | ↑+X 昇龍手裡劍（近身框） | 22×32 | **44×64** | 2 | follow 卡比 → 自動放大；甩出的手裡劍仍是投射物 |
+| ninja | ↓+X 替身瞬移（落點爆風） | 32×30 | **64×60** | 2 | 絕對座標 `p.cx±` → **手動加 `melee: true`** |
+| ninja | 空中 X 飛踢 | 24×22 | **48×44** | 2 | follow，自動 |
+| ninja | 蓄力 必殺・影分身斬 | 34×28 | **68×56** | 2 | follow，自動 |
+| blade | X 三段連斬・第 1 段 | 26×20 | **52×40** | 2 | follow，自動 |
+| blade | X 三段連斬・第 2 段 | 26×26 | **52×52** | 2 | follow，自動 |
+| blade | X 三段連斬・第 3 段 | 30×32 | **60×64** | 2 | follow，自動 |
+| blade | ↑+X 上撩斬 | 24×34 | **48×68** | 2 | follow，自動（挑空 onHit 保留） |
+| blade | ↓+X 地摺斬（地面） | 34×14 | **68×28** | 2 | follow，自動 |
+| blade | ↓+X 地摺斬（空中） | 28×30 | **56×60** | 2 | follow，自動 |
+| blade | 空中 X 落下斬・本體 | 18×26 | **36×52** | 2 | follow，自動 |
+| blade | 空中 X 落下斬・落地左右衝擊 ×2 | 40×18 | **80×36** | 2 | 絕對座標 → **手動 `melee: true`**；基準 x 由 `cx±6` 改為 `cx+26 / cx-66`，放大後內緣仍是 `cx±6`、外緣延伸到 `cx±86`，左右兩框刻意不重疊（正中央不會被打兩次）。VFX `shockwave` 同步 40×16 → 48×22 |
+| blade | 蓄力 必殺・居合一閃 | 160×36 | 160×36 | 0 | 遠程橫斬（已 160px）→ **手動 `melee: false`** 明確不放大 |
+| bow | X 射箭 / 蓄力 貫穿箭 / 必殺 流星箭 | — | — | — | 全是 `proj_arrow*` 投射物，遠程維持 |
+| bow | ↑+X 對空連射（弓身近身框） | 22×26 | **44×52** | 2 | follow，自動；三支箭仍是投射物 |
+| bow | ↓+X 陷阱箭（BowTrap 爆炸） | 40×34 | 40×34 | 0 | 判定在陷阱實體上、不跟隨卡比，屬「放置後遠離」的機關 → **手動 `melee: false`** 維持（原本就 40×34，放大成 80×68 會誇張到 4 格高） |
+| bow | 空中 X 箭雨 | — | — | — | 5 支投射物，遠程維持 |
+
+規則來源：`src/entity.js` 第 253 行起。follow 卡比本體且原尺寸 ≤ 48×48 的框由建構子自動 ×2；本檔只在 4 處手動標記（ninja 瞬移 `melee:true`、blade 落地衝擊 `melee:true`、blade 居合一閃 `melee:false`、bow 陷阱爆炸 `melee:false`）。檔頭補了一段完整稽核註解。
+
+### 測試
+- `tools/test_weapons.py` **378 → 417**（+39）：
+  - 新增 `phase_round10`（`--only r10` 可單獨跑）：21 個 case 逐招抓 `__mb`（掛在 `KB.spawn` 上記錄 owner='player' 的 Hitbox），比對 `(w0, h0, w, h, meleeScaled)` 期望集合；
+  - 通則斷言：**`meleeScaled > 0` 的框必須剛好 `w == w0×2 且 h == h0×2`**；`meleeScaled == 0` 的框（遠程 / 全畫面 / 放置型）**尺寸必須不變**；
+  - `KB.PHYS.meleeScale == 2` 檢查；
+  - 遠程招（gunner 五招、bow 射箭 / 箭雨 / 貫穿箭、ninja 手裡劍）斷言「不產生任何玩家判定框」。
+  - 既有斷言更新：`空中 X 落下斬` 的落地衝擊由 `w == 40` 改成 `w == 80 and h == 36`。
+- 結果：`test_weapons.py` **417/417 passed**、MISSING SPRITES 空、無 pageerror。
+- `tools/engine_test.py` **167/167 passed**。
+- `tools/playthrough.py --level w2 --ability blade --godmode` → `cleared=True deaths=0 frames=6079 bossDamage=100% missing []`。
+
+### 截圖（全部用 Read 看過，`--hitbox` 紅框）
+`shots/agent_melee_weapons/`
+- `blade_x_0*.png`（三段連斬第 1 段 52×40）、`blade_upx_0*.png`（上撩斬 48×68，紅框從腳邊一路蓋到頭頂上方）、
+  `blade_downx_0*.png`（地摺斬 68×28 貼地往前）、`blade_airx_0*.png`（落下斬本體 36×52 + 落地左右各一條 80×36 的低帶）、
+  `blade_charge_0*.png`（居合一閃，160×36 不變）
+- `ninja_x_0*.png`（手裡劍，無紅框）、`ninja_upx_0*.png`（昇龍 44×64）、`ninja_downx_0*.png`（替身瞬移落點 64×60 罩住卡比）、
+  `ninja_airx_0*.png`（飛踢 48×44）、`ninja_charge_0*.png`（影分身斬 68×56）
+- `bow_upx_0*.png`（對空連射弓身框 44×52）、`bow_downx_0*.png`（陷阱箭，爆炸前無紅框）
+- `gunner_x_0*.png` / `gunner_downx_0*.png`（**完全沒有紅框**，只有子彈 → 遠程確實沒被動到）
+
+### 跨檔需求
+- 無。本輪改動都在 `src/abilities_weapons.js` 與 `tools/test_weapons.py` 之內；`src/entity.js` / `src/const.js` 的規則沿用總控版本，未更動。
+- 給 qa10 的提醒：`tools/enemy_test.py` 的 `HOOK_JS` 只記錄 `w/h`，沒有 `w0/h0/meleeScaled`；本檔自己另外掛了一層 `KB.spawn`（`R10_HOOK`）。若之後其它測試也要查驗放大倍率，建議把 `w0/h0/ms` 加進 `enemy_test.py` 的 `HOOK_JS`（那支檔案不屬於本 agent）。
+
+### 已知問題
+1. **視覺與判定的落差**：判定框翻倍後，`blade` 連斬 / `ninja` 飛踢的紅框比刀光 / 腳的美術大一圈（尤其高度是置中放大，會往身體上下各長出約半格）。這是 Round 10 的設計取捨（要打得到），只微調了 `blade` 落地的 `shockwave` 尺寸，其餘沒有逐一重畫美術。
+2. `blade` ↓+X 空中版（56×60）與空中 X 本體（36×52）因為高度置中放大，判定會延伸到卡比頭頂上方約 9~13px；對「頭上的敵人」變得比原設計好打，屬於加強方向的副作用，未特別壓制。
+3. `bow` ↓+X 陷阱箭與 `gunner` ↓+X 霰彈維持遠程尺寸（見上表理由）。若使用者實測後仍覺得這兩招「↓X 太小」，改法是給陷阱爆炸加 `melee: true`（會變 80×68）或把霰彈改成近身也有一個小判定框 —— 兩者都會動到既有手感，先不自作主張。
+
+---
+
+## melee-basic（Round 10，2026-09-17）
+
+> 負責檔案：`src/abilities.js`、`tools/test_charge.py`、`tools/enemy_test.py`（後者本輪**沒有**需要改的尺寸斷言）。
+> 目標：8 基本能力（fire / sword / beam / cutter / spark / stone / ice / hammer）的**貼身招判定 ×2**，遠程維持原樣。
+> 核心規則沿用總控版本（`KB.PHYS.meleeScale = 2` + `src/entity.js` Hitbox 建構子），本檔只負責「逐招核對 + 補 melee 旗標 + 修逐幀改寫」。
+
+- [11:50] 完成：8 能力 ×（X / ↑X / ↓X / 空中 X / 空中 ↑X / 空中 ↓X / 蓄力）全部量測並修正；驗證：`tools/test_charge.py` 140/140、`engine_test` 167/167、`enemy_test` 393/393、`playthrough w1 sword/fire --godmode` 皆 cleared；下一步：交給 qa10 做全測試 + build。
+
+### 這輪做了三件事
+1. **`fitBox(b, o)` 共用工具**（abilities.js 開頭，緊接 `beat` 之後）。
+   招式**進行中**逐幀改寫判定框的招式（劍的揮砍、火 / 冰的噴射與頭頂柱、鐵鎚掄下的位移）原本直接寫 `b.w / b.ox`，
+   會把建構子放大的結果整個洗掉 → 現在一律傳「原始（未放大）」數值進 `fitBox`，由它依 `b.meleeScaled` 重算，
+   規則與 `entity.js` 建構子完全一致（方向框 3/4 往前 1/4 往後、對稱框置中、高度置中），並同步維護 `w0 / h0`。
+   **這是本輪最容易漏掉的一點：只加 `melee` 旗標、不改逐幀改寫的話，劍的 X 與火 / 冰的 X / ↑X 會在第 1 幀之後縮回原大小。**
+2. **絕對座標的貼身框補 `melee: true`**（落地衝擊波這類不 follow 卡比的近身框）。
+3. **不該放大的補 `melee: false`**（光鞭 = 遠程、電擊波 = 本來就是全身巨框；石頭本體靠 player.js 既有的 `stone:true` 自動排除）。
+
+### 逐招對照表（實測值，`KB.PHYS.meleeScale = 2`）
+w0×h0 = 原尺寸、w×h = 實際判定；「自動」= entity.js 規則命中（follow 卡比且 ≤48×48），「melee:true」= 本檔手動標記。
+
+| 能力 | 招 | 原尺寸 → 新尺寸 | 途徑 | 備註 |
+|---|---|---|---|---|
+| fire | X 噴火 | 12×16 → 24×32（伸長到 40×16 → **80×32**） | 自動 + fitBox | 火柱逐幀伸長，改走 `fitBox({w, ox:6})` |
+| fire | ↑X 火焰噴泉 | 16×12 → 32×24（長高到 16×38 → **32×76**） | 自動 + fitBox | 火焰粒子改用 `boxUp(b)` 噴到判定上緣 |
+| fire | ↓X 火焰衝刺 | 24×20 → **48×40** | 自動 | |
+| fire | 空中 ↓X 火焰俯衝 | 24×24 → **48×48**；落地爆燃 48×16 → **96×32** | 自動 / melee:true | 落地框是絕對座標 |
+| fire | 空中 X 火焰旋轉 | 30×28 → **60×56** | 自動 | |
+| sword | X 揮砍 | 舉劍 22×16 → 44×32；劈下 24×26 → **48×52** | 自動 + fitBox | **逐幀改寫，靠 fitBox 才維持 2×** |
+| sword | X 滿血劍氣 | proj 12×16（**不變**） | 遠程 | |
+| sword | ↑X 上挑斬 | 22×30 → **44×60** | 自動 | |
+| sword | ↓X 掃堂斬 | 地面 30×14 → **60×28**；空中 26×28 → **52×56** | 自動 | |
+| sword | 空中 X 迴旋斬 | 32×26 → **64×52** | 自動 | |
+| beam | X 甩光鞭 | 12×12（依 segs 長到 ~31×37）**不變** | melee:false | 招式本體是遠程弧形光鞭，判定每幀依 6 段絕對座標重算 |
+| beam | ↑X 天頂光柱 | 18×38 → **36×76** | 自動 | |
+| beam | ↓X 牽星光環 | 地面 22×18 → **44×36**；空中 30×30 → **60×60** | 自動 | dmg 0 的抓取框，放大後比較好抓 |
+| beam | 空中 X 光星墜 | 32×26 → **64×52** | 自動 | |
+| beam | 蓄力 星潮光束 | proj 18×18（**不變**） | 遠程 | |
+| cutter | X 迴旋刃 / ↑X 上拋刃 | proj 12×12（**不變**） | 遠程 | |
+| cutter | ↓X 下劈 | 上段 18×14 → **36×28**；下段 20×22 → **40×44**（空中 20×28 → **40×56**） | 自動 | 兩段判定都放大 |
+| cutter | 空中 X 錐旋刃 | 本體 20×26 → **40×52**；落地 52×16 → **104×32** | 自動 / melee:true | |
+| spark | X 放電電場 | 44×40 → **88×80** | 自動 | 電場特效半徑 22→38、散射範圍同步加大 |
+| spark | ↑X 雷擊柱 | 20×38 → **40×76** | 自動 | 閃電特效改用 `boxUp(b)` |
+| spark | ↓X 落雷 | 地面 52×16 → **104×32**；空中 20×34 → **40×68** | melee:true / 自動 | 地面版 52>48 不吃自動規則，**手動標 melee:true** |
+| spark | 空中 X 電光衝 | 本體 28×26 → **56×52**；落地 68×18 → **136×36** | 自動 / melee:true | |
+| spark | 蓄力 電擊波 | 96×80（**不變**） | melee:false | 本來就是全身巨框、招式表寫明 96px，再翻倍會蓋滿畫面 |
+| stone | X / 空中 X 變石本體 | 18×17（**不變**） | stone:true 自動排除 | 判定框在 `player.js startStone`（非本檔） |
+| stone | ↑X 彗星落石 | 落地 68×18 → **136×36** | melee:true | |
+| stone | ↓X 地滾衝刺 | 同本體 18×17（**不變**） | stone:true | 威力靠 `rollUpdate` 的 dmg 6→8，不是靠框 |
+| ice | X 噴冰 | 12×16 → 24×32（伸長到 32×16 → **64×32**） | 自動 + fitBox | |
+| ice | ↑X 冰柱噴泉 | 16×12 → 32×24（長高到 16×38 → **32×76**） | 自動 + fitBox | |
+| ice | ↓X 冰塊飛踢 | 冰塊 / 冰彈 proj 10×10（**不變**）；空中追加框 22×22 → **44×44** | 遠程 / 自動 | |
+| ice | 空中 X 冰晶散射 | 5 發 proj 8×8（**不變**） | 遠程 | 本來就是純遠程招 |
+| hammer | X 掄鎚 | 地面 26×28 → **52×56**；空中 20×22 → **40×44** | 自動 + fitBox | 掄下的 ox/oy 位移改走 `fitBox` |
+| hammer | ↑X 擎天鎚 | 26×34 → **52×68** | 自動 | |
+| hammer | ↓X 巨鎚敲擊 | 地面 34×30 → **68×60**；空中 32×30 → **64×60** | 自動 | |
+| hammer | 空中 X 落地震 | 本體 22×20 → **44×40**；落地左右各 36×16 → **72×32** | 自動 / melee:true | |
+| hammer | 蓄力 大迴旋 | 40×32 → **80×64**（三段） | 自動 | |
+
+### 視覺（VFX）微調
+判定放大後只補了「明顯看起來只有一半」的幾處，其餘維持原美術（視覺可以小於判定）：
+- 劍：揮砍 slash 半徑 21→32、上挑 20→30、掃堂 18→27、迴旋斬 19→30 與 aura 16→26 / ring 30→46，上挑的白線終點 −34→−48。
+- 電擊：電場魔法陣 r 22→38、閃電半徑 14~22→18~38、`fx_spark_field` 與粒子散射範圍約 ×1.8。
+- 火 / 冰：頭頂柱的火焰 / 冰晶改用 `boxUp(b)`（判定上緣）當噴發高度；噴射招的粒子前端改用 `b.w`（跟著伸長）。
+
+### 驗證
+- `.venv/bin/python tools/test_charge.py` → **140/140 passed**（原 115 項 + 新增 25 項 Round 10 檢查）。
+  新增內容在 `run_melee(h)`：逐能力實跑 7 種輸入，檢查
+  ①每個貼身框 `meleeScaled == 2` 且 `w == w0×2 / h == h0×2`、
+  ②招式中途改寫尺寸後仍是 2×（`fitBox` 沒被繞過）、
+  ③遠程投射物尺寸落在白名單集合內且 `meleeScaled == 0`、
+  ④三個不放大的白名單（石頭本體 / 電擊波 96×80 / 光鞭）都確實出現且維持原尺寸。
+- `.venv/bin/python tools/enemy_test.py` → **393/393 passed**（本輪**不需要**改任何尺寸斷言：enemy_test 檢查的都是 `owner:'enemy'` 的框與敵人自身 w/h，不受玩家近戰放大影響）。
+- `.venv/bin/python tools/engine_test.py` → **167/167 passed**。
+- `.venv/bin/python tools/playthrough.py --level w1 --ability sword --godmode` → `cleared=True deaths=0 frames=5341 bossDamage=100% missing []`。
+  另外加跑 `--ability fire` → `cleared=True deaths=0 frames=4380`（確認 80px 寬的火焰 + `breakBlocks` 不會把關卡打壞）、
+  `--ability hammer` → `cleared=True deaths=0 frames=8862`。
+
+### 截圖（全部用 Read 看過，`--hitbox` 紅框）
+`shots/agent_melee_basic/`
+- `sword_X.png`（48×52，紅框從頭頂罩到身前一大塊）、`sword_upX.png`（44×60 直立框）、`sword_downX.png`（60×28 貼地往前）
+- `spark_X.png`（88×80 電場，幾乎一整塊畫面）、`spark_upX.png`（40×76 雷柱）、`spark_downX.png`（104×32 落雷橫帶）
+- `fire_X.png`（80×32 火舌）、`fire_upX.png`（32×76 火柱）、`ice_X.png`（64×32 寒霧）
+- `hammer_X.png`（52×56）、`hammer_upX.png`（52×68）、`cutter_downX.png`（40×44）
+- `beam_upX.png`（36×76）、`beam_X_whip.png`（**光鞭只有貼著光鞭段的小框 → 遠程確實沒被動到**）
+
+### 跨檔需求
+- 無強制需求。`src/entity.js` / `src/const.js` 的規則直接沿用總控版本，未更動；`KB.PHYS` 既有常數也沒動。
+- 建議（給總控 / qa10，不屬於本輪任一 agent 的授權範圍）：`tools/enemy_test.py` 的 `HOOK_JS` 只記錄 `w/h`，
+  melee-weapons 與本 agent 都各自另外掛了一層 `KB.spawn` 才拿得到 `w0 / h0 / meleeScaled`。
+  若之後還要驗放大倍率，把這三個欄位加進 `HOOK_JS` 會省事（本輪授權寫明「只准修尺寸斷言」，所以沒動）。
+- 同理 `src/main.js` 的 `__kb.entities()` 也沒有 `w/h/w0/meleeScaled`，除錯時得自己讀 `KB.game.entities`。
+
+### 已知問題
+1. **高度是「置中」放大**，所以像 ↑X 這類頭頂招的判定會同時往下長出半格、蓋住卡比身體；
+   反過來 ↓X 也會往上長。整體是「更容易打到、也更容易替自己清掉貼身的敵人」，方向與使用者需求一致，但和美術對不齊。
+2. **落地衝擊波變得很寬**：spark 空中 X 與 stone ↑X 的落地框是 136×36（超過畫面一半寬）、cutter 104×32、fire 96×32。
+   都只有 8~10 幀、且要先付出俯衝 / 落石的硬直，實測 playthrough 沒有異常，但如果使用者覺得「太誇張」，
+   改法是把這幾個絕對座標框的 `melee: true` 拿掉（回到原尺寸）或改成只放大寬度。
+3. **beam 的 X（光鞭）依規格維持原大小**——它是本輪定義中的「遠程」。若使用者實測後覺得光束的 X 還是太短，
+   要改的是 `BeamWhip` 的 `n`（段數 6）/ `r = i * 7`（每段間距），不是 melee 旗標；這會動到既有手感，先不自作主張。
+4. `fitBox` 目前只在 abilities.js 內；其他 abilities_*.js 若也有「招式中途改寫判定框尺寸」的招，需要各自處理（已在本段開頭點名這個坑）。
+
+
+## melee-mix（Round 10・貼身判定加倍：24 混合能力 + 覺醒 / 夥伴核對，2026-09-17）
+
+擁有檔案：`src/abilities_mix.js`、`src/abilities_mix2.js`、`src/awaken.js`、`src/helper.js`、
+`tools/test_mix.py`、`tools/test_mix2.py`、`tools/test_awaken.py`、`tools/test_skins.py`。
+核心（`src/entity.js` / `src/const.js`）完全沒動，`KB.PHYS` 也沒加常數。
+
+### 判定框是怎麼生出來的（先弄清楚才動手）
+24 個混合能力在兩個檔裡只各有 **2 個 `KB.hitbox` 呼叫**，都是共用工廠：
+
+| 工廠 | 位置 | 產生方式 | Round 10 處理 |
+|---|---|---|---|
+| `fbox(p, o)` | mix.js / mix2.js `const fbox = …` | `follow: p`（跟著卡比本體），相對座標 `ox/oy` | **不用改**：`follow.type === 'player'` 且原尺寸 ≤ 48×48 → entity.js 建構子自動 ×2 |
+| `abox(x, y, w, h, o)` | 同上 `const abox = …` | 絕對世界座標（x/y 給中心點），**沒有 follow → 自動規則不會生效** | 新增 `mbox(p, x, y, w, h, o)` 包一層，帶 `melee: p.type === 'player'`；貼身招的 abox 全部改叫 `mbox` |
+| `shoot(o)` / `MixHoming` / `MixOrbit` / `Mix2Homing` / `Mix2Orbit` / `Mix2Return` | 同上 | `KB.Projectile` | **完全沒動**（遠程維持） |
+| `echo(p, o)` | 兩檔 Round 9 區塊各一份 | ↑X 的「地面餘波」，絕對座標 | 改走 `mbox` → ×2（這是貼在卡比腳邊的接觸判定） |
+
+`mbox` 的定義（兩檔各一份，緊接在 `abox` 之後）：
+
+```js
+const mbox = (p, x, y, w, h, o) => abox(x, y, w, h, Object.assign({ melee: !!p && p.type === 'player' }, o || {}));
+```
+
+`p.type` 這個判斷就是**夥伴不被誤放大**的關鍵：`KB.Helper` 的 `type` 是 `'ally'`，
+夥伴用 `callDef()` 借用同一份招式定義時 `melee` 會是 `false`，判定維持 Round 9 尺寸。
+
+改動統計：`abilities_mix.js` 21 處 `abox → mbox`、`abilities_mix2.js` 28 處。
+
+### 哪些放大 / 哪些維持（規則寫進兩檔的檔頭註解）
+- **放大 ×2**：貼身招的框——↑X 直立框、↓X 地面斬、空中 X 的落地衝擊、m1 的刀光 / 鎚擊 / 拳、`echo()` 餘波、
+  身體周圍的迴旋光環（`flipWithOwner:false` 的對稱框）、三種龍吐息。
+- **維持原樣**：投射物本體與它命中 / 撞牆時的爆炸框、以敵人座標或遠處地面生成的追打框（落雷柱 / 冰柱 / 隕石）、
+  持續場地框（火海 `firePool` 44×22、flamegun 火牆 26×46、frostgun 冰霧 62×40、thundergun 電網 70×58、
+  starmage 星塵魔法陣 88×30、timebeam 時間裂縫 40×84 / 時砂沙漏 66×42、flamebow 地火箭列 18×46）、
+  全畫面框（雷光一閃 272×28、EMP 272×200、山崩 272×44、冰河期 272×160、時停爆 260×190、銀河爆 230×180…）、
+  蓄力必殺的大框（千刃 120×96、奇點 120×110 / 150×130、太陽炎 140×130、雷神劍 150×200、軌道砲鎚 70×230…）、
+  starmage 的 96×18 光束（固定長度的遠程框）。
+- **純遠程混合**（`thunderbow` 雷弓、`starmage` 星光法師）**五招一個放大框都沒有**——它們的招全是投射物 /
+  遠處落點，完全符合「遠程維持」。測試把這件事釘成正向斷言（`純遠程混合，判定維持原樣（0 個放大框）`）。
+
+### ⚠ 逐幀改寫判定框的坑（總控在 melee-basic 那邊發現的）
+- 全文搜過 `\.(w|h|ox|oy)\s*=`：`abilities_mix.js` / `abilities_mix2.js` **0 個命中**，
+  沒有「招式中途改寫 `b.w / b.h / b.ox / b.oy`」的招 → 不需要 `abilities.js` 的 `fitBox()`。
+- 但有**同一個坑的另一種長相**：三種龍吐息（`frostdragon` 冰息 / `flamedragon` 炎息 / `thunderdragon` 雷息）
+  是**每幀 `d.box.dead = true` 再重建**，而長度 `len` 會一路變長（18→62 / 20→78 / 18→70）。
+  只靠 entity.js 的自動門檻的話，`len ≤ 48` 會放大、`len > 48` 就不放大 → **「吐得越久判定越小」**。
+  修法：那三處明確寫 `melee: p.type === 'player'`（強制開），全程 ×2；
+  順便把 `flamedragon` 的 `len` 從 `Math.min(78, 20 + t * 2.2)` 包上 `Math.round()`（原本會產生 22.2 這種半像素框）。
+  測試有專門的一關驗這件事（見下）。
+
+### 覺醒招（`src/awaken.js`）：只核對、不誤放大
+- 覺醒招的判定框 **100% 走 `bigbox() → mkbox()`**（全檔只有 1 個 `KB.hitbox` 呼叫），
+  預設 288×208 全畫面框，或追著「畫面外魔王」的 `max(64, e.w+48)` 大框 —— 兩者都遠超過 48×48 門檻，
+  而且 `follow` 不是卡比（是 `null` 或 boss），所以**本來就不會被自動放大**。
+- 仍然在 `mkbox` 明確寫上 `melee: !!o.melee`（預設 `false`）當保險 + 註解理由，行為與 Round 9 **完全相同**。
+  將來若真要做「貼身小框的覺醒招」，在該招的 opts 傳 `melee: true` 即可。
+
+### 夥伴（`src/helper.js`）：只核對、不誤放大
+- `stoneBox`（`follow: this`，`this.type === 'ally'`）、`stompWave()` 40×18、`unionFire()` 44×(h+20)：
+  三個都不符合自動規則（不是 follow 卡比本體 / 沒有 follow）→ **一行程式都沒改**，只補了 Round 10 的說明註解。
+- 另外實測發現：**混合能力的 def 帶 `transform: true`**，`helper.js` 的 `simpleOf()` 會回 `{ fallback: true }`，
+  夥伴拿混合能力時是走「退化成吐星（`spitStar`）」，根本不會跑到混合招式的貼身框。
+  `mbox` 的 `p.type` 判斷因此是「防禦性正確」（將來 `SIMPLE` 若加進混合能力就會生效）。測試把兩件事都釘住了。
+
+### 24 混合能力 × 五招 判定框對照表
+（**粗體**＝放大後尺寸，`←` 後面是 Round 9 原尺寸；用 `shots/agent_melee_mix/survey.py` 讀 `KB.game.entities` 的 `w/h/w0/h0/meleeScaled` 產生，原始資料 `shots/agent_melee_mix/survey.json`）
+
+| 混合能力 | X | ↑X | ↓X | 空中 X | 蓄力必殺 |
+|---|---|---|---|---|---|
+| `flamesword` 炎劍 | **60×52**←30×26；投射物×3 | **64×116**←32×58、**96×48**←48×24；投射物×1 | **156×44**←78×22；維持 44×22 | **52×52**←26×26、**140×72**←70×36 | **60×52**←30×26；投射物×5 |
+| `frostsword` 冰劍 | **64×56**←32×28；投射物×1 | **32×80**←16×40；投射物×3 | **148×40**←74×20；投射物×3 | **60×60**←30×30、**128×64**←64×32；投射物×1 | **64×56**←32×28；維持 20×46；投射物×8 |
+| `thunderblade` 雷刀 | 維持 272×28 | **52×148**←26×74、**96×48**←48×24 | **80×60**←40×30 | **92×68**←46×34 | 維持 272×28、26×200 |
+| `flamegun` 火焰槍 | 維持 44×22；投射物×3 | **72×48**←36×24；維持 46×38、44×22；投射物×5 | 維持 26×46；投射物×4 | 維持 44×22；投射物×2 | 維持 44×22、68×54；投射物×7 |
+| `frostgun` 冰彈槍 | 投射物×3 | **72×48**←36×24；維持 48×46；投射物×1 | 維持 62×40；投射物×5 | 維持 50×20；投射物×2 | 維持 210×22；投射物×7 |
+| `thunderbow` 雷弓 | 投射物×2 | 維持 24×120；投射物×1 | 維持 30×22；投射物×1 | 維持 26×34 | 維持 44×210；投射物×2 |
+| `flamehammer` 火鎚 | **72×64**←36×32；維持 18×48 | **72×112**←36×56、**104×48**←52×24 | **180×52**←90×26；維持 44×22 | **92×84**←46×42 | **72×64**←36×32；維持 18×48、56×44；投射物×5 |
+| `stonehammer` 岩鎚 | **68×60**←34×30；投射物×3 | 投射物×2 | **128×56**←64×28；投射物×3 | **56×52**←28×26、**168×72**←84×36；投射物×2 | **68×60**←34×30；維持 272×44、18×40；投射物×11 |
+| `shadowblade` 影刃 | 投射物×2 | **68×120**←34×60、**96×48**←48×24；投射物×2 | 投射物×4 | **72×72**←36×36、**112×52**←56×26；投射物×2 | 維持 120×96；投射物×20 |
+| `starmage` 星光法師 | 維持 96×18 | 維持 30×26；投射物×6 | 維持 88×30；投射物×4 | 投射物×8 | 維持 96×18、230×180 |
+| `frostdragon` 冰龍 | **40×52→124×52**（←20×26→62×26，全程×2） | **56×132**←28×66、**72×48**←36×24 | **140×48**←70×24；投射物×3 | **64×56**←32×28、**132×72**←66×36；投射物×2 | **40×52→124×52**（←20×26→62×26，全程×2）；維持 70×60；投射物×1 |
+| `thundermech` 雷電機甲 | **76×56**←38×28 | 投射物×2 | **156×52**←78×26 | 投射物×1 | **76×56**←38×28；維持 272×200 |
+| `flamebow` 焰弓 | 維持 48×38；投射物×2 | **72×48**←36×24；維持 50×50、44×22；投射物×6 | 維持 18×46；投射物×3 | 維持 44×22 | 維持 48×38、44×22、90×72；投射物×3 |
+| `frosthammer` 冰鎚 | **76×64**←38×32；維持 76×30；投射物×2 | **64×108**←32×54、**96×48**←48×24；投射物×2 | **36×92**←18×46；投射物×5 | **56×56**←28×28、**136×68**←68×34；投射物×2 | **76×64**←38×32；維持 76×30、272×160、22×52；投射物×11 |
+| `thundersword` 雷劍 | **68×60**←34×30 | **48×136**←24×68、**96×48**←48×24 | **168×44**←84×22 | **56×60**←28×30、**160×80**←80×40 | **68×60**←34×30；維持 150×200、28×200 |
+| `flameninja` 火忍 | 維持 44×22；投射物×3 | **60×112**←30×56、**96×48**←48×24；投射物×3 | **120×96**←60×48、**108×92**←54×46；維持 44×22 | 維持 44×22；投射物×2 | 維持 44×22、170×120；投射物×5 |
+| `frostninja` 冰忍 | 投射物×4 | **56×116**←28×58、**96×48**←48×24；投射物×3 | **88×64**←44×32；投射物×2 | 投射物×3 | 維持 200×140；投射物×10 |
+| `thundergun` 雷槍 | 投射物×3 | **72×48**←36×24；維持 46×46；投射物×1 | 維持 70×58；投射物×7 | 投射物×2 | 維持 220×26；投射物×6 |
+| `stonegiant` 岩巨人 | **88×68**←44×34、**180×64**←90×32；投射物×2 | **64×124**←32×62、**108×48**←54×24；投射物×2 | **68×64**←34×32 | **64×52**←32×26、**192×72**←96×36；投射物×2 | **88×68**←44×34、**180×64**←90×32；維持 60×46、272×44；投射物×9 |
+| `flamedragon` 炎龍 | **44×60→156×60**（←22×30→78×30，全程×2）；投射物×2 | **56×136**←28×68、**72×48**←36×24 | **144×48**←72×24；維持 44×22 | **68×60**←34×30、**148×76**←74×38；維持 18×48 | **44×60→156×60**（←22×30→78×30，全程×2）；維持 140×130；投射物×3 |
+| `thunderdragon` 雷龍 | **40×56→140×56**（←20×28→70×28，全程×2） | **52×140**←26×70、**72×48**←36×24 | **152×48**←76×24 | **64×60**←32×30、**140×72**←70×36；維持 26×200 | **40×56→140×56**（←20×28→70×28，全程×2）；維持 28×200 |
+| `timebeam` 時光束 | 維持 110×20 | 維持 40×84；投射物×3 | 維持 66×42；投射物×1 | **88×88**←44×44；投射物×1 | 維持 110×20、260×190 |
+| `gravityblade` 重力刃 | 投射物×4 | **60×116**←30×58、**96×48**←48×24；投射物×2 | 投射物×1 | **60×60**←30×30、**128×64**←64×32 | 維持 120×110、150×130；投射物×20 |
+| `hammermech` 鎚機甲 | **92×72**←46×36、**120×60**←60×30 | **96×52**←48×26；投射物×2 | **160×56**←80×28；投射物×2 | **88×80**←44×40 | **92×72**←46×36、**120×60**←60×30；維持 70×230；投射物×1 |
+
+> 註 1：`蓄力必殺` 欄同時會出現 `X` 的框，因為蓄力就是「按住 X」→ 先放 X 招、放開才放必殺（這是原本的設計）。
+> 註 2：`↑X` 欄常見的 `96×48←48×24` / `72×48←36×24` 是共用的 `echo()` 地面餘波（空中版 48 寬、地面版 36 寬）。
+
+### 測試
+| 指令 | 結果 |
+|---|---|
+| `.venv/bin/python tools/test_mix.py` | **701/701 passed**（Round 9 是 509；本輪 +192） |
+| `.venv/bin/python tools/test_mix2.py` | **801/801 passed**（Round 9 是 607；本輪 +194） |
+| `.venv/bin/python tools/test_awaken.py` | **270/270 PASS**（Round 9 是 240；本輪 +30） |
+| `.venv/bin/python tools/test_helper.py` | **131/131 passed**（未改斷言，只加註解） |
+| `.venv/bin/python tools/test_skins.py` | **67/67 PASS**（**不需要改任何尺寸斷言**：skins 測的是配色 / HUD 臉 / 存檔，沒有判定框斷言） |
+| `.venv/bin/python tools/engine_test.py` | **167/167 passed** |
+
+新增的檢查（`test_mix.py` / `test_mix2.py` 的 `melee` 關卡 + `phase_moves` 逐招檢查）：
+1. `貼身框 meleeScaled == 2 且 w/h 剛好 ×2` —— 每一招都驗（`w == w0*2 and h == h0*2`）。
+2. `遠程投射物不受 meleeScale 影響` —— 每一招都驗。
+3. `<能力>: 至少一招的貼身判定被放大（×2）` —— 22 個混合；`thunderbow` / `starmage` 反向驗 0 個。
+4. `<龍>[X 吐息]: 中段（≥10 幀）判定框仍是 2×` / `長度超過 48px 之後也沒有縮回原尺寸` / `吐息越吐越長`
+   —— 就是上面那個坑的回歸測試。
+5. `維持原尺寸、沒有被放大` —— 全畫面 / 遠程 / 持續場地框逐一點名（272×28、96×18、24×120、26×46、
+   62×40、70×58、110×20、66×42、18×46）。
+6. 夥伴：`KB.Helper.spawn() 成功` / `有出招` / `判定框 / 投射物維持 Round 9 尺寸` / `走簡化 / 退化路徑`。
+7. `test_awaken.py` 新增 `melee` 關卡：14 個代表性覺醒招（8 基本 + 6 混合）
+   `覺醒招判定框沒有被 meleeScale 放大` + `最小邊 ≥ 64` + `meleeScaled 一律 0`。
+
+技術細節：`tools/enemy_test.py` 的 `HOOK_JS` 只記錄 `w/h`，所以三個測試檔各自在它外面**再包一層 `KB.spawn`**
+（`MELEE_HOOK` / `AWAKEN_BOX_REC`），把 `w0 / h0 / meleeScaled` 補進記錄；沒有動到 `enemy_test.py`。
+
+### 截圖（全部用 Read 打開看過，`--hitbox` 紅框）
+`shots/agent_melee_mix/`
+- `flamesword_dn.png`（↓X 156×44 貼地橫掃，蓋住整棵樹的寬度）
+- `thunderblade_up.png`（↑X 52×148 直立雷柱 + 96×48 地面餘波，兩層紅框疊在一起）
+- `thundersword_dn_00~03.png`（↓X 168×44）
+- `stonehammer_air_00~04.png`（空中 X 落地 168×72）
+- `stonegiant_air.png`（空中 X 落地 **192×72**，本輪最大的貼身框）
+- `gravityblade_up_00~03.png`（↑X 60×116 + 96×48 餘波）
+- `flameninja_dn_00~04.png`（↓X 替身爆 120×96 + 原地替身 108×92）
+- `frostdragon_up.png`（↑X 56×132）、`hammermech_m1.png`（X 92×72 + 地面 120×60）
+- `timebeam_air.png`（空中 X 88×88 逆行光環，整個罩住卡比）
+- `flamedragon_m1_breath.png`（炎息拉到 156×60，全程 ×2）
+- 對照組（**遠程沒被動到**）：`flamegun_dn_ranged.png`、`thunderbow_m1_ranged.png`
+- 資料：`survey.py`（playwright 小腳本）、`survey.json`（24 能力 × 五招的完整 w/h/w0/h0/meleeScaled）
+
+### 跨檔需求
+- **無強制需求**，`src/entity.js` / `src/const.js` 沿用總控版本未動。
+- 建議（同 melee-basic）：`tools/enemy_test.py` 的 `HOOK_JS` 加上 `w0 / h0 / meleeScaled` 三個欄位、
+  `src/main.js` 的 `__kb.entities()` 加上 `w/h/w0/meleeScaled`，之後要驗判定框就不用每個測試檔自己再包一層。
+  （本輪授權是「僅修尺寸斷言」，所以沒動。）
+
+### 已知問題 / 給 qa10 與使用者的旋鈕
+1. **落地衝擊波 / ↓X 地面斬變得很寬**：最大的幾個是 `stonegiant` 空中 X 192×72、`stonegiant` X 180×64、
+   `flamehammer` ↓X 180×52、`thundersword` ↓X 168×44、`stonehammer` 空中 X 168×72、`hammermech` ↓X 160×56、
+   `thundersword` 空中 X 160×80。畫面寬只有 256px，所以這些幾乎是「半個畫面」。
+   都只有 14~18 幀、而且要先付俯衝 / 蓄招的硬直，測試與試打沒異常；
+   **若使用者覺得太誇張**，只要把那幾行從 `mbox(p, …)` 改回 `abox(…)` 就恢復 Round 9 尺寸（一行一個招，互不影響）。
+2. **高度同樣 ×2 且置中**（entity.js 的規則），所以 ↑X 的直立框會往卡比腳下多長半截、↓X 會往上多長半截。
+   結果是「打得到、也比較容易替自己清掉貼身的敵人」，方向與使用者需求一致，但判定框比美術大一圈。
+3. **龍吐息現在最長 156px（炎龍）**。這是為了不讓混合版比它的成分（`fire` 基本吐息放大後 80px）還短；
+   如果覺得太長，把那三行的 `melee: p.type === 'player'` 改成 `melee: false` 即可（但會出現「比基本能力短」的怪現象）。
+4. `flamegun` / `frostgun` / `thunderbow` / `starmage` / `thundergun` / `timebeam` / `flamebow` 這些遠程系，
+   只有 `echo()` 餘波與少數身體周圍的框被放大，X / ↓X 幾乎原封不動 —— 這是照「遠程維持」的指示做的；
+   若使用者實測後覺得「連槍的貼身防身招也要變大」，再把各自的持續場地框改成 `mbox` 就好（一行一個）。
+5. 沒有跑 `tools/build.py`（TASKS 把 build 歸給第二波的 qa10，避免多 agent 同時打包互相覆蓋）。
+
+- [2026-09-17] 完成：24 混合能力貼身招判定 ×2（mix 21 處 + mix2 28 處 `abox → mbox`、三種龍吐息強制 ×2）、
+  覺醒 `mkbox` 標 `melee:false`、夥伴核對不放大；測試新增 melee 關卡。
+  驗證：test_mix 701/701、test_mix2 801/801、test_awaken 270/270、test_helper 131/131、test_skins 67/67、engine 167/167；
+  截圖 `shots/agent_melee_mix/`。下一步：交給 qa10 跑 playthrough + build 對照。
+
+---
+## melee-magic-forms（Round 10，2026-09-17）
+> 擁有檔案：`src/abilities_magic.js`、`src/abilities_forms.js`、`tools/test_magic.py`、`tools/test_forms.py`
+> 目標：8 能力（mage / time / gravity / clone、giant / dragon / mech / ghost）的每一招逐一核對 —
+> **貼身招（含 ↑X / ↓X / 空中 X / 蓄力）判定約 2×、遠程維持**。核心規則沿用總控的
+> `src/entity.js` Hitbox 自動放大 + `KB.PHYS.meleeScale = 2`（本輪沒有動這兩個檔）。
+
+### 做法（三種標注，每個 KB.hitbox 都在程式裡寫了理由）
+1. `follow: p` 且原尺寸 ≤ 48×48 → **自動 ×2**（不加旗標，只補註解說明它是貼身招）。
+2. 絕對座標的近身框（落地衝擊波、龍尾前後斬、交換星爆、墊腳、百裂分身、冰牆冰刺、怨靈落地震波）
+   → 加 `melee: true` 強制 ×2；巨人上勾拳 40×64 超過自動門檻，也用 `melee: true` 補上（總控指示「拳頭要 2×」）。
+3. 不該放大的 → 加 `melee: false` 並寫明理由：遠程投射物的落點爆炸、全畫面必殺、
+   持續型大範圍光環（時之枷 72×48 / 時震環 56×40 / 重力場 64×56 / 幽靈哀嚎 80×68 —— 這些本來就 ≥「貼身框 ×2」的尺寸）、
+   分身塔本體 26×60（總控指示）、隱身用的 0×0 dmg 0 工具框。
+
+### 尺寸對照表（`shots/agent_melee_mf/hb.py` 逐幀量測，×＝meleeScaled）
+| 能力 | 招 | 判定框 | 原尺寸 → 新尺寸 | 備註 |
+|---|---|---|---|---|
+| mage | X 火球 | 落點爆炸 | 30×30 → 30×30 | 遠程投射物，`melee:false` |
+| mage | ↑X 冰牆 | 冰刺 | 24×48 → **48×96** | 卡比前方 20px 的貼身框，`melee:true` |
+| mage | ↓X 雷擊召喚 | 雷柱 | 24×132 → 24×132 | 前方 48px 遠程召喚，h 本來就貫穿畫面 |
+| mage | 空中 X 風刃 | （投射物 ×3） | 不變 | 遠程 |
+| mage | 蓄力 元素風暴 | 全畫面 ×3 波 | 272×208 → 272×208 | 必殺滿版，`melee:false` |
+| time | X 時停 | （無判定框） | — | 時停本身不打人 |
+| time | 時停 / CD 中 X 近身拳 | follow | 20×16 → **40×32** | 自動 ×2，time 唯一的貼身招 |
+| time | ↑X 時震環 | 全向光環 | 56×40 → 56×40 | 已等於一般貼身框 ×2，`melee:false` |
+| time | ↓X 時之枷 | 全向光環 | 72×48 → 72×48 | 比貼身 ×2 更大，`melee:false` |
+| time | 空中 X 回溯 | 路徑框 | padding 14 → **28**（最小 28×28 → 56×56） | 長度＝回溯路徑，整框 ×2 會半個畫面 ⇒ 只把厚度加倍 |
+| gravity | X 黑洞 | 刮傷 / 內爆 | 28×28、56×56 → 不變 | 前方 48px 遠程引力點 |
+| gravity | ↑X 重力波 | 光環 | 64×48 → 64×48 | 總控指示：56~72px 級維持 |
+| gravity | ↓X 反重力 | 重力擠壓 | 64×56 → 64×56 | 同上（拉起敵人的判定是另一套迴圈） |
+| gravity | 空中 X 隕石 | 落點爆炸 | 36×36 → 36×36 | 遠程 |
+| gravity | 蓄力 奇點 | 全畫面 + 大內爆 | 272×208、90×90 → 不變 | 必殺 |
+| clone | X 全員吐星 | （投射物 ×3） | 不變 | 遠程 |
+| clone | ↑X 分身塔 | 柱子本體 | 26×60 → 26×60 | 總控指示 `melee:false`（框＝柱子外觀） |
+| clone | ↓X 交換 | 星爆 | 32×28 → **64×56** | 炸在卡比剛離開的位置，`melee:true` |
+| clone | 空中 X 墊腳 | 腳下轟擊 | 30×20 → **60×40** | `melee:true` |
+| clone | 蓄力 百裂分身 | 殘影斬 ×8 | 26×24 → **52×48** | `melee:true`；收尾爆風 44×44 不變 |
+| giant | X 巨腳踩踏 | 落地衝擊波 ×2 | 44×18 → **88×36** | `groundWave()`，`melee:true` |
+| giant | ↑X 上勾拳 | 頭頂拳 | 40×64 → **80×128** | 超過自動門檻，`melee:true` 強制（總控指示） |
+| giant | ↓X 巨人衝撞 | 全身框 | 38×30 → **76×60** | 自動 ×2（巨人 p.w 28 / p.h 30） |
+| giant | 空中 X 屁股墜落 | 全身框 + 落地波 | 34×30 → **68×60**、48×18 → **96×36** | 下墜框改 `breakBlocks:false`（見「副作用修正」） |
+| dragon | X 龍息 | 火焰（逐幀加長） | 20×18 → **40×36**，按住到底 56 → **112×36** | 走新的 `fitBox()`，每一幀都 ×2 |
+| dragon | ↑X 升龍尾撩 | 尾焰 | 30×44 → **60×88** | 自動 ×2 |
+| dragon | ↓X 尾擊 | 前後各一刀 | 30×22 → **60×44** | `melee:true` |
+| dragon | 空中 X 俯衝 | 全身框 + 落地波 | 24×19 → **48×38**、42×18 → **84×36** | 下墜框改 `breakBlocks:false` |
+| dragon | 蓄力 龍炎彈 | （投射物 20×20） | 不變 | 遠程 |
+| mech | X 火箭拳 | （Projectile） | 不變 | 遠程（來回判定） |
+| mech | ↑X 追蹤飛彈 | 爆風 | 32×28 → 32×28 | 遠程，`melee:false` |
+| mech | ↓X 鑽頭突進 | 鑽頭 | 24×16 → **48×32** | 自動 ×2 |
+| mech | 空中 X 噴射墜踩 | 全身框 + 落地波 | 20×15 → **40×30**、44×18 → **88×36** | 下墜框改 `breakBlocks:false` |
+| mech | 蓄力 全彈發射 | 飛彈爆風 | 32×28 → 32×28 | 遠程 |
+| ghost | X 穿牆開關 | （無判定框） | — | 不是攻擊 |
+| ghost | ↑X 隱身 | alert 清除工具框 | 0×0 dmg 0 → 不變 | `melee:false`（不是攻擊框） |
+| ghost | ↓X 附身 / 怨靈墜擊 | 墜擊 + 落地震波 | 28×28 → **56×56**、48×22 → **96×44** | 自動 ×2 + `melee:true` |
+| ghost | 空中 X 幽靈哀嚎 | 大範圍音波 | 80×68 → 80×68 | 對應 76px 的 stun 半徑，`melee:false` |
+
+### 兩個非「加旗標」的必要修正
+1. **逐幀改寫尺寸的招要用 `fitBox()`**（總控中途提醒的陷阱）：龍息每幀都在寫 `b.w`，
+   直接寫會把建構子的 ×2 洗掉。`src/abilities_forms.js` 新增了與 `src/abilities.js` 同一套規則的
+   `fitBox(b, {w, h, ox, oy})`（傳未放大的原始值，依 `b.meleeScaled` 重算並維護 `w0/h0`）。
+   `src/abilities_magic.js` 全文檢查後沒有這種招（回溯路徑框是建立當幀一次算好），已在檔頭註明。
+2. **全身框 ×2 + `breakBlocks` = 自己挖洞把自己埋了**：`playthrough w1 --ability mech` 實測
+   3/3 卡在 r1 x=979 的通道（放大後的墜踩框往腳底下多出半個身體，一路把地板砸穿後掉進地形）。
+   修法：**下墜途中的全身框改 `breakBlocks:false`**（mech 噴射墜踩 / giant 屁股墜落 / dragon 俯衝），
+   破壞方塊交給落地的 `groundWave`（一樣是 2× 的貼身框）。改完 3/3 通關。
+   ※ 前衝型（giant 衝撞 breakHard、mech 鑽頭）維持會破壞方塊 —— 那是招式本來的賣點。
+
+### 特效同步放大（不然會有「看不見的傷害」）
+龍息火焰長度改成跟著 `b.w` 走（原本只畫到 52px、判定卻到 112px）；
+巨人上勾拳光環 48→76 / 斬線 26→42、龍尾斬線 20→32、怨靈落地環 44→72、
+交換星爆環 30→48、墊腳環 24→40、冰牆冰刺環 28→46。
+
+### 截圖（`--hitbox`，已逐張用 Read 檢視）
+`shots/agent_melee_mf/`：`mage_upX_icewall_0x.png`、`time_X_punch_0x.png`、`gravity_upX_wave_0x.png`、
+`clone_downX_swap_0x.png`、`giant_upX_upper_0x.png`、`giant_X_stomp_0x.png`、`dragon_X_breath_0x.png`、
+`dragon_downX_tail_0x.png`、`mech_downX_drill_0x.png`、`ghost_downX_plunge_0x.png`。
+量測腳本：`shots/agent_melee_mf/hb.py`（playwright，逐幀印出每招每個判定框的 `kind / follow / w0×h0 / w×h / meleeScaled / dmg`）。
+
+### 測試
+- `tools/test_magic.py` 新增 `round10` 段（16 個 case + 回溯路徑框 + `KB.PHYS.meleeScale` 常數）：**248/248**（原 192）。
+- `tools/test_forms.py` 新增 `round10` 段（14 個 case + 幽靈哀嚎 + 龍息最長判定 + 常數）：**315/315**（原 263）。
+- 每個 case 都檢查三件事：① 指定的貼身框 `meleeScaled == 2` 且 `w == w0×2, h == h0×2`；
+  ② 指定的遠程 / 全畫面 / 光環 / 本體框 `meleeScaled == 0` 且尺寸不變；
+  ③ **招式進行中的每一個取樣幀**都維持 ×2（逐幀改寫不會洗掉放大 —— 龍息就是靠這條抓出來的）。
+- `tools/engine_test.py` **167/167**。
+- `tools/playthrough.py --godmode`：w3 giant **cleared**（本輪指定）；另外跑 w1 giant / w1 dragon / w1 mech ×4 /
+  w2 ghost / w2 mage / w1 clone / w4 dragon / w6 mech 全部 cleared（w5 giant 第一次卡住、重跑 cleared —— RNG 已知現象）。
+
+### 跨檔需求
+- **無**。`src/entity.js` / `src/const.js` 沿用總控版本未動，也沒有動別的 agent 的檔。
+- 建議（與 melee-basic / melee-mix 同）：`src/main.js` 的 `__kb.entities()` 補上 `w/h/w0/h0/meleeScaled`，
+  以後驗判定框就不用每個測試檔各包一份 JS 掃描字串。
+
+### 已知問題 / 給 qa10 與使用者的旋鈕
+1. **巨人上勾拳 80×128 是本輪最大的貼身框**（畫面高只有 192px），等於打得到頭頂上方 72px 的飛行敵人。
+   這是照總控「巨人的拳頭要 2×」做的；若使用者覺得太誇張，把那一行的 `melee: true` 拿掉即可回到 40×64
+   （它超過自動規則的 48 門檻，不標就不會放大）。
+2. **龍息最長 112px**，已經不太像「貼身」。若要收回去，把 `update()` 裡 `fitBox(b, { w: Math.min(56, …) })`
+   的 56 改成 28（＝放大後仍是 56px）。火焰演出會自動跟著縮短。
+3. **落地衝擊波左右兩框放大後會在卡比腳下重疊**（各自以原中心置中）。同一幀不會雙重扣血
+   （`Enemy.hurt` 有 `invuln = 6`），但除錯畫面上會看到兩個紅框疊在一起，屬正常。
+4. **giant 衝撞（breakHard）/ mech 鑽頭放大後仍會破壞方塊**，框比身體大 1.5 倍 ⇒ 破壞範圍也變大。
+   目前 w1 / w3 / w5 / w6 通關機器人沒問題，但如果 qa10 在某個房間看到「不該被打穿的地形被打穿」，
+   優先懷疑這兩個（照 mech 墜踩的做法改 `breakBlocks:false` 或縮框即可）。
+5. time / gravity 的 ↑X / ↓X 與 clone ↑X 依指示**維持原尺寸**，所以這三招不會感覺到變強；
+   若使用者實測後仍覺得這幾招太小，再把對應的 `melee:false` 拿掉（每招各一行、互不影響）。
+6. 沒有跑 `tools/build.py`（TASKS 把 build 歸給第二波的 qa10）。
+
+- [2026-09-17] 完成：8 能力（magic 4 + forms 4）全招式判定核對 —— 貼身招 ×2（12 招）、遠程 / 全畫面 / 光環 / 本體框維持（14 處標注理由）、
+  龍息改走 `fitBox` 逐幀重算、下墜全身框 `breakBlocks:false` 修掉「自己挖洞卡關」、特效同步放大。
+  驗證：test_magic 248/248、test_forms 315/315、engine 167/167、playthrough w3 giant cleared（另 8 組能力 / 世界全 cleared）；
+  截圖 `shots/agent_melee_mf/`。下一步：交給 qa10 跑全測試 + build 對照。
+
+---
+
+## qa10（Round 10 第二波・獨立驗收 + build，2026-09-17）
+
+> 擁有檔案：`docs/QA_REPORT.md`、本區段、`shots/agent_qa10/`，以及執行 `tools/build.py` 產出 `dist/卡比之星.html`（本輪 build 歸 qa10）。
+> **src 全程唯讀、沒有 git 操作**（沒有 commit / stash / checkout / reset）。
+> 對照組取得方式：`git archive HEAD 卡比之星 | tar -x -C <暫存目錄>`，用專案 venv 跑**那一份**的工具 —— 工作區完全沒有被動過。
+> 不採信任何 agent 的自述數字，17 支測試 + 44×5 判定框普查 + 12 次 playthrough 全部自己重跑。
+
+- [18:40] 完成：16 支測試全綠；驗證：`shots/agent_qa10/tests/all_tests.log`；下一步：boss / level / audio / font + 判定框普查
+- [18:45] 完成：44 能力 × 5 招判定框普查（目前 + git HEAD 兩份）；驗證：`shots/agent_qa10/survey.json` / `survey_base.json`；下一步：playthrough 對照 + 地形破壞
+- [18:50] 完成：非無敵 playthrough 目前 vs HEAD 12 次、godmode w1~w7 7 次、地形破壞與硬磚對照、效能、UI 截圖；下一步：build
+- [18:55] 完成：`tools/build.py` → dist **3328 KB**、playwright 開 dist 實跑可玩（missing []、0 error）；驗證：`shots/agent_qa10/dist_game.png`；下一步：寫 QA_REPORT
+
+### 結論
+
+**可以出貨。P0 × 0、P1 × 1、P2 × 5。** 詳見 `docs/QA_REPORT.md` 的「Round 10 驗收（qa10）」章節。
+
+使用者的核心需求確實達成：44 能力 × 5 招實測 **713 個 player 判定框**，其中 **459 個 `meleeScaled == 2` 且全部 `w == 2×w0 && h == 2×h0`**（0 個不對稱）；**395 個投射物與 git HEAD 零差異**；241 個活到第 10 幀的框**沒有一個縮回**原尺寸。
+非無敵實測改善幅度很大：w1 sword / w2 spark / w4 blade 各 2 次，**目前 6/6 通關（總 deaths 4）、HEAD 只有 1/6 通關（總 deaths 20）**。
+
+### 要總控注意
+
+1. **R10-P1-01（唯一的紅字）**：`font_subset.py --check` **exit 1、缺「宣 稽 遍」**，HEAD 跑同一支工具是 OK。來源是三個 agent 新寫的**程式註解**（`abilities_weapons.js:5` 稽核、`abilities_mix.js:132/998` 宣告、`abilities_magic.js:668` 一遍），**沒有任何 UI 字串用到這 3 個字，遊戲影響為零**，但違反 STATUS 的品質基準、且 `build.py` 已內嵌的字集（1848）比 src 掃到的（1851）少 3。
+   **修法擇一**：① 跑一次 `.venv/bin/python tools/font_subset.py`（不加 `--check`）重做子集 → 要重新 build；② 請 agent 把註解裡那 3 個字換掉 → 零資產改動。**qa10 沒有動 assets**（不在授權範圍內）。
+2. **R10-P2-05（四個 agent 都提過的跨檔需求）**：`tools/enemy_test.py` 的 `HOOK_JS` 與 `src/main.js` 的 `__kb.entities()` 都沒有 `w0 / h0 / meleeScaled`，導致 melee-basic / melee-weapons / melee-mix / melee-magic-forms **四個 agent 各自另外掛了一層 `KB.spawn` hook**，qa10 又寫了第五份。建議由總控統一補上。
+3. **build 已完成**（dist 3328 KB / 3,611,299 bytes，+26 KB）。若採用上面第 1 條的修法 ①，**需要再 build 一次**。
+4. 兩個需要**使用者裁決**的清單已整理好，直接貼在 QA_REPORT 的 R10-2c（例外清單，54 個格子分四級）與 R10-2g（過大框 48 招）。
+
+### 給使用者的兩張表（摘要）
+
+**① 例外清單第 1 級（使用者點名卻沒放大，只有 1 條）**
+
+| 能力 / 招 | 目前 | 放大後會變成 | agent 的理由 |
+|---|---|---|---|
+| **spark 蓄力「電擊波」** | 96×80 不變 | 192×160 = 遊戲區的 **62%** | 招式表寫明 96px、本來就是全身巨框 |
+
+> sword 的五招**全部達標**：X 44×32 / ↑X 44×60 / ↓X 60×28 / 空中X 64×52 都 ×2，第 5 招「滿血 X 劍氣」本來就是遠程投射物（照規格不放大）。
+> spark 的其餘四招也全部 ×2（X **88×80**、↑X 40×76、↓X 104×32、空中X 56×52 + 落地 136×36）。
+
+**② 過大框 Top 8（完整 48 招見 QA_REPORT R10-2g）**
+
+| 能力 | 招 | 放大後 | 佔畫面 |
+|---|---|---|---|
+| stonegiant | 空中X | **192×72** | 寬 75% |
+| stonegiant | X / 蓄力 | 180×64 | 寬 70% |
+| flamehammer | ↓X | 180×52 | 寬 70% |
+| stonehammer | 空中X | 168×72 | 寬 66% |
+| thundersword | ↓X | 168×44 | 寬 66% |
+| thundersword | 空中X | 160×80 | 寬 63% |
+| hammermech | ↓X | 160×56 | 寬 63% |
+| **giant** | **↑X** | **80×128** | **高 67%** |
+
+### 旋鈕（使用者想調就改這幾行）
+
+- **想讓 spark 電擊波也變大** → `src/abilities.js:675` 附近拿掉 `melee: false`（會變 192×160）。
+- **想收斂過大框** → 把對應那一行的 `mbox(p, …)` 改回 `abox(…)`（melee-mix 的招）或拿掉 `melee: true`（giant ↑X）。一行一個招、互不影響。
+- **想讓槍 / 弓系的貼身防身招也變大** → `flamegun` / `frostgun` / `thunderbow` / `thundergun` / `flamebow` / `starmage` / `timebeam` 的持續場地框從 `abox` 改成 `mbox`。
+- **想讓 time / gravity / clone 的光環招變大** → 拿掉各自的 `melee:false`（9 條，見 QA_REPORT R10-2c 第 2 級）。
+
+### 已知問題（qa10 觀察到、不阻擋出貨）
+
+1. **判定框明顯超出特效**（R10-P2-02）：最嚴重是 **blade X 第 1 段**（52×40 的框 vs 約 12px 的白色短劃）與 **sword X 起手**（44×32 的框有 3/4 是空的）；**giant ↑X** 框頂比拳頭高約 40px。**反例**：spark X 的電場魔法陣（r=38）幾乎內接 88×80 的框、dragon X 的火焰跟著 `b.w` 逐幀伸長 —— 證明特效同步放大做得到，只是沒做完。
+2. **高度一律置中放大**，所有貼身框的下緣會沉入地面 10~20px、上緣長到卡比頭頂上方。功能無影響（地板 `#` 不可破），只是 `--hitbox` 畫面難看。
+3. **地形破壞半徑跟著變大**（不是 bug，但使用者可能有感）：hammer X 在同一距離由破 0 塊 → 破 3 塊。**但逐格量測確認每一塊被破的磚都與框真實重疊**（最邊緣的 giant ↓X 也只是剛好蓋到上一列磚的下緣 4px），**沒有隔空破壞**；而且**能破硬磚 X 的能力名單與 HEAD 完全一致**（sword / beam / cutter / ice / spark / ninja 全部仍然打不破）——`src/tilemap.js` 本輪一個字都沒改，`hardBreakable()` 只看 kind / breakHard / dmg，不看尺寸。
+4. **spark 招式表文案過期**（R10-P2-01）：暫停能力卡寫「放電（44px 電場）」，實際 88px。掃過 44 種能力的全部文案，**只有這一處**寫死尺寸數字。
+5. 12 個地形破壞案例裡有 7 個破壞 0 塊 —— 是我的卡比擺位沒站到磚旁（房間地形所致），不是程式問題；結論靠另外兩組（破壞位置量測 + 硬磚 12 能力對照）支撐。
+6. `boss_test --runs 3` 這次 **kracko fight 3/3 PASS**，沒有出現 CLAUDE.md 記載的「2/3 已知 WARN」。
+7. 效能**比 R9 更快**（0.247~0.536 vs 0.36~0.57 ms/幀）——碰撞是 AABB，成本與框的尺寸無關。
+
+---
+# Round 10 總結（總控，2026-09-17）— 貼身招判定加倍
+使用者需求：武器 / 變身貼身招範圍太小常被打死，要「攻擊怪物的判定大一倍左右，含 ↑X / ↓X」，遠程維持。
+核心：`KB.PHYS.meleeScale = 2`（const.js 尾端）+ entity.js Hitbox 自動規則 + `melee:true/false` 強制 + `w0/h0/meleeScaled`。4 個 melee-* agent 逐能力核對（44 能力 × 5 招），qa10 獨立普查。
+最終驗證：engine 167、enemy 393(+79)、boss ALL PASS（kracko 3/3）、weapons 417、magic 248、forms 315、charge 140、mix 701、mix2 801、helper 131、elements 96、progression 101、awaken 270、extra 53、challenge 93、saves 67、skins 67；level_check / audio_check / font_subset --check 全過；playthrough w1~w7 --godmode 7/7；非無敵 sword w1 / spark w2 / blade w4 各 2 次 6/6 通關（R9 版 1/6）；效能 0.25~0.54 ms/幀；build 3328KB。
+總控修：三個註解用字（宣 / 稽 / 遍）換掉讓字集檢查回綠；spark 招式表「44px 電場」→ 88px。
+## 已知 / 待裁決（詳 QA_REPORT Round 10）
+- 過大框 48 招（stonegiant 空中 X 192×72、giant ↑X 80×128 等）；例外清單 54 格（spark 蓄力電擊波唯一使用者點名未放大）；判定超出特效（blade X / sword X / giant ↑X）；`__kb.entities()` / HOOK_JS 缺 w0/h0/meleeScaled。

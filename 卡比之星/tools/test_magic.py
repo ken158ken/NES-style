@@ -566,6 +566,125 @@ def phase_enemies(h):
             h.save_shot('magic_enemy_' + key)
 
 
+
+# ---------------------------------------------------------------------------
+# 5.6 Round 10：貼身招判定 ×2（KB.PHYS.meleeScale）
+#   規格：docs/TASKS.md Round 10 —— 貼身招（follow 卡比的框 / 絕對座標的近身框）最終尺寸約 2×；
+#         遠程投射物（火球 / 風刃 / 隕石 / 小星）、全畫面必殺、持續型大範圍光環、分身柱本體維持原尺寸。
+#   判定方式：entity.js 在每個 Hitbox 上留了 w0 / h0（原尺寸）與 meleeScaled（實際倍率），
+#             逐幀掃描招式期間場上所有 owner='player' 的判定框來核對。
+#   ※「招式進行中逐幀改寫 b.w / b.ox」會洗掉建構子的放大 —— 所以除了起手那一幀，
+#     這裡對**每一個取樣幀**都檢查 w == w0 × ms、h == h0 × ms（本檔沒有這種招，但規則一致）。
+# ---------------------------------------------------------------------------
+MS = 2          # KB.PHYS.meleeScale（總控在 src/const.js 設定）
+
+HB_SCAN = ("(n)=>{const out=[];for(let i=0;i<n;i++){__kb.step(1);"
+           "for(const e of KB.game.entities){if(e.dead||e.type!=='hitbox'||e.owner!=='player')continue;"
+           "out.push({f:i,k:e.kind,w:Math.round(e.w),h:Math.round(e.h),w0:Math.round(e.w0),h0:Math.round(e.h0),"
+           "ms:e.meleeScaled|0,dmg:e.dmg});}}return out;}")
+
+
+def hb_run(h, key, seq, air=False, wait=40):
+    """給能力 →（空中招先升空）→ 依序按鍵，全程逐幀取樣場上的玩家判定框"""
+    h.goto(3, 9, ability=key, immune=True)
+    if key == 'clone':
+        give(h, 'clone')                 # 分身要走 onGet 才會生成
+    h.ev("()=>{KB.player.dir=1;}")
+    if air:
+        g = gstate(h)
+        h.teleport(g['x'], GROUND_TOP - PLAYER_H - 48)
+        step(h, 1)
+    out, base = [], 0
+    for keys, fr in seq:
+        if keys:
+            h.press(keys)
+        else:
+            h.release()
+        for e in h.ev(HB_SCAN, fr):
+            e['f'] += base; out.append(e)
+        base += fr
+    h.release()
+    for e in h.ev(HB_SCAN, wait):
+        e['f'] += base; out.append(e)
+    return out
+
+
+def hb_pick(samples, k, w0, h0):
+    """挑出符合 (kind, w0, h0) 的取樣（w0 / h0 傳 None＝不限）"""
+    return [s for s in samples
+            if s['k'] == k and (w0 is None or s['w0'] == w0) and (h0 is None or s['h0'] == h0)]
+
+
+def hb_check(h, nm, samples, x2=(), keep=()):
+    seen = sorted({(s['k'], s['w0'], s['h0'], s['ms']) for s in samples})
+    for k, w0, h0 in x2:
+        got = hb_pick(samples, k, w0, h0)
+        ok = bool(got) and all(s['ms'] == MS and s['w'] == s['w0'] * MS and s['h'] == s['h0'] * MS for s in got)
+        check(f'{nm}: 貼身框 {k} {w0}x{h0} → {MS}×', ok, got[:1] or seen)
+    for k, w0, h0 in keep:
+        got = hb_pick(samples, k, w0, h0)
+        ok = bool(got) and all(s['ms'] == 0 and s['w'] == s['w0'] and s['h'] == s['h0'] for s in got)
+        check(f'{nm}: {k} {w0}x{h0} 維持原尺寸（遠程 / 全畫面 / 本體框）', ok, got[:1] or seen)
+    bad = [s for s in samples if s['ms'] not in (0, MS)]
+    check(f'{nm}: 沒有非 0 / 非 {MS} 的倍率', not bad, bad[:2])
+    bad2 = [s for s in samples if s['ms'] and (s['w'] != s['w0'] * s['ms'] or s['h'] != s['h0'] * s['ms'])]
+    check(f'{nm}: 招式進行中每一幀都維持 {MS}×（逐幀改寫不會洗掉放大）', not bad2, bad2[:2])
+
+
+# key, 標籤, 按鍵序列[(keys|None, frames)], 空中?, 等待幀數, 要 2× 的框, 要維持的框
+R10_MAGIC = [
+    ('mage', 'X 火球', [('attack', 3)], False, 80, [], [('fire', 30, 30)]),
+    ('mage', '↑X 冰牆（冰刺）', [('up', 3), ('up,attack', 3)], False, 20, [('ice', 24, 48)], []),
+    ('mage', '↓X 雷擊召喚', [('down', 4), ('down,attack', 3)], False, 90, [], [('spark', 24, 132)]),
+    ('mage', '蓄力 元素風暴', [('attack', 80)], False, 140, [],
+     [('fire', 272, 208), ('ice', 272, 208), ('spark', 272, 208)]),
+    # 時停 CD 中的第二發 X ＝ 近身拳（本能力唯一的貼身招）
+    ('time', 'X 時停→近身拳', [('attack', 3), (None, 40), ('attack', 3)], False, 30, [('time', 20, 16)], []),
+    ('time', '↑X 時震環', [('up', 3), ('up,attack', 3)], False, 20, [], [('time', 56, 40)]),
+    ('time', '↓X 時之枷', [('down', 4), ('down,attack', 3)], False, 20, [], [('time', 72, 48)]),
+    ('gravity', 'X 黑洞', [('attack', 3)], False, 120, [], [('gravity', 28, 28), ('gravity', 56, 56)]),
+    ('gravity', '↑X 重力波', [('up', 3), ('up,attack', 3)], False, 20, [], [('gravity', 64, 48)]),
+    ('gravity', '↓X 反重力', [('down', 4), ('down,attack', 3)], False, 20, [], [('gravity', 64, 56)]),
+    ('gravity', '空中 X 隕石', [('attack', 3)], True, 120, [], [('fire', 36, 36)]),
+    ('gravity', '蓄力 奇點', [('attack', 80)], False, 150, [], [('gravity', 272, 208), ('gravity', 90, 90)]),
+    ('clone', '↑X 分身塔', [('up', 3), ('up,attack', 3)], False, 35, [], [('clone', 26, 60)]),
+    ('clone', '↓X 交換星爆', [('down', 4), ('down,attack', 3)], False, 25, [('star', 32, 28)], []),
+    ('clone', '空中 X 分身墊腳', [('attack', 3)], True, 25, [('star', 30, 20)], []),
+    ('clone', '蓄力 百裂分身', [('attack', 80)], False, 110, [('clone', 26, 24)], [('clone', 44, 44)]),
+]
+
+
+def phase_round10(h):
+    n = 'R10 '
+    for key, label, seq, air, wait, x2, keep in R10_MAGIC:
+        nm = f'{n}{key} [{label}]'
+        try:
+            hb_check(h, nm, hb_run(h, key, seq, air, wait), x2, keep)
+        except Exception as ex:
+            check(nm + ': raised', False, repr(ex))
+
+    # 空中 X 回溯：判定框長度＝回溯路徑長度（動態），所以只檢查「厚度已自行加倍且不再疊乘」
+    nm = n + 'time [空中 X 回溯（路徑框）]'
+    try:
+        h.goto(3, 9, ability='time', immune=True)
+        give(h, 'time')
+        press(h, 'right', 70); release(h)
+        h.ev("([k,n])=>__kb.tap(k,n)", ['jump', 2]); step(h, 8)
+        h.press('attack')
+        sm = h.ev(HB_SCAN, 3)
+        h.release()
+        sm += h.ev(HB_SCAN, 20)
+        box = [s for s in sm if s['k'] == 'time']
+        ok = bool(box) and all(s['ms'] == 0 and s['w'] >= 28 * MS and s['h'] >= 28 * MS for s in box)
+        check(nm + f': 最小厚度 {28 * MS}px（padding 已加倍）且沒有再疊乘', ok, box[:1])
+    except Exception as ex:
+        check(nm + ': raised', False, repr(ex))
+
+    # 全域規則：meleeScale 常數沒被動過
+    ms = h.ev("()=>KB.PHYS.meleeScale")
+    check(n + f'KB.PHYS.meleeScale == {MS}', ms == MS, ms)
+
+
 # ---------------------------------------------------------------------------
 # 6. 註冊 / 資料完整性
 # ---------------------------------------------------------------------------
@@ -605,7 +724,7 @@ def main():
     ET.SHOTS = SHOTS
     phases = [('registry', phase_registry), ('mage', phase_mage), ('time', phase_time),
               ('gravity', phase_gravity), ('clone', phase_clone), ('round9', phase_round9),
-              ('charge', phase_charge), ('enemies', phase_enemies)]
+              ('round10', phase_round10), ('charge', phase_charge), ('enemies', phase_enemies)]
     only = [k for k in a.only.split(',') if k]
     if only:
         phases = [p for p in phases if p[0] in only]

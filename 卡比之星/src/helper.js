@@ -205,6 +205,9 @@
     restartAttack() { this.setState('idle'); this.startAttack(); }
 
     // 石頭系（player.js 的 startStone 走的是玩家專屬狀態機）：夥伴改成 60 幀的原地石化判定框
+    // Round 10（貼身判定加倍）：夥伴的判定框一律維持 Round 9 尺寸。
+    //   entity.js 的自動規則要求 follow.type === 'player'，夥伴是 'ally' → 不會被放大；
+    //   夥伴用玩家能力定義出招時（callDef），abilities_* 的 mbox() 也會看 p.type 而傳 melee:false。
     startStone() {
       this.setState('attack'); this.attackTimer = 60; this.attackLock = true; this.stoneMode = 60;
       this.vx = 0; sfx('stone');
@@ -275,7 +278,8 @@
       KB.particles(this.cx, this.bottom, ['#f0e0c0', '#ffffff'], 6, { spread: 1.6, life: 18, up: 0.8 });
     }
 
-    /** 落地雙向衝擊波（夥伴版 groundWave；判定框 owner 'player' + fromHelper） */
+    /** 落地雙向衝擊波（夥伴版 groundWave；判定框 owner 'player' + fromHelper）
+     *  Round 10：絕對座標且 owner 'player'，但沒有 follow → entity.js 不會自動放大；夥伴維持原尺寸（40×18）。 */
     stompWave() {
       const g = KB.game;
       if (g) { g.shake = Math.max(g.shake || 0, 6); g.freezeT = Math.max(g.freezeT || 0, 3); }
@@ -650,7 +654,8 @@
       if (Math.abs(dx) < 6 || this.unionT <= 0) { this.unionT = 0; this.unionFire(); }
     }
 
-    /** 合體技的必殺：把 abilityData 蓄滿 → 放開（重用各能力自己的蓄力必殺） */
+    /** 合體技的必殺：把 abilityData 蓄滿 → 放開（重用各能力自己的蓄力必殺）
+     *  Round 10：合體衝擊框同樣不放大（無 follow、且合體技本來就是大招）。 */
     unionFire() {
       const d = this.abilityDef;
       this.dir = this.unionDir >= 0 ? 1 : -1;

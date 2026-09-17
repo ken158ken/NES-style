@@ -151,6 +151,128 @@ def run_move_table(h, keys, chk=None):
         check(f'{key} [moves]: desc 仍在', has_desc, has_desc)
 
 
+# ---------------------------------------------------------------------------
+# Round 10：貼身招判定加倍（melee-basic）
+#   KB.PHYS.meleeScale = 2；entity.js 的 Hitbox 建構子自動放大「跟隨卡比的近戰框」，
+#   abilities.js 對絕對座標的貼身框補 melee:true、對不該放大的補 melee:false。
+#   這裡逐招實測：8 基本能力的每一招（X / ↑X / ↓X / 空中 X / 空中 ↑X / 空中 ↓X / 蓄力）
+#   ── 貼身框 meleeScaled == 2 且 w == w0×2、h == h0×2
+#   ── 遠程投射物（KB.Projectile 子類）尺寸完全不變
+#   ── 白名單（石頭本體 / 電擊波 96×80 / 光鞭）維持原大小
+# ---------------------------------------------------------------------------
+MELEE_KEYS = ['fire', 'sword', 'beam', 'cutter', 'spark', 'stone', 'ice', 'hammer']
+
+# 招式輸入：(名稱, 同時按住的方向鍵, 按住攻擊幀數, 是否先浮空)
+MELEE_MOVES = [
+    ('X', [], 14, False), ('↑X', ['up'], 14, False), ('↓X', ['down'], 14, False),
+    ('空中X', [], 14, True), ('空中↑X', ['up'], 14, True), ('空中↓X', ['down'], 14, True),
+    ('蓄力', [], 70, False),
+]
+
+# 不放大的貼身框白名單（w0, h0, 理由）；其餘玩家判定框一律要 ×2
+MELEE_EXEMPT = {
+    'stone_body': '石頭本體：player.js startStone 的 stone:true 無敵框（放大會壓到不該壓的敵人）',
+    'spark_96':   '電擊波（蓄力）：本來就是 96×80 全身巨框，招式表寫明 96px',
+    'beam_whip':  '光鞭：遠程，判定框每幀依 6 段 segs 的絕對座標重算',
+}
+
+# 遠程投射物的合法尺寸（放大後必須完全一樣）
+MELEE_PROJ = {
+    'sword':  {(12, 16)},             # 劍氣 proj_swordwave
+    'beam':   {(18, 18)},             # 星潮光束 proj_beamwave
+    'cutter': {(12, 12)},             # 迴旋刃 / 上拋刃 proj_cutter
+    'ice':    {(8, 8), (10, 10)},     # 冰晶散射 / 冰彈 proj_ice
+}
+
+_MELEE_HOOK = r"""() => {
+  window.__mrec = [];
+  const os = KB.spawn;
+  KB.spawn = e => {
+    const r = os(e);
+    if (e.owner === 'player' && (e.type === 'hitbox' || e.type === 'proj'))
+      __mrec.push({ cls: e.type, kind: e.kind || e.name || '', w: e.w, h: e.h,
+        w0: e.w0 === undefined ? e.w : e.w0, h0: e.h0 === undefined ? e.h : e.h0,
+        ms: e.meleeScaled || 0, follow: !!e.follow, stone: !!e.stone, ent: e });
+    return r;
+  };
+  window.__melee = ([key, keys, hold, air]) => {
+    __kb.release();
+    __t.goto({ x: 3, y: 9, ability: key });
+    const p = KB.player; p.invuln = 1e9; p.dir = 1;
+    if (air) { p.y -= 52; p.onGround = false; p.vy = 0; }
+    __kb.step(1);
+    __mrec.length = 0;
+    const kk = { attack: true }; for (const k of keys) kk[k] = true;
+    __kb.press(kk);
+    let mid = [];
+    for (let i = 0; i < hold; i++) {
+      __kb.step(1);
+      if (i === Math.min(10, hold - 1)) mid = __mrec.filter(r => r.ent && !r.ent.dead && r.cls === 'hitbox')
+        .map(r => ({ kind: r.kind, w: r.ent.w, h: r.ent.h, w0: r.ent.w0, h0: r.ent.h0, ms: r.ent.meleeScaled || 0, stone: r.stone, follow: r.follow }));
+    }
+    __kb.release();
+    for (let i = 0; i < 40; i++) __kb.step(1);
+    const seen = {}, out = [];
+    for (const r of __mrec) {
+      const id = r.cls + '|' + r.kind + '|' + r.w0 + 'x' + r.h0 + '|' + r.ms + '|' + r.stone;
+      if (seen[id]) continue; seen[id] = 1;
+      out.push({ cls: r.cls, kind: r.kind, w: r.w, h: r.h, w0: r.w0, h0: r.h0, ms: r.ms, follow: r.follow, stone: r.stone });
+    }
+    return { spawn: out, mid: mid };
+  };
+  return true;
+}"""
+
+
+def _exempt(key, b):
+    """回傳白名單理由（不該放大的框），不是白名單就回 None。"""
+    if b['stone']: return 'stone_body'
+    if key == 'spark' and b['w0'] >= 96: return 'spark_96'
+    if key == 'beam' and not b['follow'] and b['kind'] == 'beam': return 'beam_whip'
+    return None
+
+
+def run_melee(h, chk=None):
+    """Round 10：8 基本能力的貼身招 meleeScaled == 2、遠程投射物不變。"""
+    check = chk or ET.check
+    h.ev(_MELEE_HOOK)
+    all_exempt = set()
+    scale = h.ev("()=>KB.PHYS.meleeScale")
+    check('melee: KB.PHYS.meleeScale == 2', scale == 2, scale)
+    for key in MELEE_KEYS:
+        bad, good, projs, midbad, exempt = [], 0, set(), [], set()
+        for name, keys, hold, air in MELEE_MOVES:
+            r = h.ev("(a)=>__melee(a)", [key, keys, hold, air])
+            for b in r['spawn']:
+                if b['cls'] == 'proj':
+                    projs.add((b['w'], b['h']))
+                    if b['ms']: bad.append(f"{name} 遠程 {b['kind']} 被放大")
+                    continue
+                why = _exempt(key, b)
+                if why:
+                    exempt.add(why)
+                    if b['ms'] != 0: bad.append(f"{name} {b['kind']} {b['w0']}x{b['h0']} 白名單卻被放大({why})")
+                elif b['ms'] == 2 and b['w'] == b['w0'] * 2 and b['h'] == b['h0'] * 2:
+                    good += 1
+                else:
+                    bad.append(f"{name} {b['kind']} {b['w0']}x{b['h0']} -> {b['w']}x{b['h']} ms={b['ms']}")
+            for b in r['mid']:
+                if _exempt(key, b) or b['ms'] != 2: continue
+                if b['w'] != b['w0'] * 2 or b['h'] != b['h0'] * 2:
+                    midbad.append(f"{name} {b['kind']} 招式中途 {b['w0']}x{b['h0']} -> {b['w']}x{b['h']}")
+        check(f'{key} [melee]: 每個貼身判定框都是 2×（w/h 各 ×2、meleeScaled 2）', not bad and good > 0, bad or good)
+        check(f'{key} [melee]: 招式中途改寫尺寸後仍維持 2×（fitBox）', not midbad, midbad)
+        if key in MELEE_PROJ:
+            check(f'{key} [melee]: 遠程投射物尺寸不變 {sorted(MELEE_PROJ[key])}',
+                  projs and projs <= MELEE_PROJ[key], sorted(projs))
+        all_exempt |= exempt
+        for why in sorted(exempt):
+            check(f'{key} [melee]: 白名單維持原尺寸 — {MELEE_EXEMPT[why]}', True, '')
+    # 三個白名單一定都要出現過（規則寫壞把它們一起放大時，上面的迴圈會靜靜地少檢查）
+    check('melee: 石頭本體 / 電擊波 / 光鞭 三個白名單都出現過',
+          all_exempt == set(MELEE_EXEMPT), sorted(all_exempt))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--only', default='')
@@ -175,6 +297,8 @@ def main():
         run_charge_lv3(h, only)
         print('-' * 8, 'moves table (Round 9)')
         run_move_table(h, BASIC_KEYS + WEAPON_KEYS)
+        print('-' * 8, 'melee x2 (Round 10)')
+        run_melee(h)           # __t.goto 來自上面的 HOOK_JS
         check('charge: no page errors', not logs, logs[:3])
         b.close()
     print('---')
