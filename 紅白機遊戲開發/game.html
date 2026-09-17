@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>星塵勇者（NES 核心引擎）</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  html, body { margin: 0; padding: 0; background: #000; height: 100%; overflow: hidden; }
+  body { display: block; }
+  /* 整數倍放大、無平滑；顯示 256×224（PPU 內部 256×240 上下各裁 8 列） */
+  canvas#nes {
+    position: absolute; background: #000; outline: none;
+    image-rendering: pixelated; image-rendering: crisp-edges;
+  }
+  /* 除錯 / 提示列（?debug=1 或缺模組時才顯示） */
+  #hint {
+    position: absolute; left: 0; bottom: 0; right: 0; margin: 0; padding: 2px 6px;
+    font: 12px/1.5 monospace; color: #6a6a6a; background: #000; white-space: pre; display: none;
+  }
+</style>
+</head>
+<body>
+<canvas id="nes" tabindex="0"></canvas>
+<pre id="hint"></pre>
+
+<!-- ===== engine（契約載入順序；缺檔不致命，nes.js 會用 stub 頂替） ===== -->
+<script src="engine/palette.js"></script>
+<script src="engine/fixed.js"></script>
+<script src="engine/input.js"></script>
+<script src="engine/cpu_timing.js"></script>
+<script src="engine/chr.js"></script>
+<script src="engine/ppu.js"></script>
+<script src="engine/nes_lint.js"></script>
+<script src="engine/apu.js"></script>
+<script src="engine/music.js"></script>
+<script src="engine/nes.js"></script>
+
+<!-- ===== 遊戲：games/demo「星塵測試室」（demo agent）=====
+     載入順序有相依：chr（CHR bank / 調色盤）→ song（音樂音效）→ room（關卡 / 狀態列）
+     → main（物理 / 敵人 / 繪製，最後一檔設 window.GAME = {init, update, draw, state}）。
+     新增檔案請同時加到這裡，tools/build.py 會自動內嵌。 -->
+<script src="games/demo/chr.js"></script>
+<script src="games/demo/song.js"></script>
+<script src="games/demo/room.js"></script>
+<script src="games/demo/main.js"></script>
+
+<script>
+// ---- 啟動：整數放大置中、鍵盤焦點、F 全螢幕 ----
+(function () {
+  var W = 256, H = 224;                 // 顯示尺寸（PPU 內部 240 列，裁上下各 8）
+  var canvas = document.getElementById('nes');
+  var hint = document.getElementById('hint');
+  var q = new URLSearchParams(location.search);
+  var debug = q.get('debug') === '1';
+  var forced = parseInt(q.get('scale') || '0', 10) || 0;   // ?scale=1 供截圖工具用
+
+  function fit() {                       // 視窗能塞幾倍就幾倍（至少 1 倍）
+    if (forced) return forced;
+    return Math.max(1, Math.floor(Math.min(window.innerWidth / W, window.innerHeight / H)));
+  }
+  function place(s) {
+    canvas.style.width = (W * s) + 'px';
+    canvas.style.height = (H * s) + 'px';
+    canvas.style.left = Math.floor((window.innerWidth - W * s) / 2) + 'px';
+    canvas.style.top = Math.floor((window.innerHeight - H * s) / 2) + 'px';
+  }
+
+  if (!window.NES || typeof NES.boot !== 'function') {
+    hint.style.display = 'block';
+    hint.textContent = 'engine/nes.js 未載入';
+    return;
+  }
+
+  var scale = fit();
+  var game = window.GAME || NES.game || null;
+  var nes = NES.boot({ canvas: canvas, game: game, scale: scale });
+  place(nes.scale || scale);
+
+  window.addEventListener('resize', function () {
+    var s = fit();
+    if (s !== nes.scale) nes.setScale(s);
+    place(nes.scale || s);
+  });
+
+  // 鍵盤焦點：canvas 可聚焦，點畫面或載入完成都聚焦；方向鍵 / 空白鍵不捲頁
+  function focus() { try { canvas.focus({ preventScroll: true }); } catch (e) { canvas.focus(); } }
+  focus();
+  window.addEventListener('pointerdown', focus);
+  window.addEventListener('keydown', function (e) {
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].indexOf(e.code) >= 0) e.preventDefault();
+    // F = 全螢幕切換（不佔用遊戲按鍵；瀏覽器拒絕時安靜失敗）
+    if (e.code === 'KeyF' && !e.ctrlKey && !e.altKey && !e.metaKey) {
+      e.preventDefault();
+      try {
+        if (!document.fullscreenElement) {
+          var p = document.documentElement.requestFullscreen && document.documentElement.requestFullscreen();
+          if (p && p.catch) p.catch(function () { });
+        } else {
+          var q2 = document.exitFullscreen && document.exitFullscreen();
+          if (q2 && q2.catch) q2.catch(function () { });
+        }
+      } catch (err) { }
+    }
+  });
+  document.addEventListener('fullscreenchange', function () {
+    setTimeout(function () { var s = fit(); if (s !== nes.scale) nes.setScale(s); place(nes.scale || s); }, 60);
+  });
+
+  // 缺模組 / debug 時在底部列出狀態（正式遊玩畫面不顯示）
+  if (debug || (nes.missing && nes.missing.length)) {
+    hint.style.display = 'block';
+    hint.textContent = 'NES ' + NES.VERSION + ' scale=' + nes.scale
+      + (nes.missing && nes.missing.length ? '  缺: ' + nes.missing.join(' ') : '  模組齊全')
+      + (game ? '' : '  (無 game，空畫面)')
+      + (debug ? '  __nes 可用' : '');
+  }
+  window.nes = nes;
+})();
+</script>
+</body>
+</html>
