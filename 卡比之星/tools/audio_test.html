@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>卡比之星 音訊試聽</title>
+<style>
+  body { font-family: system-ui, sans-serif; background: #1a1a2a; color: #eee; margin: 0; padding: 16px 20px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 18px 0 6px; color: #ffb0d0; }
+  .row { display: flex; flex-wrap: wrap; gap: 6px; }
+  button { background: #3a3a5a; color: #fff; border: 1px solid #666; border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 13px; }
+  button:hover { background: #55558a; }
+  button.on { background: #e07aa8; border-color: #ffb0d0; }
+  #status { font-family: monospace; font-size: 12px; color: #9f9; margin: 8px 0; white-space: pre; }
+  .hint { color: #aaa; font-size: 12px; }
+  #render { margin-top: 6px; font-family: monospace; font-size: 12px; color: #ccc; white-space: pre; }
+  label.vol { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; background: #2a2a44; border-radius: 6px; padding: 4px 10px; }
+  label.vol output { font-family: monospace; color: #9f9; width: 32px; text-align: right; }
+</style>
+</head>
+<body>
+<h1>卡比之星（同人版）— 音訊試聽</h1>
+<div class="hint">按鈕會先呼叫 KB.audio.unlock()。M 鍵切換靜音。所有聲音皆由 Web Audio 即時合成。</div>
+<div id="status"></div>
+<h2>控制</h2>
+<div class="row">
+  <button id="mute">靜音 (M)</button>
+  <button onclick="KB.audio.music(null)">停止音樂</button>
+  <button id="duck">暫停閃避 duck(on)</button>
+  <button id="renderAll">離線渲染全部（檢查峰值）</button>
+</div>
+<div class="row" style="margin-top:6px">
+  <label class="vol">音樂 <input id="vmusic" type="range" min="0" max="1" step="0.05"><output id="omusic"></output></label>
+  <label class="vol">音效 <input id="vsfx" type="range" min="0" max="1" step="0.05"><output id="osfx"></output></label>
+</div>
+<h2>音效 sfx(name)</h2>
+<div class="row" id="sfx"></div>
+<h2>音樂 music(key)</h2>
+<div class="row" id="music"></div>
+<h2>環境音層 ambient(key)</h2>
+<div class="hint">與音樂完全獨立：停止音樂不會停掉環境音；音量跟隨「音效」滑桿。</div>
+<div class="row" id="amb"></div>
+<div id="render"></div>
+
+<script src="../src/const.js"></script>
+<script src="../src/audio.js"></script>
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  for (const n of KB.audio.SFX_NAMES) {
+    const b = document.createElement('button'); b.textContent = n;
+    b.onclick = () => { KB.audio.unlock(); KB.audio.sfx(n); };
+    $('sfx').appendChild(b);
+  }
+  for (const k of KB.audio.MUSIC_NAMES) {
+    const s = KB.audio.SONGS[k], c = KB.audio.compileSong(s);
+    const b = document.createElement('button'); b.textContent = `${k} (${s.bpm}bpm/${c.bars}小節${s.loop === false ? '/一次' : ''})`; b.dataset.key = k;
+    b.onclick = () => { KB.audio.unlock(); KB.audio.music(k); };
+    $('music').appendChild(b);
+  }
+  for (const k of (KB.audio.AMBIENT_NAMES || [])) {
+    const b = document.createElement('button'); b.textContent = k; b.dataset.amb = k;
+    b.onclick = () => { KB.audio.unlock(); KB.audio.ambient(KB.audio.status().ambient === k ? null : k); };
+    $('amb').appendChild(b);
+  }
+  {
+    const b = document.createElement('button'); b.textContent = '停止環境音';
+    b.onclick = () => KB.audio.ambient(null);
+    $('amb').appendChild(b);
+  }
+  $('mute').onclick = () => { KB.audio.unlock(); KB.audio.toggleMute(); };
+  let ducked = false;
+  $('duck').onclick = () => { KB.audio.unlock(); ducked = !ducked; KB.audio.duck(ducked); };
+  const v0 = KB.audio.getVolume();
+  $('vmusic').value = v0.music; $('vsfx').value = v0.sfx;
+  $('vmusic').oninput = () => KB.audio.setVolume({ music: +$('vmusic').value });
+  $('vsfx').oninput = () => { KB.audio.setVolume({ sfx: +$('vsfx').value }); KB.audio.unlock(); KB.audio.sfx('menu'); };
+  setInterval(() => {
+    const st = KB.audio.status();
+    $('status').textContent = JSON.stringify(st);
+    $('mute').classList.toggle('on', st.muted);
+    $('duck').classList.toggle('on', !!st.ducked);
+    $('omusic').textContent = st.volume.music.toFixed(2);
+    $('osfx').textContent = st.volume.sfx.toFixed(2);
+    for (const b of $('music').children) b.classList.toggle('on', b.dataset.key === st.playing);
+    for (const b of $('amb').children) if (b.dataset.amb) b.classList.toggle('on', b.dataset.amb === st.ambient);
+  }, 200);
+
+  function stats(buf) {
+    const d = buf.getChannelData(0); let peak = 0, sum = 0;
+    for (let i = 0; i < d.length; i++) { const v = Math.abs(d[i]); if (v > peak) peak = v; sum += d[i] * d[i]; }
+    return { peak: +peak.toFixed(3), rms: +Math.sqrt(sum / d.length).toFixed(4), secs: +(d.length / buf.sampleRate).toFixed(2) };
+  }
+  $('renderAll').onclick = async () => {
+    const out = [];
+    for (const n of KB.audio.SFX_NAMES) { try { out.push('sfx   ' + n.padEnd(10) + JSON.stringify(stats(await KB.audio.renderSfx(n)))); } catch (e) { out.push('sfx   ' + n + ' ERROR ' + e); } $('render').textContent = out.join('\n'); }
+    for (const k of KB.audio.MUSIC_NAMES) { try { out.push('music ' + k.padEnd(10) + JSON.stringify(stats(await KB.audio.renderSong(k, 6)))); } catch (e) { out.push('music ' + k + ' ERROR ' + e); } $('render').textContent = out.join('\n'); }
+    for (const k of (KB.audio.AMBIENT_NAMES || [])) { try { out.push('amb   ' + k.padEnd(10) + JSON.stringify(stats(await KB.audio.renderAmbient(k, 5)))); } catch (e) { out.push('amb   ' + k + ' ERROR ' + e); } $('render').textContent = out.join('\n'); }
+  };
+  // 供自動化測試呼叫
+  window.__audioStats = stats;
+})();
+</script>
+</body>
+</html>
