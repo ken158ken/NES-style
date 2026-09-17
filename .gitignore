@@ -1,0 +1,10 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+# 截圖/暫存
+shots/
+# 系統
+.DS_Store
+Thumbs.db
