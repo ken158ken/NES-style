@@ -274,7 +274,16 @@
     { row: 8, col: 8, text: 'STARDUST CRUISER' },
     { row: 11, col: 7, text: 'ORIGINAL NES SHMUP' },
     { row: 15, col: 10, text: 'PRESS START' },
-    { row: 19, col: 8, text: '$ 2026 ORIGINAL' }
+    { row: 18, col: 6, text: 'SECRET CODE IN PAUSE' },
+    { row: 21, col: 8, text: '$ 2026 ORIGINAL' }
+  ];
+  // fix3：START 暫停（研究 §7-3「暫停」）＋ 暫停中的 Konami 指令（研究 §9-1）
+  var PAUSE = [
+    { row: 11, col: 13, text: 'PAUSE' }
+  ];
+  var SECRET = [
+    { row: 11, col: 13, text: 'PAUSE' },
+    { row: 15, col: 12, text: 'SECRET!' }
   ];
   var OVER = [
     { row: 11, col: 11, text: 'GAME OVER' },
@@ -342,7 +351,10 @@
     nes: null, ppu: null, input: null, oam: null,
     mode: 'title', frames: 0, playFrames: 0,
     ship: null, camX: 0, hits: 0, kills: 0, bossOn: false,
-    lastEvent: '', noStageWarn: false
+    lastEvent: '', noStageWarn: false,
+    // fix3：暫停 / Konami 秘技 / GAME OVER 續關
+    paused: false, secretLeft: 1, secrets: 0, secretMsg: 0,
+    continues: 0, continueCam: 0, lastCode: ''
   };
   CR.g = g;
 
@@ -372,6 +384,96 @@
     return (s2 && typeof s2.camX === 'number') ? s2.camX : 0;
   }
 
+  /* ================================================ 暫停 + Konami 指令（fix3）
+   * 研究 §9-1 [源]：FC《宇宙巡航艦》**暫停中**輸入 ↑↑↓↓←→←→BA →
+   *   1 次 SPEED UP、MISSILE、2 顆 OPTION、護盾（**不含 DOUBLE / LASER**）；
+   *   一場遊戲 1 次，每打掉一隻 Big Core 多 1 次；
+   *   GAME OVER 畫面輸入同一組 → 給 3 條命並回到剛才的檢查點（分數不清）。
+   * 使用者記憶的變體（↑↑↓↓←←→→AB / …ABAB / ABAB）一併接受：
+   *   比對「最近 12 個按鍵邊緣」的**字尾**，任一組命中即可。觸控走 `Input.setExternal`，
+   *   一樣會進 `pressed()` 的邊緣判定，所以搖桿方向 + A / B 也輸得進來。
+   */
+  var KONAMI_N = 12;
+  var KONAMI_BUF = [];
+  var KONAMI_CODES = [
+    'UUDDLRLRBA',       // [源] FC 原版（ROM $9793 = 08 08 04 04 02 01 02 01 40 80）
+    'UUDDLLRRAB',       // 使用者記憶的變體
+    'UUDDLLRRABAB',     //   同上 + ABAB
+    'ABAB'              //   只按 ABAB（暫停畫面沒有別的用途，寬容處理）
+  ];
+  // 同一幀多鍵時的固定順序（讓「同時按」也有決定性的結果）
+  var KONAMI_EDGE = [[BTN.UP, 'U'], [BTN.DOWN, 'D'], [BTN.LEFT, 'L'], [BTN.RIGHT, 'R'], [BTN.B, 'B'], [BTN.A, 'A']];
+
+  function konamiClear() { KONAMI_BUF.length = 0; }
+  function konamiPush(input) {
+    var m = 0, i;
+    if (input && typeof input.pressedMask === 'function') m = input.pressedMask() | 0;
+    else if (input) { for (i = 0; i < KONAMI_EDGE.length; i++) if (input.pressed(KONAMI_EDGE[i][0])) m |= KONAMI_EDGE[i][0]; }
+    if (!m) return;
+    for (i = 0; i < KONAMI_EDGE.length; i++) if (m & KONAMI_EDGE[i][0]) KONAMI_BUF.push(KONAMI_EDGE[i][1]);
+    while (KONAMI_BUF.length > KONAMI_N) KONAMI_BUF.shift();
+  }
+  function konamiHit() {
+    var s2 = KONAMI_BUF.join(''), i, c;
+    for (i = 0; i < KONAMI_CODES.length; i++) {
+      c = KONAMI_CODES[i];
+      if (s2.length >= c.length && s2.slice(s2.length - c.length) === c) return c;
+    }
+    return '';
+  }
+  CR.konamiBuffer = function () { return KONAMI_BUF.join(''); };
+  CR.KONAMI_CODES = KONAMI_CODES;
+
+  // [源] §9-1：SPEED UP ×1 / MISSILE / OPTION ×2 / 護盾；**不給 DOUBLE、不給 LASER**
+  function secretGrant() {
+    var s2 = g.ship, P = CR.Ship;
+    if (s2.speed < P.MAX_SPEED) s2.speed++;
+    s2.power.missile = true;
+    s2.power.option = P.MAX_OPTION;
+    s2.power.shield = P.SHIELD_HP;
+    s2.syncOptions();
+  }
+  function trySecret(code) {
+    if (g.secretLeft <= 0) return false;              // [源] 一場 1 次（打掉魔王再 +1）
+    g.secretLeft--; g.secrets++; g.lastCode = code;
+    secretGrant();
+    muteBudget(true); drawMsg(g.ppu, SECRET, 0); muteBudget(false);
+    g.secretMsg = 60;                                  // 「SECRET!」顯示 1 秒
+    call(CR.Audio, 'sfx', 'powerup');
+    return true;
+  }
+
+  function pauseGame() {
+    muteBudget(true); drawMsg(g.ppu, PAUSE, 0); muteBudget(false);
+    g.paused = true; g.secretMsg = 0;
+    konamiClear();
+  }
+  function unpauseGame() {
+    muteBudget(true);
+    clearMsg(g.ppu);
+    call(st(), 'redraw');                              // 還原被 PAUSE / SECRET! 蓋掉的地形磚 + 屬性
+    muteBudget(false);
+    g.paused = false; g.secretMsg = 0;
+    konamiClear();
+  }
+
+  // [源] §9-1：GAME OVER 畫面輸入指令 → 3 條命 + 回到剛才的檢查點（**分數不清**）
+  function continueGame() {
+    var ppu = g.ppu, ship = g.ship;
+    muteBudget(true);
+    clearMsg(ppu);
+    call(st(), 'restart', g.continueCam | 0);
+    hudStatic(ppu);
+    muteBudget(false);
+    ship.lives = CR.Ship.START_LIVES;
+    ship.reset(true);                                  // 強化歸零（與死亡一致）
+    ship.invul = CR.Ship.INVUL_FRAMES;
+    g.mode = 'play'; g.paused = false; g.bossOn = false;
+    g.secretLeft = 1; g.secretMsg = 0; g.continues++;
+    hud.score = null; hud.hi = null; hud.lives = null; hud.gauge = -1;
+    if (CR.Audio && CR.Audio.play) call(CR.Audio, 'play', 'stage1');
+  }
+
   /* ---------------------------------------------------------- 模式切換 */
   function toPlay() {
     var ppu = g.ppu;
@@ -382,6 +484,9 @@
     muteBudget(false);
     g.ship.newGame();
     g.mode = 'play'; g.playFrames = 0; g.hits = 0; g.kills = 0; g.bossOn = false;
+    g.paused = false; g.secretLeft = 1; g.secrets = 0; g.secretMsg = 0;
+    g.continues = 0; g.continueCam = 0; g.lastCode = '';
+    konamiClear();
     hud.score = null; hud.hi = null; hud.lives = null; hud.gauge = -1;
     if (CR.Audio && CR.Audio.play) call(CR.Audio, 'play', 'stage1');
   }
@@ -393,21 +498,24 @@
     hudHide(ppu);                        // P3-1：標題畫面沒有能量表
     drawMsg(ppu, TITLE, 0);
     muteBudget(false);
-    g.mode = 'title'; g.bossOn = false;
+    g.mode = 'title'; g.bossOn = false; g.paused = false; g.secretMsg = 0;
+    konamiClear();
     if (CR.Audio && CR.Audio.play) call(CR.Audio, 'play', 'title');
   }
   function toGameOver() {
     muteBudget(true);
     drawMsg(g.ppu, OVER, 0);             // P1-2：寫到目前捲動位置對應的名稱表
     muteBudget(false);
-    g.mode = 'gameover';
+    g.mode = 'gameover'; g.paused = false; g.secretMsg = 0;
+    konamiClear();                       // GAME OVER 畫面重新開始收指令
     if (CR.Audio && CR.Audio.play) call(CR.Audio, 'play', 'gameover');
   }
   function toStageClear() {
     muteBudget(true);
     drawMsg(g.ppu, CLEAR, 0);            // P1-2：魔王在 camX 2816（% 512 = 256）⇒ 文字其實在 nt1
     muteBudget(false);
-    g.mode = 'stageclear';
+    g.mode = 'stageclear'; g.paused = false; g.secretMsg = 0;
+    g.secretLeft++;                      // [源] 每打掉一隻 Big Core，秘技可再用 1 次
     if (CR.Audio && CR.Audio.play) call(CR.Audio, 'play', 'clear');
   }
 
@@ -498,7 +606,19 @@
   function respawn() {
     var ship = g.ship;
     ship.lives--;
-    if (ship.lives <= 0) { ship.lives = 0; ship.reset(true); ship.alive = false; toGameOver(); return; }
+    if (ship.lives <= 0) {
+      ship.lives = 0; ship.reset(true); ship.alive = false;
+      // fix3：GAME OVER 的 Konami 續關要「回到剛才的關卡位置」⇒ 先把檢查點記下來
+      var s0 = st(), cc = 0;
+      if (s0) {
+        cc = call(s0, 'checkpoint', camX());
+        if (typeof cc !== 'number') cc = ship.checkpointOf(camX());
+        if (s0.bossActive && typeof s0.BOSS_RESPAWN === 'number' && s0.BOSS_RESPAWN > cc) cc = s0.BOSS_RESPAWN;
+      }
+      g.continueCam = cc | 0;
+      toGameOver();
+      return;
+    }
     var s2 = st();
     var cp = 0;
     var wasBoss = !!(s2 && s2.bossActive);
@@ -638,8 +758,24 @@
 
       if (g.mode === 'title') {
         if (input.pressed(BTN.START) || input.pressed(BTN.A)) toPlay();
-      } else if (g.mode === 'gameover' || g.mode === 'stageclear') {
+      } else if (g.mode === 'gameover') {
+        // [源] §9-1：GAME OVER 畫面的 Konami 指令 = 3 條命續關（分數保留）；START 才是回標題
+        konamiPush(input);
+        if (konamiHit()) { konamiClear(); continueGame(); }
+        else if (input.pressed(BTN.START)) toTitle();
+      } else if (g.mode === 'stageclear') {
         if (input.pressed(BTN.START)) toTitle();
+      } else if (g.paused) {
+        // 暫停中：遊戲完全凍結，只收 Konami 指令與 START（研究 §7-3「暫停」）
+        konamiPush(input);
+        var code = konamiHit();
+        if (code) { konamiClear(); trySecret(code); }
+        if (g.secretMsg > 0 && --g.secretMsg === 0) {
+          muteBudget(true); drawMsg(g.ppu, PAUSE, 0); muteBudget(false);
+        }
+        if (input.pressed(BTN.START)) unpauseGame();
+      } else if (g.mode === 'play' && input.pressed(BTN.START)) {
+        pauseGame();
       } else {
         g.playFrames++;
         var ev = g.ship.update(g);                  // 船 / 選項 / 自機彈
@@ -703,6 +839,10 @@
         // 畫面上看得到的訊息文字（列 11 / 15）—— QA P1-2 的驗收欄位
         msg: g.ppu ? (screenText(11).trim() + '|' + screenText(15).trim()) : '',
         bossSong: !!g.bossOn,
+        // fix3：暫停 / 秘技 / 續關
+        paused: !!g.paused, secretLeft: g.secretLeft | 0, secrets: g.secrets | 0,
+        secretMsg: g.secretMsg | 0, continues: g.continues | 0, continueCam: g.continueCam | 0,
+        konami: KONAMI_BUF.join(''), lastCode: g.lastCode,
         lastEvent: g.lastEvent
       };
     }

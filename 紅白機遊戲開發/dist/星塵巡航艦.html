@@ -5535,6 +5535,8 @@
   var G_MON = ['........', '33333333', '22222222', '22222222', '22222222', '33333333', '........', '........'];
   var G_RON = ['........', '3333333.', '2222223.', '2222223.', '2222223.', '3333333.', '........', '........'];
   var SHIPICON = ['........', '...11...', '..12221.', '.1222221', '..12221.', '...11...', '........', '........'];
+  // fix3：驚嘆號（engine 的 DEMO.FONT 沒有），給暫停秘技的「SECRET!」用
+  var EXCL = ['..33....', '..33....', '..33....', '..33....', '..33....', '........', '..33....', '........'];
 
   var BG = {}, i, ch;
   BG.H_SP = F.SP;                                   // 磚 0 = 空白（真機慣例）
@@ -5545,10 +5547,11 @@
   BG.H_GL = G_L; BG.H_GM = G_M; BG.H_GR = G_R;
   BG.H_GLON = G_LON; BG.H_GMON = G_MON; BG.H_GRON = G_RON;
   BG.H_SHIP = SHIPICON;
+  BG.H_EXCL = EXCL;
 
   /* -------------------------------------------------- 字元 → 磚名（HUD 用） */
   var CHARMAP = { ' ': 'H_SP', '?': 'H_QUEST', 'x': 'H_MUL', 'X': 'H_X', '*': 'H_MUL',
-    '.': 'H_DOT', '-': 'H_DASH', ':': 'H_COLON', '>': 'H_ARROW', '$': 'H_STAR' };
+    '.': 'H_DOT', '-': 'H_DASH', ':': 'H_COLON', '>': 'H_ARROW', '$': 'H_STAR', '!': 'H_EXCL' };
   (function () {
     var k;
     for (k = 0; k <= 9; k++) CHARMAP[String(k)] = 'H_N' + k;
@@ -5913,6 +5916,30 @@
     '13333331',
     '13333331',
     '.111111.'
+  ];
+
+  // ---- 可破壞小隕石（8×8 兩幀：完整 / 裂開；spr3 黑輪廓 + 藍岩體 + 白高光）--------
+  // fix3：使用者回饋「一開始就一堆撞了會死的礁石」⇒ 小行星帶的小碎塊改成**可打破的敵人**
+  // （hp 2、100 分），只有 16×16 的大隕石維持地形。第 2 幀在 hp = 1 時顯示 ＝ 免費的傷害回饋。
+  SPR.W_MROCK0 = [
+    '..1111..',
+    '.132221.',
+    '13222221',
+    '13222231',
+    '13222221',
+    '12222221',
+    '.122221.',
+    '..1111..'
+  ];
+  SPR.W_MROCK1 = [
+    '..11.1..',
+    '.13.221.',
+    '1.222.21',
+    '132.2.31',
+    '1.22.221',
+    '122.22.1',
+    '.12.21..',
+    '..1.11..'
   ];
 
   // ---- 爆炸 4 幀（ship 的 S_EXPL 在場時優先用 ship 的，這是 stage 的保底）----
@@ -7453,9 +7480,12 @@
     fan:    { w: 8,  h: 8,  hp: 1, score: 100, small: true,  size: 8,  pal: 2 },
     turret: { w: 12, h: 12, hp: 2, score: 200, small: true,  size: 16, pal: 3 },
     zig:    { w: 12, h: 12, hp: 1, score: 150, small: true,  size: 16, pal: 2 },
-    tank:   { w: 12, h: 12, hp: 3, score: 400, small: false, size: 16, pal: 3 }
+    tank:   { w: 12, h: 12, hp: 3, score: 400, small: false, size: 16, pal: 3 },
+    // fix3（使用者回饋「一開始還沒吃到強化就一堆撞了會死的礁石」）：
+    // 小行星帶的小碎塊改成**可破壞的敵人**（hp 2、100 分），只有 16×16 大隕石維持地形。
+    rock:   { w: 8,  h: 8,  hp: 2, score: 100, small: true,  size: 8,  pal: 3 }
   };
-  var KINDS = ['fan', 'turret', 'zig', 'tank'];
+  var KINDS = ['fan', 'turret', 'zig', 'tank', 'rock'];
   // 研究 §3-3 [源]「**紅色單體**：一般敵人多是灰 / 藍配色，紅色版本必掉膠囊」。
   // R2 原本只實作「編隊全滅掉膠囊」⇒ qa2 的機器人 2400 幀 0 顆膠囊、全程速度 1（`capsuleSeq()` 恆 0），
   // 等於沒有強化管道。改用 spr1（ship 的 紅 $16 / 橘 $28 / 白 $30，已在場上）畫紅色版本，0 新顏色、0 新磚。
@@ -7468,13 +7498,13 @@
   var ZIG_VY = FX.v88(1, 0);           // ±1.0 px/幀
   var ZIG_PERIOD = 32;                 // 每 32 幀換向
   var TANK_VX = -FX.v88(2, 128);       // -2.5 px/幀
+  var ROCK_VX = -FX.v88(1, 0);         // 小隕石 -1.0 px/幀（比捲動 0.5 快一倍，會「迎面飄來」）
   var TURRET_PERIOD = 90;              // 每 90 幀射 1 彈
-  // QA R2 P2-3：要塞入口（欄 144~158）與天地反轉段（欄 194~210）連滿強化都過不去 ⇒
-  // **砲台射擊週期 90 → 130 幀（敵彈密度 −30%）**。實測後把範圍從那兩段擴到整個要塞
-  // （世界欄 150~300）：機器人在欄 228 的第三座砲台一樣被瞄準彈鎖死，難點不只兩處。
-  // 核心室前（欄 > 300）與小行星帶維持 90（研究 §10 原值）。
+  // QA R2 P2-3：連滿強化都過不去 ⇒ **砲台射擊週期 90 → 130 幀（敵彈密度 −30%）**。
+  // fix3 三段式改版後**砲台只存在於要塞（世界欄 248 起）**，所以放寬區直接涵蓋 248..383；
+  // 空戰段 / 小行星帶完全沒有砲台（＝沒有敵彈），`spawnTest` 生在別處的砲台維持 90（研究 §10 原值）。
   var EASY_PERIOD = 130;
-  var EASY_COL0 = 150, EASY_COL1 = 300;          // 世界欄（含）；砲台站在這段裡就放寬（＝整個要塞）
+  var EASY_COL0 = 248, EASY_COL1 = 383;          // 世界欄（含）；砲台站在這段裡就放寬（＝整個要塞）
   function turretPeriod(wx) {
     var c = (wx | 0) >> 3;
     return (c >= EASY_COL0 && c <= EASY_COL1) ? EASY_PERIOD : TURRET_PERIOD;
@@ -7583,6 +7613,8 @@
       e.vx = TANK_VX;
       var sh = ctx.ship();
       if (sh && sh.alive !== false) { e.y = e.y0 = clampY(sh.y - 6); FX.vsetPx(e.ys, e.y); }
+    } else if (kind === 'rock') {
+      e.vx = ROCK_VX;                                      // 直線飄，不追人、不開火
     }
     e.alive = true;
     return e;
@@ -7644,7 +7676,7 @@
       if (e.y < 0) { e.y = 0; FX.vsetPx(e.ys, 0); e.vy = ZIG_VY; }
       if (e.y > GAME_H - 16) { e.y = GAME_H - 16; FX.vsetPx(e.ys, e.y); e.vy = -ZIG_VY; }
 
-    } else if (e.kind === 'tank') {
+    } else if (e.kind === 'tank' || e.kind === 'rock') {
       FX.vadd(e.xs, e.vx);
       e.x = FX.vpx(e.xs);
     }
@@ -7696,20 +7728,36 @@
       draw16(oam, f ? S.ZIG1 : S.ZIG0, e.x - 2, e.y - 2, pal, false, PRIO_ENEMY);
     } else if (e.kind === 'tank') {
       draw16(oam, (e.flash > 0) ? S.TANK1 : S.TANK0, e.x - 2, e.y - 2, pal, false, PRIO_ENEMY);
+    } else if (e.kind === 'rock') {
+      // hp 2 → 1 換成「裂開」那一張（研究 §10-6：每吃一點傷害換一張圖 = 最便宜的命中回饋）
+      put(oam, e.x, e.y, (e.hp <= 1) ? S.MROCK1 : S.MROCK0, pal, false, PRIO_ENEMY);
     }
   }
 
   /* ---------------------------------------------------------- 出怪表 */
   // `NES.SH.Spawner` 的格式 `[{col, fn}]`，`fn(ctx, col, entry)`，camCol 走到 col 時單次觸發。
-  // 捲動 0.5 px/幀 ⇒ **1 欄 = 16 幀**；全關 352 欄捲動 ≈ 5632 幀 ≈ 94 秒。
-  // 節奏：① 小行星帶（欄 0..127，每 6~10 欄一波）→ ② 要塞（128..287，砲台 + 混編，每 4~6 欄）
-  //       → ③ 核心室前（288..350，每 3~5 欄，逼近魔王）。共 56 個事件。
+  // 捲動 0.5 px/幀 ⇒ **1 欄 = 16 幀**；事件欄 c 生成的敵人在畫面右緣外（＝世界欄 c + 34）。
+  //
+  // ── fix3：關卡 1 依研究 §7-1 改成「三段式」 ──────────────────────────────────
+  // 使用者真機回饋：「一開始還沒吃到任何武器加強就一堆礁石（撞了會死）…宇宙巡航艦前半段是
+  // 空曠的宇宙，會有小怪物打出來吃加強道具，最後才進到比較多怪物的地方。」
+  //
+  //   ① 空戰段  camX    0..1280（欄   0..160）：純星空。**無地形 / 無隕石 / 無砲台 ⇒ 敵彈 0 發**。
+  //      只有 fan 編隊（全滅掉膠囊）11 波 + 紅色單體（必掉）3 隻 + 少量 zig；事件間隔 8~10 欄
+  //      （128~160 幀）⇒ 玩家在進本關段前就能湊齊 SPEED / MISSILE / OPTION。
+  //   ② 本關段  camX 1280..2560（欄 160..320）：先小行星帶（可破壞的 `rock` + 大隕石通道），
+  //      再進要塞（天花板 / 地板凸起 + 砲台 7 座 + tank 硬殼）；強度逐段爬升（研究 11 §⑯）。
+  //   ③ 魔王段  camX 2560..3072（欄 320..384）：核心室。欄 300..323 是魔王前的「呼吸區」。
+  //
+  // 硬規則（fix2 已驗收，本輪維持）：檢查點（欄 0 / 64 / 128 / 192 / 256 / 320）之後
+  //   22 欄內不放砲台事件、14 欄內至少一隻紅色單體（死亡後的回血路徑）。
   function buildTable(stage) {
     var T = [];
     function at(col, fn) { T.push({ col: col, fn: fn }); }
     function fan(y) { return function () { spawnFan(272, y); }; }
     // zig(y, dir, red) / zigs(list, redIdx)：`red` 的那一隻 = **紅色單體**（hp 1，打掉必掉膠囊）
     function zig(y, dir, red) { return function () { spawn('zig', 268, y, { dir: dir, drop: red ? 1 : 0 }); }; }
+    function redzig(y) { return zig(y, 1, true); }        // ★ 紅色單體
     function zigs(list, redIdx) {
       if (redIdx === undefined) redIdx = -1;
       return function () {
@@ -7720,73 +7768,86 @@
     }
     // tank(y) 一般硬殼（藍白）；tank(y, true) = **紅色單體**，打掉必掉膠囊（研究 §3-3 [源]）
     function tank(y, red) { return function () { spawn('tank', 268, y, red ? { drop: 1 } : {}); }; }
+    // rocks([y…])：可破壞小隕石（hp 2 / 100 分）—— 只出現在小行星帶
+    function rocks(list) {
+      return function () {
+        for (var i = 0; i < list.length; i++) spawn('rock', 268 + i * 12, list[i], {});
+      };
+    }
     // 砲台貼在「畫面右緣再往右 2 欄」的地形上（stage 依該欄的天花板 / 地板算 y）
     function turret(ceiling) {
       return function (c, col) { stage.spawnTurretAt(col + 34, ceiling); };
     }
 
-    // ── ① 小行星帶（稀疏 → 起步）────────────────────────────────
-    at(20, fan(56));
-    at(30, zig(96, 1));
-    at(40, fan(120));
-    at(50, zigs([64, 128]));
-    at(60, fan(80));
-    at(68, tank(96, true));
-    at(76, zigs([48, 104]));
-    at(84, fan(140));
-    at(92, tank(72));
-    at(100, zigs([60, 100, 140], 1));
-    at(108, fan(96));              // QA P2-3：原本 y = 64（貼天花板），欄 100~127 通道正在收窄，
-                                  //          機器人會被逼進左上角撞死 ⇒ 移到通道中央
-    at(116, tank(120));
-    at(122, zigs([72, 132]));
+    // ── ① 空戰段（欄 0..160 ＝ camX 0..1280）：純星空、零敵彈、膠囊提款機 ──────
+    // 膠囊管道：fan 編隊 11 波（全滅各 1 顆）+ **紅色單體 7 隻**（1 發即掉）= 最多 18 顆。
+    // 紅色單體是「保底」管道（hp 1、必掉），編隊全滅是「獎勵」管道 ⇒ 一般玩家自然可拿 7~10 顆，
+    // 足夠買 SPEED(1) + MISSILE(2) + OPTION(5)（能量表格位越後面越貴，見研究 §3）。
+    // 波距 14 欄 = 224 幀（一波 fan 在畫面上存活 ≈ 229 幀 ⇒ 同屏幾乎不會超過一波，不會撞到 10 隻上限）。
+    // fan 的 y0 一律落在 56..128：正弦振幅 ±20 ⇒ 實際佔 36..148，上下各留 20 px 以上的逃生空間
+    // （實測 y0 = 144 的那一波會把玩家壓在畫面底緣 y 169 附近，機器人連死 3 次）。
+    at(12, fan(88));
+    at(19, redzig(128));                  // ★ 紅色單體（1 發打掉、必掉膠囊）
+    at(26, fan(56));
+    at(33, redzig(112));                  // ★
+    at(40, fan(128));
+    at(47, zig(40, 1));
+    at(54, fan(72));
+    at(61, redzig(136));                  // ★
+    at(68, fan(96));
+    at(75, redzig(64));                   // ★（檢查點 欄 64 + 11）
+    at(82, fan(120));
+    at(89, zigs([48, 144]));
+    at(96, fan(64));
+    at(103, redzig(120));                 // ★
+    at(110, fan(104));
+    at(117, redzig(80));                  // ★
+    at(124, fan(112));
+    at(131, redzig(96));                  // ★（檢查點 欄 128 + 3）
+    at(138, fan(72));
+    at(145, zigs([56, 124]));
+    at(152, fan(100));
 
-    // ── ② 要塞入口（砲台 + 混編，漸強）──────────────────────────
-    // QA R2 P2-3 的三項放寬（每一項都對應一個實測死因）：
-    //   ① 砲台 15 座 → **7 座**，且**每個檢查點（欄 128 / 192 / 256）之後 24 欄內不會遇到砲台**
-    //      （砲台站在「事件欄 + 34」、進畫面時相機在「世界欄 − 32」⇒ 事件欄 ≥ 檢查點 + 22）。
-    //      依據：qa2 機器人在檢查點 1024 復活後，逐幀追蹤顯示它在欄 149 被世界欄 170 的砲台
-    //      瞄準彈鎖死（速度 1 = 1 px/幀，追不開 2 px/幀 的瞄準彈）。
-    //   ② 兩個難點段（世界欄 150~240）的砲台週期 90 → 130 幀（敵彈密度 −30%，見 EASY_PERIOD）。
-    //   ③ **每個檢查點之後 10 欄內放一隻紅色單體**（打掉必掉膠囊，研究 §3-3 [源]），
-    //      讓「死亡 → 全部強化歸零 → 速度 1」的複利懲罰有一條回血路徑。
-    at(132, fan(72));
-    at(138, zigs([80, 120], 0));          // ★ 紅色單體（檢查點 128 + 10）
-    at(146, tank(104));
-    at(152, turret(false));               // 世界欄 186
-    at(160, zigs([64, 96, 128], 1));
-    at(166, turret(true));                // 世界欄 200
-    at(172, fan(56));
-    at(180, tank(80));
-    at(182, turret(false));               // 世界欄 216
-    at(196, fan(112));
-    at(202, zigs([72, 136], 0));          // ★ 紅色單體（檢查點 192 + 10）
-    at(210, tank(64, true));              // ★ 紅色硬殼
-    at(216, turret(true));                // 世界欄 250
-    at(226, fan(96));
+    // ── ②A 本關段・小行星帶（欄 160..213 ＝ 世界欄 194..247）──────────────────
+    // 大隕石是地形（stage1.js 的 BIG_ROCKS，永遠留 ≥ 18 列的中央通道）；
+    // 這裡生的是**可打破的**小隕石，第一次出現時單獨出場（研究 11 §⑯「新元素只有它」）。
+    at(162, rocks([64, 120]));
+    at(170, fan(96));
+    at(177, rocks([48, 104, 152]));
+    at(184, zigs([72, 136]));
+    at(191, rocks([56, 96, 144]));
+    at(198, redzig(112));                 // ★（檢查點 欄 192 + 6）
+    at(205, fan(72));
+    at(211, rocks([40, 88, 128]));
+
+    // ── ②B 本關段・星際要塞（欄 214..293 ＝ 世界欄 248..327）──────────────────
+    // 砲台 7 座：世界欄 250 / 258 / 266 / 274 / 282 / 313 / 318（全部避開檢查點後 22 欄）。
+    at(216, turret(false));               // 世界欄 250（地板）
+    at(220, fan(128));
+    at(224, turret(true));                // 世界欄 258（天花板）
+    at(230, zigs([64, 104, 144], 1));
     at(232, turret(false));               // 世界欄 266
-    at(242, zigs([56, 88, 120, 152], 1));
-    at(248, turret(true));                // 世界欄 282
-    at(254, fan(72));
-    at(260, tank(112));
-    at(266, zigs([64, 104, 144], 0));     // ★ 紅色單體（檢查點 256 + 10）
-    at(274, fan(128));
-    at(280, turret(false));               // 世界欄 314
+    at(238, tank(96));                    // 硬殼第一次登場（此前完全沒有）
+    at(240, turret(true));                // 世界欄 274
+    at(244, fan(112));
+    at(248, turret(false));               // 世界欄 282
+    at(252, zigs([56, 120]));
+    at(258, redzig(80));                  // ★（檢查點 欄 256 + 2）
+    at(264, fan(96));
+    at(268, tank(72, true));              // ★ 紅色硬殼
+    at(274, zigs([48, 96, 140], 2));
+    at(279, turret(false));               // 世界欄 313
+    at(281, fan(120));
+    at(284, turret(true));                // 世界欄 318（上下對射 = 本關高潮）
+    at(288, tank(120));
+    at(293, zigs([72, 112, 148], 0));     // ★ 紅色單體（進呼吸區前最後一個）
 
-    // ── ③ 核心室前（密集，逼近魔王）────────────────────────────
-    // QA R2 P2-3：原本 14 個事件塞在 54 欄（每 3.9 欄 = 62 幀），連滿強化都死 2 次；
-    //             改成 11 個事件、間隔 ≥ 4 欄，且檢查點（欄 320）之後 6 欄（96 幀）內不出怪。
-    at(290, zigs([56, 96, 136]));
-    at(296, tank(72));
-    at(302, fan(104));
-    at(308, zigs([64, 128], 0));
-    at(314, tank(96));
-    at(319, fan(80));
-    at(326, zigs([48, 88, 128, 160], 1));
-    at(332, tank(144, true));
-    at(338, fan(120));
-    at(344, zigs([72, 112, 152], 1));
-    at(348, tank(104));
+    // ── ③ 呼吸區 + 魔王段（欄 300..352 ＝ camX 2400..2816）────────────────────
+    // 研究 11 §⑯-2 第 ⑤ 段：魔王前要有一段幾乎沒有敵人的開闊區。
+    at(300, fan(88));                     // 呼吸前最後一波補給
+    at(324, redzig(96));                  // ★（檢查點 欄 320 + 4）＝ 魔王前回血點
+    at(332, fan(120));                    // 最後補給（必掉）
+    // 欄 333..352 完全淨空 ⇒ 玩家有 320 幀調整位置、看能量表，然後魔王進場
     return T;
   }
 
@@ -7797,6 +7858,7 @@
     TURRET_PERIOD: TURRET_PERIOD, EASY_PERIOD: EASY_PERIOD, turretPeriod: turretPeriod, PAL_DROP: PAL_DROP,
     ZIG_PERIOD: ZIG_PERIOD,
     BULLET_BASE: BULLET_BASE,
+    ROCK_VX: ROCK_VX,
     FAN_AMP: FAN_AMP,
     bulletSpeed: bulletSpeed,
     rank: rank,
@@ -8007,6 +8069,13 @@
     B.phase = 4;
     B.deathT = DEATH_FRAMES;
     clearLaser();
+    // fix3（使用者回饋「設計太難了」）：核心爆掉的瞬間**清空殘留敵彈**。
+    // 原本 90 幀的爆炸演出期間，先前放出的環形彈還在飛 ⇒ 打贏了卻在勝利動畫裡被殘彈打死
+    // （機器人實測：boss phase 4、被 (−1.1, 0) 的環形彈打中 ⇒ 魔王又滿血重來）。
+    var pool = ctx.stage && ctx.stage.bullets;
+    if (pool && pool.items) {
+      for (var j = 0; j < pool.items.length; j++) if (pool.items[j].alive) ctx.freeBullet(pool.items[j]);
+    }
     for (var i = 0; i < 4; i++) {
       var p = B.plates[i];
       if (p && p.alive) { p.alive = false; ctx.freeEnemy(p); }
@@ -8253,11 +8322,13 @@
  *       欄串流用 `NES.SH.Scroller({row0: 0, rows: 26})`，**絕不碰列 26..29**（ship 的 HUD）。
  *       `ppu.scroll` / `ppu.split` 由 main.js（ship agent）每幀設定，本檔不碰（NES.SH 契約 §15.5）。
  *
- * 地形（12 畫面 = 384 欄 × 26 列，全部原創）：
- *   ① 欄 0..127   小行星帶：星空 + 30 顆可撞小行星（16×16）與碎片，無天花板 / 地板
- *   ② 欄 128..287 要塞入口：天花板 / 地板凸起（3..8 列）、鉚釘牆、管線、壁燈、貼地 / 貼天砲台
- *   ③ 欄 288..383 核心室：等高通道 + 暗紅背板；相機到底後捲動停止、魔王「核心要塞」進場
- *   資料 = **RLE 段表（24 段）+ 決定性 LCG 佈點**，沒有 384×26 的明碼陣列。
+ * 地形（12 畫面 = 384 欄 × 26 列，全部原創）——fix3 改成研究 §7-1 的三段式：
+ *   ① 欄 0..191   **空戰段**：純星空，**沒有任何地形 / 隕石 / 砲台**（camX 0..1280 全程 solid 0）
+ *   ② 欄 192..247 小行星帶：16×16 大隕石（地形）只貼上緣（列 0/2）或下緣（列 22/24），
+ *                 中央自由通道恆 ≥ 18 列；小碎塊改成可破壞的 `rock` 敵人（enemies.js）
+ *   ③ 欄 248..319 星際要塞：天花板 / 地板凸起（0..5 列）、鉚釘牆、管線、壁燈、貼地 / 貼天砲台
+ *   ④ 欄 320..383 核心室：等高通道 + 暗紅背板；相機到底後捲動停止、魔王「核心要塞」進場
+ *   資料 = **RLE 段表（12 段）+ 明碼大隕石座標表**，沒有 384×26 的明碼陣列。
  *
  * 手感數字（docs/research/03…/16_宇宙巡航艦_沙羅曼蛇.md §10）：
  *   捲動 **0.5 px/幀**（8.8 = 128）⇒ 全關 2816 px ≈ 5632 幀 ≈ 94 秒；
@@ -8326,22 +8397,31 @@
   // 機器人帶滿強化也過不了欄 144~158 / 194~210。
   // 改成 **天花板 + 地板 ≤ 8 列 ⇒ 可用高度永遠 ≥ 18 列（144 px）**；
   // 起伏 / 天地反轉的節奏全部保留，只是落差變緩。
+  // fix3：① 空戰段（欄 0..191）與小行星帶（192..247）都是 [0, 0] ＝ 上下完全開闊；
+  //       要塞（248..319）的天花板 + 地板仍 ≤ 8 列 ⇒ 可用高度永遠 ≥ 18 列（144 px）。
   var TERRAIN = [
-    [96, 0, 0], [8, 0, 1], [8, 1, 2], [8, 2, 2], [4, 2, 3], [4, 3, 3],          // ① 小行星帶
-    [16, 3, 3], [8, 3, 5], [8, 4, 4], [8, 3, 3], [8, 5, 3], [8, 3, 5],          // ② 要塞入口
-    [8, 3, 3], [8, 3, 5], [8, 5, 3], [8, 3, 3], [8, 3, 5], [8, 5, 3],
-    [8, 3, 3], [8, 4, 4], [8, 3, 3], [16, 4, 4], [16, 3, 3],
-    [96, 3, 3]                                                                   // ③ 核心室
+    [192, 0, 0],                                                                 // ① 空戰段（純星空）
+    [56, 0, 0],                                                                  // ② 小行星帶（只有大隕石）
+    [8, 0, 1], [8, 1, 2], [8, 2, 3],                                             // ③ 要塞入口斜坡
+    [8, 3, 3], [8, 3, 5], [8, 5, 3], [8, 3, 3], [8, 4, 4], [8, 3, 3],            //    要塞走廊
+    [64, 3, 3]                                                                   // ④ 核心室
+  ];
+  var AIR_COLS = 192;                     // 空戰段（＝ camX 0..1280 時看得到的全部欄）
+  var BELT_COL0 = 192, BELT_COL1 = 247;   // 小行星帶
+  var FORT_COL0 = 248;                    // 星際要塞
+  var BOSS_COL0 = 320;                    // 核心室（＝ 魔王段 camX 2560..3072）
+  // 16×16 大隕石的明碼座標 [欄, 列]：列只用 0 / 2（貼上緣）與 22 / 24（貼下緣），
+  // 所以任何一欄的中央自由列都 >= 18（22 − 4），而「上下各一顆」的欄就是明顯的閘門。
+  var BIG_ROCKS = [
+    [196, 2], [202, 22], [208, 0], [214, 24],
+    [220, 2], [220, 22], [226, 24], [232, 0],
+    [238, 22], [238, 2], [244, 24]
   ];
 
   var ceilH = new Uint8Array(COLS), floorH = new Uint8Array(COLS);
   var map = new Uint8Array(COLS * ROWS);
   var ATTR_ROWS = 13;                                       // 列 0..25 → row16 0..12
   var attr = new Uint8Array((COLS >> 1) * ATTR_ROWS);
-
-  var seed = 0;
-  function srand(s) { seed = s | 0; }
-  function rnd(n) { seed = (seed * 1103515245 + 12345) & 0x7FFFFFFF; return ((seed >> 13) % n + n) % n; }
 
   function setK(c, r, k) { if (c >= 0 && c < COLS && r >= 0 && r < ROWS) map[r * COLS + c] = k; }
   function kindAt(c, r) {
@@ -8363,10 +8443,10 @@
 
     map.fill(K.SPACE);
     for (c = 0; c < COLS; c++) {
-      var ch = ceilH[c], fh = floorH[c], bossRoom = (c >= 288);
+      var ch = ceilH[c], fh = floorH[c], bossRoom = (c >= BOSS_COL0);
       for (r = ch; r < ROWS - fh; r++) {
         if (bossRoom) setK(c, r, ((c % 10) === 1 && (r & 1) === 0) ? K.GRID : K.BOSSBG);   // 只留直立支柱，別跟魔王搶視線
-        else if (c < 128) {
+        else if (c < FORT_COL0) {
           if (((c * 7 + r * 13) % 29) === 0) setK(c, r, K.STARA);
           else if (((c * 5 + r * 11) % 37) === 0) setK(c, r, K.STARB);
         }
@@ -8385,24 +8465,10 @@
       if (ch >= 2 && (c % 12) === 5) setK(c, ch - 1, K.LAMP);   // 壁燈每 12 欄一盞
     }
 
-    // ── 小行星帶佈點（決定性 LCG，每次 build 都一樣）─────────────
-    // QA R2 P2-3：欄 100 之後天花板 / 地板已經開始長出來（通道收窄），再放岩石會變成
-    //             「牆 + 石頭」雙重夾擊；岩石 / 碎片只鋪到欄 99，欄 100~127 留成純過渡段。
-    //             （rnd 仍照原順序抽，所以欄 < 100 的佈點與 R2 完全一樣。）
-    var ROCK_MAX_COL = 100;
-    srand(0x5A17);
-    for (i = 0; i < 18; i++) { var ra = 24 + i * 6, rb = 2 + (rnd(11) << 1), rt = rnd(3); if (ra < ROCK_MAX_COL) putRock(ra, rb, rt); }
-    for (i = 0; i < 12; i++) { var rc = 28 + i * 8, rd2 = 2 + (rnd(11) << 1), rt2 = rnd(3); if (rc < ROCK_MAX_COL) putRock(rc, rd2, rt2); }
-    for (i = 0; i < 26; i++) {
-      var cd = 20 + i * 4 + rnd(3), rd = 1 + rnd(24), kk = kindAt(cd, rd);
-      if (cd < ROCK_MAX_COL && (kk === K.SPACE || kk === K.STARA || kk === K.STARB)) setK(cd, rd, rnd(2) ? K.DEB0 : K.DEB1);
-    }
-    for (c = 0; c < 20; c++) {                               // 出發區淨空
-      for (r = 0; r < ROWS; r++) {
-        var k0 = kindAt(c, r);
-        if (k0 !== K.SPACE && k0 !== K.STARA && k0 !== K.STARB) setK(c, r, K.SPACE);
-      }
-    }
+    // ── 小行星帶佈點（fix3：明碼座標，不再用亂數；空戰段完全不佈點）────────
+    // 使用者回饋「一開始還沒吃到任何武器加強就一堆礁石」⇒ **欄 0..191 一顆都沒有**，
+    // 大隕石全部集中在欄 192..247，而且只貼上 / 下緣，中央永遠是 >= 18 列的通道。
+    for (i = 0; i < BIG_ROCKS.length; i++) putRock(BIG_ROCKS[i][0], BIG_ROCKS[i][1], i % 3);
     buildAttr();
   }
 
@@ -8435,6 +8501,9 @@
   var stage = {
     COLS: COLS, ROWS: ROWS, CAM_MAX: CAM_MAX, GAME_H: GAME_H,
     CHECKPOINTS: CHECKPOINTS.slice(), CHECKPOINT_STEP: CHECKPOINT_STEP, BOSS_RESPAWN: BOSS_RESPAWN,
+    // fix3 三段式節奏的分界（欄）；測試 / 機器人 / 文件共用同一組數字
+    AIR_COLS: AIR_COLS, BELT_COL0: BELT_COL0, BELT_COL1: BELT_COL1,
+    FORT_COL0: FORT_COL0, BOSS_COL0: BOSS_COL0, BIG_ROCKS: BIG_ROCKS,
     BLUE_EVERY: BLUE_EVERY, MAX_ALIVE_ENEMY: MAX_ALIVE_ENEMY,
     length: COLS,
     camX: 0,
@@ -8572,6 +8641,7 @@
       TUR0: q(sprBank, 'W_TUR0'), TUR1: q(sprBank, 'W_TUR1'),
       ZIG0: q(sprBank, 'W_ZIG0'), ZIG1: q(sprBank, 'W_ZIG1'),
       TANK0: q(sprBank, 'W_TANK0'), TANK1: q(sprBank, 'W_TANK1'),
+      MROCK0: pick(['W_MROCK0']), MROCK1: pick(['W_MROCK1']),   // fix3：可破壞小隕石
       PLATE: q(sprBank, 'W_PLATE'), PLATEX: q(sprBank, 'W_PLATEX'),
       CORE0: q(sprBank, 'W_CORE0'), CORE1: q(sprBank, 'W_CORE1'),
       MUZZ0: pick(['W_MUZZ0']), MUZZ1: pick(['W_MUZZ1']),
@@ -8708,6 +8778,7 @@
       case 'turret_ceil': return CR.Enemies.spawn('turret', x, y, { wx: stage.camX + x, ceiling: true });
       case 'zig': return CR.Enemies.spawn('zig', x, y, {});
       case 'tank': return CR.Enemies.spawn('tank', x, y, {});
+      case 'rock': return CR.Enemies.spawn('rock', x, y, {});
       case 'bullet': return fire(x, y, -CR.Enemies.bulletSpeed(), 0);
       case 'capsule': return dropCapsule(x, y, false);
       case 'capsule_blue': return dropCapsule(x, y, true);
@@ -8805,6 +8876,12 @@
   stage.draw = draw;
   stage.checkpoint = checkpoint;
   stage.restart = restart;
+  // fix3（暫停 / SECRET 文字用）：只重畫兩張名稱表，**不動物件池、不重置出怪指標**。
+  // 與 restart 一樣屬於「關閉 rendering 重建畫面」，所以把 budget mute 起來。
+  stage.redraw = function () {
+    muteBudget(ppu0, function () { scroller.reset(stage.camX); });
+    return stage;
+  };
   stage.solidAt = solidAt;
   stage.solidAtWorld = solidAtWorld;
   stage.clearScreen = clearScreen;
@@ -9120,7 +9197,16 @@
     { row: 8, col: 8, text: 'STARDUST CRUISER' },
     { row: 11, col: 7, text: 'ORIGINAL NES SHMUP' },
     { row: 15, col: 10, text: 'PRESS START' },
-    { row: 19, col: 8, text: '$ 2026 ORIGINAL' }
+    { row: 18, col: 6, text: 'SECRET CODE IN PAUSE' },
+    { row: 21, col: 8, text: '$ 2026 ORIGINAL' }
+  ];
+  // fix3：START 暫停（研究 §7-3「暫停」）＋ 暫停中的 Konami 指令（研究 §9-1）
+  var PAUSE = [
+    { row: 11, col: 13, text: 'PAUSE' }
+  ];
+  var SECRET = [
+    { row: 11, col: 13, text: 'PAUSE' },
+    { row: 15, col: 12, text: 'SECRET!' }
   ];
   var OVER = [
     { row: 11, col: 11, text: 'GAME OVER' },
@@ -9188,7 +9274,10 @@
     nes: null, ppu: null, input: null, oam: null,
     mode: 'title', frames: 0, playFrames: 0,
     ship: null, camX: 0, hits: 0, kills: 0, bossOn: false,
-    lastEvent: '', noStageWarn: false
+    lastEvent: '', noStageWarn: false,
+    // fix3：暫停 / Konami 秘技 / GAME OVER 續關
+    paused: false, secretLeft: 1, secrets: 0, secretMsg: 0,
+    continues: 0, continueCam: 0, lastCode: ''
   };
   CR.g = g;
 
@@ -9218,6 +9307,96 @@
     return (s2 && typeof s2.camX === 'number') ? s2.camX : 0;
   }
 
+  /* ================================================ 暫停 + Konami 指令（fix3）
+   * 研究 §9-1 [源]：FC《宇宙巡航艦》**暫停中**輸入 ↑↑↓↓←→←→BA →
+   *   1 次 SPEED UP、MISSILE、2 顆 OPTION、護盾（**不含 DOUBLE / LASER**）；
+   *   一場遊戲 1 次，每打掉一隻 Big Core 多 1 次；
+   *   GAME OVER 畫面輸入同一組 → 給 3 條命並回到剛才的檢查點（分數不清）。
+   * 使用者記憶的變體（↑↑↓↓←←→→AB / …ABAB / ABAB）一併接受：
+   *   比對「最近 12 個按鍵邊緣」的**字尾**，任一組命中即可。觸控走 `Input.setExternal`，
+   *   一樣會進 `pressed()` 的邊緣判定，所以搖桿方向 + A / B 也輸得進來。
+   */
+  var KONAMI_N = 12;
+  var KONAMI_BUF = [];
+  var KONAMI_CODES = [
+    'UUDDLRLRBA',       // [源] FC 原版（ROM $9793 = 08 08 04 04 02 01 02 01 40 80）
+    'UUDDLLRRAB',       // 使用者記憶的變體
+    'UUDDLLRRABAB',     //   同上 + ABAB
+    'ABAB'              //   只按 ABAB（暫停畫面沒有別的用途，寬容處理）
+  ];
+  // 同一幀多鍵時的固定順序（讓「同時按」也有決定性的結果）
+  var KONAMI_EDGE = [[BTN.UP, 'U'], [BTN.DOWN, 'D'], [BTN.LEFT, 'L'], [BTN.RIGHT, 'R'], [BTN.B, 'B'], [BTN.A, 'A']];
+
+  function konamiClear() { KONAMI_BUF.length = 0; }
+  function konamiPush(input) {
+    var m = 0, i;
+    if (input && typeof input.pressedMask === 'function') m = input.pressedMask() | 0;
+    else if (input) { for (i = 0; i < KONAMI_EDGE.length; i++) if (input.pressed(KONAMI_EDGE[i][0])) m |= KONAMI_EDGE[i][0]; }
+    if (!m) return;
+    for (i = 0; i < KONAMI_EDGE.length; i++) if (m & KONAMI_EDGE[i][0]) KONAMI_BUF.push(KONAMI_EDGE[i][1]);
+    while (KONAMI_BUF.length > KONAMI_N) KONAMI_BUF.shift();
+  }
+  function konamiHit() {
+    var s2 = KONAMI_BUF.join(''), i, c;
+    for (i = 0; i < KONAMI_CODES.length; i++) {
+      c = KONAMI_CODES[i];
+      if (s2.length >= c.length && s2.slice(s2.length - c.length) === c) return c;
+    }
+    return '';
+  }
+  CR.konamiBuffer = function () { return KONAMI_BUF.join(''); };
+  CR.KONAMI_CODES = KONAMI_CODES;
+
+  // [源] §9-1：SPEED UP ×1 / MISSILE / OPTION ×2 / 護盾；**不給 DOUBLE、不給 LASER**
+  function secretGrant() {
+    var s2 = g.ship, P = CR.Ship;
+    if (s2.speed < P.MAX_SPEED) s2.speed++;
+    s2.power.missile = true;
+    s2.power.option = P.MAX_OPTION;
+    s2.power.shield = P.SHIELD_HP;
+    s2.syncOptions();
+  }
+  function trySecret(code) {
+    if (g.secretLeft <= 0) return false;              // [源] 一場 1 次（打掉魔王再 +1）
+    g.secretLeft--; g.secrets++; g.lastCode = code;
+    secretGrant();
+    muteBudget(true); drawMsg(g.ppu, SECRET, 0); muteBudget(false);
+    g.secretMsg = 60;                                  // 「SECRET!」顯示 1 秒
+    call(CR.Audio, 'sfx', 'powerup');
+    return true;
+  }
+
+  function pauseGame() {
+    muteBudget(true); drawMsg(g.ppu, PAUSE, 0); muteBudget(false);
+    g.paused = true; g.secretMsg = 0;
+    konamiClear();
+  }
+  function unpauseGame() {
+    muteBudget(true);
+    clearMsg(g.ppu);
+    call(st(), 'redraw');                              // 還原被 PAUSE / SECRET! 蓋掉的地形磚 + 屬性
+    muteBudget(false);
+    g.paused = false; g.secretMsg = 0;
+    konamiClear();
+  }
+
+  // [源] §9-1：GAME OVER 畫面輸入指令 → 3 條命 + 回到剛才的檢查點（**分數不清**）
+  function continueGame() {
+    var ppu = g.ppu, ship = g.ship;
+    muteBudget(true);
+    clearMsg(ppu);
+    call(st(), 'restart', g.continueCam | 0);
+    hudStatic(ppu);
+    muteBudget(false);
+    ship.lives = CR.Ship.START_LIVES;
+    ship.reset(true);                                  // 強化歸零（與死亡一致）
+    ship.invul = CR.Ship.INVUL_FRAMES;
+    g.mode = 'play'; g.paused = false; g.bossOn = false;
+    g.secretLeft = 1; g.secretMsg = 0; g.continues++;
+    hud.score = null; hud.hi = null; hud.lives = null; hud.gauge = -1;
+    if (CR.Audio && CR.Audio.play) call(CR.Audio, 'play', 'stage1');
+  }
+
   /* ---------------------------------------------------------- 模式切換 */
   function toPlay() {
     var ppu = g.ppu;
@@ -9228,6 +9407,9 @@
     muteBudget(false);
     g.ship.newGame();
     g.mode = 'play'; g.playFrames = 0; g.hits = 0; g.kills = 0; g.bossOn = false;
+    g.paused = false; g.secretLeft = 1; g.secrets = 0; g.secretMsg = 0;
+    g.continues = 0; g.continueCam = 0; g.lastCode = '';
+    konamiClear();
     hud.score = null; hud.hi = null; hud.lives = null; hud.gauge = -1;
     if (CR.Audio && CR.Audio.play) call(CR.Audio, 'play', 'stage1');
   }
@@ -9239,21 +9421,24 @@
     hudHide(ppu);                        // P3-1：標題畫面沒有能量表
     drawMsg(ppu, TITLE, 0);
     muteBudget(false);
-    g.mode = 'title'; g.bossOn = false;
+    g.mode = 'title'; g.bossOn = false; g.paused = false; g.secretMsg = 0;
+    konamiClear();
     if (CR.Audio && CR.Audio.play) call(CR.Audio, 'play', 'title');
   }
   function toGameOver() {
     muteBudget(true);
     drawMsg(g.ppu, OVER, 0);             // P1-2：寫到目前捲動位置對應的名稱表
     muteBudget(false);
-    g.mode = 'gameover';
+    g.mode = 'gameover'; g.paused = false; g.secretMsg = 0;
+    konamiClear();                       // GAME OVER 畫面重新開始收指令
     if (CR.Audio && CR.Audio.play) call(CR.Audio, 'play', 'gameover');
   }
   function toStageClear() {
     muteBudget(true);
     drawMsg(g.ppu, CLEAR, 0);            // P1-2：魔王在 camX 2816（% 512 = 256）⇒ 文字其實在 nt1
     muteBudget(false);
-    g.mode = 'stageclear';
+    g.mode = 'stageclear'; g.paused = false; g.secretMsg = 0;
+    g.secretLeft++;                      // [源] 每打掉一隻 Big Core，秘技可再用 1 次
     if (CR.Audio && CR.Audio.play) call(CR.Audio, 'play', 'clear');
   }
 
@@ -9344,7 +9529,19 @@
   function respawn() {
     var ship = g.ship;
     ship.lives--;
-    if (ship.lives <= 0) { ship.lives = 0; ship.reset(true); ship.alive = false; toGameOver(); return; }
+    if (ship.lives <= 0) {
+      ship.lives = 0; ship.reset(true); ship.alive = false;
+      // fix3：GAME OVER 的 Konami 續關要「回到剛才的關卡位置」⇒ 先把檢查點記下來
+      var s0 = st(), cc = 0;
+      if (s0) {
+        cc = call(s0, 'checkpoint', camX());
+        if (typeof cc !== 'number') cc = ship.checkpointOf(camX());
+        if (s0.bossActive && typeof s0.BOSS_RESPAWN === 'number' && s0.BOSS_RESPAWN > cc) cc = s0.BOSS_RESPAWN;
+      }
+      g.continueCam = cc | 0;
+      toGameOver();
+      return;
+    }
     var s2 = st();
     var cp = 0;
     var wasBoss = !!(s2 && s2.bossActive);
@@ -9484,8 +9681,24 @@
 
       if (g.mode === 'title') {
         if (input.pressed(BTN.START) || input.pressed(BTN.A)) toPlay();
-      } else if (g.mode === 'gameover' || g.mode === 'stageclear') {
+      } else if (g.mode === 'gameover') {
+        // [源] §9-1：GAME OVER 畫面的 Konami 指令 = 3 條命續關（分數保留）；START 才是回標題
+        konamiPush(input);
+        if (konamiHit()) { konamiClear(); continueGame(); }
+        else if (input.pressed(BTN.START)) toTitle();
+      } else if (g.mode === 'stageclear') {
         if (input.pressed(BTN.START)) toTitle();
+      } else if (g.paused) {
+        // 暫停中：遊戲完全凍結，只收 Konami 指令與 START（研究 §7-3「暫停」）
+        konamiPush(input);
+        var code = konamiHit();
+        if (code) { konamiClear(); trySecret(code); }
+        if (g.secretMsg > 0 && --g.secretMsg === 0) {
+          muteBudget(true); drawMsg(g.ppu, PAUSE, 0); muteBudget(false);
+        }
+        if (input.pressed(BTN.START)) unpauseGame();
+      } else if (g.mode === 'play' && input.pressed(BTN.START)) {
+        pauseGame();
       } else {
         g.playFrames++;
         var ev = g.ship.update(g);                  // 船 / 選項 / 自機彈
@@ -9549,6 +9762,10 @@
         // 畫面上看得到的訊息文字（列 11 / 15）—— QA P1-2 的驗收欄位
         msg: g.ppu ? (screenText(11).trim() + '|' + screenText(15).trim()) : '',
         bossSong: !!g.bossOn,
+        // fix3：暫停 / 秘技 / 續關
+        paused: !!g.paused, secretLeft: g.secretLeft | 0, secrets: g.secrets | 0,
+        secretMsg: g.secretMsg | 0, continues: g.continues | 0, continueCam: g.continueCam | 0,
+        konami: KONAMI_BUF.join(''), lastCode: g.lastCode,
         lastEvent: g.lastEvent
       };
     }

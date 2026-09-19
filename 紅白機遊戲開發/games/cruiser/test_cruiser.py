@@ -825,6 +825,195 @@ def test_fix2(page):
     ok('死後 camX 已回到魔王復活點之後', d['after'] >= d['cp'], d)
 
 
+# ======================================= ⑫ fix3（START 暫停 / Konami 秘技 / 續關）
+# 期望值來源：docs/research/03…/16_宇宙巡航艦_沙羅曼蛇.md §9-1 [源]
+#   暫停中 ↑↑↓↓←→←→BA → SPEED UP ×1 / MISSILE / OPTION ×2 / 護盾（不含 DOUBLE / LASER）；
+#   一場 1 次（每打掉一隻 Big Core 多 1 次）；GAME OVER 畫面輸入 → 3 條命續關、分數不清。
+# 使用者記憶的變體 ↑↑↓↓←←→→AB / …ABAB / ABAB 一併接受（最近 12 個按鍵邊緣的字尾比對）。
+
+# 用注入佇列送一串「按下 1 幀 → 放開 1 幀」的按鍵邊緣
+JS_TAPS = r"""
+(keys) => {
+  const B = NES.Input.BTN;
+  for (const k of keys) {
+    NES.Input.inject(B[k], 1); __nes.step(1);
+    NES.Input.inject(0, 1); __nes.step(1);
+  }
+  return window.GAME.state();
+}
+"""
+CODE_FC = ['UP', 'UP', 'DOWN', 'DOWN', 'LEFT', 'RIGHT', 'LEFT', 'RIGHT', 'B', 'A']
+CODE_V1 = ['UP', 'UP', 'DOWN', 'DOWN', 'LEFT', 'LEFT', 'RIGHT', 'RIGHT', 'A', 'B']
+CODE_V2 = ['A', 'B', 'A', 'B']
+
+
+def test_fix3(page):
+    print('[⑫ fix3：START 暫停 / Konami 秘技（原版 + 變體）/ 一次限制 / GAME OVER 續關]')
+
+    # ---------------------------------------------------------------- 暫停
+    fresh(page, setup={'noSolid': True})
+    page.evaluate("() => { __nes.release(); __nes.step(30); }")
+    before = page.evaluate("""() => { const g = GAME.state();
+        return { camX: g.camX, x: g.x, y: g.y, pf: g.playFrames, ev: CR.stage.spawner().index }; }""")
+    p1 = page.evaluate(JS_TAPS, ['START'])
+    ok('START → 進入暫停', p1['paused'] is True, p1['paused'])
+    ok('暫停畫面畫出 PAUSE（列 11）', 'PAUSE' in p1['msg'].split('|')[0], p1['msg'])
+    after = page.evaluate("""() => { __nes.release(); __nes.step(90);
+        const g = GAME.state();
+        return { camX: g.camX, x: g.x, y: g.y, pf: g.playFrames, ev: CR.stage.spawner().index,
+                 paused: g.paused }; }""")
+    ok('暫停 90 幀：相機凍結', after['camX'] == before['camX'], (before['camX'], after['camX']))
+    ok('暫停 90 幀：自機與出怪表都不動',
+       after['x'] == before['x'] and after['y'] == before['y'] and
+       after['pf'] == before['pf'] and after['ev'] == before['ev'], (before, after))
+    ok('暫停不會自己解除', after['paused'] is True)
+
+    # 解除暫停 → 地形磚被還原（PAUSE 文字寫過的格）
+    r = page.evaluate(r"""() => {
+      const ppu = __nes.nes().ppu, s = CR.stage;
+      const base = ((s.camX % 512) + 512) % 512 >> 3;
+      const cells = [];
+      for (let i = 0; i < 5; i++) {
+        const gc = (base + 13 + i) & 63;
+        cells.push([(gc >> 5) & 1, gc & 31, 11, s.tileAt((s.camX >> 3) + 13 + i, 11)]);
+      }
+      const dirty = cells.filter(c => ppu.getTile(c[0], c[1], c[2]) !== c[3]).length;
+      NES.Input.inject(NES.Input.BTN.START, 1); __nes.step(1);
+      NES.Input.inject(0, 1); __nes.step(1);
+      const restored = cells.filter(c => ppu.getTile(c[0], c[1], c[2]) === c[3]).length;
+      const g = GAME.state();
+      return { dirty, restored, n: cells.length, paused: g.paused, msg: g.msg };
+    }""")
+    ok('暫停時 PAUSE 文字真的蓋掉了地形磚', r['dirty'] > 0, r)
+    ok('再按 START → 解除暫停', r['paused'] is False, r)
+    ok('解除暫停後地形磚全部還原（CR.stage.redraw）', r['restored'] == r['n'], r)
+    r2 = page.evaluate("() => { __nes.release(); __nes.step(10); const g = GAME.state(); return { camX: g.camX, pf: g.playFrames }; }")
+    ok('解除暫停後遊戲繼續跑', r2['camX'] > after['camX'] and r2['pf'] > after['pf'], (after, r2))
+
+    # ------------------------------------------------- Konami 原版指令的效果
+    for name, code in (('原版 ↑↑↓↓←→←→BA', CODE_FC),
+                       ('變體 ↑↑↓↓←←→→AB', CODE_V1),
+                       ('變體 ABAB', CODE_V2)):
+        fresh(page, setup={'noSolid': True})
+        page.evaluate("() => { __nes.release(); __nes.step(10); }")
+        b = S(page)
+        page.evaluate(JS_TAPS, ['START'])
+        g2 = page.evaluate(JS_TAPS, code)
+        ok('%s：取得 SPEED UP ×1' % name, g2['speed'] == b['speed'] + 1, (b['speed'], g2['speed']))
+        ok('%s：取得 MISSILE' % name, g2['power']['missile'] is True, g2['power'])
+        ok('%s：取得 OPTION ×2' % name, g2['power']['option'] == 2, g2['power'])
+        ok('%s：取得護盾（5 點）' % name, g2['power']['shield'] == 5, g2['power'])
+        ok('%s：不含 DOUBLE / LASER（[源] §9-1）' % name,
+           g2['power']['double'] is False and g2['power']['laser'] is False, g2['power'])
+        ok('%s：顯示 SECRET!' % name, 'SECRET' in g2['msg'].split('|')[1], g2['msg'])
+        ok('%s：剩餘次數 1 → 0' % name, g2['secretLeft'] == 0 and g2['secrets'] == 1, g2['secretLeft'])
+
+    # SECRET! 訊息 60 幀後收回，PAUSE 還在
+    r = page.evaluate("() => { __nes.release(); __nes.step(70); return GAME.state(); }")
+    ok('SECRET! 顯示 1 秒後收回、PAUSE 仍在', 'SECRET' not in r['msg'].split('|')[1]
+       and 'PAUSE' in r['msg'].split('|')[0], r['msg'])
+
+    # -------------------------------------------------------- 一場只能用 1 次
+    g3 = page.evaluate(JS_TAPS, CODE_FC)
+    ok('一場遊戲只能用 1 次（[源] §9-1）', g3['secrets'] == 1 and g3['secretLeft'] == 0, g3['secrets'])
+    r = page.evaluate(r"""() => {
+      CR.ship.power.option = 0; CR.ship.power.shield = 0; CR.ship.syncOptions();
+      const B = NES.Input.BTN;
+      for (const k of ['UP','UP','DOWN','DOWN','LEFT','RIGHT','LEFT','RIGHT','B','A']) {
+        NES.Input.inject(B[k], 1); __nes.step(1); NES.Input.inject(0, 1); __nes.step(1);
+      }
+      const g = GAME.state();
+      return { option: g.power.option, shield: g.power.shield, secrets: g.secrets };
+    }""")
+    ok('用完之後再輸入一次完全沒有效果',
+       r['option'] == 0 and r['shield'] == 0 and r['secrets'] == 1, r)
+
+    # ------------------------------------------ 只有暫停 / GAME OVER 才收指令
+    fresh(page, setup={'noSolid': True})
+    page.evaluate("() => { __nes.release(); __nes.step(10); }")
+    g4 = page.evaluate(JS_TAPS, CODE_FC)          # 沒有先暫停
+    ok('遊戲進行中輸入指令不會觸發（只在暫停 / GAME OVER 有效）',
+       g4['secrets'] == 0 and g4['secretLeft'] == 1 and g4['power']['option'] == 0, g4['secrets'])
+
+    # ------------------------------------------------ 觸控（external）也輸得進去
+    fresh(page, setup={'noSolid': True})
+    page.evaluate("() => { __nes.release(); __nes.step(10); }")
+    g5 = page.evaluate(r"""() => {
+      const B = NES.Input.BTN;
+      // 觸控覆蓋層走 Input.setExternal（不是 inject）⇒ 驗 pressed() 的邊緣對 external 也成立
+      const tap = (b) => { NES.Input.setExternal(b); __nes.step(1); NES.Input.setExternal(0); __nes.step(1); };
+      tap(B.START);
+      const paused = GAME.state().paused;
+      for (const k of ['UP','UP','DOWN','DOWN','LEFT','RIGHT','LEFT','RIGHT','B','A']) tap(B[k]);
+      const g = GAME.state();
+      NES.Input.setExternal(0);
+      return { paused: paused, secrets: g.secrets, option: g.power.option, shield: g.power.shield };
+    }""")
+    ok('觸控（NES.Input.setExternal）也能暫停 + 輸入秘技',
+       g5['paused'] is True and g5['secrets'] == 1 and g5['option'] == 2 and g5['shield'] == 5, g5)
+
+    # -------------------------------------------- 打掉魔王 → 秘技次數 +1（[源]）
+    page.goto((ROOT / 'cruiser.html').as_uri() + '?debug=1&scale=1&mute=1&boss=1')
+    page.wait_for_function('() => !!window.__nes && !!window.CR && !!window.CR.ship')
+    page.evaluate("() => { __nes.tap('start', 1); __nes.step(60); }")
+    r = page.evaluate(r"""() => {
+      const before = GAME.state().secretLeft;
+      CR.ship.invul = 999999;
+      for (let i = 0; i < 900; i++) {
+        __nes.step(1);
+        CR.stage.enemies.each(e => { if (e.boss && e.alive) e.hit(9); });
+        if (GAME.state().mode === 'stageclear') break;
+      }
+      const g = GAME.state();
+      return { before: before, after: g.secretLeft, mode: g.mode };
+    }""")
+    ok('打掉一隻魔王 → 秘技次數 +1（[源] §9-1）',
+       r['mode'] == 'stageclear' and r['after'] == r['before'] + 1, r)
+
+    # ------------------------------------------------ GAME OVER 輸入指令 → 續關
+    page.goto((ROOT / 'cruiser.html').as_uri() + '?debug=1&scale=1&mute=1&camx=1600')
+    page.wait_for_function('() => !!window.__nes && !!window.CR && !!window.CR.ship')
+    page.evaluate("() => { __nes.tap('start', 1); __nes.step(30); }")
+    over = page.evaluate(r"""() => {
+      CR.ship.addScore(12300);
+      CR.ship.lives = 1; CR.ship.invul = 0; CR.ship.power.shield = 0; CR.ship.hit(true);
+      __nes.step(150);
+      const g = GAME.state();
+      return { mode: g.mode, lives: g.lives, score: g.score, cont: g.continueCam, msg: g.msg };
+    }""")
+    ok('死到沒命 → GAME OVER', over['mode'] == 'gameover' and over['lives'] == 0, over)
+    ok('GAME OVER 前先記好續關檢查點（512 的倍數 / 魔王門口）',
+       over['cont'] % 512 == 0 or over['cont'] == 2760, over['cont'])
+    cont = page.evaluate(JS_TAPS, CODE_FC)
+    ok('GAME OVER 輸入 Konami 指令 → 回到遊戲', cont['mode'] == 'play', cont['mode'])
+    ok('續關給 3 條命（[源] §9-1）', cont['lives'] == 3, cont['lives'])
+    ok('續關不清分數', cont['score'] >= over['score'], (over['score'], cont['score']))
+    ok('續關回到 GAME OVER 前的檢查點', cont['camX'] == over['cont'], (over['cont'], cont['camX']))
+    ok('續關後強化歸零、秘技次數重設為 1',
+       cont['power']['option'] == 0 and cont['speed'] == 1 and cont['secretLeft'] == 1, cont['power'])
+    ok('續關計數 +1', cont['continues'] == 1, cont['continues'])
+    ok('續關後 HUD 回來了', cont['hudOn'] is True and '1P' in cont['hud'], cont['hudOn'])
+    lt = page.evaluate("() => { __nes.render(); return __nes.lint(); }")
+    ok('續關後畫面 lint 綠', lt['ok'] is True and lt['colors'] <= 25,
+       {'ok': lt['ok'], 'colors': lt['colors']})
+
+    # GAME OVER 按 START 仍然是回標題（原有行為不變）
+    page.goto((ROOT / 'cruiser.html').as_uri() + '?debug=1&scale=1&mute=1&camx=1600')
+    page.wait_for_function('() => !!window.__nes && !!window.CR && !!window.CR.ship')
+    page.evaluate("() => { __nes.tap('start', 1); __nes.step(30); }")
+    r = page.evaluate(r"""() => {
+      CR.ship.lives = 1; CR.ship.invul = 0; CR.ship.power.shield = 0; CR.ship.hit(true);
+      __nes.step(150);
+      const m0 = GAME.state().mode;
+      NES.Input.inject(NES.Input.BTN.START, 1); __nes.step(1); NES.Input.inject(0, 1); __nes.step(2);
+      const g = GAME.state();
+      return { m0: m0, mode: g.mode, msg: g.msg };
+    }""")
+    ok('GAME OVER 按 START 仍然回標題', r['m0'] == 'gameover' and r['mode'] == 'title', r)
+    ok('標題畫面有秘技提示小字', 'SECRET CODE IN PAUSE' in r['msg'].split('|')[0]
+       or 'SECRET CODE IN PAUSE' in page.evaluate("() => CR.screenText(18)"), r['msg'])
+
+
 def main():
     if not (ROOT / 'cruiser.html').exists():
         print('找不到 cruiser.html')
@@ -846,6 +1035,7 @@ def main():
         test_ppu(page)
         test_stage(page)
         test_fix2(page)
+        test_fix3(page)
         test_no_errors(page, errors)
         browser.close()
 

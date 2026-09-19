@@ -1,20 +1,27 @@
 # -*- coding: utf-8 -*-
 """cruiser：自動通關機器人（貪婪 + 軌跡模擬）
 
-策略（fix2-cruiser 改版）：
+策略（fix2-cruiser 初版、fix3-cruiser 修訂）：
   - **按住 A**（R2 fix2 起 A 支援自動連射：邊緣 或 計時器歸零且按住，研究 §5-3）
-  - 9 個候選方向，每個方向都**模擬「持續往該方向走」**：地形 84 幀、敵彈 / 敵人 40 幀，
+  - 9 個候選方向，每個方向都**模擬「持續往該方向走」**：地形 84 幀、敵彈 / 敵人 56 幀，
     取最早碰撞幀算成本 ⇒ 機器人會真的往上 / 往下閃，而不是原地被瞄準彈鎖死
     （舊版只用「候選位置 + 停著不動」評估，上 / 下 / 停三者成本幾乎相同 ⇒ 永遠不做垂直閃避）
-  - **打飛編隊優先**：瞄準目標優先選 fan 編隊（整隊打光才會掉膠囊），其次 zig / turret / tank
-  - 撿到膠囊後按 B，順序 SPEED×2 → MISSILE → OPTION×2 → LASER；**死亡復活後願望清單重置**
+  - **紅色單體優先**（fix3）：`e.drop` 的敵人 1 發必掉膠囊 ⇒ 瞄準優先序排在 fan 編隊之前
+  - 撿到膠囊後按 B，順序 SPEED×2 → MISSILE → LASER → OPTION×2；**死亡復活後願望清單重置**
     （死亡會清光強化並回到速度 1，不重新買 SPEED 就永遠追不開 2 px/幀 的瞄準彈）
   - 死亡就繼續（回檢查點），GAME OVER 或超過 --max-frames 就停
+
+fix3 的三項機器人修正（都附實測依據，見程式內註解）：
+  ① 模擬視野改成「固定看 40 px」而不是「固定看 24 幀」——速度 4 時 24 幀 = 60 px，
+     在核心室（天花板 3 列）等於「往上一定撞牆」⇒ 機器人被鎖在 y 86，雷射從裝甲板下緣擦過去
+  ② 膠囊吸引權重 6 → 14（大於「對準敵人」的 9）⇒ 掉 15 顆撿 14 顆（原本掉 10 撿 5）
+  ③ 魔王戰手上有幾格能量就花掉（原本要 ≥ 4 才花）
 
 用法：
   ../卡比之星/.venv/bin/python tools/playthrough_cruiser.py                 # 從頭跑
   ../卡比之星/.venv/bin/python tools/playthrough_cruiser.py --camx 1024     # 分段驗證
   ../卡比之星/.venv/bin/python tools/playthrough_cruiser.py --boss 1
+  ../卡比之星/.venv/bin/python tools/playthrough_cruiser.py --konami        # 驗秘技流程（不通關）
 """
 import argparse
 import base64
@@ -32,21 +39,29 @@ BOT_JS = r"""
   // ---- 機器人：全部跑在頁面內，避免每幀一次 IPC ----
   const NESg = window.NES, CR = window.CR;
   const BTN = NESg.Input.BTN;
-  const WISH = [1, 1, 2, 5, 5, 4];       // SPEED, SPEED, MISSILE, OPTION, OPTION, LASER
+  // fix3：LASER 提前到 OPTION 之前（格 4 比格 5 便宜 1 顆膠囊，而且雷射貫穿 ⇒ 魔王 24 血打得完）
+  const WISH = [1, 1, 2, 4, 5, 5];       // SPEED, SPEED, MISSILE, LASER, OPTION, OPTION
   const MOVES = [[0,0],[0,-1],[0,1],[1,0],[-1,0],[1,-1],[1,1],[-1,-1],[-1,1]];
   const TERR_H = 84, TERR_STEP = 4;      // 地形預判 84 幀（= 42 px 捲動）
   const THR_H = 56;                      // 敵彈 / 敵人預判 56 幀（魔王的環形 8 彈要更早看到）
   // 模擬時只「按住這個方向 HOLD 幀」，之後停住讓地形自己捲過來。
   // 若假設一路按到底，任何往上 / 往下的候選最後都會撞到天花板 / 地板 ⇒ 垂直移動永遠被罰，
   // 機器人就會退化成「只左右移動」（實測：魔王戰卡在 y = 94、打不到 y = 72 的裝甲板 18000 幀）。
-  const HOLD = 24;
+  const HOLD = 24, HOLD_PX = 40;
+  // fix3：HOLD 是「幀數」⇒ 速度越高模擬位移越遠。速度 4（2.5 px/幀）時 24 幀 = 60 px，
+  // 在核心室（天花板 3 列 = y < 24）代表「往上」永遠會撞天花板 ⇒ 任何向上候選都被罰 2.6 萬，
+  // 機器人被鎖在 y 86、雷射從 y 88 擦過 y 72..88 的裝甲板下緣（實測 24000 幀 0 傷害）。
+  // 改成**固定看 40 px**（幀數 = 40 / 速度，上限 24、下限 8）⇒ 上下對稱。
+  const holdFor = (spd) => Math.max(8, Math.min(HOLD, Math.round(HOLD_PX / spd)));
   const BOX_DX = 2, BOX_DY = 1, BOX_W = 12, BOX_H = 6;   // 自機碰撞框（相對精靈左上）
 
   function aabb(ax, ay, aw, ah, bx, by, bw, bh) {
     return ax < bx + bw && bx < ax + aw && ay < by + bh && by < ay + ah;
   }
   // 敵人種類 → 瞄準優先序（fan 編隊最優先：整隊打光才掉膠囊）
-  function aimRank(k) { return k === 'fan' ? 0 : (k === 'zig' ? 1 : (k === 'turret' ? 2 : 3)); }
+  // fix3：`e.drop` 的**紅色單體**是「1 發必掉膠囊」的保底管道 ⇒ 優先序排在 fan 之前
+  //       （人類玩家學到「紅色 = 有獎」之後也是這樣打）。
+  function aimRank(k) { return k === 'fan' ? 1 : (k === 'zig' ? 2 : (k === 'turret' ? 3 : (k === 'rock' ? 4 : 5))); }
 
   window.__bot = {
     wish: WISH.slice(), deaths: 0, frames: 0, lastLives: 3, log: [], cause: '', wasAlive: true,
@@ -65,6 +80,7 @@ BOT_JS = r"""
       if (!this.wasAlive) this.wish = WISH.slice();
 
       const spd = s.speedPx();
+      const hold = holdFor(spd);
       const solid = (x, y) => { try { return !!st.solidAt(x | 0, y | 0); } catch (e) { return false; } };
 
       // ── 威脅清單（螢幕座標 + px/幀速度）──────────────────────────────
@@ -112,7 +128,7 @@ BOT_JS = r"""
       let aimY = null, aimBest = 1e9;
       st.enemies.each(e => {
         if (e.x <= s.sx + 40) return;
-        const k = (e.boss ? -1e6 : aimRank(e.kind) * 500) + (e.x - s.sx);
+        const k = (e.boss ? -1e6 : (e.drop ? 0 : aimRank(e.kind) * 500)) + (e.x - s.sx);
         if (k < aimBest) { aimBest = k; aimY = e.y + e.h / 2; }
       });
 
@@ -131,7 +147,7 @@ BOT_JS = r"""
               solid(bx0, by0 + BOX_H) || solid(bx0 + BOX_W, by0 + BOX_H)) cost += 5e6;
           let px = nx0, py = ny0;
           for (let f = TERR_STEP; f <= TERR_H; f += TERR_STEP) {
-            if (f <= HOLD) {
+            if (f <= hold) {
               px = Math.max(8, Math.min(240, px + m[0] * spd * TERR_STEP));
               py = Math.max(16, Math.min(184, py + m[1] * spd * TERR_STEP));
             }
@@ -149,7 +165,7 @@ BOT_JS = r"""
         for (const t of threats) {
           let px = nx0, py = ny0;
           for (let f = 1; f <= THR_H; f++) {
-            if (f <= HOLD) {
+            if (f <= hold) {
               px = Math.max(8, Math.min(240, px + m[0] * spd));
               py = Math.max(16, Math.min(184, py + m[1] * spd));
             }
@@ -171,7 +187,9 @@ BOT_JS = r"""
         const threatCost = cost - cost0;
 
         // ③ 膠囊吸引（有立即威脅時讓位給閃避）
-        if (cap) cost += (threatCost > 0 ? 1 : 6) * (Math.abs(cap.x - nx0) + Math.abs(cap.y - ny0));
+        // fix3：權重 6 比「對準目標」的 9 還小 ⇒ 機器人寧可繼續瞄敵人，實測掉 10 顆只撿到 5 顆。
+        //       調到 14（大於 aim 的 9、home 的 5）⇒ 沒有立即威脅時優先去接膠囊。
+        if (cap) cost += (threatCost > 0 ? 2 : 14) * (Math.abs(cap.x - nx0) + Math.abs(cap.y - ny0));
 
         // ③b 對準目標（fan 編隊優先）；沒有立即威脅時才積極對準
         if (aimY !== null) {
@@ -215,7 +233,8 @@ BOT_JS = r"""
       let want = this.wish.length ? this.wish[0] : -1;
       // 魔王戰不會再掉膠囊 ⇒ 手上有幾格就花幾格（4 = LASER 貫穿 / 5 = OPTION / 6 = 護盾），
       // 不然會像 qa2 那樣抱著 gauge 4 等一顆永遠不會出現的膠囊，用單發彈磨 24 血
-      if (st.bossActive && g.gauge >= 4) want = g.gauge;   // 只花在 LASER / OPTION / 護盾
+      // fix3：魔王戰不會再掉膠囊 ⇒ 手上有幾格就立刻花掉（1 SPEED / 3 DOUBLE 都比抱著不用好）
+      if (st.bossActive && g.gauge >= 1) want = g.gauge;
       if (want >= 0 && g.gauge === want && (this.frames & 1) === 1) {
         mask |= BTN.B;
         if (this.wish.length && this.wish[0] === want) this.wish.shift();
@@ -230,12 +249,15 @@ BOT_JS = r"""
         let c = '';
         if (solid(rb.x, rb.y) || solid(rb.x + rb.w - 1, rb.y) ||
             solid(rb.x, rb.y + rb.h - 1) || solid(rb.x + rb.w - 1, rb.y + rb.h - 1)) c = 'terrain';
-        st.bullets.each(b => { if (!c && aabb(rb.x-1, rb.y-1, rb.w+2, rb.h+2, b.x, b.y, b.w, b.h)) c = 'bullet'; });
+        st.bullets.each(b => { if (!c && aabb(rb.x-1, rb.y-1, rb.w+2, rb.h+2, b.x, b.y, b.w, b.h))
+          c = 'bullet(' + (Math.round(b.vx / 25.6) / 10) + ',' + (Math.round(b.vy / 25.6) / 10) + ')'; });
         st.enemies.each(e => { if (!c && aabb(rb.x-1, rb.y-1, rb.w+2, rb.h+2, e.x, e.y, e.w, e.h)) c = 'enemy:' + e.kind; });
         this.deaths++;
         const gg = window.GAME.state();
         this.log.push({f: this.frames, camX: gg.camX, cause: c || '?', at: [s.sx, s.sy],
-                       spd: gg.speed, pow: gg.power});
+                       spd: gg.speed, pow: gg.power,
+                       boss: (CR.Boss && CR.Boss.state) ? CR.Boss.state().phase : 0,
+                       nb: st.aliveBullets ? st.aliveBullets() : 0});
       }
       if (this.dbg) {
         this.dbgHist.push({f: this.frames, x: s.sx, y: s.sy, alive: s.alive,
@@ -274,6 +296,94 @@ def shot(page, path, scale=3):
     print('  saved', path)
 
 
+# ============================================================ Konami 秘技驗證
+# 研究 §9-1 [源]：暫停中 ↑↑↓↓←→←→BA → SPEED UP ×1 / MISSILE / OPTION ×2 / 護盾，一場 1 次；
+#                 GAME OVER 畫面輸入同一組 → 3 條命續關（分數不清）。
+CODE_FC = ['UP', 'UP', 'DOWN', 'DOWN', 'LEFT', 'RIGHT', 'LEFT', 'RIGHT', 'B', 'A']
+CODE_V1 = ['UP', 'UP', 'DOWN', 'DOWN', 'LEFT', 'LEFT', 'RIGHT', 'RIGHT', 'A', 'B']
+CODE_V2 = ['A', 'B', 'A', 'B']
+
+JS_TAPS = r"""
+(keys) => {
+  const B = NES.Input.BTN;
+  for (const k of keys) {
+    NES.Input.inject(B[k], 1); __nes.step(1);
+    NES.Input.inject(0, 1); __nes.step(1);
+  }
+  return window.GAME.state();
+}
+"""
+
+
+def run_konami(page, out):
+    """暫停 → 輸入指令 → 強化欄位變化 → 一次限制 → GAME OVER 續關。回傳 0 / 1。"""
+    bad = []
+
+    def chk(name, cond, detail=''):
+        print(('  PASS ' if cond else '  FAIL ') + name + (('  — ' + str(detail)) if detail else ''))
+        if not cond:
+            bad.append(name)
+
+    def fresh(query=''):
+        page.goto((ROOT / 'cruiser.html').as_uri() + '?debug=1&scale=1&mute=1' + query)
+        page.wait_for_function('()=>!!window.__nes && !!window.CR && !!window.CR.ship')
+        page.evaluate("()=>{__nes.tap('start',1); __nes.step(30);}")
+        return page.evaluate('()=>window.GAME.state()')
+
+    for name, code in (('原版 ↑↑↓↓←→←→BA', CODE_FC),
+                       ('變體 ↑↑↓↓←←→→AB', CODE_V1),
+                       ('變體 ABAB', CODE_V2)):
+        before = fresh()
+        p1 = page.evaluate(JS_TAPS, ['START'])
+        chk('%s：START 進入暫停（畫面出現 PAUSE）' % name,
+            p1['paused'] and 'PAUSE' in p1['msg'].split('|')[0], p1['msg'].split('|')[0].strip())
+        after = page.evaluate(JS_TAPS, code)
+        chk('%s：SPEED %d → %d' % (name, before['speed'], after['speed']),
+            after['speed'] == before['speed'] + 1)
+        chk('%s：MISSILE / OPTION×2 / 護盾 5' % name,
+            after['power']['missile'] and after['power']['option'] == 2 and after['power']['shield'] == 5,
+            after['power'])
+        chk('%s：不含 DOUBLE / LASER' % name,
+            not after['power']['double'] and not after['power']['laser'], after['power'])
+        chk('%s：顯示 SECRET!' % name, 'SECRET' in after['msg'].split('|')[1], after['msg'].split('|')[1].strip())
+        chk('%s：一場只能用 1 次（剩餘 %d）' % (name, after['secretLeft']),
+            after['secretLeft'] == 0 and after['secrets'] == 1)
+        again = page.evaluate(JS_TAPS, code)
+        chk('%s：再輸入一次無效' % name, again['secrets'] == 1)
+        if code is CODE_FC:
+            shot(page, out / 'konami_secret.png')
+            back = page.evaluate(JS_TAPS, ['START'])
+            chk('再按 START 解除暫停、遊戲繼續', not back['paused'])
+            go = page.evaluate("()=>{__nes.release(); __nes.step(60); return window.GAME.state();}")
+            chk('解除暫停後相機繼續捲動', go['camX'] > back['camX'], (back['camX'], go['camX']))
+            shot(page, out / 'konami_after.png')
+
+    # ---- GAME OVER 續關 ----
+    fresh('&camx=1600')
+    over = page.evaluate(r"""()=>{
+      CR.ship.addScore(12300);
+      CR.ship.lives = 1; CR.ship.invul = 0; CR.ship.power.shield = 0; CR.ship.hit(true);
+      __nes.step(150);
+      return window.GAME.state();
+    }""")
+    chk('打到沒命 → GAME OVER', over['mode'] == 'gameover' and over['lives'] == 0, over['mode'])
+    shot(page, out / 'konami_gameover.png')
+    cont = page.evaluate(JS_TAPS, CODE_FC)
+    chk('GAME OVER 輸入指令 → 續關回遊戲', cont['mode'] == 'play', cont['mode'])
+    chk('續關給 3 條命', cont['lives'] == 3, cont['lives'])
+    chk('續關不清分數（%d → %d）' % (over['score'], cont['score']), cont['score'] >= over['score'])
+    chk('續關回到 GAME OVER 前的檢查點 camX=%d' % cont['camX'], cont['camX'] == over['continueCam'],
+        (over['continueCam'], cont['camX']))
+    chk('續關後強化歸零、秘技次數重設 1',
+        cont['power']['option'] == 0 and cont['speed'] == 1 and cont['secretLeft'] == 1)
+    shot(page, out / 'konami_continue.png')
+
+    print('\n==== 秘技驗證：%s ====' % ('全部通過' if not bad else '%d 項失敗' % len(bad)))
+    for b in bad:
+        print('  FAIL', b)
+    return 1 if bad else 0
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--camx', type=int, default=None)
@@ -281,6 +391,8 @@ def main():
     ap.add_argument('--max-frames', type=int, default=30000)
     ap.add_argument('--tag', default='')
     ap.add_argument('--shots', action='store_true', help='每 1200 幀截一張')
+    ap.add_argument('--konami', action='store_true',
+                    help='不跑通關，改驗「暫停 → Konami 指令 → 強化欄位變化 / 一次限制 / GAME OVER 續關」')
     args = ap.parse_args()
 
     q = '?debug=1&scale=1&mute=1'
@@ -296,6 +408,14 @@ def main():
         page = br.new_page(viewport={'width': 900, 'height': 800})
         errs = []
         page.on('pageerror', lambda e: errs.append(str(e)))
+        if args.konami:
+            print('==== Konami 秘技流程驗證（研究 §9-1）====')
+            rc = run_konami(page, OUT / 'konami')
+            if errs:
+                print('頁面錯誤 =', errs[:5])
+                rc = 1
+            br.close()
+            return rc
         page.goto((ROOT / 'cruiser.html').as_uri() + q)
         page.wait_for_function('()=>!!window.__nes && !!window.CR && !!window.CR.ship')
         page.evaluate("()=>{__nes.tap('start',1); __nes.step(2);}")
@@ -314,7 +434,8 @@ def main():
                    ''.join(k[0].upper() if g['power'][k] else '-'
                            for k in ('missile', 'double', 'laser')) + str(g['power']['option']) +
                    str(g['power']['shield']),
-                   g['enemies'], g['stage']['bossActive']))
+                   g['enemies'], g['stage']['bossActive']),
+                  ' caps=%d/%d' % (g['capsules'], page.evaluate("()=>CR.stage.capsuleSeq()")))
             if args.shots and (total // 1200) != ((total - chunk) // 1200):
                 shot(page, OUT / 'bot' / ('%s_f%05d.png' % (tag, total)))
             if r['done']:

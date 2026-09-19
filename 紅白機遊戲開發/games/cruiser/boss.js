@@ -188,6 +188,13 @@
     B.phase = 4;
     B.deathT = DEATH_FRAMES;
     clearLaser();
+    // fix3（使用者回饋「設計太難了」）：核心爆掉的瞬間**清空殘留敵彈**。
+    // 原本 90 幀的爆炸演出期間，先前放出的環形彈還在飛 ⇒ 打贏了卻在勝利動畫裡被殘彈打死
+    // （機器人實測：boss phase 4、被 (−1.1, 0) 的環形彈打中 ⇒ 魔王又滿血重來）。
+    var pool = ctx.stage && ctx.stage.bullets;
+    if (pool && pool.items) {
+      for (var j = 0; j < pool.items.length; j++) if (pool.items[j].alive) ctx.freeBullet(pool.items[j]);
+    }
     for (var i = 0; i < 4; i++) {
       var p = B.plates[i];
       if (p && p.alive) { p.alive = false; ctx.freeEnemy(p); }

@@ -12,11 +12,13 @@
  *       欄串流用 `NES.SH.Scroller({row0: 0, rows: 26})`，**絕不碰列 26..29**（ship 的 HUD）。
  *       `ppu.scroll` / `ppu.split` 由 main.js（ship agent）每幀設定，本檔不碰（NES.SH 契約 §15.5）。
  *
- * 地形（12 畫面 = 384 欄 × 26 列，全部原創）：
- *   ① 欄 0..127   小行星帶：星空 + 30 顆可撞小行星（16×16）與碎片，無天花板 / 地板
- *   ② 欄 128..287 要塞入口：天花板 / 地板凸起（3..8 列）、鉚釘牆、管線、壁燈、貼地 / 貼天砲台
- *   ③ 欄 288..383 核心室：等高通道 + 暗紅背板；相機到底後捲動停止、魔王「核心要塞」進場
- *   資料 = **RLE 段表（24 段）+ 決定性 LCG 佈點**，沒有 384×26 的明碼陣列。
+ * 地形（12 畫面 = 384 欄 × 26 列，全部原創）——fix3 改成研究 §7-1 的三段式：
+ *   ① 欄 0..191   **空戰段**：純星空，**沒有任何地形 / 隕石 / 砲台**（camX 0..1280 全程 solid 0）
+ *   ② 欄 192..247 小行星帶：16×16 大隕石（地形）只貼上緣（列 0/2）或下緣（列 22/24），
+ *                 中央自由通道恆 ≥ 18 列；小碎塊改成可破壞的 `rock` 敵人（enemies.js）
+ *   ③ 欄 248..319 星際要塞：天花板 / 地板凸起（0..5 列）、鉚釘牆、管線、壁燈、貼地 / 貼天砲台
+ *   ④ 欄 320..383 核心室：等高通道 + 暗紅背板；相機到底後捲動停止、魔王「核心要塞」進場
+ *   資料 = **RLE 段表（12 段）+ 明碼大隕石座標表**，沒有 384×26 的明碼陣列。
  *
  * 手感數字（docs/research/03…/16_宇宙巡航艦_沙羅曼蛇.md §10）：
  *   捲動 **0.5 px/幀**（8.8 = 128）⇒ 全關 2816 px ≈ 5632 幀 ≈ 94 秒；
@@ -85,22 +87,31 @@
   // 機器人帶滿強化也過不了欄 144~158 / 194~210。
   // 改成 **天花板 + 地板 ≤ 8 列 ⇒ 可用高度永遠 ≥ 18 列（144 px）**；
   // 起伏 / 天地反轉的節奏全部保留，只是落差變緩。
+  // fix3：① 空戰段（欄 0..191）與小行星帶（192..247）都是 [0, 0] ＝ 上下完全開闊；
+  //       要塞（248..319）的天花板 + 地板仍 ≤ 8 列 ⇒ 可用高度永遠 ≥ 18 列（144 px）。
   var TERRAIN = [
-    [96, 0, 0], [8, 0, 1], [8, 1, 2], [8, 2, 2], [4, 2, 3], [4, 3, 3],          // ① 小行星帶
-    [16, 3, 3], [8, 3, 5], [8, 4, 4], [8, 3, 3], [8, 5, 3], [8, 3, 5],          // ② 要塞入口
-    [8, 3, 3], [8, 3, 5], [8, 5, 3], [8, 3, 3], [8, 3, 5], [8, 5, 3],
-    [8, 3, 3], [8, 4, 4], [8, 3, 3], [16, 4, 4], [16, 3, 3],
-    [96, 3, 3]                                                                   // ③ 核心室
+    [192, 0, 0],                                                                 // ① 空戰段（純星空）
+    [56, 0, 0],                                                                  // ② 小行星帶（只有大隕石）
+    [8, 0, 1], [8, 1, 2], [8, 2, 3],                                             // ③ 要塞入口斜坡
+    [8, 3, 3], [8, 3, 5], [8, 5, 3], [8, 3, 3], [8, 4, 4], [8, 3, 3],            //    要塞走廊
+    [64, 3, 3]                                                                   // ④ 核心室
+  ];
+  var AIR_COLS = 192;                     // 空戰段（＝ camX 0..1280 時看得到的全部欄）
+  var BELT_COL0 = 192, BELT_COL1 = 247;   // 小行星帶
+  var FORT_COL0 = 248;                    // 星際要塞
+  var BOSS_COL0 = 320;                    // 核心室（＝ 魔王段 camX 2560..3072）
+  // 16×16 大隕石的明碼座標 [欄, 列]：列只用 0 / 2（貼上緣）與 22 / 24（貼下緣），
+  // 所以任何一欄的中央自由列都 >= 18（22 − 4），而「上下各一顆」的欄就是明顯的閘門。
+  var BIG_ROCKS = [
+    [196, 2], [202, 22], [208, 0], [214, 24],
+    [220, 2], [220, 22], [226, 24], [232, 0],
+    [238, 22], [238, 2], [244, 24]
   ];
 
   var ceilH = new Uint8Array(COLS), floorH = new Uint8Array(COLS);
   var map = new Uint8Array(COLS * ROWS);
   var ATTR_ROWS = 13;                                       // 列 0..25 → row16 0..12
   var attr = new Uint8Array((COLS >> 1) * ATTR_ROWS);
-
-  var seed = 0;
-  function srand(s) { seed = s | 0; }
-  function rnd(n) { seed = (seed * 1103515245 + 12345) & 0x7FFFFFFF; return ((seed >> 13) % n + n) % n; }
 
   function setK(c, r, k) { if (c >= 0 && c < COLS && r >= 0 && r < ROWS) map[r * COLS + c] = k; }
   function kindAt(c, r) {
@@ -122,10 +133,10 @@
 
     map.fill(K.SPACE);
     for (c = 0; c < COLS; c++) {
-      var ch = ceilH[c], fh = floorH[c], bossRoom = (c >= 288);
+      var ch = ceilH[c], fh = floorH[c], bossRoom = (c >= BOSS_COL0);
       for (r = ch; r < ROWS - fh; r++) {
         if (bossRoom) setK(c, r, ((c % 10) === 1 && (r & 1) === 0) ? K.GRID : K.BOSSBG);   // 只留直立支柱，別跟魔王搶視線
-        else if (c < 128) {
+        else if (c < FORT_COL0) {
           if (((c * 7 + r * 13) % 29) === 0) setK(c, r, K.STARA);
           else if (((c * 5 + r * 11) % 37) === 0) setK(c, r, K.STARB);
         }
@@ -144,24 +155,10 @@
       if (ch >= 2 && (c % 12) === 5) setK(c, ch - 1, K.LAMP);   // 壁燈每 12 欄一盞
     }
 
-    // ── 小行星帶佈點（決定性 LCG，每次 build 都一樣）─────────────
-    // QA R2 P2-3：欄 100 之後天花板 / 地板已經開始長出來（通道收窄），再放岩石會變成
-    //             「牆 + 石頭」雙重夾擊；岩石 / 碎片只鋪到欄 99，欄 100~127 留成純過渡段。
-    //             （rnd 仍照原順序抽，所以欄 < 100 的佈點與 R2 完全一樣。）
-    var ROCK_MAX_COL = 100;
-    srand(0x5A17);
-    for (i = 0; i < 18; i++) { var ra = 24 + i * 6, rb = 2 + (rnd(11) << 1), rt = rnd(3); if (ra < ROCK_MAX_COL) putRock(ra, rb, rt); }
-    for (i = 0; i < 12; i++) { var rc = 28 + i * 8, rd2 = 2 + (rnd(11) << 1), rt2 = rnd(3); if (rc < ROCK_MAX_COL) putRock(rc, rd2, rt2); }
-    for (i = 0; i < 26; i++) {
-      var cd = 20 + i * 4 + rnd(3), rd = 1 + rnd(24), kk = kindAt(cd, rd);
-      if (cd < ROCK_MAX_COL && (kk === K.SPACE || kk === K.STARA || kk === K.STARB)) setK(cd, rd, rnd(2) ? K.DEB0 : K.DEB1);
-    }
-    for (c = 0; c < 20; c++) {                               // 出發區淨空
-      for (r = 0; r < ROWS; r++) {
-        var k0 = kindAt(c, r);
-        if (k0 !== K.SPACE && k0 !== K.STARA && k0 !== K.STARB) setK(c, r, K.SPACE);
-      }
-    }
+    // ── 小行星帶佈點（fix3：明碼座標，不再用亂數；空戰段完全不佈點）────────
+    // 使用者回饋「一開始還沒吃到任何武器加強就一堆礁石」⇒ **欄 0..191 一顆都沒有**，
+    // 大隕石全部集中在欄 192..247，而且只貼上 / 下緣，中央永遠是 >= 18 列的通道。
+    for (i = 0; i < BIG_ROCKS.length; i++) putRock(BIG_ROCKS[i][0], BIG_ROCKS[i][1], i % 3);
     buildAttr();
   }
 
@@ -194,6 +191,9 @@
   var stage = {
     COLS: COLS, ROWS: ROWS, CAM_MAX: CAM_MAX, GAME_H: GAME_H,
     CHECKPOINTS: CHECKPOINTS.slice(), CHECKPOINT_STEP: CHECKPOINT_STEP, BOSS_RESPAWN: BOSS_RESPAWN,
+    // fix3 三段式節奏的分界（欄）；測試 / 機器人 / 文件共用同一組數字
+    AIR_COLS: AIR_COLS, BELT_COL0: BELT_COL0, BELT_COL1: BELT_COL1,
+    FORT_COL0: FORT_COL0, BOSS_COL0: BOSS_COL0, BIG_ROCKS: BIG_ROCKS,
     BLUE_EVERY: BLUE_EVERY, MAX_ALIVE_ENEMY: MAX_ALIVE_ENEMY,
     length: COLS,
     camX: 0,
@@ -331,6 +331,7 @@
       TUR0: q(sprBank, 'W_TUR0'), TUR1: q(sprBank, 'W_TUR1'),
       ZIG0: q(sprBank, 'W_ZIG0'), ZIG1: q(sprBank, 'W_ZIG1'),
       TANK0: q(sprBank, 'W_TANK0'), TANK1: q(sprBank, 'W_TANK1'),
+      MROCK0: pick(['W_MROCK0']), MROCK1: pick(['W_MROCK1']),   // fix3：可破壞小隕石
       PLATE: q(sprBank, 'W_PLATE'), PLATEX: q(sprBank, 'W_PLATEX'),
       CORE0: q(sprBank, 'W_CORE0'), CORE1: q(sprBank, 'W_CORE1'),
       MUZZ0: pick(['W_MUZZ0']), MUZZ1: pick(['W_MUZZ1']),
@@ -467,6 +468,7 @@
       case 'turret_ceil': return CR.Enemies.spawn('turret', x, y, { wx: stage.camX + x, ceiling: true });
       case 'zig': return CR.Enemies.spawn('zig', x, y, {});
       case 'tank': return CR.Enemies.spawn('tank', x, y, {});
+      case 'rock': return CR.Enemies.spawn('rock', x, y, {});
       case 'bullet': return fire(x, y, -CR.Enemies.bulletSpeed(), 0);
       case 'capsule': return dropCapsule(x, y, false);
       case 'capsule_blue': return dropCapsule(x, y, true);
@@ -564,6 +566,12 @@
   stage.draw = draw;
   stage.checkpoint = checkpoint;
   stage.restart = restart;
+  // fix3（暫停 / SECRET 文字用）：只重畫兩張名稱表，**不動物件池、不重置出怪指標**。
+  // 與 restart 一樣屬於「關閉 rendering 重建畫面」，所以把 budget mute 起來。
+  stage.redraw = function () {
+    muteBudget(ppu0, function () { scroller.reset(stage.camX); });
+    return stage;
+  };
   stage.solidAt = solidAt;
   stage.solidAtWorld = solidAtWorld;
   stage.clearScreen = clearScreen;

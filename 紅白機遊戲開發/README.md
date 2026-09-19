@@ -11,7 +11,8 @@
 | 《星塵勇者》 | 橫向平台動作 | 超級瑪利歐 1 / 3 手感常數 | `star.html` | https://ken158ken.github.io/NES-style/紅白機遊戲開發/star.html |
 | 《星塵巡航艦》 | 橫向射擊 | 宇宙巡航艦（Gradius）能量表 / Option | `cruiser.html` | https://ken158ken.github.io/NES-style/紅白機遊戲開發/cruiser.html |
 | 《星塵測試室》 | 引擎測試房 | — | `game.html` | https://ken158ken.github.io/NES-style/紅白機遊戲開發/game.html |
-操作：方向鍵 / WASD、Z = A、X = B、Enter = START、Shift = SELECT、F 全螢幕。單檔版在 `dist/`。
+操作：方向鍵 / WASD、Z = A、X = B、Enter = START、Shift = SELECT、F 全螢幕；手機有觸控搖桿。單檔版在 `dist/`。
+《星塵巡航艦》秘技（考據自原作）：遊戲中按 START 暫停後輸入 ↑↑↓↓←→←→BA（也接受 ↑↑↓↓←←→→AB / ABAB）→ SPEED、MISSILE、2 顆 OPTION、護盾（一場一次，打掉魔王多一次）；GAME OVER 畫面輸入同指令 → 3 條命續關。
 
 ## 目錄
 - `docs/research/` — 研究文件（Markdown，繁體中文，附來源網址）

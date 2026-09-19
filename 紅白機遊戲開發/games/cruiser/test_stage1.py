@@ -174,16 +174,20 @@ def test_spawner(page):
         var tb = CR.stage.spawnTable(), i, inc = true, cols = [];
         for (i = 0; i < tb.length; i++) { cols.push(tb[i].col); if (i && tb[i].col < tb[i-1].col) inc = false; }
         return { n: tb.length, inc: inc, first: cols[0], last: cols[cols.length - 1],
-                 sec1: cols.filter(function(c){ return c < 128; }).length,
-                 sec2: cols.filter(function(c){ return c >= 128 && c < 288; }).length,
-                 sec3: cols.filter(function(c){ return c >= 288; }).length };
+                 sec1: cols.filter(function(c){ return c < 160; }).length,
+                 sec2: cols.filter(function(c){ return c >= 160 && c < 320; }).length,
+                 sec3: cols.filter(function(c){ return c >= 320; }).length,
+                 breath: cols.filter(function(c){ return c >= 301 && c < 320; }).length };
     """)
     ok('出怪事件 ≥ 40 個', t['n'] >= 40, 'n=%s' % t['n'])
     ok('欄位遞增排序', t['inc'])
-    ok('三段都有事件（小行星帶 / 要塞 / 核心室前）',
-       t['sec1'] >= 8 and t['sec2'] >= 15 and t['sec3'] >= 8, t)
-    ok('節奏漸強：核心室前的事件密度 > 小行星帶',
-       (t['sec3'] / 96.0) > (t['sec1'] / 128.0), '%s vs %s' % (t['sec3'], t['sec1']))
+    # fix3：三段式（空戰段 欄 0..159 / 本關段 160..319 / 魔王段 320..）
+    ok('三段都有事件（空戰段 / 本關段 / 魔王段）',
+       t['sec1'] >= 15 and t['sec2'] >= 20 and t['sec3'] >= 2, t)
+    ok('節奏漸強：本關段的事件密度 > 空戰段',
+       (t['sec2'] / 160.0) > (t['sec1'] / 160.0), '%s vs %s' % (t['sec2'], t['sec1']))
+    ok('魔王前有「呼吸區」（欄 301..319 完全不出怪，研究 11 §⑯-2 第 ⑤ 段）',
+       t['breath'] == 0, t['breath'])
 
     s = ev(page, """
         CR.stage.restart(0);
@@ -310,7 +314,7 @@ def test_enemies(page):
        (not tv2.get('none')) and tv2['vx'] > 0 and tv2['vy'] > 0, tv2)
 
     ceil = ev(page, """
-        CR.stage.restart(1200);
+        CR.stage.restart(2200);                            // fix3：要塞段（欄 275 起才有天花板 / 地板）
         var e = CR.stage.spawnTurretAt((CR.stage.camX >> 3) + 20, true);
         var f = CR.stage.spawnTurretAt((CR.stage.camX >> 3) + 22, false);
         return { ceilY: e && e.y, ceilFlip: e && e.flipV, floorY: f && f.y, floorFlip: f && f.flipV,
@@ -401,7 +405,7 @@ def test_stage_api(page):
     ok('restart 關掉 bossActive / cleared', (not rs['boss']) and (not rs['cleared']))
 
     sa = ev(page, """
-        CR.stage.restart(1200);                 // 要塞段（有天花板 / 地板）
+        CR.stage.restart(2200);                 // fix3：要塞段（有天花板 / 地板）
         var col = CR.stage.camX >> 3;
         var ch = CR.stage.ceilAt(col + 4), fh = CR.stage.floorAt(col + 4);
         var x = 4 * 8 + 2;
@@ -422,7 +426,7 @@ def test_stage_api(page):
     ok('solidAt（畫面座標）與 solidAtWorld（世界座標）一致', sa['world'] == sa['floor'])
 
     consist = ev(page, """
-        CR.stage.restart(1200);
+        CR.stage.restart(2200);
         var col = CR.stage.camX >> 3, bad = 0, n = 0, c, r;
         for (c = 0; c < 32; c++) for (r = 0; r < 26; r++) {
           var k = CR.stage.kindAt(col + c, r);
@@ -693,12 +697,13 @@ def test_fix2(page):
         var E = CR.Enemies;
         return { base: E.TURRET_PERIOD, easy: E.EASY_PERIOD,
                  at100: E.turretPeriod(100 * 8), at180: E.turretPeriod(180 * 8),
-                 at250: E.turretPeriod(250 * 8), at330: E.turretPeriod(330 * 8) };
+                 at250: E.turretPeriod(250 * 8), at318: E.turretPeriod(318 * 8) };
     """)
     eq('砲台基礎週期 90 幀（研究 §10）', r['base'], 90)
     eq('難點段砲台週期 130 幀（敵彈密度 -30%）', r['easy'], 130)
-    ok('欄 180 / 250 在放寬區、欄 100 / 330 不在',
-       r['at180'] == 130 and r['at250'] == 130 and r['at100'] == 90 and r['at330'] == 90, r)
+    # fix3：砲台只存在於要塞（世界欄 248..319）⇒ 放寬區改成 248..383
+    ok('要塞欄 250 / 318 在放寬區、空戰段欄 100 / 180 不在',
+       r['at250'] == 130 and r['at318'] == 130 and r['at100'] == 90 and r['at180'] == 90, r)
 
     # ---- 紅色單體（研究 §3-3 [源]）：必掉膠囊，每個檢查點之後 14 欄內至少一隻 ----
     r = ev(page, """
@@ -774,6 +779,205 @@ def test_fix2(page):
     ok('魔王死亡後空捲 <= 3 秒', (r['max'] - r['cp']) / 0.5 <= 180, r)
 
 
+# ============================================== ⑨ fix3（三段式節奏 + 可破壞小隕石）
+def test_fix3(page):
+    print('[⑨ fix3：三段式節奏 / 空戰段淨空 / 可破壞小隕石]')
+    fresh(page)
+
+    # ---- 分段常數 ----
+    r = ev(page, """
+        var s = CR.stage;
+        return { air: s.AIR_COLS, b0: s.BELT_COL0, b1: s.BELT_COL1, f0: s.FORT_COL0,
+                 boss: s.BOSS_COL0, rocks: s.BIG_ROCKS.length };
+    """)
+    eq('空戰段 = 欄 0..191（camX 0..1280，前 5 畫面看得到的全部欄）', r['air'], 192)
+    eq('小行星帶從欄 192 起', r['b0'], 192)
+    eq('要塞從欄 248 起', r['f0'], 248)
+    eq('核心室（魔王段）從欄 320 起（＝ 世界 2560..3072 px）', r['boss'], 320)
+
+    # ---- 空戰段：完全沒有 solid（地形 / 隕石 / 砲台底座）----
+    r = ev(page, """
+        var s = CR.stage, bad = [], c, r2;
+        for (c = 0; c < s.AIR_COLS; c++) {
+          if (s.ceilAt(c) || s.floorAt(c)) { bad.push(['hf', c]); continue; }
+          for (r2 = 0; r2 < s.ROWS; r2++) if (s.solidAtWorld(c * 8 + 3, r2 * 8 + 3)) bad.push([c, r2]);
+        }
+        return { bad: bad.slice(0, 5), n: bad.length };
+    """)
+    ok('空戰段（欄 0..191 ＝ camX 0..1280）沒有任何 solid 磚（純星空）', r['n'] == 0, r)
+
+    # ---- 空戰段：出怪表只有 fan / zig，沒有 turret / tank / rock ----
+    r = ev(page, """
+        var s = CR.stage, tb = s.spawnTable(), kinds = {}, turretCols = [], i;
+        var orig = s.spawnTurretAt;
+        s.spawnTurretAt = function (col) { turretCols.push(col); return null; };
+        for (i = 0; i < tb.length; i++) {
+          if (tb[i].col >= 160) break;
+          s.enemies.freeAll();
+          try { tb[i].fn({}, tb[i].col, tb[i]); } catch (e) {}
+          s.enemies.each(function (e) { kinds[e.kind] = (kinds[e.kind] || 0) + 1; });
+        }
+        s.spawnTurretAt = orig; s.enemies.freeAll(); s.restart(0);
+        return { kinds: kinds, turrets: turretCols.length };
+    """)
+    ok('空戰段只有 fan 編隊與 zig（沒有 turret / tank / rock ⇒ 沒有硬殼、沒有敵彈）',
+       sorted(r['kinds'].keys()) == ['fan', 'zig'] and r['turrets'] == 0, r)
+    ok('空戰段 fan 編隊 ≥ 10 波（5 隻 / 波）', r['kinds'].get('fan', 0) >= 50, r['kinds'])
+    ok('空戰段紅色單體 ≥ 6 隻（hp 1、必掉膠囊的保底管道）',
+       r['kinds'].get('zig', 0) >= 10, r['kinds'])
+
+    # ---- 空戰段實跑：0 發敵彈、膠囊管道足夠 ----
+    r = ev(page, """
+        CR.stage.restart(0);
+        CR.ship.invul = 1 << 28;
+        var maxB = 0, i, drops = 0;
+        for (i = 0; i < 2560; i++) {                    // camX 0 → 1280
+          __nes.step(1);
+          if (CR.stage.aliveBullets() > maxB) maxB = CR.stage.aliveBullets();
+        }
+        // 把場上還活著的小敵全部打掉，數一數空戰段的膠囊上限
+        var seq0 = CR.stage.capsuleSeq();
+        return { camX: CR.stage.camX, maxBullets: maxB, seq0: seq0 };
+    """)
+    eq('空戰段跑完 camX = 1280', r['camX'], 1280)
+    eq('空戰段全程 0 發敵彈（規格是「640 px 後才開始」，實作更寬鬆＝完全沒有）', r['maxBullets'], 0)
+
+    r = ev(page, """
+        // 膠囊供給上限：把空戰段的每一個事件都生出來、全部打光，數膠囊
+        CR.stage.restart(0);
+        var s = CR.stage, tb = s.spawnTable(), caps = 0, i, guard = 0;
+        var seq0 = s.capsuleSeq();
+        for (i = 0; i < tb.length && tb[i].col < 160; i++) {
+          s.enemies.freeAll(); s.capsules.freeAll();
+          try { tb[i].fn({}, tb[i].col, tb[i]); } catch (e) {}
+          var list = [];
+          s.enemies.each(function (e) { list.push(e); });
+          for (var j = 0; j < list.length; j++) if (list[j].alive) list[j].hit(9);
+        }
+        caps = s.capsuleSeq() - seq0;
+        s.restart(0);
+        return { caps: caps };
+    """)
+    # 11 波 fan（全滅各 1 顆）+ 7 隻紅色單體（1 發即掉）= 18；機器人實測自然拿到 9 顆
+    ok('空戰段全打光可得 16~20 顆膠囊（機器人實測自然拿 9 顆 ⇒ SPEED / MISSILE / LASER 買得起）',
+       16 <= r['caps'] <= 20, r)
+
+    # ---- 小行星帶：大隕石只貼上下緣、通道 ≥ 18 列 ----
+    r = ev(page, """
+        var s = CR.stage, worst = 99, at = -1, c, r2, run, best;
+        for (c = 0; c < s.length; c++) {
+          run = 0; best = 0;
+          for (r2 = 0; r2 < s.ROWS; r2++) {
+            if (!s.solidAtWorld(c * 8 + 3, r2 * 8 + 3)) { run++; if (run > best) best = run; }
+            else run = 0;
+          }
+          if (best < worst) { worst = best; at = c; }
+        }
+        var rows = s.BIG_ROCKS.map(function (b) { return b[1]; });
+        var cols = s.BIG_ROCKS.map(function (b) { return b[0]; });
+        return { worst: worst, at: at, rows: rows,
+                 outside: cols.filter(function (c2) { return c2 < s.BELT_COL0 || c2 > s.BELT_COL1 - 1; }) };
+    """)
+    ok('全關「最長連續可通行列」>= 18 列（144 px，含大隕石）', r['worst'] >= 18, r)
+    ok('大隕石只貼上緣（列 0 / 2）或下緣（列 22 / 24）',
+       all(x in (0, 2, 22, 24) for x in r['rows']), r['rows'])
+    ok('大隕石全部落在小行星帶（欄 192..246）', r['outside'] == [], r['outside'])
+
+    # ---- 可破壞小隕石 rock ----
+    r = ev(page, """
+        CR.stage.restart(0);
+        var e = CR.stage.spawnTest('rock', 200, 100);
+        if (!e) return { none: true };
+        var spec = CR.Enemies.SPEC.rock;
+        var hp0 = e.hp, a = e.hit(1), b = e.hit(1);
+        return { hp0: hp0, a: a, b: b, alive: e.alive, score: spec.score,
+                 w: spec.w, h: spec.h, small: spec.small, pal: spec.pal,
+                 vx: CR.Enemies.ROCK_VX };
+    """)
+    ok('spawnTest 支援 rock', not r.get('none'), r)
+    eq('小隕石 hp = 2', r['hp0'], 2)
+    ok('打 1 下不死、第 2 下才破', (not r['a']) and r['b'] and not r['alive'], r)
+    eq('小隕石 100 分', r['score'], 100)
+    ok('小隕石碰撞框 8×8、算「小敵」（會被藍膠囊清屏）', r['w'] == 8 and r['h'] == 8 and r['small'], r)
+    eq('小隕石往左 1.0 px/幀（8.8 = -256）', r['vx'], -256)
+
+    r = ev(page, """
+        CR.stage.restart(0);
+        var e = CR.stage.spawnTest('rock', 200, 100), x0 = e.x, i;
+        for (i = 0; i < 16; i++) __nes.step(1);
+        return { dx: e.x - x0, y: e.y };
+    """)
+    eq('小隕石 16 幀往左 16 px（比捲動 0.5 快一倍 ⇒ 會「迎面飄來」）', r['dx'], -16)
+    eq('小隕石不上下飄', r['y'], 100)
+
+    # ---- 小隕石只出現在小行星帶 ----
+    r = ev(page, """
+        var s = CR.stage, tb = s.spawnTable(), cols = [], i;
+        var orig = s.spawnTurretAt;
+        s.spawnTurretAt = function () { return null; };
+        for (i = 0; i < tb.length; i++) {
+          s.enemies.freeAll();
+          try { tb[i].fn({}, tb[i].col, tb[i]); } catch (e) {}
+          var got = false;
+          s.enemies.each(function (e) { if (e.kind === 'rock') got = true; });
+          if (got) cols.push(tb[i].col);
+        }
+        s.spawnTurretAt = orig; s.enemies.freeAll(); s.restart(0);
+        return { cols: cols };
+    """)
+    ok('小隕石事件 ≥ 4 組，而且全部在小行星帶（欄 160..213）',
+       len(r['cols']) >= 4 and all(160 <= c <= 213 for c in r['cols']), r['cols'])
+
+    # ---- tank 硬殼只在本關段之後才出現 ----
+    r = ev(page, """
+        var s = CR.stage, tb = s.spawnTable(), first = -1, i;
+        var orig = s.spawnTurretAt;
+        s.spawnTurretAt = function () { return null; };
+        for (i = 0; i < tb.length; i++) {
+          s.enemies.freeAll();
+          try { tb[i].fn({}, tb[i].col, tb[i]); } catch (e) {}
+          var got = false;
+          s.enemies.each(function (e) { if (e.kind === 'tank') got = true; });
+          if (got && first < 0) first = tb[i].col;
+        }
+        s.spawnTurretAt = orig; s.enemies.freeAll(); s.restart(0);
+        return { first: first };
+    """)
+    ok('tank 硬殼最早在要塞段才登場（欄 >= 214）', r['first'] >= 214, r)
+
+    # ---- 魔王爆炸瞬間清空殘彈（打贏了不該死在勝利動畫裡）----
+    r = ev(page, """
+        CR.stage.restart(CR.stage.CAM_MAX);
+        CR.ship.invul = 1 << 28;
+        CR.stage.bossActive = true; CR.Boss.spawn(); CR.Boss.force(2);
+        var i;
+        for (i = 0; i < 240; i++) __nes.step(1);       // 讓魔王放幾輪環形彈
+        var before = CR.stage.aliveBullets();
+        CR.stage.enemies.each(function (e) { if (e.boss && e.alive) e.hit(99); });
+        __nes.step(1);
+        var st = CR.Boss.state();
+        return { before: before, after: CR.stage.aliveBullets(), phase: st.phase };
+    """)
+    ok('魔王被打爆前畫面上有殘留敵彈', r['before'] > 0, r)
+    eq('魔王進入爆炸階段（phase 4）', r['phase'], 4)
+    eq('魔王爆炸瞬間清空全部敵彈（fix3：不會打贏了反而死在勝利動畫裡）', r['after'], 0)
+
+    # ---- stage.redraw（暫停文字還原用）----
+    r = ev(page, """
+        var s = CR.stage, ppu = __nes.nes().ppu;
+        s.restart(600);
+        var c = (s.camX >> 3) + 5, ntc = c & 63, nt = (ntc >> 5) & 1, col = ntc & 31;
+        var want = s.tileAt(c, 12);
+        ppu.setTile(nt, col, 12, 0);                    // 故意寫髒
+        var dirty = ppu.getTile(nt, col, 12);
+        s.redraw();
+        return { want: want, dirty: dirty, got: ppu.getTile(nt, col, 12),
+                 fn: typeof s.redraw, camX: s.camX };
+    """)
+    eq('CR.stage.redraw 是 function', r['fn'], 'function')
+    ok('redraw() 把被文字蓋掉的磚還原（且不動 camX）', r['got'] == r['want'] and r['camX'] == 600, r)
+
+
 # ------------------------------------------------------------------ 主程式
 def main():
     if not (ROOT / 'cruiser.html').exists():
@@ -803,6 +1007,7 @@ def main():
         test_boss(page)
         test_lint(page)
         test_fix2(page)
+        test_fix3(page)
         ok('整場測試 0 個 JS 例外 / console error', not errors, errors[:3])
         browser.close()
 
