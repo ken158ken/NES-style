@@ -12,7 +12,7 @@
 | 《星塵巡航艦》 | 橫向射擊 | 宇宙巡航艦（Gradius）能量表 / Option | `cruiser.html` | https://ken158ken.github.io/NES-style/紅白機遊戲開發/cruiser.html |
 | 《星塵測試室》 | 引擎測試房 | — | `game.html` | https://ken158ken.github.io/NES-style/紅白機遊戲開發/game.html |
 操作：方向鍵 / WASD、Z = A、X = B、Enter = START、Shift = SELECT、F 全螢幕；手機有觸控搖桿。單檔版在 `dist/`。
-《星塵巡航艦》秘技（考據自原作）：遊戲中按 START 暫停後輸入 ↑↑↓↓←→←→BA（也接受 ↑↑↓↓←←→→AB / ABAB）→ SPEED、MISSILE、2 顆 OPTION、護盾（一場一次，打掉魔王多一次）；GAME OVER 畫面輸入同指令 → 3 條命續關。
+秘技：兩款都是 **START 暫停 → 按 SELECT（鍵盤 Shift）一鍵補強**（巡航艦：SPEED / MISSILE / 2 OPTION / 護盾；勇者：命補到 9 + 無敵 20 秒），**GAME OVER 畫面按 SELECT 直接 3 條命續關**，皆不限次數。巡航艦另保留考據自原作的指令：暫停中輸入 ↑↑↓↓←→←→BA（也接受 ↑↑↓↓←←→→AB / ABAB），一場一次、打掉魔王多一次；GAME OVER 輸入同指令續關。
 
 ## 目錄
 - `docs/research/` — 研究文件（Markdown，繁體中文，附來源網址）

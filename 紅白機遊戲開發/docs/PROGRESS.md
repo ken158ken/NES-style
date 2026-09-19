@@ -1938,3 +1938,125 @@ $PY tools/nes_lint.py --palette engine/palette.js shots/agent_fix2star/*.png # 2
    要改用 `__nes.release()` 或先確認 `GAME.state().paused`。
 5. 未動、留給下一輪：第二輪（loop）難度、魔王逾時自爆（研究 §21.2-A 的 180 秒撤退目前沒做）、
    `rock` 目前不掉膠囊（要的話改 `{drop:1}` 即可）。
+
+---
+
+## fix4-cheat（R2c）
+
+2026-09-19 ｜ fix4-cheat agent ｜ 對象：**使用者真機回饋**
+「多個一鍵密技好了，當然也保留舊密技，不然死到一半就玩不下去了。」
+
+擁有並修改：`games/cruiser/{chr_ship, main, test_cruiser.py}`、`games/star/{main, test_star.py}`、
+`tools/playthrough_cruiser.py`、`tools/playthrough_star.py`。
+**`engine/`、三個 `*.html`、其他 `games/*`、其他 `tools/` 一個字都沒動、沒有 git 操作。**
+
+### 0. 規格表（兩款 × 暫停 / GAME OVER × 按鍵 × 效果 × 次數）
+
+| 遊戲 | 畫面 | 按鍵 | 效果 | 次數 |
+|---|---|---|---|---|
+| **星塵巡航艦** | 暫停（START 進入） | **SELECT** | SPEED +1、MISSILE、OPTION ×2、護盾 5（＝ Konami 同一組，不含 DOUBLE / LASER）；`sfx('powerup')` + 列 15「SECRET!」1 秒 | **不限次數**；每次暫停只吃一次（`selectUsed`，防連按） |
+| 星塵巡航艦 | 暫停 | ↑↑↓↓←→←→BA（+3 組變體） | 同上 | **一場 1 次**（打掉魔王 `secretLeft++`）— **保留，且完全不受 SELECT 影響** |
+| 星塵巡航艦 | GAME OVER | **SELECT** | 3 條命 + 回 `continueCam` 檢查點（魔王戰用 `BOSS_RESPAWN`）；**分數 / HI 保留**、強化歸零 | **不限次數** |
+| 星塵巡航艦 | GAME OVER | Konami 4 組序列 | 同上 | **不限次數**（原本就是，保留） |
+| **星塵勇者** | 暫停（**新增** START 進入） | **SELECT** | 命補到 **9**、無敵 **1200 幀 = 20 秒**（走現有 `hero.inv` 閃爍）、切 `invincible` 曲（結束自動換回關卡 / 魔王曲）；`sfx('powerup')` + 列 18「SECRET!」1 秒 | **不限次數**；每次暫停只吃一次 |
+| 星塵勇者 | GAME OVER | **SELECT** | 3 條命 + `respawn()` 回**當前關卡**的檢查點；**分數 / 金幣保留** | **不限次數** |
+| 星塵勇者 | GAME OVER | START | 回標題（fix2-star P2-5 行為**不變**） | — |
+
+> SELECT 在鍵盤 = **Shift**（`engine/input.js` `ShiftLeft/ShiftRight`）、手把 = button 8、
+> 觸控手把有實體 SELECT 鍵（`engine/touch.js` 走 `Input.setExternal` ⇒ `pressed()` 的邊緣判定成立，兩款都實測過）。
+> 一律用 `NES.Input.pressed(BTN.SELECT)` **邊緣觸發**；暫停中其他鍵（Konami 緩衝、START）完全不受影響。
+
+### 1. 畫面文字（全部沿用各自的「跨名稱表」疊字機制）
+
+| 遊戲 | 畫面 | 文字 |
+|---|---|---|
+| cruiser | 暫停 | 列 11 `PAUSE` ／ **列 13 `SELECT = SECRET`**（新增） |
+| cruiser | 暫停 + 密技 | 上面兩行 ＋ 列 15 `SECRET!`（60 幀後只收回這一行） |
+| cruiser | GAME OVER | 列 11 `GAME OVER` ／ 列 15 `PRESS START` ／ **列 17 `SELECT = CONTINUE`**（新增） |
+| cruiser | 標題 | 列 18 由 `SECRET CODE IN PAUSE` 改成 **`SECRET: PAUSE + SELECT`** |
+| star | 暫停 | 列 12 `PAUSE` ／ 列 15 `SELECT = SECRET`（全新） |
+| star | 暫停 + 密技 | 上面兩行 ＋ 列 18 `SECRET!` |
+| star | GAME OVER | 列 12 `GAME OVER` ／ 列 16 `PRESS START` ／ **列 18 `SELECT = CONTINUE`**（新增） |
+
+- cruiser 走 fix3 的 `drawMsg()`（依 `scrollCol()` 逐字換算 nt 0/1，跨張自動分段）；star 走 fix2-star 的
+  `drawBanner/clearBanner`（`ntOfScreenCol()`）。新增的 `setBanner(lines)` 把「先還原舊的、再畫新的」包成一個動作。
+- **字型缺字**：cruiser 的 `CR.BG_HUD` 原本沒有 `=` 與 `+`（會被畫成空白）⇒ `chr_ship.js` 補
+  `BG.H_EQ = F.EQ` / `BG.H_PLUS = F.PLUS` 與 `CHARMAP['='] / ['+']`，**`BG_HUD` 52 → 54 磚**（`padTo(..., 64)` 佔位數不變）。
+  star 的 `ST.CHARMAP` 本來就有 `=` / `+`，不用動。
+- 解除暫停：cruiser `clearMsg` + `CR.stage.redraw()`；star `clearBanner`（逐格還原成 `scrTileAt` / `attrAt`）。
+  兩邊都用測試逐格比對過「文字蓋掉的磚 100% 還原」。
+
+### 2. 實作位置（給後面的人）
+
+**`games/cruiser/main.js`**
+- `fireSecret(code)` 抽出「強化 + 畫 SECRET! + 音效」；`trySecret(code)` = Konami 路徑（扣 `secretLeft`）、
+  **`trySelectSecret()` = SELECT 路徑（只看 `g.selectUsed`，不扣 `secretLeft`）**。
+- `pauseGame()` 把 `g.selectUsed` 歸 false；`toPlay()` / `continueGame()` 一併重設。
+- update：`paused` 分支最前面加 `if (input.pressed(BTN.SELECT)) trySelectSecret();`；
+  `gameover` 分支加 `if (input.pressed(BTN.SELECT)) { konamiClear(); g.selectContinues++; continueGame(); }`（在 Konami 之前）。
+- `state()` 新增 **`msg2`**（列 13 ｜ 列 17 的畫面文字）、`selectUsed` / `selectSecrets` / `selectContinues`。
+  **舊的 `msg`（列 11 ｜ 列 15）沒有動**，fix3 的測試一項都沒改到。
+
+**`games/star/main.js`**
+- 新常數 `SECRET_LIVES 9` / `SECRET_INV 1200` / `SECRET_MSG 60` / `CONTINUE_LIVES 3`。
+- 新函式 `setBanner / pauseGame / unpauseGame / trySelectSecret / continueGame`。
+- update 的 `play` 分支前面插兩段：`g.mode==='play' && g.paused`（凍結，只收 SELECT / START）、
+  `g.mode==='play' && pressed(START)`（進暫停）。**凍結實測 90 幀後 `x / camX / time / enemies` 一格不差。**
+- `g.cheatInv` 三態：SELECT 時 true → `h.inv` 歸零時換回 `lv.music`（魔王房 `bossMusic===1` 換回 `boss`、
+  已擊破 `===2` 不動）；`loadLevel()` / `respawn()` 都會歸 false。
+- `state()` 新增 `paused / secrets / secretMsg / selectUsed / cheatInv / continues`。
+- **順帶一改**：`draw()` 在 `mode === 'gameover'` 時**不畫敵人 / 魔王精靈**（主角本來就不畫）——
+  不然路過的敵人會蓋住第三行字（實測 1-1 col 300 的滾球正好壓在 `CONTINUE` 上）。
+
+### 3. 機器人
+
+| 指令 | 內容 | 結果 |
+|---|---|---|
+| `$PY tools/playthrough_cruiser.py --konami` | 原本 29 項 ＋ **fix4 15 項**（暫停兩行文字、SELECT 強化欄位變化、不扣 Konami 額度、防連按、第 2 次暫停照樣生效、用過 SELECT 後 Konami 仍可用、GAME OVER 第三行、SELECT 續關 3 命 / 回檢查點 / 不清分數、續關不限次數） | **44 項全 PASS**，多存 3 張截圖（`select_secret` / `select_gameover` / `select_continue`） |
+| `$PY tools/playthrough_star.py --cheat [--level 1-1]`（**新增**） | 24 項：START 暫停 + 凍結 90 幀、兩行文字、SELECT 命 9 / 無敵 1200 / SECRET! / powerup 音效、防連按、SECRET! 1 秒收回、解除後逐格還原、繼續跑、第 2 次暫停照樣生效、GAME OVER 三行 / SELECT 續關 / 分數保留 / 回檢查點 / lint 綠 / 不限次數 | **24 項全 PASS**，截圖存 `shots/play_star/cheat/` 5 張 |
+| `$PY tools/playthrough_cruiser.py` | 回歸（沒用秘技的正常通關） | **cleared、0 死、6455 幀、score 17000**（與 fix3 一幀不差） |
+| `$PY tools/playthrough_star.py --all` | 回歸 | 1-1 1400/1 死、1-2 1070/0、1-3 1265/0、1-4 1385/1（**與 fix2-star 完全相同**） |
+
+### 4. 測試
+
+| 檔 | 原 | 現 | 新增 |
+|---|---:|---:|---|
+| `games/cruiser/test_cruiser.py` | 200 | **230** | ⑬ fix4 組 **30 項**：暫停兩行文字 + 列 13 白色像素 ≥ 60、SELECT 四項強化 + 不含 DOUBLE/LASER、SECRET! 文字、**不消耗 Konami 額度**、`selectSecrets` 計數、防連按（同一暫停連按 3 次無效）、解除後兩行都還原、再暫停額度重置、第 2 次 SELECT 生效、**用過 SELECT 後 Konami 仍可用且此時才扣額度**、遊戲進行中 SELECT 無效、觸控 `setExternal` 的 SELECT、GAME OVER 第三行文字 + 列 17 白色像素 ≥ 60、SELECT 續關 6 項（回遊戲 / 3 命 / 不清分數 / 回檢查點 / 計數 / HUD）、續關後 lint 綠、續關不限次數。另改 1 項既有斷言（標題小字改成 `SECRET: PAUSE + SELECT`） |
+| `games/star/test_star.py` | 158 | **193** | ⑨e fix4 組 **34 項**：START 暫停 + 兩行文字 + 兩行白色像素、凍結 4 個欄位 90 幀、不自解除、SELECT 命 9 / 無敵 1200 / SECRET! / banner 三行 / 仍暫停 / `lastSfx === 'powerup'`、防連按、SECRET! 1 秒收回、解除後 `ntTileAt === bgIndexAt` 逐格比對 27 格、繼續跑、lint 綠、額度重置、第 2 次生效、無敵期間 `hurt()` 回 false、遊戲進行中 SELECT 無效、觸控 `setExternal`、GAME OVER 第三行 + 白色像素、SELECT 續關 5 項、續關 lint 綠、不限次數、**GAME OVER 按 START 仍回標題**。另改 1 項既有斷言（`state().banner` 兩行 → 三行） |
+| `games/cruiser/test_stage1.py` / `games/star/test_w1.py` | 174 / 177 | 未動，**仍 174 / 177 全過** | — |
+
+`bash tools/run_all.sh`（完整）**17 項全 PASS、總結 PASS**。
+`$PY tools/build.py --src cruiser.html` → `dist/星塵巡航艦.html` 內嵌 20 檔、缺 0 檔、**428 KB**；
+`--src star.html` → `dist/星塵勇者.html` 內嵌 20 檔、缺 0 檔、**456 KB**。
+
+### 5. 截圖（`shots/agent_fix4/`，14 張 `nes_lint.py` 全 PASS、每張都 Read 看過圖）
+
+| 檔 | 內容 | colors |
+|---|---|---:|
+| `c0_title.png` | cruiser 標題（小字改 `SECRET: PAUSE + SELECT`） | 3 |
+| `c1_pause.png` | cruiser 暫停：`PAUSE` / `SELECT = SECRET` 兩行 | 8 |
+| `c2_secret.png` | 按 SELECT：三行 + 船上出現護盾括號 | 8 |
+| `c3_after_secret.png` | 解除暫停：文字全消、星空還原、船帶護盾 + 2 顆 Option 續跑 | 8 |
+| `c4_gameover.png` | cruiser GAME OVER 三行（score 12300） | 7 |
+| `c5_continue.png` | 按 SELECT 續關：分數 12300 保留、命 ×3、回檢查點 1536 | 7 |
+| `s1_pause.png` | star 暫停：`PAUSE` / `SELECT = SECRET`（HUD 命 ×3） | 11 |
+| `s2_secret.png` | 按 SELECT：三行 + **HUD 命變 ×9** | 11 |
+| `s3_after_secret.png` | 解除暫停：字消、地形還原、主角無敵閃爍中續跑 | 11 |
+| `s4_gameover.png` | star GAME OVER 三行（score 7700） | 9 |
+| `s5_continue.png` | 按 SELECT 續關：score 7700 保留、命 ×3、回檢查點 col 256 | 11 |
+| `s6_normal_respawn.png` | **對照組**：同一個檢查點「正常死亡復活」的畫面，與 `s5` 逐處相同（證明左緣那條細橫線是既有的關卡裝飾，不是 fix4 造成的） | 11 |
+| `d1_dist_cruiser.png` / `d2_dist_star.png` | **打包後的 dist 單檔**用鍵盤 Shift（= SELECT）實測，兩款都出現 `SECRET!` | 6 / 11 |
+
+### 6. 給其他 agent / 總控
+
+1. **cruiser `CR.BG_HUD` 52 → 54 磚**（多 `H_EQ` / `H_PLUS`）。`padTo(..., 64)` 還剩 10 格。
+2. **cruiser `GAME.state()` 多 4 個欄位**：`msg2`（列 13 ｜ 列 17）、`selectUsed`、`selectSecrets`、`selectContinues`。
+   舊的 `msg`（列 11 ｜ 列 15）語意沒變。
+3. **star `GAME.state()` 多 6 個欄位**：`paused`、`secrets`、`secretMsg`、`selectUsed`、`cheatInv`、`continues`；
+   `state().banner` 在 GAME OVER 時**變成三行**（用到這個斷言的測試要跟著改）。
+4. **star 的 START 現在是暫停鍵**（只在 `play` 模式）。任何「按 START 前進」的自動化腳本要先看 `state().paused`
+   （cruiser 從 fix3 起就是這樣，現在兩款一致）。
+5. **star 的 GAME OVER 畫面不再畫敵人精靈**（只剩背景 + 文字）。
+6. 未動、留給下一輪：star 的**標題畫面沒有秘技小字**（暫停畫面與 GAME OVER 畫面自己會寫，所以沒硬加）；
+   star 的一鍵無敵**擋不住熔岩 / 掉坑**（那兩者走 `Hero.kill()`，不經 `hurt()` 的 `inv` 判定）——
+   要做「真·無敵星」得在 `hero.js` 的危險磚掃描加一個 `h.star` 旗標，那是 star-hero 的檔。

@@ -144,10 +144,13 @@
   BG.H_GLON = G_LON; BG.H_GMON = G_MON; BG.H_GRON = G_RON;
   BG.H_SHIP = SHIPICON;
   BG.H_EXCL = EXCL;
+  // fix4：一鍵密技提示字用的 `=` 與 `+`（engine 的 DEMO.FONT 本來就有，只是沒收進 HUD 字型）
+  BG.H_EQ = F.EQ; BG.H_PLUS = F.PLUS;
 
   /* -------------------------------------------------- 字元 → 磚名（HUD 用） */
   var CHARMAP = { ' ': 'H_SP', '?': 'H_QUEST', 'x': 'H_MUL', 'X': 'H_X', '*': 'H_MUL',
-    '.': 'H_DOT', '-': 'H_DASH', ':': 'H_COLON', '>': 'H_ARROW', '$': 'H_STAR', '!': 'H_EXCL' };
+    '.': 'H_DOT', '-': 'H_DASH', ':': 'H_COLON', '>': 'H_ARROW', '$': 'H_STAR', '!': 'H_EXCL',
+    '=': 'H_EQ', '+': 'H_PLUS' };
   (function () {
     var k;
     for (k = 0; k <= 9; k++) CHARMAP[String(k)] = 'H_N' + k;

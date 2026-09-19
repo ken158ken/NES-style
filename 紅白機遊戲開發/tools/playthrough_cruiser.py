@@ -378,6 +378,66 @@ def run_konami(page, out):
         cont['power']['option'] == 0 and cont['speed'] == 1 and cont['secretLeft'] == 1)
     shot(page, out / 'konami_continue.png')
 
+    # ================================================================ fix4：一鍵密技
+    # 使用者回饋：「多個一鍵密技好了，當然也保留舊密技」⇒ 暫停 SELECT / GAME OVER SELECT。
+    print('  ---- fix4：一鍵密技（SELECT）----')
+    before = fresh()
+    p1 = page.evaluate(JS_TAPS, ['START'])
+    chk('暫停畫面兩行：PAUSE / SELECT = SECRET',
+        'PAUSE' in p1['msg'].split('|')[0] and 'SELECT = SECRET' in p1['msg2'].split('|')[0],
+        (p1['msg'].split('|')[0].strip(), p1['msg2'].split('|')[0].strip()))
+    a1 = page.evaluate(JS_TAPS, ['SELECT'])
+    chk('暫停 SELECT：SPEED %d → %d' % (before['speed'], a1['speed']),
+        a1['speed'] == before['speed'] + 1)
+    chk('暫停 SELECT：MISSILE / OPTION×2 / 護盾 5',
+        a1['power']['missile'] and a1['power']['option'] == 2 and a1['power']['shield'] == 5,
+        a1['power'])
+    chk('暫停 SELECT：顯示 SECRET!', 'SECRET' in a1['msg'].split('|')[1], a1['msg'].split('|')[1].strip())
+    chk('暫停 SELECT **不消耗** Konami 的一場 1 次額度', a1['secretLeft'] == 1, a1['secretLeft'])
+    shot(page, out / 'select_secret.png')
+    page.evaluate("()=>{CR.ship.power.option=0; CR.ship.power.shield=0; CR.ship.syncOptions();}")
+    a2 = page.evaluate(JS_TAPS, ['SELECT', 'SELECT'])
+    chk('防連按：同一次暫停再按 SELECT 無效',
+        a2['selectSecrets'] == 1 and a2['power']['option'] == 0, a2['selectSecrets'])
+    page.evaluate(JS_TAPS, ['START'])                    # 解除
+    page.evaluate("()=>{__nes.release(); __nes.step(20);}")
+    page.evaluate(JS_TAPS, ['START'])                    # 再暫停
+    a3 = page.evaluate(JS_TAPS, ['SELECT'])
+    chk('不限次數：第 2 次暫停 SELECT 照樣生效',
+        a3['selectSecrets'] == 2 and a3['power']['option'] == 2 and a3['power']['shield'] == 5,
+        a3['selectSecrets'])
+    a4 = page.evaluate(JS_TAPS, CODE_FC)
+    chk('舊密技保留：用過 SELECT 之後 Konami 序列仍可用（此時才扣額度）',
+        a4['secretLeft'] == 0 and a4['secrets'] == a3['secrets'] + 1, (a3['secrets'], a4['secrets']))
+
+    fresh('&camx=1600')
+    o2 = page.evaluate(r"""()=>{
+      CR.ship.addScore(9800);
+      CR.ship.lives = 1; CR.ship.invul = 0; CR.ship.power.shield = 0; CR.ship.hit(true);
+      __nes.step(150);
+      return window.GAME.state();
+    }""")
+    chk('GAME OVER 畫面多一行 SELECT = CONTINUE',
+        'SELECT = CONTINUE' in o2['msg2'].split('|')[1], o2['msg2'].split('|')[1].strip())
+    shot(page, out / 'select_gameover.png')
+    c2 = page.evaluate(JS_TAPS, ['SELECT'])
+    chk('GAME OVER 按 SELECT → 3 條命續關回檢查點 camX=%d' % c2['camX'],
+        c2['mode'] == 'play' and c2['lives'] == 3 and c2['camX'] == o2['continueCam'],
+        (o2['continueCam'], c2['camX'], c2['lives']))
+    chk('SELECT 續關不清分數（%d → %d）' % (o2['score'], c2['score']), c2['score'] >= o2['score'])
+    shot(page, out / 'select_continue.png')
+    c3 = page.evaluate(r"""()=>{
+      CR.ship.lives = 1; CR.ship.invul = 0; CR.ship.power.shield = 0; CR.ship.hit(true);
+      __nes.step(150);
+      const m = window.GAME.state().mode;
+      const B = NES.Input.BTN;
+      NES.Input.inject(B.SELECT,1); __nes.step(1); NES.Input.inject(0,1); __nes.step(1);
+      const g = window.GAME.state();
+      return { over: m, mode: g.mode, lives: g.lives, sc: g.selectContinues };
+    }""")
+    chk('SELECT 續關不限次數（第 2 次照樣可用）',
+        c3['over'] == 'gameover' and c3['mode'] == 'play' and c3['lives'] == 3 and c3['sc'] == 2, c3)
+
     print('\n==== 秘技驗證：%s ====' % ('全部通過' if not bad else '%d 項失敗' % len(bad)))
     for b in bad:
         print('  FAIL', b)
@@ -392,7 +452,8 @@ def main():
     ap.add_argument('--tag', default='')
     ap.add_argument('--shots', action='store_true', help='每 1200 幀截一張')
     ap.add_argument('--konami', action='store_true',
-                    help='不跑通關，改驗「暫停 → Konami 指令 → 強化欄位變化 / 一次限制 / GAME OVER 續關」')
+                    help='不跑通關，改驗秘技：Konami（暫停 / 一次限制 / GAME OVER 續關）'
+                         ' + fix4 一鍵密技（暫停 SELECT / GAME OVER SELECT，不限次數）')
     args = ap.parse_args()
 
     q = '?debug=1&scale=1&mute=1'

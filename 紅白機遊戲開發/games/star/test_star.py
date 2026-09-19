@@ -928,7 +928,8 @@ def test_banner(page):
     ok('indexFrame 逐像素：GAME OVER 有 ≥ 60 個白色像素（真的畫出來了）',
        R['white1'] >= 60, R['white1'])
     ok('indexFrame 逐像素：PRESS START 有 ≥ 60 個白色像素', R['white2'] >= 60, R['white2'])
-    ok('state().banner 回報兩行文字', R['banner'] == ['GAME OVER', 'PRESS START'], R['banner'])
+    ok('state().banner 回報三行文字（fix4 多了 SELECT = CONTINUE）',
+       R['banner'] == ['GAME OVER', 'PRESS START', 'SELECT = CONTINUE'], R['banner'])
     ok('畫結束畫面沒有讓 VBlank 預算爆掉', not R['budgetOver'], R['budgetOver'])
 
     # ---- GAME OVER → START 回標題（P2-5）----
@@ -1079,6 +1080,204 @@ def test_stomp(page):
     ok('踩敵後離地', R['onGround'] is False, R['onGround'])
 
 
+# =====================================================================  ⑨e fix4（一鍵密技）
+# 使用者回饋（2026-09-19）：「多個一鍵密技好了，當然也保留舊密技，不然死到一半就玩不下去了。」
+#   START     = 暫停（凍結 update，畫 PAUSE / SELECT = SECRET 兩行，解除後還原畫面）
+#   暫停 SELECT = 命補到 9 + 無敵 20 秒（1200 幀），**不限次數**，每次暫停只吃一次（防連按）
+#   GAME OVER SELECT = 3 條命回**當前關卡的檢查點**續關（分數保留），**不限次數**
+JS_TAPS = r"""
+(keys) => {
+  const B = NES.Input.BTN;
+  for (const k of keys) {
+    NES.Input.inject(B[k], 1); __nes.step(1);
+    NES.Input.inject(0, 1); __nes.step(1);
+  }
+  return window.GAME.state();
+}
+"""
+
+
+def test_fix4(page):
+    print('[⑨e fix4：START 暫停 / 暫停 SELECT 一鍵密技 / GAME OVER SELECT 續關]')
+    has11 = page.evaluate("() => !!(window.ST && ST.LEVELS && ST.LEVELS['1-1'])")
+    lvid = '1-1' if has11 else 'test'
+
+    # ------------------------------------------------------------ START 暫停
+    fresh(page, lvid)
+    page.evaluate("() => { __nes.press(['right'], 120); }")
+    before = page.evaluate('() => window.GAME.state()')
+    p1 = page.evaluate(JS_TAPS, ['START'])
+    ok('play 中按 START → 進入暫停', p1['paused'] is True and p1['mode'] == 'play',
+       'paused=%s mode=%s' % (p1['paused'], p1['mode']))
+    ok('暫停畫面第 1 行 = PAUSE',
+       page.evaluate("() => GAME.dev.screenText(12, 13, 5)") == 'PAUSE',
+       page.evaluate("() => GAME.dev.screenText(12, 13, 5)"))
+    ok('暫停畫面第 2 行 = SELECT = SECRET',
+       page.evaluate("() => GAME.dev.screenText(15, 8, 15)") == 'SELECT = SECRET',
+       page.evaluate("() => GAME.dev.screenText(15, 8, 15)"))
+    W = page.evaluate(r"""() => {
+      __nes.render();
+      const idx = NES.instance.ppu.indexFrame;
+      const w = (row, col, len) => { let c = 0;
+        for (let y = row * 8; y < row * 8 + 8; y++)
+          for (let x = col * 8; x < (col + len) * 8; x++) if (idx[y * 256 + x] === 0x30) c++;
+        return c; };
+      return { p: w(12, 13, 5), s: w(15, 8, 15) };
+    }""")
+    ok('PAUSE 真的畫在可見區（≥ 30 個白色像素）', W['p'] >= 30, W['p'])
+    ok('SELECT = SECRET 真的畫在可見區（≥ 60 個白色像素）', W['s'] >= 60, W['s'])
+    frz = page.evaluate(r"""() => {
+      const a = window.GAME.state();
+      __nes.release(); __nes.step(90);
+      const b = window.GAME.state();
+      return { x0: a.x, x1: b.x, cam0: a.camX, cam1: b.camX, t0: a.time, t1: b.time,
+               e0: a.enemies, e1: b.enemies, paused: b.paused };
+    }""")
+    ok('暫停 90 幀：主角 / 鏡頭 / 計時器 / 敵人數全部凍結',
+       frz['x0'] == frz['x1'] and frz['cam0'] == frz['cam1'] and frz['t0'] == frz['t1']
+       and frz['e0'] == frz['e1'], frz)
+    ok('暫停不會自己解除', frz['paused'] is True)
+
+    # ------------------------------------------------------- 暫停中 SELECT 密技
+    g1 = page.evaluate(JS_TAPS, ['SELECT'])
+    ok('暫停 SELECT：命補到 9', g1['lives'] == 9, (before['lives'], g1['lives']))
+    ok('暫停 SELECT：無敵 1200 幀（20 秒）', g1['inv'] == 1200, g1['inv'])
+    ok('暫停 SELECT：顯示 SECRET!',
+       page.evaluate("() => GAME.dev.screenText(18, 12, 7)") == 'SECRET!',
+       page.evaluate("() => GAME.dev.screenText(18, 12, 7)"))
+    ok('暫停 SELECT：state().banner 三行 + secrets 計數 +1',
+       g1['banner'] == ['PAUSE', 'SELECT = SECRET', 'SECRET!'] and g1['secrets'] == 1, g1['banner'])
+    ok('暫停 SELECT：仍然是暫停（遊戲沒有自己跑起來）', g1['paused'] is True)
+    ok('暫停 SELECT：觸發 powerup 音效', g1['lastSfx'] == 'powerup', g1['lastSfx'])
+
+    # ---------------------------------------------- 防連按：同一次暫停只吃一次
+    page.evaluate("() => { GAME.dev.setLives(1); GAME.dev.hero().inv = 5; }")
+    g2 = page.evaluate(JS_TAPS, ['SELECT', 'SELECT', 'SELECT'])
+    ok('防連按：同一次暫停再按 SELECT 完全沒有效果',
+       g2['secrets'] == 1 and g2['lives'] == 1 and g2['inv'] <= 5, (g2['secrets'], g2['lives'], g2['inv']))
+
+    # ------------------------------------------- SECRET! 一秒後收回、PAUSE 留著
+    g3 = page.evaluate("() => { __nes.release(); __nes.step(70); return window.GAME.state(); }")
+    ok('SECRET! 顯示 1 秒後收回、PAUSE / SELECT = SECRET 留著',
+       g3['banner'] == ['PAUSE', 'SELECT = SECRET'], g3['banner'])
+
+    # ------------------------------------------------------- 解除暫停 → 重畫畫面
+    g4 = page.evaluate(JS_TAPS, ['START'])
+    ok('再按 START → 解除暫停、文字收回', g4['paused'] is False and g4['banner'] is None, g4['banner'])
+    rest = page.evaluate(r"""() => {
+      const d = GAME.dev, s = window.GAME.state(), base = s.camX >> 3;
+      let bad = 0;
+      [[12, 13, 5], [15, 8, 15], [18, 12, 7]].forEach(([row, col, len]) => {
+        for (let i = 0; i < len; i++) {
+          if (d.ntTileAt(base + col + i, row) !== d.bgIndexAt(base + col + i, row)) bad++;
+        }
+      });
+      return bad;
+    }""")
+    ok('解除暫停後被文字蓋掉的地形磚全部還原', rest == 0, rest)
+    g5 = page.evaluate("() => { __nes.press(['right'], 30); return window.GAME.state(); }")
+    ok('解除暫停後遊戲繼續跑', g5['x'] > g4['x'], (g4['x'], g5['x']))
+    lt = page.evaluate("() => { __nes.render(); return __nes.lint(); }")
+    ok('解除暫停後畫面 lint 綠（≤ 25 色）', lt['ok'] is True and lt['colors'] <= 25,
+       {'ok': lt['ok'], 'colors': lt['colors']})
+
+    # --------------------------------------------- 不限次數：再暫停還能再用一次
+    g6 = page.evaluate(JS_TAPS, ['START'])
+    ok('再次暫停：SELECT 額度重置', g6['selectUsed'] is False, g6['selectUsed'])
+    g7 = page.evaluate(JS_TAPS, ['SELECT'])
+    ok('暫停 SELECT 不限次數（第 2 次照樣生效）',
+       g7['secrets'] == 2 and g7['lives'] == 9 and g7['inv'] == 1200, (g7['secrets'], g7['lives']))
+    page.evaluate(JS_TAPS, ['START'])
+
+    # ------------------------------------------------ 無敵期間真的打不死（hurt 無效）
+    inv = page.evaluate(r"""() => {
+      const h = GAME.dev.hero(), before = h.lives;
+      const r1 = GAME.dev.hurt(h.x - 20);
+      return { hurt: r1, lives: GAME.dev.hero().lives, state: window.GAME.state().state };
+    }""")
+    ok('無敵期間 hurt() 無效（打不死）', inv['hurt'] is False and inv['state'] != 'hurt', inv)
+
+    # -------------------------------------------- 遊戲進行中按 SELECT 不會觸發
+    fresh(page, lvid)
+    g8 = page.evaluate(JS_TAPS, ['SELECT', 'SELECT'])
+    ok('遊戲進行中按 SELECT 沒有任何效果（只有暫停 / GAME OVER 有效）',
+       g8['secrets'] == 0 and g8['paused'] is False and g8['lives'] == 3,
+       (g8['secrets'], g8['lives']))
+
+    # --------------------------------------------------- 觸控 SELECT（setExternal）
+    fresh(page, lvid)
+    g9 = page.evaluate(r"""() => {
+      const B = NES.Input.BTN;
+      const tap = (b) => { NES.Input.setExternal(b); __nes.step(1); NES.Input.setExternal(0); __nes.step(1); };
+      tap(B.START);
+      const paused = window.GAME.state().paused;
+      tap(B.SELECT);
+      const s = window.GAME.state();
+      NES.Input.setExternal(0);
+      return { paused, lives: s.lives, inv: s.inv, secrets: s.secrets };
+    }""")
+    ok('觸控手把（setExternal）的 START / SELECT 也能暫停 + 一鍵密技',
+       g9['paused'] is True and g9['lives'] == 9 and g9['inv'] == 1200 and g9['secrets'] == 1, g9)
+
+    # ---------------------------------------- GAME OVER 按 SELECT 續關（不限次數）
+    fresh(page, lvid)
+    over = page.evaluate(r"""(col) => {
+      const d = GAME.dev, S = () => window.GAME.state();
+      d.warp(col * 8); __nes.step(4);
+      d.setScore(7700); d.setLives(0); d.kill();
+      let n = 0; while (S().mode !== 'gameover' && n++ < 600) __nes.step(1);
+      const s = S();
+      __nes.render();
+      const idx = NES.instance.ppu.indexFrame;
+      let white = 0;
+      for (let y = 18 * 8; y < 19 * 8; y++)
+        for (let x = 7 * 8; x < 24 * 8; x++) if (idx[y * 256 + x] === 0x30) white++;
+      return { mode: s.mode, score: s.score, cp: s.checkpoint, level: s.level,
+               line: d.screenText(18, 7, 17), white: white, banner: s.banner };
+    }""", 300 if has11 else 100)
+    ok('命盡 → GAME OVER', over['mode'] == 'gameover', over['mode'])
+    ok('GAME OVER 畫面多一行 SELECT = CONTINUE', over['line'] == 'SELECT = CONTINUE', over['line'])
+    ok('SELECT = CONTINUE 真的畫在可見區（≥ 60 個白色像素）', over['white'] >= 60, over['white'])
+    c1 = page.evaluate(JS_TAPS, ['SELECT'])
+    ok('GAME OVER 按 SELECT → 回到遊戲', c1['mode'] == 'play', c1['mode'])
+    ok('SELECT 續關給 3 條命', c1['lives'] == 3, c1['lives'])
+    ok('SELECT 續關不清分數', c1['score'] == over['score'], (over['score'], c1['score']))
+    ok('SELECT 續關回到**當前關卡**的檢查點', c1['level'] == over['level']
+       and (over['cp'] < 0 or abs(c1['x'] - over['cp'] * 8) <= 32),
+       (over['level'], over['cp'], c1['level'], c1['x']))
+    ok('SELECT 續關計數 +1、字收回', c1['continues'] == 1 and c1['banner'] is None,
+       (c1['continues'], c1['banner']))
+    lt2 = page.evaluate("() => { __nes.render(); return __nes.lint(); }")
+    ok('SELECT 續關後畫面 lint 綠', lt2['ok'] is True and lt2['colors'] <= 25,
+       {'ok': lt2['ok'], 'colors': lt2['colors']})
+    c2 = page.evaluate(r"""() => {
+      const d = GAME.dev, S = () => window.GAME.state(), B = NES.Input.BTN;
+      d.setLives(0); d.kill();
+      let n = 0; while (S().mode !== 'gameover' && n++ < 600) __nes.step(1);
+      const m = S().mode;
+      NES.Input.inject(B.SELECT, 1); __nes.step(1); NES.Input.inject(0, 1); __nes.step(1);
+      const s = S();
+      return { over: m, mode: s.mode, lives: s.lives, continues: s.continues };
+    }""")
+    ok('GAME OVER SELECT 續關不限次數（第 2 次照樣可用）',
+       c2['over'] == 'gameover' and c2['mode'] == 'play' and c2['lives'] == 3
+       and c2['continues'] == 2, c2)
+
+    # -------------------------------- GAME OVER 按 START 仍然回標題（原行為不變）
+    fresh(page, lvid)
+    c3 = page.evaluate(r"""() => {
+      const d = GAME.dev, S = () => window.GAME.state();
+      d.setLives(0); d.kill();
+      let n = 0; while (S().mode !== 'gameover' && n++ < 600) __nes.step(1);
+      const m = S().mode;
+      __nes.tap('start', 1); __nes.step(3);
+      const s = S();
+      return { over: m, mode: s.mode, lives: s.lives, score: s.score };
+    }""")
+    ok('GAME OVER 按 START 仍然回標題（fix2-star P2-5 行為不變）',
+       c3['over'] == 'gameover' and c3['mode'] == 'title' and c3['lives'] == 3 and c3['score'] == 0, c3)
+
+
 # =====================================================================  主程式
 def main():
     if not (ROOT / 'star.html').exists():
@@ -1118,6 +1317,7 @@ def main():
         test_ppu_setup(page)
         test_modes(page)
         test_banner(page)
+        test_fix4(page)
         test_music_hooks(page)
         test_query(page)
         test_air_control(page)

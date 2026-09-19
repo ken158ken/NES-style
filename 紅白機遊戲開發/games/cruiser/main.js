@@ -274,20 +274,24 @@
     { row: 8, col: 8, text: 'STARDUST CRUISER' },
     { row: 11, col: 7, text: 'ORIGINAL NES SHMUP' },
     { row: 15, col: 10, text: 'PRESS START' },
-    { row: 18, col: 6, text: 'SECRET CODE IN PAUSE' },
+    { row: 18, col: 5, text: 'SECRET: PAUSE + SELECT' },
     { row: 21, col: 8, text: '$ 2026 ORIGINAL' }
   ];
   // fix3：START 暫停（研究 §7-3「暫停」）＋ 暫停中的 Konami 指令（研究 §9-1）
+  // fix4：一鍵密技 —— 暫停畫面兩行，第二行明示 SELECT；GAME OVER 多一行 SELECT = CONTINUE
   var PAUSE = [
-    { row: 11, col: 13, text: 'PAUSE' }
+    { row: 11, col: 13, text: 'PAUSE' },
+    { row: 13, col: 8, text: 'SELECT = SECRET' }
   ];
   var SECRET = [
     { row: 11, col: 13, text: 'PAUSE' },
+    { row: 13, col: 8, text: 'SELECT = SECRET' },
     { row: 15, col: 12, text: 'SECRET!' }
   ];
   var OVER = [
     { row: 11, col: 11, text: 'GAME OVER' },
-    { row: 15, col: 10, text: 'PRESS START' }
+    { row: 15, col: 10, text: 'PRESS START' },
+    { row: 17, col: 7, text: 'SELECT = CONTINUE' }
   ];
   var CLEAR = [
     { row: 11, col: 10, text: 'STAGE CLEAR' },
@@ -354,7 +358,9 @@
     lastEvent: '', noStageWarn: false,
     // fix3：暫停 / Konami 秘技 / GAME OVER 續關
     paused: false, secretLeft: 1, secrets: 0, secretMsg: 0,
-    continues: 0, continueCam: 0, lastCode: ''
+    continues: 0, continueCam: 0, lastCode: '',
+    // fix4：一鍵密技（SELECT）。selectUsed = 這一次暫停已經用過（防連按重複觸發）
+    selectUsed: false, selectSecrets: 0, selectContinues: 0
   };
   CR.g = g;
 
@@ -433,19 +439,33 @@
     s2.power.shield = P.SHIELD_HP;
     s2.syncOptions();
   }
-  function trySecret(code) {
-    if (g.secretLeft <= 0) return false;              // [源] 一場 1 次（打掉魔王再 +1）
-    g.secretLeft--; g.secrets++; g.lastCode = code;
+  // 實際發動（兩條路共用）：強化 + 畫 SECRET! + 音效
+  function fireSecret(code) {
+    g.lastCode = code;
     secretGrant();
     muteBudget(true); drawMsg(g.ppu, SECRET, 0); muteBudget(false);
     g.secretMsg = 60;                                  // 「SECRET!」顯示 1 秒
     call(CR.Audio, 'sfx', 'powerup');
+  }
+  function trySecret(code) {
+    if (g.secretLeft <= 0) return false;              // [源] 一場 1 次（打掉魔王再 +1）
+    g.secretLeft--; g.secrets++;
+    fireSecret(code);
+    return true;
+  }
+  // fix4（使用者回饋「多個一鍵密技」）：暫停中按 SELECT = 同一組效果，**不限次數**，
+  // 但每一次暫停只吃一次（避免長按 / 連按在同一個暫停畫面重複觸發），且**不動 Konami 的一次限制**。
+  function trySelectSecret() {
+    if (g.selectUsed) return false;
+    g.selectUsed = true; g.secrets++; g.selectSecrets++;
+    fireSecret('SELECT');
     return true;
   }
 
   function pauseGame() {
     muteBudget(true); drawMsg(g.ppu, PAUSE, 0); muteBudget(false);
     g.paused = true; g.secretMsg = 0;
+    g.selectUsed = false;                              // fix4：每次暫停重新給一次 SELECT 機會
     konamiClear();
   }
   function unpauseGame() {
@@ -470,6 +490,7 @@
     ship.invul = CR.Ship.INVUL_FRAMES;
     g.mode = 'play'; g.paused = false; g.bossOn = false;
     g.secretLeft = 1; g.secretMsg = 0; g.continues++;
+    g.selectUsed = false;
     hud.score = null; hud.hi = null; hud.lives = null; hud.gauge = -1;
     if (CR.Audio && CR.Audio.play) call(CR.Audio, 'play', 'stage1');
   }
@@ -486,6 +507,7 @@
     g.mode = 'play'; g.playFrames = 0; g.hits = 0; g.kills = 0; g.bossOn = false;
     g.paused = false; g.secretLeft = 1; g.secrets = 0; g.secretMsg = 0;
     g.continues = 0; g.continueCam = 0; g.lastCode = '';
+    g.selectUsed = false; g.selectSecrets = 0; g.selectContinues = 0;
     konamiClear();
     hud.score = null; hud.hi = null; hud.lives = null; hud.gauge = -1;
     if (CR.Audio && CR.Audio.play) call(CR.Audio, 'play', 'stage1');
@@ -760,13 +782,16 @@
         if (input.pressed(BTN.START) || input.pressed(BTN.A)) toPlay();
       } else if (g.mode === 'gameover') {
         // [源] §9-1：GAME OVER 畫面的 Konami 指令 = 3 條命續關（分數保留）；START 才是回標題
+        // fix4：**SELECT = 一鍵續關**（同樣效果、不限次數），Konami 序列照舊保留
         konamiPush(input);
-        if (konamiHit()) { konamiClear(); continueGame(); }
+        if (input.pressed(BTN.SELECT)) { konamiClear(); g.selectContinues++; continueGame(); }
+        else if (konamiHit()) { konamiClear(); continueGame(); }
         else if (input.pressed(BTN.START)) toTitle();
       } else if (g.mode === 'stageclear') {
         if (input.pressed(BTN.START)) toTitle();
       } else if (g.paused) {
-        // 暫停中：遊戲完全凍結，只收 Konami 指令與 START（研究 §7-3「暫停」）
+        // 暫停中：遊戲完全凍結，只收 SELECT（fix4 一鍵密技）、Konami 指令與 START（研究 §7-3「暫停」）
+        if (input.pressed(BTN.SELECT)) trySelectSecret();
         konamiPush(input);
         var code = konamiHit();
         if (code) { konamiClear(); trySecret(code); }
@@ -838,11 +863,15 @@
         hudOn: hudOn,
         // 畫面上看得到的訊息文字（列 11 / 15）—— QA P1-2 的驗收欄位
         msg: g.ppu ? (screenText(11).trim() + '|' + screenText(15).trim()) : '',
+        // fix4：暫停第二行（列 13）與 GAME OVER 第三行（列 17）
+        msg2: g.ppu ? (screenText(13).trim() + '|' + screenText(17).trim()) : '',
         bossSong: !!g.bossOn,
         // fix3：暫停 / 秘技 / 續關
         paused: !!g.paused, secretLeft: g.secretLeft | 0, secrets: g.secrets | 0,
         secretMsg: g.secretMsg | 0, continues: g.continues | 0, continueCam: g.continueCam | 0,
         konami: KONAMI_BUF.join(''), lastCode: g.lastCode,
+        selectUsed: !!g.selectUsed, selectSecrets: g.selectSecrets | 0,
+        selectContinues: g.selectContinues | 0,
         lastEvent: g.lastEvent
       };
     }

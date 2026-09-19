@@ -6,6 +6,7 @@
   $PY tools/playthrough_star.py --level 1-4 --seed 7 --max-frames 30000
   $PY tools/playthrough_star.py --all            # 依序跑 1-1..1-4（缺席的關自動略過）
   $PY tools/playthrough_star.py --level test     # main.js 的內建測試關（驗證機器人本身）
+  $PY tools/playthrough_star.py --cheat          # 不通關，改驗一鍵密技（暫停 SELECT / GAME OVER SELECT）
 
 策略（全部在頁面內跑，一次 evaluate 推 2000 幀，避免每幀 round-trip）：
   ① 基本動作：一直往右 + 按住 B 跑
@@ -23,6 +24,7 @@
 結束碼：0 = 指定的關全部 cleared / 1 = 有關卡沒過 / 2 = 環境錯誤
 """
 import argparse
+import base64
 import json
 import pathlib
 import sys
@@ -294,6 +296,132 @@ BOT_JS = r"""
 """
 
 
+# ============================================================ fix4：一鍵密技驗證
+# 使用者回饋（2026-09-19）：「多個一鍵密技好了，當然也保留舊密技，不然死到一半就玩不下去了。」
+#   START 暫停 → SELECT = 命補到 9 + 無敵 20 秒（1200 幀），不限次數、每次暫停只吃一次；
+#   GAME OVER → SELECT = 3 條命回當前關卡的檢查點續關（分數保留），不限次數。
+JS_TAPS = r"""
+(keys) => {
+  const B = NES.Input.BTN;
+  for (const k of keys) {
+    NES.Input.inject(B[k], 1); __nes.step(1);
+    NES.Input.inject(0, 1); __nes.step(1);
+  }
+  return window.GAME.state();
+}
+"""
+
+
+def shot(page, path, scale=3):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    page.evaluate("()=>__nes.render()")
+    d = page.evaluate("""(s)=>{const c=(NES.instance&&NES.instance.canvas)||document.getElementById('nes');
+        const o=document.createElement('canvas'); o.width=c.width*s; o.height=c.height*s;
+        const x=o.getContext('2d'); x.imageSmoothingEnabled=false; x.drawImage(c,0,0,o.width,o.height);
+        return o.toDataURL('image/png')}""", scale)
+    path.write_bytes(base64.b64decode(d.split(',', 1)[1]))
+    print('  saved', path)
+
+
+def run_cheat(page, url, level, out):
+    """暫停 → SELECT → 命 / 無敵欄位變化 → 防連按 → 解除還原 → GAME OVER SELECT 續關。"""
+    bad = []
+
+    def chk(name, cond, detail=''):
+        print(('  PASS ' if cond else '  FAIL ') + name + (('  — ' + str(detail)) if detail else ''))
+        if not cond:
+            bad.append(name)
+
+    def fresh():
+        page.goto(url + '&level=' + level)
+        page.wait_for_function('() => !!window.__nes && !!window.GAME && !!window.GAME.dev')
+        page.evaluate('() => __nes.step(2)')
+        return page.evaluate('() => window.GAME.state()')
+
+    # ---------------------------------------------------------- 暫停 + SELECT
+    before = fresh()
+    page.evaluate("() => { __nes.press(['right'], 120); }")
+    p1 = page.evaluate(JS_TAPS, ['START'])
+    chk('START → 進入暫停', p1['paused'] is True and p1['mode'] == 'play', p1['mode'])
+    chk('暫停畫面兩行：PAUSE / SELECT = SECRET',
+        p1['banner'] == ['PAUSE', 'SELECT = SECRET'], p1['banner'])
+    frz = page.evaluate("""() => { const a = window.GAME.state(); __nes.release(); __nes.step(90);
+        const b = window.GAME.state();
+        return { same: a.x === b.x && a.camX === b.camX && a.time === b.time, paused: b.paused }; }""")
+    chk('暫停 90 幀：主角 / 鏡頭 / 計時器全部凍結', frz['same'] and frz['paused'], frz)
+    shot(page, out / 'star_pause.png')
+    a1 = page.evaluate(JS_TAPS, ['SELECT'])
+    chk('暫停 SELECT：命 %d → %d（補到 9）' % (before['lives'], a1['lives']), a1['lives'] == 9)
+    chk('暫停 SELECT：無敵 1200 幀（20 秒）', a1['inv'] == 1200, a1['inv'])
+    chk('暫停 SELECT：畫出 SECRET!',
+        a1['banner'] == ['PAUSE', 'SELECT = SECRET', 'SECRET!'], a1['banner'])
+    chk('暫停 SELECT：觸發 powerup 音效', a1['lastSfx'] == 'powerup', a1['lastSfx'])
+    shot(page, out / 'star_secret.png')
+    page.evaluate("() => { GAME.dev.setLives(1); GAME.dev.hero().inv = 5; }")
+    a2 = page.evaluate(JS_TAPS, ['SELECT', 'SELECT'])
+    chk('防連按：同一次暫停再按 SELECT 無效',
+        a2['secrets'] == 1 and a2['lives'] == 1, (a2['secrets'], a2['lives']))
+    a3 = page.evaluate("() => { __nes.release(); __nes.step(70); return window.GAME.state(); }")
+    chk('SECRET! 1 秒後收回、PAUSE 留著', a3['banner'] == ['PAUSE', 'SELECT = SECRET'], a3['banner'])
+    a4 = page.evaluate(JS_TAPS, ['START'])
+    chk('再按 START → 解除暫停、文字收回', a4['paused'] is False and a4['banner'] is None, a4['banner'])
+    rest = page.evaluate("""() => { const d = GAME.dev, s = window.GAME.state(), base = s.camX >> 3;
+        let bad = 0;
+        [[12, 13, 5], [15, 8, 15], [18, 12, 7]].forEach(function (t) {
+          for (let i = 0; i < t[2]; i++)
+            if (d.ntTileAt(base + t[1] + i, t[0]) !== d.bgIndexAt(base + t[1] + i, t[0])) bad++;
+        });
+        return bad; }""")
+    chk('解除暫停後被文字蓋掉的地形磚全部還原', rest == 0, rest)
+    a5 = page.evaluate("() => { __nes.press(['right'], 30); return window.GAME.state(); }")
+    chk('解除暫停後遊戲繼續跑', a5['x'] > a4['x'], (a4['x'], a5['x']))
+    shot(page, out / 'star_after.png')
+    page.evaluate(JS_TAPS, ['START'])
+    a6 = page.evaluate(JS_TAPS, ['SELECT'])
+    chk('不限次數：第 2 次暫停 SELECT 照樣生效',
+        a6['secrets'] == 2 and a6['lives'] == 9 and a6['inv'] == 1200, (a6['secrets'], a6['lives']))
+    page.evaluate(JS_TAPS, ['START'])
+
+    # ------------------------------------------------- GAME OVER SELECT 續關
+    fresh()
+    over = page.evaluate("""() => { const d = GAME.dev, S = () => window.GAME.state();
+        d.warp(300 * 8); __nes.step(4);          // 先走到關卡尾端（過檢查點 + camX % 512 >= 256）
+        d.setScore(7700); d.setLives(0); d.kill();
+        let n = 0; while (S().mode !== 'gameover' && n++ < 600) __nes.step(1);
+        return S(); }""")
+    chk('命盡 → GAME OVER', over['mode'] == 'gameover', over['mode'])
+    chk('GAME OVER 畫面三行（多一行 SELECT = CONTINUE）',
+        over['banner'] == ['GAME OVER', 'PRESS START', 'SELECT = CONTINUE'], over['banner'])
+    shot(page, out / 'star_gameover.png')
+    c1 = page.evaluate(JS_TAPS, ['SELECT'])
+    chk('GAME OVER 按 SELECT → 回遊戲、3 條命', c1['mode'] == 'play' and c1['lives'] == 3,
+        (c1['mode'], c1['lives']))
+    chk('SELECT 續關不清分數（%d → %d）' % (over['score'], c1['score']), c1['score'] == over['score'])
+    chk('SELECT 續關回到當前關卡（%s）的檢查點 x=%d' % (c1['level'], c1['x']),
+        c1['level'] == over['level'] and (over['checkpoint'] < 0 or abs(c1['x'] - over['checkpoint'] * 8) <= 32),
+        (over['checkpoint'], c1['x']))
+    chk('SELECT 續關計數 +1、字收回', c1['continues'] == 1 and c1['banner'] is None,
+        (c1['continues'], c1['banner']))
+    lt = page.evaluate("() => { __nes.render(); return __nes.lint(); }")
+    chk('續關後畫面 lint 綠（≤ 25 色）', lt['ok'] and lt['colors'] <= 25,
+        (lt['ok'], lt['colors']))
+    shot(page, out / 'star_continue.png')
+    c2 = page.evaluate("""() => { const d = GAME.dev, S = () => window.GAME.state(), B = NES.Input.BTN;
+        d.setLives(0); d.kill();
+        let n = 0; while (S().mode !== 'gameover' && n++ < 600) __nes.step(1);
+        const m = S().mode;
+        NES.Input.inject(B.SELECT, 1); __nes.step(1); NES.Input.inject(0, 1); __nes.step(1);
+        const s = S();
+        return { over: m, mode: s.mode, lives: s.lives, continues: s.continues }; }""")
+    chk('SELECT 續關不限次數（第 2 次照樣可用）',
+        c2['over'] == 'gameover' and c2['mode'] == 'play' and c2['lives'] == 3 and c2['continues'] == 2, c2)
+
+    print('\n==== 一鍵密技驗證：%s ====' % ('全部通過' if not bad else '%d 項失敗' % len(bad)))
+    for b in bad:
+        print('  FAIL', b)
+    return 1 if bad else 0
+
+
 def run_level(page, url, level, seed, max_frames, verbose, lives):
     page.goto(url + '&level=' + level)
     page.wait_for_function('() => !!window.__nes && !!window.GAME && !!window.GAME.dev')
@@ -326,12 +454,29 @@ def main():
     ap.add_argument('--max-frames', type=int, default=20000)
     ap.add_argument('--lives', type=int, default=60, help='給機器人幾條命（死亡數照實回報）')
     ap.add_argument('--verbose', '-v', action='store_true')
+    ap.add_argument('--cheat', action='store_true',
+                    help='不跑通關，改驗 fix4 一鍵密技（暫停 SELECT = 命 9 + 無敵 20 秒 / '
+                         'GAME OVER SELECT = 3 命回檢查點續關）')
     a = ap.parse_args()
 
     if not (ROOT / 'star.html').exists():
         print('找不到 star.html')
         return 2
     url = (ROOT / 'star.html').as_uri() + '?debug=1&scale=1&mute=1'
+
+    if a.cheat:
+        out = ROOT / 'shots' / 'play_star' / 'cheat'
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch()
+            page = browser.new_page()
+            errs = []
+            page.on('pageerror', lambda e: errs.append(str(e)))
+            rc = run_cheat(page, url, a.level, out)
+            if errs:
+                print('PAGE ERRORS:', errs[:3])
+                rc = 1
+            browser.close()
+        return rc
 
     todo = LEVELS if a.all else [a.level]
     bad = 0

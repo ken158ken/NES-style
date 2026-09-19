@@ -1010,8 +1010,138 @@ def test_fix3(page):
       return { m0: m0, mode: g.mode, msg: g.msg };
     }""")
     ok('GAME OVER 按 START 仍然回標題', r['m0'] == 'gameover' and r['mode'] == 'title', r)
-    ok('標題畫面有秘技提示小字', 'SECRET CODE IN PAUSE' in r['msg'].split('|')[0]
-       or 'SECRET CODE IN PAUSE' in page.evaluate("() => CR.screenText(18)"), r['msg'])
+    ok('標題畫面有秘技提示小字（fix4 改成 SECRET: PAUSE + SELECT）',
+       'SECRET: PAUSE + SELECT' in page.evaluate("() => CR.screenText(18)"),
+       page.evaluate("() => CR.screenText(18)"))
+
+
+# =============================== ⑬ fix4（一鍵密技：暫停 SELECT / GAME OVER SELECT）
+# 使用者回饋（2026-09-19）：「多個一鍵密技好了，當然也保留舊密技，不然死到一半就玩不下去了。」
+#   暫停中 SELECT   = Konami 同款效果（SPEED+1 / MISSILE / OPTION×2 / 護盾 5），**不限次數**，
+#                     但每次暫停只吃一次（防連按）；**不消耗 Konami 的一場 1 次額度**。
+#   GAME OVER SELECT = 3 條命回檢查點續關（分數保留），**不限次數**；Konami 續關保留。
+def test_fix4(page):
+    print('[⑬ fix4：一鍵密技（SELECT）/ 兩行暫停畫面 / GAME OVER SELECT 續關]')
+
+    # ------------------------------------------------ 暫停畫面兩行（文字可見）
+    fresh(page, setup={'noSolid': True})
+    page.evaluate("() => { __nes.release(); __nes.step(10); }")
+    b = S(page)
+    p1 = page.evaluate(JS_TAPS, ['START'])
+    ok('暫停畫面第 1 行 = PAUSE（列 11）', 'PAUSE' in p1['msg'].split('|')[0], p1['msg'])
+    ok('暫停畫面第 2 行 = SELECT = SECRET（列 13）',
+       'SELECT = SECRET' in p1['msg2'].split('|')[0], p1['msg2'])
+    px = page.evaluate(r"""() => {
+      __nes.render();
+      const f = __nes.nes().ppu.indexFrame, W = 256;
+      let n = 0;
+      for (let y = 13 * 8; y < 14 * 8; y++) for (let x = 0; x < W; x++) if (f[y * W + x] === 0x30) n++;
+      return n;
+    }""")
+    ok('SELECT = SECRET 真的畫在可見區（列 13 的白色像素 ≥ 60）', px >= 60, px)
+
+    # ------------------------------------------------------- SELECT 一鍵密技
+    g1 = page.evaluate(JS_TAPS, ['SELECT'])
+    ok('SELECT：SPEED +1', g1['speed'] == b['speed'] + 1, (b['speed'], g1['speed']))
+    ok('SELECT：MISSILE / OPTION×2 / 護盾 5',
+       g1['power']['missile'] is True and g1['power']['option'] == 2 and g1['power']['shield'] == 5,
+       g1['power'])
+    ok('SELECT：不含 DOUBLE / LASER（與 Konami 同一組效果）',
+       g1['power']['double'] is False and g1['power']['laser'] is False, g1['power'])
+    ok('SELECT：顯示 SECRET!', 'SECRET' in g1['msg'].split('|')[1], g1['msg'])
+    ok('SELECT：PAUSE / SELECT = SECRET 兩行仍在',
+       'PAUSE' in g1['msg'].split('|')[0] and 'SELECT = SECRET' in g1['msg2'].split('|')[0], g1['msg2'])
+    ok('SELECT：**不消耗** Konami 的一場 1 次額度', g1['secretLeft'] == 1, g1['secretLeft'])
+    ok('SELECT：selectSecrets 計數 +1', g1['selectSecrets'] == 1 and g1['selectUsed'] is True, g1)
+
+    # ------------------------------------------------ 防連按：同一次暫停只吃一次
+    page.evaluate("() => { CR.ship.power.option = 0; CR.ship.power.shield = 0; CR.ship.syncOptions(); }")
+    g2 = page.evaluate(JS_TAPS, ['SELECT', 'SELECT', 'SELECT'])
+    ok('防連按：同一次暫停再按 SELECT 完全沒有效果',
+       g2['selectSecrets'] == 1 and g2['power']['option'] == 0 and g2['power']['shield'] == 0, g2['selectSecrets'])
+
+    # -------------------------------------- 解除 → 再暫停 → SELECT 可以再用（不限次數）
+    g3 = page.evaluate(JS_TAPS, ['START'])
+    ok('解除暫停（文字收回）', g3['paused'] is False and 'PAUSE' not in g3['msg'].split('|')[0], g3['msg'])
+    ok('解除暫停後列 13 的 SELECT = SECRET 也還原了',
+       'SELECT = SECRET' not in g3['msg2'].split('|')[0], g3['msg2'])
+    page.evaluate("() => { __nes.release(); __nes.step(20); }")
+    g4 = page.evaluate(JS_TAPS, ['START'])
+    ok('再次暫停：SELECT 額度重置', g4['selectUsed'] is False, g4['selectUsed'])
+    g5 = page.evaluate(JS_TAPS, ['SELECT'])
+    ok('SELECT 不限次數（第 2 次照樣生效）',
+       g5['selectSecrets'] == 2 and g5['power']['option'] == 2 and g5['power']['shield'] == 5, g5['selectSecrets'])
+    ok('用了兩次 SELECT 之後，Konami 的一場 1 次仍然完好', g5['secretLeft'] == 1, g5['secretLeft'])
+    g6 = page.evaluate(JS_TAPS, CODE_FC)
+    ok('Konami 序列仍可用，且此時才扣掉那 1 次',
+       g6['secretLeft'] == 0 and g6['secrets'] == g5['secrets'] + 1, (g5['secrets'], g6['secrets']))
+
+    # ------------------------------------------- 遊戲進行中按 SELECT 不會觸發
+    fresh(page, setup={'noSolid': True})
+    page.evaluate("() => { __nes.release(); __nes.step(10); }")
+    g7 = page.evaluate(JS_TAPS, ['SELECT', 'SELECT'])
+    ok('遊戲進行中按 SELECT 沒有任何效果（只有暫停 / GAME OVER 有效）',
+       g7['selectSecrets'] == 0 and g7['power']['option'] == 0 and g7['paused'] is False, g7['selectSecrets'])
+
+    # ------------------------------------------------------- 觸控 SELECT 也通
+    fresh(page, setup={'noSolid': True})
+    page.evaluate("() => { __nes.release(); __nes.step(10); }")
+    g8 = page.evaluate(r"""() => {
+      const B = NES.Input.BTN;
+      const tap = (b) => { NES.Input.setExternal(b); __nes.step(1); NES.Input.setExternal(0); __nes.step(1); };
+      tap(B.START); tap(B.SELECT);
+      const g = GAME.state();
+      NES.Input.setExternal(0);
+      return { paused: g.paused, sel: g.selectSecrets, option: g.power.option, shield: g.power.shield };
+    }""")
+    ok('觸控手把的 SELECT 鍵（setExternal）也能一鍵密技',
+       g8['paused'] is True and g8['sel'] == 1 and g8['option'] == 2 and g8['shield'] == 5, g8)
+
+    # ------------------------------------------- GAME OVER 按 SELECT 續關（不限次數）
+    page.goto((ROOT / 'cruiser.html').as_uri() + '?debug=1&scale=1&mute=1&camx=1600')
+    page.wait_for_function('() => !!window.__nes && !!window.CR && !!window.CR.ship')
+    page.evaluate("() => { __nes.tap('start', 1); __nes.step(30); }")
+    over = page.evaluate(r"""() => {
+      CR.ship.addScore(9800);
+      CR.ship.lives = 1; CR.ship.invul = 0; CR.ship.power.shield = 0; CR.ship.hit(true);
+      __nes.step(150);
+      return GAME.state();
+    }""")
+    ok('GAME OVER 畫面多一行 SELECT = CONTINUE（列 17）',
+       'SELECT = CONTINUE' in over['msg2'].split('|')[1], over['msg2'])
+    ok('GAME OVER 畫面 PRESS START 仍在', 'PRESS START' in over['msg'].split('|')[1], over['msg'])
+    px2 = page.evaluate(r"""() => {
+      __nes.render();
+      const f = __nes.nes().ppu.indexFrame, W = 256;
+      let n = 0;
+      for (let y = 17 * 8; y < 18 * 8; y++) for (let x = 0; x < W; x++) if (f[y * W + x] === 0x30) n++;
+      return n;
+    }""")
+    ok('SELECT = CONTINUE 真的畫在可見區（列 17 白色像素 ≥ 60）', px2 >= 60, px2)
+    c1 = page.evaluate(JS_TAPS, ['SELECT'])
+    ok('GAME OVER 按 SELECT → 回到遊戲', c1['mode'] == 'play', c1['mode'])
+    ok('SELECT 續關給 3 條命', c1['lives'] == 3, c1['lives'])
+    ok('SELECT 續關不清分數', c1['score'] >= over['score'], (over['score'], c1['score']))
+    ok('SELECT 續關回到 GAME OVER 前的檢查點',
+       c1['camX'] == over['continueCam'], (over['continueCam'], c1['camX']))
+    ok('SELECT 續關計數 +1', c1['selectContinues'] == 1 and c1['continues'] == 1, c1['selectContinues'])
+    ok('SELECT 續關後 HUD 回來了', c1['hudOn'] is True and '1P' in c1['hud'], c1['hudOn'])
+    lt = page.evaluate("() => { __nes.render(); return __nes.lint(); }")
+    ok('SELECT 續關後畫面 lint 綠', lt['ok'] is True and lt['colors'] <= 25,
+       {'ok': lt['ok'], 'colors': lt['colors']})
+
+    # 第二次 GAME OVER → 再按 SELECT 還是能續關（不限次數）
+    c2 = page.evaluate(r"""() => {
+      CR.ship.lives = 1; CR.ship.invul = 0; CR.ship.power.shield = 0; CR.ship.hit(true);
+      __nes.step(150);
+      const m = GAME.state().mode;
+      const B = NES.Input.BTN;
+      NES.Input.inject(B.SELECT, 1); __nes.step(1); NES.Input.inject(0, 1); __nes.step(1);
+      const g = GAME.state();
+      return { over: m, mode: g.mode, lives: g.lives, sc: g.selectContinues };
+    }""")
+    ok('GAME OVER SELECT 續關不限次數（第 2 次照樣可用）',
+       c2['over'] == 'gameover' and c2['mode'] == 'play' and c2['lives'] == 3 and c2['sc'] == 2, c2)
 
 
 def main():
@@ -1036,6 +1166,7 @@ def main():
         test_stage(page)
         test_fix2(page)
         test_fix3(page)
+        test_fix4(page)
         test_no_errors(page, errors)
         browser.close()
 

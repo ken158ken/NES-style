@@ -41,6 +41,11 @@
   var TIME_START = 300;
   var SCORE_STOMP = 100, SCORE_COIN = 200, SCORE_GOAL = 1000, SCORE_PER_TIME = 50;
   var CLEAR_HOLD = 40;                        // 結算完停幾幀再進下一關
+  // fix4：一鍵密技（使用者回饋「多個一鍵密技…也保留舊密技」）
+  var SECRET_LIVES = 9;                       // 暫停中按 SELECT：命補到 9
+  var SECRET_INV = 1200;                      // 無敵 20 秒（60 fps × 20）
+  var SECRET_MSG = 60;                        // 「SECRET!」顯示 1 秒
+  var CONTINUE_LIVES = 3;                     // GAME OVER 按 SELECT：3 條命續關
 
   /* ===================== 磚語意（star-world 缺席時的後備） ===================== */
   function ensureTiles() {
@@ -184,6 +189,9 @@
       hud: {}, hudDirty: true,
       startLevel: null, skipTitle: false,
       banner: null, bossMusic: 0,
+      // fix4：暫停 / 一鍵密技 / 續關
+      paused: false, secrets: 0, secretMsg: 0, selectUsed: false,
+      cheatInv: false, continues: 0,
       lastSfx: null, colWrites: 0
     };
   }
@@ -302,6 +310,8 @@
     g.cleared = false;
     g.bossClear = 0;
     g.bossMusic = 0;
+    g.cheatInv = false;
+    g.paused = false;
     g.pops.length = 0;
     g.bump = null;
     g.checkpoint = -1;                      // −1 = 還沒過檢查點 ⇒ 死亡回關卡起點
@@ -460,7 +470,18 @@
   ];
   var GAMEOVER_LINES = [
     { row: 12, col: 12, text: 'GAME OVER' },
-    { row: 16, col: 10, text: 'PRESS START' }
+    { row: 16, col: 10, text: 'PRESS START' },
+    { row: 18, col: 7, text: 'SELECT = CONTINUE' }        // fix4：一鍵續關
+  ];
+  // fix4：START 暫停（畫兩行）＋ 暫停中按 SELECT 的一鍵密技
+  var PAUSE_LINES = [
+    { row: 12, col: 13, text: 'PAUSE' },
+    { row: 15, col: 8, text: 'SELECT = SECRET' }
+  ];
+  var PAUSE_SECRET_LINES = [
+    { row: 12, col: 13, text: 'PAUSE' },
+    { row: 15, col: 8, text: 'SELECT = SECRET' },
+    { row: 18, col: 12, text: 'SECRET!' }
   ];
   // 破完 1-4：多一行分數（進入畫面時才算得出來，所以用函式產生）
   function winLines() {
@@ -539,6 +560,55 @@
 
   function drawTitle(ppu) { drawBanner(ppu, TITLE); }
   function clearTitle(ppu) { clearBanner(ppu, TITLE); }
+
+  /* ------------------ fix4：暫停 / 一鍵密技 / 一鍵續關 ------------------
+   * 使用者回饋：「多個一鍵密技好了，當然也保留舊密技，不然死到一半就玩不下去了。」
+   *   暫停中 SELECT → 命補到 9 + 無敵 20 秒（不限次數，每次暫停只吃一次，避免連按重複觸發）
+   *   GAME OVER 中 SELECT → 3 條命回**當前關卡的檢查點**續關（分數保留，不限次數）
+   */
+  // 換一組疊字（先把上一組還原成關卡原本的磚 / 屬性，再畫新的）
+  function setBanner(lines) {
+    if (g.banner) clearBanner(ppu0, g.banner);
+    g.banner = lines || null;
+    if (lines) drawBanner(ppu0, lines);
+  }
+
+  function pauseGame() {
+    g.paused = true;
+    g.secretMsg = 0;
+    g.selectUsed = false;                 // 每次暫停重新給一次 SELECT 機會
+    setBanner(PAUSE_LINES);
+  }
+  function unpauseGame() {
+    setBanner(null);                      // 還原被文字蓋掉的地形磚 + 屬性
+    g.paused = false;
+    g.secretMsg = 0;
+    g.hudDirty = true;
+  }
+  function trySelectSecret() {
+    if (g.selectUsed) return false;
+    g.selectUsed = true;
+    g.secrets++;
+    var h = g.hero;
+    h.lives = SECRET_LIVES;
+    h.inv = SECRET_INV;                   // 走現有的受傷無敵（閃爍 + hurt() 直接 return false）
+    g.cheatInv = true;
+    g.hudDirty = true;
+    setBanner(PAUSE_SECRET_LINES);
+    g.secretMsg = SECRET_MSG;
+    sfx('powerup');
+    audio('play', 'invincible');          // song.js 第 6 首（無敵曲），無敵結束後換回關卡曲
+    return true;
+  }
+  // GAME OVER → 3 條命 + 回當前關卡的檢查點（**分數 / 金幣不清**）
+  function continueGame() {
+    setBanner(null);
+    g.won = false;
+    g.hero.lives = CONTINUE_LIVES;
+    g.continues++;
+    respawn();                            // 內含 rebuildScreen ⇒ 殘字被整片蓋掉
+    g.hudDirty = true;
+  }
 
   /* ------------------------------- 音訊 ------------------------------- */
   function audio(fn, a) {
@@ -704,6 +774,8 @@
     else if (ST.Enemies && typeof ST.Enemies.reset === 'function') { try { ST.Enemies.reset(); } catch (e) { } }
     if (ST.Boss && typeof ST.Boss.reset === 'function') { try { ST.Boss.reset(); } catch (e) { } }
     g.bossMusic = 0;                          // 魔王房復活：重新進房時再切一次 boss 曲
+    g.cheatInv = false;
+    g.paused = false;
     g.mode = 'play';
     g.modeFrames = 0;
     g.hudDirty = true;
@@ -888,6 +960,13 @@
           g.modeFrames = 0;
           audio('play', g.lv.music || themeOf(g.lv));
         }
+      } else if (g.mode === 'play' && g.paused) {
+        // fix4：暫停中遊戲完全凍結，只收 SELECT（一鍵密技）與 START（解除）
+        if (input.pressed(BTN.SELECT)) trySelectSecret();
+        if (g.secretMsg > 0 && --g.secretMsg === 0) setBanner(PAUSE_LINES);   // SECRET! 收回、PAUSE 留著
+        if (input.pressed(BTN.START)) unpauseGame();
+      } else if (g.mode === 'play' && input.pressed(BTN.START)) {
+        pauseGame();
       } else if (g.mode === 'play') {
         Hero.update(h, ctx);
         var worldDidCollide = false;
@@ -903,6 +982,11 @@
           g.timeTick = 0;
           if (g.time > 0) { g.time--; g.hudDirty = true; }
           else if (h.state !== 'dead') Hero.kill(h, ctx);
+        }
+        // fix4：一鍵密技的 20 秒無敵結束 → 換回關卡曲（魔王房則回魔王曲）
+        if (g.cheatInv && h.inv <= 0) {
+          g.cheatInv = false;
+          if (g.bossMusic !== 2) audio('play', g.bossMusic === 1 ? 'boss' : (g.lv.music || themeOf(g.lv)));
         }
         // 魔王曲（qa2-star P2-1）：進魔王房 → boss、擊破 → clear、離開魔王房 → 回關卡曲
         if (g.lv.boss && ST.Boss) {
@@ -936,8 +1020,11 @@
           nextLevel();
         }
       } else if (g.mode === 'gameover') {
+        // fix4：SELECT = 一鍵續關（3 條命回檢查點、分數保留、不限次數）；破關畫面沒有這條路
+        if (!g.won && input.pressed(BTN.SELECT)) {
+          continueGame();
         // qa2-star P2-5：START 回**標題**（不是直接重開）；標題再按 START 才開始新的一輪
-        if (input.pressed(BTN.START)) {
+        } else if (input.pressed(BTN.START)) {
           g.banner = null;
           g.hero.lives = 3; g.hero.score = 0; g.hero.coins = 0;
           g.won = false;
@@ -964,14 +1051,17 @@
       } else if (g.mode === 'title') {
         Hero.draw(h, g, oam, heroTiles, g.camX);
       }
-      // ? 磚頂出的金幣粒子（prio 1）
-      for (i = 0; i < g.pops.length; i++) {
+      // ? 磚頂出的金幣粒子（prio 1）；總控：GAME OVER 畫面也不畫（會疊在 SELECT = CONTINUE 上）
+      for (i = 0; g.mode !== 'gameover' && i < g.pops.length; i++) {
         var p = g.pops[i];
         if (heroTiles.H_COIN === undefined) break;
         oam.add({ x: p.x - g.camX, y: p.y, tile: heroTiles.H_COIN, pal: 1, prio: 1 });
       }
-      if (ST.Enemies && typeof ST.Enemies.draw === 'function') { try { ST.Enemies.draw(oam, g); } catch (e) { } }
-      if (ST.Boss && typeof ST.Boss.draw === 'function') { try { ST.Boss.draw(oam, g); } catch (e) { } }
+      // fix4：GAME OVER 畫面不畫敵人（主角本來就不畫）—— 三行字才不會被路過的敵人精靈蓋掉
+      if (g.mode !== 'gameover') {
+        if (ST.Enemies && typeof ST.Enemies.draw === 'function') { try { ST.Enemies.draw(oam, g); } catch (e) { } }
+        if (ST.Boss && typeof ST.Boss.draw === 'function') { try { ST.Boss.draw(oam, g); } catch (e) { } }
+      }
       oam.end();
     },
 
@@ -997,7 +1087,10 @@
         scrNext: g.scr ? g.scr.next : 0, scrLeft: g.scrLeft, scrBytes: g.scr ? g.scr.bytes : 0,
         lastSfx: g.lastSfx, pops: g.pops.length,
         banner: g.banner ? g.banner.map(function (t) { return t.text; }) : null,
-        bossMusic: g.bossMusic
+        bossMusic: g.bossMusic,
+        // fix4：暫停 / 一鍵密技 / 續關
+        paused: !!g.paused, secrets: g.secrets | 0, secretMsg: g.secretMsg | 0,
+        selectUsed: !!g.selectUsed, cheatInv: !!g.cheatInv, continues: g.continues | 0
       };
     },
 
