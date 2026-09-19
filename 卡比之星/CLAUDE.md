@@ -21,7 +21,7 @@ node tools/audio_check.js               # 音效 / 音樂名單與節流檢查
 $PY tools/font_subset.py [--check]      # 新增中文字串後重做 16px 字集（Unifont 子集）
 $PY tools/build.py                      # 打包 dist（內嵌 JS + 字型 base64）+ 重產 sw.js ASSETS / VERSION（部署前必跑）
 $PY tools/mobile_shot.py --device "iPhone 13" --landscape --scene game --level w1 --touch "tap 649 189 3; step 20" --out shots/agent_x/m.png   # 手機模擬截圖（含觸控覆蓋層；--touch 座標 CSS px，先 --eval "JSON.stringify(KB.TOUCH.rects())" 查按鍵中心；--dist / --url / --offline）
-$PY tools/test_touch.py                 # 觸控 56 項（改 touch.js / input.js / main.js resize 後必跑）
+$PY tools/test_touch.py                 # 觸控 105 項（改 touch.js / input.js / main.js resize 後必跑）
 ```
 - `--script` 指令：`press <k,k> <frames> | tap <k> <frames> | step <n> | release | shot <name>`；key：`left right up down jump attack select start`。需要 evaluate 的情境自己寫 playwright 小腳本（參考 shots/agent_qa5/mshot.py、shots/agent_qa7/kb.py）。
 - **截圖後一定要用 Read 打開 PNG 看圖**；每個 agent 存到自己的 `shots/agent_<名稱>/`（shots/ 整個已 gitignore）。

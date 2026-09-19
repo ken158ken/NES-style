@@ -512,6 +512,9 @@
     { id: 'touchSide', label: '按鍵位置', touch: 'side', cycle: ['right', 'left'], names: ['右手', '左手'], need: hasTouchApi },
     { id: 'touchSize', label: '按鍵大小', touch: 'size', cycle: [0.8, 1, 1.2], names: ['小', '中', '大'], need: hasTouchApi },
     { id: 'touchOpacity', label: '按鍵透明度', touch: 'opacity', cycle: [0.3, 0.5, 0.8], names: ['淡', '中', '濃'], need: hasTouchApi },
+    // Round 11b（touch2）：方向鍵樣式（十字 / 搖桿）與浮動搖桿（手指落在空白區就把搖桿搬過去）
+    { id: 'touchStick', label: '方向鍵樣式', touch: 'stick', cycle: ['dpad', 'stick'], names: ['十字', '搖桿'], need: hasTouchApi },
+    { id: 'touchFloat', label: '搖桿浮動', touch: 'stickFloat', cycle: [false, true], names: ['關', '開'], need: hasTouchApi },
     // saves-input agent：KB.KeyConfigMenu()（子選單版，update() 回傳 'back'）；只有 KeyConfigScene 時退而用 {menu:true}
     {
       id: 'keyconfig', label: '按鍵設定', arrow: true,

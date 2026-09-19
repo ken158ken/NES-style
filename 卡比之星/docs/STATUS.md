@@ -17,10 +17,10 @@
 
 ## 操作
 方向鍵 / WASD 移動；Z 跳（空中再按漂浮）；**按住 ↑ 飛行**（地面 4 幀起飛、門前不飛、空中持續上升、水中上浮；房間頂封頂）；X 吸入 / 吐 / 招式；↓ 吞；↓+跳 滑鏟（平台上穿下）；Shift 短按丟能力星（砸帶能力敵人可混合）、長按 45 幀叫夥伴 / 吸回；↑+Shift 夥伴指令；↓+Shift 合體技；Lv4 量表滿時 跳+攻 覺醒；Enter 暫停（能力說明卡）；M 靜音；F 全螢幕。
-**觸控（Round 11）**：D-pad（單指滑動切方向）＋ A 跳 / B 攻擊 / C 丟能力 / START 暫停 / 全螢幕鍵；直向按鍵在畫面下方、橫向在左右兩側；鍵盤 / 手把輸入後覆蓋層淡出；設定頁可調 觸控按鍵 自動/開（「關」會鎖死已拿掉）、左右手、大小、透明度（存 `settings.touch`）。線上：https://ken158ken.github.io/NES-style/卡比之星/ （sw.js 快取、加到主畫面可離線）。
+**觸控（Round 11 / 11b）**：搖桿（預設；8 方向含斜向、±6° 磁滯、浮動：手指落在方向側空白處搖桿就出現在那裡；設定可切回十字）＋ A 跳 / B 攻擊 / C 丟能力 / START 暫停 / 全螢幕鍵；直向按鍵在畫面下方、橫向在左右兩側；鍵盤 / 手把輸入後覆蓋層淡出；設定頁可調 觸控按鍵 自動/開（「關」會鎖死已拿掉）、左右手、大小、透明度、方向鍵樣式 十字/搖桿、搖桿浮動（存 `settings.touch`）。線上：https://ken158ken.github.io/NES-style/卡比之星/ （sw.js 快取、加到主畫面可離線）。
 
 ## 品質基準（收工前全部要綠）
-engine 167 / enemy 393（--extra 79）/ boss ALL PASS / weapons 417 / magic 248 / forms 315 / charge 140 / mix 701 / mix2 801 / helper 131 / elements 96 / progression 101 / awaken 240 / extra 53 / challenge 93 / saves 67 / skins 67 / **touch 56**；font_subset --check 無缺字；level_check（含 --extra）0 error；audio_check 全過；playthrough w1~w7 --godmode 全 cleared；build 後 dist 約 3.3MB 且 sw.js VERSION 已更新（**部署前必跑 build.py**）。
+engine 167 / enemy 393（--extra 79）/ boss ALL PASS / weapons 417 / magic 248 / forms 315 / charge 140 / mix 701 / mix2 801 / helper 131 / elements 96 / progression 101 / awaken 240 / extra 53 / challenge 93 / saves 67 / skins 67 / **touch 105**；font_subset --check 無缺字；level_check（含 --extra）0 error；audio_check 全過；playthrough w1~w7 --godmode 全 cleared；build 後 dist 約 3.3MB 且 sw.js VERSION 已更新（**部署前必跑 build.py**）。
 
 ## 各輪摘要
 1. Round 1：中文可讀、暫停 / 標題選單、操控手感、8 能力 26 招、大星星 / 秘密房 / 魔王二階段、音量 API。

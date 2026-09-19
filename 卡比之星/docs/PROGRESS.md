@@ -5201,3 +5201,97 @@ canvas backing store 恆為 256×224（只改 `style.width/height`，不隨 DPR 
 - qa11：36 張版面矩陣 0 交集 0 出界、觸控實戰 28/28、dist / HTTP / 離線 / 桌機回歸皆過。**P1**「觸控按鍵：關」在純觸控裝置鎖死 → 修：設定拿掉「關」+ touch.js 逃生口（off 時再觸控切回 auto、載入時 off 退回 auto）；**P2** 桌機設定頁多 4 項 → `hasTouchApi` 加 `available` 條件，桌機回 7 項。P3（rects 隱藏時仍回報、iPad「大」壓左緣 39px、iPad 動作鍵直排、icon-512 星星貼邊）留待下輪。
 - 測試：engine 167 / enemy 393+79 / weapons 417 / magic 248 / forms 315 / charge 140 / mix 701 / mix2 801 / helper 131 / elements 96 / progression 101 / awaken 270 / extra 53 / challenge 93 / saves 67 / skins 67 / touch 56；font_subset OK；level_check 0 error；audio_check 全過；playthrough w1 / w4 / w7 cleared；dist 3377KB。
 - 已知：只在 Chromium 模擬驗證，iOS Safari 真機待使用者回饋。
+
+---
+## touch2（Round 11b）— 方向鍵改搖桿（8 方向斜推）+ 磁滯 + 浮動搖桿
+使用者回饋：「上下左右的鍵中間也可以變成搖桿，這樣可以更精細控制，同時左上、右上等角度」。
+判定本來就已是 8 方向（TAN22），但**視覺是十字四箭頭、旋鈕只位移 0.42 半徑**，玩家不知道可以斜推 ⇒ 本輪把「看起來能斜推」做出來，並把判定換成扇區 + 磁滯。
+擁有檔案：`src/touch.js`、`src/menu.js`（只動 SET_ITEMS 觸控項）、`src/ui.js`（只動 `UI.HELP3`）、`tools/test_touch.py`。
+
+### API 變更（都是**新增**，既有 API 行為不變）
+| API | 說明 |
+|---|---|
+| `KB.TOUCH.layout.stick` | `'dpad'` \| `'stick'`，**預設 `'stick'`**。`'stick'` ＝ 圓形底座 + 8 方向刻度（含 4 個斜向）+ 內圈導引環 + 淺色旋鈕；`'dpad'` ＝ 原本的四箭頭十字，另加 4 個斜角小圓點（提示可斜推）。 |
+| `KB.TOUCH.layout.stickFloat` | `true` \| `false`，**預設 `true`**。手指落在方向側空白區 → 底座搬到落點；放開回原位。 |
+| `KB.TOUCH.setLayout({stick, stickFloat})` | 即時套用 + 存 `KB.save.settings.touch`（＝ localStorage `kirbystar_global.settings.touch`）。 |
+| `KB.TOUCH.sector()` | 目前扇區 `0~7`（0 右、1 右下、2 下 …… 7 右上），死區內 / 沒按為 `-1`。 |
+| `KB.TOUCH.tickOn()` | 目前亮著的刻度索引（同 sector），`-1` ＝ 沒亮。 |
+| `KB.TOUCH.floatZone()` | 浮動感應區矩形 `{x,y,w,h}`；`stickFloat:false` 或空間放不下時 `null`。 |
+| `KB.TOUCH.padHome()` | 底座**原位** `{cx,cy,d}`（浮動中也不變）。 |
+| `KB.TOUCH.floating()` | 目前是否浮動中。 |
+| `KB.TOUCH.dirs()` / `rects()` / `layout` / `setLayout` / `buttons` … | 不變。`rects().dpad` 在浮動中回報的是**浮動後**的位置（`rects()` 本身不 relayout，測試要拿原位請用 `padHome()`）。 |
+
+遊戲讀法完全不變：斜向 ＝ `left/right` 與 `up/down` 同時為 true，一樣走 `KB.input.setTouch`。
+
+### 判定規則（取代 Round 11 的 TAN22）
+- **8 扇區各 45°**：角度 `deg = atan2(oy, ox)`（螢幕座標，y 向下為正 ⇒ 0°＝右、90°＝下）；扇區 `i` 的中心 ＝ `i × 45°`。
+- **磁滯 ±6°**：已在某扇區時，偏離該扇區中心 `≤ 22.5 + 6 = 28.5°` 就**留在原扇區**；超過才換到最近的扇區。實測（以「往上為正角」描述）：`20° → 右`、`25° → 仍右`、`回 15° → 右`、`30° → 右上`、`回 25° → 仍右上`、`回 10° → 才變回右`。邊界抖動消失。
+- **死區**：`dpad` 26%（維持 Round 11）、`stick` **20%**（搖桿本來就該更靈敏），下限都是 6px。
+- **旋鈕**：`stick` 完整跟隨手指、clamp 在「底座半徑 − 旋鈕半徑 − 邊框」內（死區內也跟隨，只是不送方向）；`dpad` 維持原本只在出死區後位移 0.42 半徑。
+- **亮燈**：正向亮 1 個刻度；**斜向亮 3 個**（斜向專用刻度 + 左右兩個正向刻度），一眼看得出是在斜推。刻度 `z-index:3` 蓋在旋鈕之上，推到底時仍看得到。
+
+### 浮動搖桿規則
+- 感應區（`floatZone()`）＝「方向側的空白帶」∪「原搖桿中心 1.6 倍半徑的抓取圈」，再扣掉動作鍵叢集那一側；直向＝畫面下方按鍵帶、橫向＝該側留白。感應區是覆蓋層裡**排在所有按鍵之前**的透明 div ⇒ A/B/C/START/全螢幕永遠先吃到觸控，不會誤觸浮動。
+- 落點會被 `clampFloat` 夾住：① 不出 safe-area ② 不壓動作鍵叢集 ③ 原位沒壓畫面時浮動也不准壓畫面 ④ 不高過 START / 全螢幕那一列（`padTop + 半徑`）。所以**感應區四角極端落點都不會壓到畫面或任何按鍵**（測試有驗）。
+- 放開 → 位置立刻回原位（不做位移動畫，截圖 / 測試才量得準），搭配 `@keyframes kb-padret` 0.22s 的**淡回**。
+
+### 設定頁（menu.js，`need: hasTouchApi` ⇒ 桌機不出現）
+- `方向鍵樣式`：十字 / **搖桿**（`setLayout({stick})`）
+- `搖桿浮動`：關 / **開**（`setLayout({stickFloat})`）
+- 觸控裝置上設定頁變成 **13 項**（桌機仍 7 項），捲動視窗 `SET_WINDOW=7` 照常運作，截圖確認沒破版。
+
+### ui.js（只動 `UI.HELP3`）
+第 1 列改成 `['方向鍵／搖桿', '可斜推（8 方向）']` + 第 2 列 `['', '上飛行／下吞']`；為了維持 **11 列上限**，把原本尾巴兩列（`設定裡可調整` / `位置／大小／透明度`）併成一列 `['觸控按鍵', '設定裡可調樣式大小']`。右欄仍在 138px 內（截圖確認）。
+`font_subset.py --check` **OK：沒有缺字**（新字 斜／搖／桿／樣 都已在既有子集裡），字集檔沒有重做。
+
+### 里程碑
+- [2026-09-19 16:10] 完成 touch.js：扇區 + 磁滯判定、stick 視覺（底座 / 導引環 / 8 刻度 / 旋鈕）、dpad 斜角點、浮動搖桿 + 感應區 + clampFloat、`stick / stickFloat` 存讀。驗證：`tools/test_touch.py`。
+- [2026-09-19 16:20] 修：旋鈕推到底會蓋住斜向刻度 ⇒ 刻度 `z-index:3`、亮燈改成斜向亮 3 個、刻度加大。驗證：`shots/agent_touch2/l_iphone_upright.png` 看圖。
+- [2026-09-19 16:25] 修：橫向浮動到感應區頂端會壓到「全螢幕」鍵 ⇒ 加 `padTop`（底座不得高過 START / 全螢幕列）並同步縮感應區。驗證：`test_float_layout` 三裝置四角落點 0 交集。
+- [2026-09-19 16:35] 完成 menu.js 兩項 + ui.js HELP3；`font_subset.py --check` OK。驗證：`shots/agent_touch2/m_settings_stick.png` / `m_settings_bottom.png` / `m_help3.png` / `p_settings_*.png`。
+- [2026-09-19 17:05] **（總控要求）直向浮動帶放寬**：直向的 START / 全螢幕從「主排上方置中」改成**貼在畫面底 + 12px、並讓到動作鍵那一側**（＝總控二擇一的「上移」案；同時橫移到動作側，否則它置中時仍會擋住方向側半邊，底座最高只能停在它下面）。方向側因此從「畫面底 + 12」到底座下緣**整塊淨空**：感應區 `floatZone()` 上緣＝畫面底 + 12、底座可浮到頂緣貼齊畫面底。Pixel 5 直向感應區 **229px 高 → 371px**、底座垂直可動範圍 **24px → 206px**（cy 438~644）。兩段退路保留（空白帶不夠高時回到 Round 11 的置中版面，底座仍只能停在那列下面）。橫向版面完全沒動。驗證：`test_touch 105/105`（新增 `test_portrait_band` 6 項）、`shots/agent_touch2/p_pixel5_floathigh.png`、`p_iphone_floathigh.png`、`p_pixel5_stick.png` 看圖。
+- [2026-09-19 16:45] 回歸：`test_touch 99/99`（56 → 99，新增 43 項）、`engine_test 167/167`、`test_saves 67/67`、`test_progression 101/101`，全部 0 FAIL / 0 WARN。
+
+### 測試（tools/test_touch.py，56 → **105 項**，新增 49）
+新增 G / H 兩組（外加 iPhone 開場的 2 項預設值、桌機 3 項）：
+- **預設值**：`stick` 預設 `'stick'`、`stickFloat` 預設 `true`
+- **G 搖桿**：`kb-stick` class；推正右只有 right；推右上 right+up 同時（`input.down` 也讀得到）且亮 sector 7；磁滯六連段 `20/25/15/30/25/10`；放開 sector 回 -1；stick 旋鈕跟隨（0.42r < 位移 < r）；死區內旋鈕仍跟隨但無方向；切 dpad 後 class 改變 + 四箭頭回來；死區 dpad 26% vs stick 20%（0.23r 處差異）；dpad 旋鈕仍是 0.42r；`setLayout` 寫進 localStorage `kirbystar_global`；`stickFloat:false` → `floatZone()` null；改回來也存得起來；浮動落點搬動底座（原位不變）、放開回原位、關閉後同落點不動
+- **H 版面（三裝置直橫向）**：按鍵**矩形**（不只中心）與畫面無交集、搖桿與動作鍵 / START / 全螢幕無交集、**浮動感應區四角 + 中心五個落點**都不壓畫面 / 按鍵、放開回原位
+- **直向浮動帶（`test_portrait_band`，Pixel 5，6 項）**：感應區上緣＝畫面底 + 12；START / 全螢幕讓到動作鍵那一側且貼在畫面底下方；底座能浮到畫面正下方（頂緣距畫面底 ≤ 16px 且不進畫面）；垂直可動範圍 ≥ 120px；浮到最高時仍不壓畫面 / 任何按鍵
+- **桌機（無觸控 1280×800）**：`available` false、覆蓋層不顯示、鍵盤方向鍵照常走路
+
+### 截圖路徑（全部已 Read 看圖）`shots/agent_touch2/`
+- `l_iphone_stick.png` — iPhone 13 橫向 750×342，搖桿靜止：圓形底座 + 8 刻度 + 導引環 + 淺色旋鈕，不壓畫面。
+- `l_iphone_upright.png` — 同上**推右上**：上／右上／右三個刻度亮黃，旋鈕推到右上，卡比向右飛行。
+- `l_iphone_float.png` — **浮動**：手指落在左側空白上方 (75,150) → 底座整個搬上去（cy 252 → 150），沒壓到左上角全螢幕鍵。
+- `l_iphone_dpad.png` / `l_iphone_dpad_upright.png` — 切回**十字**樣式：四箭頭 + 4 個斜角小點；推右上時上／右箭頭發光且右上小點變黃。
+- `p_pixel5_stick.png` / `p_pixel5_upright.png` / `p_pixel5_float.png` — Pixel 5 直向 393×727 三張同上（`p_pixel5_stick` 是 17:05 放寬後的新版面：START / 全螢幕貼在畫面底右側，左邊整塊淨空）。
+- `p_pixel5_floathigh.png` / `p_iphone_floathigh.png` — **17:05 直向放寬驗證**：手指落在畫面正下方 → 底座整個浮到 HUD 底下（Pixel 5 cy 630 → 438、iPhone 13 直向 568 → 435），沒壓到畫面、START、全螢幕、A/B/C。
+- `p_iphone_stick.png` — iPhone 13 直向 390×664 靜止版面。
+- `m_settings_stick.png` / `m_settings_float.png` / `m_settings_top.png` / `m_settings_bottom.png` — iPhone 13 橫向設定頁（13 項 + 捲動條），「方向鍵樣式　搖桿」「搖桿浮動　開」都沒破版。
+- `p_settings_*.png` / `p_help3.png` — Pixel 5 直向同上。
+- `m_help3.png` — 說明第 3 頁：第 1 列「方向鍵／搖桿　可斜推（8 方向）」，11 列沒有溢出。
+- 工具：`shots/agent_touch2/shot2.py`（`--device` / `--landscape` / `--tag`，直接組設定頁與說明頁再截圖）。
+
+### 已知問題
+- ~~直向的浮動範圍很窄~~ → 17:05 已放寬（見里程碑）；直向現在 cy 438~644（206px）。剩下的限制是**水平只有約 70px**（左緣 82 ~ 動作鍵左界 152），因為直向寬度只有 393px。
+- 浮動「回原位」是**位置瞬回 + 0.22s 淡回**，不是位移補間（補間會讓截圖 / 自動測試量到中間值）。想要滑順回彈的話要另外加一個「不影響 getBoundingClientRect 測試」的做法（例如只對 transform 做補間）。
+- `relayout()` 會把 `padFloat` 清成 null：浮動中剛好碰到 resize / 轉向 / `kb-resize`，底座會瞬間跳回原位（手指還按著時方向判定會從新的中心重算）。實務上很少遇到。
+- `stick` 樣式的刻度是 CSS `transform: rotate() translateX()`，在極小尺寸（size 0.8 + iPad 側邊窄 ⇒ 底座 98px）時斜向刻度只有 9×5px，略小但仍看得出來。
+- 磁滯只做在**扇區切換**，沒有做「死區進出」的磁滯 ⇒ 手指停在死區邊界（20% 半徑）附近微抖時，方向仍會斷續。實測不明顯（死區半徑 ≥ 16px），需要的話再加 ±2px。
+- 一樣只在 Playwright / Chromium 驗證，**iOS Safari 真機未測**。
+- `l_iphone_dpad.png` 這種「切 dpad」狀態會寫進存檔；使用者若在設定切成十字，下次開仍是十字（符合預期）。
+
+### 跨檔需求
+1. **screen（src/main.js）**：直向浮動已由本檔自行解決（START / 全螢幕改貼畫面底、讓到動作側），**不再需要 main.js 多留空間**。唯一還有幫助的是直向寬度：393px 下方向側只有 ~233px，水平浮動範圍約 70px；無解也不影響可玩性。橫向不用改。
+2. **ui（src/ui.js / src/menu.js）**：本輪我直接改了 `UI.HELP3`（Round 11b 分工把 HELP3 的觸控說明列劃給 touch2）與 `SET_ITEMS` 的兩個觸控項，其餘 ui agent 的東西沒動。之後 ui agent 若要重排 HELP3，**列數上限仍是 11**（`gap = floor(135/n) ≥ 12`），右欄 138px。
+3. **總控 / qa**：
+   - 設定頁在觸控裝置上變成 **13 項**（桌機 7 項）；寫死項目數的測試要跟著改（`test_progression.py` 是動態算的，101/101 仍過）。
+   - 品質基準那行的「touch 56」請改成 **「touch 105」**。
+   - `tools/test_touch.py` 的 G / H 兩組會實際按 CDP 觸控並讀 `KB.TOUCH.floatZone()`，跑一次約 1 分鐘。
+   - 本輪**沒有跑 build.py、沒有 git**（依指示）；`src/touch.js` 仍是純 JS + 自注入 style，dist 打包規則不用改。
+4. **pwa（sw.js / build.py）**：無需求（沒有新檔、沒有新資源）。
+
+# Round 11b 總結（總控，2026-09-19）— 方向鍵改搖桿
+- 使用者真機回饋「不錯」，要求方向鍵中間變搖桿、可斜推。touch2 agent：`layout.stick`（預設 stick：圓底座 + 8 刻度 + 旋鈕完整跟隨、斜向亮 3 刻度）、8 扇區 ±6° 磁滯、死區 20%、`layout.stickFloat`（預設 true：手指落在方向側空白處搖桿移到落點，放開回位）、設定頁 +2 項、說明第 3 頁改字；直向 START / 全螢幕改貼畫面底靠動作側，浮動範圍 24px → 206px。test_touch 105/105；engine / saves / progression 綠；font_subset OK；build 完成（sw VERSION e8e71e8396）。
+- 已知：直向水平浮動範圍僅約 70px（螢幕寬所限）；只在 Chromium 模擬驗證。

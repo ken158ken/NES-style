@@ -5,7 +5,7 @@
  * 策略：install 預快取（逐個 add，個別失敗不整批失敗）／activate 清舊版 + claim／
  *       fetch 同源 GET「網路優先、失敗回快取」，導覽請求離線時回 ./index.html；跨域直接放行。
  */
-const VERSION = '4b7a7ddbd5';
+const VERSION = 'e8e71e8396';
 const ASSETS = [
   "./", "./index.html", "./src/const.js",
   "./src/gfx.js", "./src/input.js", "./src/audio.js",
