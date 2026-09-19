@@ -39,7 +39,7 @@ def main():
     found, missing, order = [], [], []
 
     def inline(m):
-        src = m.group(1)
+        src = m.group(1).split('?')[0]     # R2c：入口頁的 ?v=<hash> 版本戳（tools/stamp.py）不算路徑
         p = ROOT / src
         if not p.exists():
             missing.append(src)

@@ -928,8 +928,8 @@ def test_banner(page):
     ok('indexFrame 逐像素：GAME OVER 有 ≥ 60 個白色像素（真的畫出來了）',
        R['white1'] >= 60, R['white1'])
     ok('indexFrame 逐像素：PRESS START 有 ≥ 60 個白色像素', R['white2'] >= 60, R['white2'])
-    ok('state().banner 回報三行文字（fix4 多了 SELECT = CONTINUE）',
-       R['banner'] == ['GAME OVER', 'PRESS START', 'SELECT = CONTINUE'], R['banner'])
+    ok('state().banner 回報三行文字（fix4 多了續關提示行）',
+       R['banner'] == ['GAME OVER', 'PRESS START', 'C OR $ = CONTINUE'], R['banner'])
     ok('畫結束畫面沒有讓 VBlank 預算爆掉', not R['budgetOver'], R['budgetOver'])
 
     # ---- GAME OVER → START 回標題（P2-5）----
@@ -1082,7 +1082,7 @@ def test_stomp(page):
 
 # =====================================================================  ⑨e fix4（一鍵密技）
 # 使用者回饋（2026-09-19）：「多個一鍵密技好了，當然也保留舊密技，不然死到一半就玩不下去了。」
-#   START     = 暫停（凍結 update，畫 PAUSE / SELECT = SECRET 兩行，解除後還原畫面）
+#   START     = 暫停（凍結 update，畫 PAUSE / C OR $ = SECRET 兩行，解除後還原畫面）
 #   暫停 SELECT = 命補到 9 + 無敵 20 秒（1200 幀），**不限次數**，每次暫停只吃一次（防連按）
 #   GAME OVER SELECT = 3 條命回**當前關卡的檢查點**續關（分數保留），**不限次數**
 JS_TAPS = r"""
@@ -1112,8 +1112,8 @@ def test_fix4(page):
     ok('暫停畫面第 1 行 = PAUSE',
        page.evaluate("() => GAME.dev.screenText(12, 13, 5)") == 'PAUSE',
        page.evaluate("() => GAME.dev.screenText(12, 13, 5)"))
-    ok('暫停畫面第 2 行 = SELECT = SECRET',
-       page.evaluate("() => GAME.dev.screenText(15, 8, 15)") == 'SELECT = SECRET',
+    ok('暫停畫面第 2 行 = C OR $ = SECRET',
+       page.evaluate("() => GAME.dev.screenText(15, 8, 15)") == 'C OR $ = SECRET',
        page.evaluate("() => GAME.dev.screenText(15, 8, 15)"))
     W = page.evaluate(r"""() => {
       __nes.render();
@@ -1125,7 +1125,7 @@ def test_fix4(page):
       return { p: w(12, 13, 5), s: w(15, 8, 15) };
     }""")
     ok('PAUSE 真的畫在可見區（≥ 30 個白色像素）', W['p'] >= 30, W['p'])
-    ok('SELECT = SECRET 真的畫在可見區（≥ 60 個白色像素）', W['s'] >= 60, W['s'])
+    ok('密技提示行真的畫在可見區（≥ 60 個白色像素）', W['s'] >= 60, W['s'])
     frz = page.evaluate(r"""() => {
       const a = window.GAME.state();
       __nes.release(); __nes.step(90);
@@ -1146,7 +1146,7 @@ def test_fix4(page):
        page.evaluate("() => GAME.dev.screenText(18, 12, 7)") == 'SECRET!',
        page.evaluate("() => GAME.dev.screenText(18, 12, 7)"))
     ok('暫停 SELECT：state().banner 三行 + secrets 計數 +1',
-       g1['banner'] == ['PAUSE', 'SELECT = SECRET', 'SECRET!'] and g1['secrets'] == 1, g1['banner'])
+       g1['banner'] == ['PAUSE', 'C OR $ = SECRET', 'SECRET!'] and g1['secrets'] == 1, g1['banner'])
     ok('暫停 SELECT：仍然是暫停（遊戲沒有自己跑起來）', g1['paused'] is True)
     ok('暫停 SELECT：觸發 powerup 音效', g1['lastSfx'] == 'powerup', g1['lastSfx'])
 
@@ -1158,8 +1158,8 @@ def test_fix4(page):
 
     # ------------------------------------------- SECRET! 一秒後收回、PAUSE 留著
     g3 = page.evaluate("() => { __nes.release(); __nes.step(70); return window.GAME.state(); }")
-    ok('SECRET! 顯示 1 秒後收回、PAUSE / SELECT = SECRET 留著',
-       g3['banner'] == ['PAUSE', 'SELECT = SECRET'], g3['banner'])
+    ok('SECRET! 顯示 1 秒後收回、PAUSE / 提示行 留著',
+       g3['banner'] == ['PAUSE', 'C OR $ = SECRET'], g3['banner'])
 
     # ------------------------------------------------------- 解除暫停 → 重畫畫面
     g4 = page.evaluate(JS_TAPS, ['START'])
@@ -1236,8 +1236,8 @@ def test_fix4(page):
                line: d.screenText(18, 7, 17), white: white, banner: s.banner };
     }""", 300 if has11 else 100)
     ok('命盡 → GAME OVER', over['mode'] == 'gameover', over['mode'])
-    ok('GAME OVER 畫面多一行 SELECT = CONTINUE', over['line'] == 'SELECT = CONTINUE', over['line'])
-    ok('SELECT = CONTINUE 真的畫在可見區（≥ 60 個白色像素）', over['white'] >= 60, over['white'])
+    ok('GAME OVER 畫面多一行 C OR $ = CONTINUE', over['line'] == 'C OR $ = CONTINUE', over['line'])
+    ok('續關提示行真的畫在可見區（≥ 60 個白色像素）', over['white'] >= 60, over['white'])
     c1 = page.evaluate(JS_TAPS, ['SELECT'])
     ok('GAME OVER 按 SELECT → 回到遊戲', c1['mode'] == 'play', c1['mode'])
     ok('SELECT 續關給 3 條命', c1['lives'] == 3, c1['lives'])
@@ -1276,6 +1276,178 @@ def test_fix4(page):
     }""")
     ok('GAME OVER 按 START 仍然回標題（fix2-star P2-5 行為不變）',
        c3['over'] == 'gameover' and c3['mode'] == 'title' and c3['lives'] == 3 and c3['score'] == 0, c3)
+
+
+# ======= ⑨f fix5（真·一鍵密技：鍵盤 C / 觸控 ★密技 / nes-cheat，不必暫停）
+# 使用者回饋（2026-09-20）：「電腦版也要有一鍵密技…手機跟電腦都要，盡量一鍵，比較直觀。」
+#   play（含暫停中） = 立刻 命 9 + 無敵 1200 幀 + invincible 曲 + SECRET! 1 秒，不限次數（間隔 ≥ 30 幀）
+#   gameover        = 立刻 3 條命續關回當前關卡的檢查點（分數保留），不限次數
+#   title           = 無作用（本輪定案，見 PROGRESS「fix5-onekey」）
+def keyC(page, steps=2):
+    """真的鍵盤事件（code = KeyC），再推 steps 幀讓 update() 吃到旗標"""
+    page.keyboard.press('KeyC')
+    page.evaluate('(n) => __nes.step(n)', steps)
+    return page.evaluate('() => window.GAME.state()')
+
+
+def test_fix5(page):
+    print('[⑨f fix5：真·一鍵密技（鍵盤 C / ★密技鍵 / nes-cheat 事件），不必暫停]')
+    has11 = page.evaluate("() => !!(window.ST && ST.LEVELS && ST.LEVELS['1-1'])")
+    lvid = '1-1' if has11 else 'test'
+
+    # -------------------------------------------- 遊戲進行中（沒暫停）直接按 C
+    fresh(page, lvid)
+    page.evaluate("() => { __nes.press(['right'], 40); __nes.release(); __nes.step(2); }")
+    b = page.evaluate('() => window.GAME.state()')
+    g1 = keyC(page)
+    ok('play 中按 C：不必暫停就生效（paused 仍是 false）', g1['paused'] is False, g1['paused'])
+    ok('play 中按 C：命補到 9', g1['lives'] == 9, (b['lives'], g1['lives']))
+    ok('play 中按 C：無敵 1200 幀（20 秒）', g1['inv'] >= 1195, g1['inv'])
+    ok('play 中按 C：cheatInv 旗標立起來（無敵結束會換回關卡曲）', g1['cheatInv'] is True)
+    ok('play 中按 C：cheats 計數 +1、lastCheat = secret',
+       g1['cheats'] == 1 and g1['lastCheat'] == 'secret', (g1['cheats'], g1['lastCheat']))
+    ok('play 中按 C：觸發 powerup 音效', g1['lastSfx'] == 'powerup', g1['lastSfx'])
+    ok('play 中按 C：畫面出現 SECRET!（列 18）',
+       page.evaluate("() => GAME.dev.screenText(18, 12, 7)") == 'SECRET!',
+       page.evaluate("() => GAME.dev.screenText(18, 12, 7)"))
+    ok('play 中按 C：只疊 SECRET! 一行（不會冒出 PAUSE 那兩行）',
+       g1['floatBanner'] == ['SECRET!'] and g1['banner'] is None,
+       (g1['floatBanner'], g1['banner']))
+
+    # ---------------------------------------------------- 防連按（30 幀）
+    page.evaluate("() => { GAME.dev.setLives(1); GAME.dev.hero().inv = 5; }")
+    g2 = keyC(page)
+    ok('連按限制：30 幀內再按 C 完全沒有效果',
+       g2['cheats'] == 1 and g2['lives'] == 1 and g2['inv'] <= 5,
+       (g2['cheats'], g2['lives'], g2['inv']))
+    page.evaluate('() => __nes.step(32)')
+    g3 = keyC(page)
+    ok('連按限制：過了 30 幀再按 C 又生效（不限次數）',
+       g3['cheats'] == 2 and g3['lives'] == 9 and g3['inv'] >= 1195,
+       (g3['cheats'], g3['lives'], g3['inv']))
+
+    # -------------------------------- SECRET! 1 秒後收回 + 地形逐格還原
+    cells = page.evaluate(r"""() => {
+      const d = GAME.dev, base = window.GAME.state().camX >> 3;
+      return { base: base, cam: window.GAME.state().camX };
+    }""")
+    page.evaluate("() => { __nes.release(); __nes.step(70); }")
+    g4 = page.evaluate('() => window.GAME.state()')
+    ok('SECRET! 顯示約 1 秒後自己收回',
+       g4['secretMsg'] == 0 and g4['floatBanner'] is None, (g4['secretMsg'], g4['floatBanner']))
+    rest = page.evaluate(r"""(base) => {
+      const d = GAME.dev;
+      let bad = 0;
+      for (let i = 0; i < 7; i++) {
+        if (d.ntTileAt(base + 12 + i, 18) !== d.bgIndexAt(base + 12 + i, 18)) bad++;
+      }
+      return bad;
+    }""", cells['base'])
+    ok('SECRET! 收回後被蓋掉的 7 格地形磚逐格還原', rest == 0, rest)
+    lt = page.evaluate("() => { __nes.render(); return __nes.lint(); }")
+    ok('SECRET! 收回後畫面 lint 綠（≤ 25 色）', lt['ok'] is True and lt['colors'] <= 25,
+       {'ok': lt['ok'], 'colors': lt['colors']})
+    g5 = page.evaluate("() => { __nes.press(['right'], 30); return window.GAME.state(); }")
+    ok('按 C 之後遊戲照樣繼續跑（沒有被凍住）', g5['x'] > g4['x'], (g4['x'], g5['x']))
+
+    # ------------------------------------------------------- 暫停中按 C
+    page.evaluate('() => { __nes.release(); __nes.step(32); }')
+    p1 = page.evaluate(JS_TAPS, ['START'])
+    ok('暫停後仍可按 C（先確認進了暫停）', p1['paused'] is True, p1['paused'])
+    page.evaluate("() => { GAME.dev.setLives(1); GAME.dev.hero().inv = 0; }")
+    p2 = keyC(page)
+    ok('暫停中按 C：一樣生效（命 9 / 無敵 1200）',
+       p2['paused'] is True and p2['lives'] == 9 and p2['inv'] >= 1195,
+       (p2['lives'], p2['inv']))
+    ok('暫停中按 C：畫暫停版的三行（PAUSE / 提示行 / SECRET!）',
+       p2['banner'] == ['PAUSE', 'C OR $ = SECRET', 'SECRET!'], p2['banner'])
+    page.evaluate(JS_TAPS, ['START'])
+
+    # -------------------------- 其他入口：CustomEvent / NES.Touch.cheat()
+    fresh(page, lvid)
+    e1 = page.evaluate(r"""() => {
+      window.dispatchEvent(new CustomEvent('nes-cheat', { detail: { source: 'test' } }));
+      __nes.step(2); return window.GAME.state();
+    }""")
+    ok('直接派發 window 的 nes-cheat 事件也能發動',
+       e1['cheats'] == 1 and e1['lives'] == 9, (e1['cheats'], e1['lives']))
+    page.evaluate("() => { GAME.dev.setLives(1); __nes.step(32); }")
+    e2 = page.evaluate("() => { NES.Touch.cheat(); __nes.step(2); return window.GAME.state(); }")
+    ok('NES.Touch.cheat()（= 觸控 ★密技 鍵）也能發動',
+       e2['cheats'] == 2 and e2['lives'] == 9, (e2['cheats'], e2['lives']))
+
+    # ------------------------------------- 修飾鍵 / 自動重複要忽略
+    page.evaluate('() => __nes.step(32)')
+    page.evaluate("() => GAME.dev.setLives(1)")
+    page.keyboard.press('Control+c')
+    page.evaluate('() => __nes.step(2)')
+    m1 = page.evaluate('() => window.GAME.state()')
+    ok('Ctrl+C 不會觸發密技（複製快捷鍵）', m1['cheats'] == 2 and m1['lives'] == 1,
+       (m1['cheats'], m1['lives']))
+    m2 = page.evaluate(r"""() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyC', repeat: true }));
+      __nes.step(2); return window.GAME.state();
+    }""")
+    ok('按住不放的自動重複（e.repeat）不會觸發', m2['cheats'] == 2 and m2['lives'] == 1,
+       (m2['cheats'], m2['lives']))
+
+    # ------------------------------------------------------ title 無作用
+    page.goto(BASE)
+    page.wait_for_function('() => !!window.__nes && !!window.GAME && !!window.GAME.dev')
+    page.evaluate('() => __nes.step(2)')
+    t1 = keyC(page)
+    ok('title 畫面按 C：無作用（維持標題、不記 cheats）',
+       t1['mode'] == 'title' and t1['cheats'] == 0 and t1['lastCheat'] == 'none',
+       (t1['mode'], t1['lastCheat']))
+    ok('title 多了一行 SECRET: C KEY OR $ BTN（列 19）',
+       page.evaluate("() => GAME.dev.screenText(19, 5, 22)") == 'SECRET: C KEY OR $ BTN',
+       page.evaluate("() => GAME.dev.screenText(19, 5, 22)"))
+
+    # ------------------------------------------- GAME OVER 按 C 立刻續關
+    fresh(page, lvid)
+    over = page.evaluate(r"""(col) => {
+      const d = GAME.dev, S = () => window.GAME.state();
+      d.warp(col * 8); __nes.step(4);
+      d.setScore(6100); d.setLives(0); d.kill();
+      let n = 0; while (S().mode !== 'gameover' && n++ < 600) __nes.step(1);
+      const s = S();
+      return { mode: s.mode, score: s.score, cp: s.checkpoint, level: s.level,
+               line: d.screenText(18, 7, 17) };
+    }""", 300 if has11 else 100)
+    ok('命盡 → GAME OVER（第三行 = C OR $ = CONTINUE）',
+       over['mode'] == 'gameover' and over['line'] == 'C OR $ = CONTINUE', over['line'])
+    c1 = keyC(page)
+    ok('GAME OVER 按 C：立刻回到遊戲', c1['mode'] == 'play', c1['mode'])
+    ok('GAME OVER 按 C：3 條命', c1['lives'] == 3, c1['lives'])
+    ok('GAME OVER 按 C：分數保留', c1['score'] == over['score'], (over['score'], c1['score']))
+    ok('GAME OVER 按 C：回到當前關卡的檢查點',
+       c1['level'] == over['level'] and (over['cp'] < 0 or abs(c1['x'] - over['cp'] * 8) <= 32),
+       (over['level'], over['cp'], c1['level'], c1['x']))
+    ok('GAME OVER 按 C：cheatContinues 計數 +1、字收回',
+       c1['cheatContinues'] == 1 and c1['continues'] == 1 and c1['banner'] is None,
+       (c1['cheatContinues'], c1['banner']))
+    lt2 = page.evaluate("() => { __nes.render(); return __nes.lint(); }")
+    ok('C 續關後畫面 lint 綠', lt2['ok'] is True and lt2['colors'] <= 25,
+       {'ok': lt2['ok'], 'colors': lt2['colors']})
+    c2m = page.evaluate(r"""() => {
+      const d = GAME.dev, S = () => window.GAME.state();
+      d.setLives(0); d.kill();
+      let n = 0; while (S().mode !== 'gameover' && n++ < 600) __nes.step(1);
+      return S().mode;
+    }""")
+    c2 = keyC(page)
+    ok('GAME OVER 按 C 不限次數（第 2 次照樣續關）',
+       c2m == 'gameover' and c2['mode'] == 'play' and c2['lives'] == 3
+       and c2['cheatContinues'] == 2, (c2m, c2['cheatContinues']))
+
+    # ------------------------------ fix4 的暫停 + SELECT 仍然完全可用
+    fresh(page, lvid)
+    k1 = page.evaluate(JS_TAPS, ['START', 'SELECT'])
+    ok('fix4 的「暫停 + SELECT」仍然可用',
+       k1['paused'] is True and k1['secrets'] == 1 and k1['lives'] == 9 and k1['inv'] == 1200,
+       (k1['secrets'], k1['lives']))
+    ok('fix4 暫停 SELECT 仍是三行 banner',
+       k1['banner'] == ['PAUSE', 'C OR $ = SECRET', 'SECRET!'], k1['banner'])
 
 
 # =====================================================================  主程式
@@ -1318,6 +1490,7 @@ def main():
         test_modes(page)
         test_banner(page)
         test_fix4(page)
+        test_fix5(page)
         test_music_hooks(page)
         test_query(page)
         test_air_control(page)

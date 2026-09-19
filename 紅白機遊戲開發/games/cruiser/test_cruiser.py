@@ -1010,8 +1010,8 @@ def test_fix3(page):
       return { m0: m0, mode: g.mode, msg: g.msg };
     }""")
     ok('GAME OVER 按 START 仍然回標題', r['m0'] == 'gameover' and r['mode'] == 'title', r)
-    ok('標題畫面有秘技提示小字（fix4 改成 SECRET: PAUSE + SELECT）',
-       'SECRET: PAUSE + SELECT' in page.evaluate("() => CR.screenText(18)"),
+    ok('標題畫面有秘技提示小字（fix5 改成 SECRET: C KEY OR $ BTN）',
+       'SECRET: C KEY OR $ BTN' in page.evaluate("() => CR.screenText(18)"),
        page.evaluate("() => CR.screenText(18)"))
 
 
@@ -1029,8 +1029,8 @@ def test_fix4(page):
     b = S(page)
     p1 = page.evaluate(JS_TAPS, ['START'])
     ok('暫停畫面第 1 行 = PAUSE（列 11）', 'PAUSE' in p1['msg'].split('|')[0], p1['msg'])
-    ok('暫停畫面第 2 行 = SELECT = SECRET（列 13）',
-       'SELECT = SECRET' in p1['msg2'].split('|')[0], p1['msg2'])
+    ok('暫停畫面第 2 行 = C OR $ = SECRET（列 13）',
+       'C OR $ = SECRET' in p1['msg2'].split('|')[0], p1['msg2'])
     px = page.evaluate(r"""() => {
       __nes.render();
       const f = __nes.nes().ppu.indexFrame, W = 256;
@@ -1038,7 +1038,7 @@ def test_fix4(page):
       for (let y = 13 * 8; y < 14 * 8; y++) for (let x = 0; x < W; x++) if (f[y * W + x] === 0x30) n++;
       return n;
     }""")
-    ok('SELECT = SECRET 真的畫在可見區（列 13 的白色像素 ≥ 60）', px >= 60, px)
+    ok('密技提示行真的畫在可見區（列 13 的白色像素 ≥ 60）', px >= 60, px)
 
     # ------------------------------------------------------- SELECT 一鍵密技
     g1 = page.evaluate(JS_TAPS, ['SELECT'])
@@ -1049,8 +1049,8 @@ def test_fix4(page):
     ok('SELECT：不含 DOUBLE / LASER（與 Konami 同一組效果）',
        g1['power']['double'] is False and g1['power']['laser'] is False, g1['power'])
     ok('SELECT：顯示 SECRET!', 'SECRET' in g1['msg'].split('|')[1], g1['msg'])
-    ok('SELECT：PAUSE / SELECT = SECRET 兩行仍在',
-       'PAUSE' in g1['msg'].split('|')[0] and 'SELECT = SECRET' in g1['msg2'].split('|')[0], g1['msg2'])
+    ok('SELECT：PAUSE / 提示行 兩行仍在',
+       'PAUSE' in g1['msg'].split('|')[0] and 'C OR $ = SECRET' in g1['msg2'].split('|')[0], g1['msg2'])
     ok('SELECT：**不消耗** Konami 的一場 1 次額度', g1['secretLeft'] == 1, g1['secretLeft'])
     ok('SELECT：selectSecrets 計數 +1', g1['selectSecrets'] == 1 and g1['selectUsed'] is True, g1)
 
@@ -1063,8 +1063,8 @@ def test_fix4(page):
     # -------------------------------------- 解除 → 再暫停 → SELECT 可以再用（不限次數）
     g3 = page.evaluate(JS_TAPS, ['START'])
     ok('解除暫停（文字收回）', g3['paused'] is False and 'PAUSE' not in g3['msg'].split('|')[0], g3['msg'])
-    ok('解除暫停後列 13 的 SELECT = SECRET 也還原了',
-       'SELECT = SECRET' not in g3['msg2'].split('|')[0], g3['msg2'])
+    ok('解除暫停後列 13 的提示行也還原了',
+       'C OR $ = SECRET' not in g3['msg2'].split('|')[0], g3['msg2'])
     page.evaluate("() => { __nes.release(); __nes.step(20); }")
     g4 = page.evaluate(JS_TAPS, ['START'])
     ok('再次暫停：SELECT 額度重置', g4['selectUsed'] is False, g4['selectUsed'])
@@ -1107,8 +1107,8 @@ def test_fix4(page):
       __nes.step(150);
       return GAME.state();
     }""")
-    ok('GAME OVER 畫面多一行 SELECT = CONTINUE（列 17）',
-       'SELECT = CONTINUE' in over['msg2'].split('|')[1], over['msg2'])
+    ok('GAME OVER 畫面多一行 C OR $ = CONTINUE（列 17）',
+       'C OR $ = CONTINUE' in over['msg2'].split('|')[1], over['msg2'])
     ok('GAME OVER 畫面 PRESS START 仍在', 'PRESS START' in over['msg'].split('|')[1], over['msg'])
     px2 = page.evaluate(r"""() => {
       __nes.render();
@@ -1117,7 +1117,7 @@ def test_fix4(page):
       for (let y = 17 * 8; y < 18 * 8; y++) for (let x = 0; x < W; x++) if (f[y * W + x] === 0x30) n++;
       return n;
     }""")
-    ok('SELECT = CONTINUE 真的畫在可見區（列 17 白色像素 ≥ 60）', px2 >= 60, px2)
+    ok('續關提示行真的畫在可見區（列 17 白色像素 ≥ 60）', px2 >= 60, px2)
     c1 = page.evaluate(JS_TAPS, ['SELECT'])
     ok('GAME OVER 按 SELECT → 回到遊戲', c1['mode'] == 'play', c1['mode'])
     ok('SELECT 續關給 3 條命', c1['lives'] == 3, c1['lives'])
@@ -1144,6 +1144,188 @@ def test_fix4(page):
        c2['over'] == 'gameover' and c2['mode'] == 'play' and c2['lives'] == 3 and c2['sc'] == 2, c2)
 
 
+# ============== ⑭ fix5（真·一鍵密技：鍵盤 C / 觸控 ★密技 / nes-cheat，不必暫停）
+# 使用者回饋（2026-09-20）：「電腦版也要有一鍵密技，巡航艦一定要，不然很難玩。
+#   手機跟電腦都要，盡量一鍵，比較直觀。」
+#   play（含暫停中） = 立刻 SPEED+1 / MISSILE / OPTION×2 / 護盾 5 + SECRET! 1 秒，不限次數（間隔 ≥ 30 幀）
+#   gameover        = 立刻 3 條命續關回檢查點（分數保留），不限次數
+#   title           = 無作用（本輪定案，見 PROGRESS「fix5-onekey」）
+JS_CHEAT_EV = r"""
+() => {
+  const ev = new CustomEvent('nes-cheat', { detail: { source: 'test' } });
+  window.dispatchEvent(ev); __nes.step(2);
+  return window.GAME.state();
+}
+"""
+
+
+def keyC(page, steps=2):
+    """真的鍵盤事件（code = KeyC），再推 steps 幀讓 update() 吃到旗標"""
+    page.keyboard.press('KeyC')
+    page.evaluate('(n) => __nes.step(n)', steps)
+    return S(page)
+
+
+def test_fix5(page):
+    print('[⑭ fix5：真·一鍵密技（鍵盤 C / ★密技鍵 / nes-cheat 事件），不必暫停]')
+
+    # ------------------------------------------------ 遊戲進行中直接按 C
+    fresh(page, setup={'noSolid': True})
+    page.evaluate("""() => {
+      CR.__sfx = [];
+      const A = CR.Audio;
+      if (A && A.sfx && !A.__wrapped) {
+        const o = A.sfx.bind(A); A.__wrapped = true;
+        A.sfx = function (n, x) { CR.__sfx.push(n); return o(n, x); };
+      }
+      __nes.release(); __nes.step(10);
+    }""")
+    b = S(page)
+    g1 = keyC(page)
+    ok('play 中按 C：不必暫停就生效（paused 仍是 false）', g1['paused'] is False, g1['paused'])
+    ok('play 中按 C：SPEED +1', g1['speed'] == b['speed'] + 1, (b['speed'], g1['speed']))
+    ok('play 中按 C：MISSILE / OPTION×2 / 護盾 5',
+       g1['power']['missile'] is True and g1['power']['option'] == 2 and g1['power']['shield'] == 5,
+       g1['power'])
+    ok('play 中按 C：不含 DOUBLE / LASER（與 Konami / SELECT 同一組效果）',
+       g1['power']['double'] is False and g1['power']['laser'] is False, g1['power'])
+    ok('play 中按 C：畫面出現 SECRET!（列 15）', 'SECRET' in g1['msg'].split('|')[1], g1['msg'])
+    ok('play 中按 C：不會冒出 PAUSE 那兩行（列 11 / 13 乾淨）',
+       'PAUSE' not in g1['msg'].split('|')[0] and 'SECRET' not in g1['msg2'].split('|')[0],
+       (g1['msg'], g1['msg2']))
+    ok('play 中按 C：cheats 計數 +1、lastCheat = secret',
+       g1['cheats'] == 1 and g1['lastCheat'] == 'secret', (g1['cheats'], g1['lastCheat']))
+    ok('play 中按 C：有 powerup 音效', 'powerup' in page.evaluate('() => CR.__sfx'),
+       page.evaluate('() => CR.__sfx'))
+    ok('play 中按 C：**不消耗** Konami 的一場 1 次額度', g1['secretLeft'] == 1, g1['secretLeft'])
+
+    # --------------------------------------------------- 防連按（30 幀）
+    page.evaluate("() => { CR.ship.power.option = 0; CR.ship.power.shield = 0; CR.ship.syncOptions(); }")
+    g2 = keyC(page)
+    ok('連按限制：30 幀內再按 C 完全沒有效果',
+       g2['cheats'] == 1 and g2['power']['option'] == 0 and g2['power']['shield'] == 0,
+       (g2['cheats'], g2['power']))
+    page.evaluate('() => __nes.step(32)')
+    g3 = keyC(page)
+    ok('連按限制：過了 30 幀再按 C 又生效（不限次數）',
+       g3['cheats'] == 2 and g3['power']['option'] == 2 and g3['power']['shield'] == 5,
+       (g3['cheats'], g3['power']))
+
+    # ------------------------------------- SECRET! 1 秒後收回 + 地形還原
+    page.evaluate('() => __nes.step(70)')
+    g4 = S(page)
+    ok('SECRET! 顯示約 1 秒後自己收回', g4['secretMsg'] == 0 and 'SECRET' not in g4['msg'].split('|')[1],
+       (g4['secretMsg'], g4['msg']))
+    lt = page.evaluate("() => { __nes.render(); return __nes.lint(); }")
+    ok('SECRET! 收回後畫面 lint 綠（地形 / 屬性都還原了）',
+       lt['ok'] is True and lt['colors'] <= 25, {'ok': lt['ok'], 'colors': lt['colors']})
+
+    # ------------------------------------------------ 已滿強化：只補護盾
+    page.evaluate("""() => {
+      const s = CR.ship;
+      s.speed = CR.Ship.MAX_SPEED; s.power.missile = true;
+      s.power.option = CR.Ship.MAX_OPTION; s.power.shield = 0; s.syncOptions();
+      __nes.step(32);
+    }""")
+    g5 = keyC(page)
+    ok('已經滿強化：按 C 只把護盾補滿，SPEED 不會超過上限',
+       g5['speed'] == page.evaluate('() => CR.Ship.MAX_SPEED') and g5['power']['shield'] == 5,
+       (g5['speed'], g5['power']['shield']))
+    ok('已經滿強化：仍然顯示 SECRET!', 'SECRET' in g5['msg'].split('|')[1], g5['msg'])
+
+    # ------------------------------------------------------- 暫停中按 C
+    page.evaluate('() => __nes.step(70)')
+    p1 = page.evaluate(JS_TAPS, ['START'])
+    ok('暫停後仍可按 C（畫面維持 PAUSE 兩行）', p1['paused'] is True, p1['paused'])
+    page.evaluate("() => { CR.ship.power.shield = 0; }")
+    p2 = keyC(page)
+    ok('暫停中按 C：一樣生效（護盾補回 5）',
+       p2['paused'] is True and p2['power']['shield'] == 5 and p2['cheats'] == 4,
+       (p2['power']['shield'], p2['cheats']))
+    ok('暫停中按 C：三行都在（PAUSE / 提示行 / SECRET!）',
+       'PAUSE' in p2['msg'].split('|')[0] and 'C OR $ = SECRET' in p2['msg2'].split('|')[0] and
+       'SECRET' in p2['msg'].split('|')[1], (p2['msg'], p2['msg2']))
+    page.evaluate(JS_TAPS, ['START'])
+
+    # ---------------------------------- 其他入口：CustomEvent / NES.Touch.cheat()
+    fresh(page, setup={'noSolid': True})
+    page.evaluate("() => { __nes.release(); __nes.step(10); }")
+    e1 = page.evaluate(JS_CHEAT_EV)
+    ok('直接派發 window 的 nes-cheat 事件也能發動',
+       e1['cheats'] == 1 and e1['power']['shield'] == 5, (e1['cheats'], e1['power']['shield']))
+    page.evaluate("() => { CR.ship.power.shield = 0; __nes.step(32); }")
+    e2 = page.evaluate("() => { NES.Touch.cheat(); __nes.step(2); return GAME.state(); }")
+    ok('NES.Touch.cheat()（= 觸控 ★密技 鍵）也能發動',
+       e2['cheats'] == 2 and e2['power']['shield'] == 5, (e2['cheats'], e2['power']['shield']))
+
+    # ----------------------------------------- 修飾鍵 / 自動重複要忽略
+    page.evaluate('() => __nes.step(32)')
+    page.keyboard.press('Control+c')
+    page.evaluate('() => __nes.step(2)')
+    m1 = S(page)
+    ok('Ctrl+C 不會觸發密技（複製快捷鍵）', m1['cheats'] == 2, m1['cheats'])
+    m2 = page.evaluate("""() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyC', repeat: true }));
+      __nes.step(2); return GAME.state();
+    }""")
+    ok('按住不放的自動重複（e.repeat）不會觸發', m2['cheats'] == 2, m2['cheats'])
+
+    # -------------------------------------------------------- title 無作用
+    page.goto(PAGE)
+    page.wait_for_function('() => !!window.__nes && !!window.GAME && !!window.CR && !!window.CR.ship')
+    page.evaluate('() => __nes.step(2)')
+    t1 = keyC(page)
+    ok('title 畫面按 C：無作用（維持標題、不記 cheats）',
+       t1['mode'] == 'title' and t1['cheats'] == 0 and t1['lastCheat'] == 'none', t1['lastCheat'])
+    ok('title 小字改成 SECRET: C KEY OR $ BTN',
+       'SECRET: C KEY OR $ BTN' in page.evaluate("() => CR.screenText(18)"),
+       page.evaluate("() => CR.screenText(18)"))
+
+    # -------------------------------------------- GAME OVER 按 C 立刻續關
+    page.goto((ROOT / 'cruiser.html').as_uri() + '?debug=1&scale=1&mute=1&camx=1600')
+    page.wait_for_function('() => !!window.__nes && !!window.CR && !!window.CR.ship')
+    page.evaluate("() => { __nes.tap('start', 1); __nes.step(30); }")
+    over = page.evaluate(r"""() => {
+      CR.ship.addScore(7700);
+      CR.ship.lives = 1; CR.ship.invul = 0; CR.ship.power.shield = 0; CR.ship.hit(true);
+      __nes.step(150);
+      return GAME.state();
+    }""")
+    ok('GAME OVER 第三行改成 C OR $ = CONTINUE（列 17）',
+       'C OR $ = CONTINUE' in over['msg2'].split('|')[1], over['msg2'])
+    c1 = keyC(page)
+    ok('GAME OVER 按 C：立刻回到遊戲', c1['mode'] == 'play', c1['mode'])
+    ok('GAME OVER 按 C：3 條命', c1['lives'] == 3, c1['lives'])
+    ok('GAME OVER 按 C：分數保留', c1['score'] >= over['score'], (over['score'], c1['score']))
+    # 一鍵是在 update() 開頭處理的 ⇒ 續關的那一幀也會跑一次 play 更新（鏡頭多前進 1~2px）
+    ok('GAME OVER 按 C：回到檢查點', abs(c1['camX'] - over['continueCam']) <= 2,
+       (over['continueCam'], c1['camX']))
+    ok('GAME OVER 按 C：cheatContinues 計數 +1', c1['cheatContinues'] == 1 and c1['continues'] == 1,
+       (c1['cheatContinues'], c1['continues']))
+    lt2 = page.evaluate("() => { __nes.render(); return __nes.lint(); }")
+    ok('C 續關後畫面 lint 綠', lt2['ok'] is True and lt2['colors'] <= 25,
+       {'ok': lt2['ok'], 'colors': lt2['colors']})
+    c2 = page.evaluate(r"""() => {
+      CR.ship.lives = 1; CR.ship.invul = 0; CR.ship.power.shield = 0; CR.ship.hit(true);
+      __nes.step(150); return GAME.state().mode;
+    }""")
+    c3 = keyC(page)
+    ok('GAME OVER 按 C 不限次數（第 2 次照樣續關）',
+       c2 == 'gameover' and c3['mode'] == 'play' and c3['lives'] == 3 and c3['cheatContinues'] == 2, c3['cheatContinues'])
+
+    # -------------------------------- fix4 的暫停 + SELECT 與 Konami 都還在
+    fresh(page, setup={'noSolid': True})
+    page.evaluate("() => { __nes.release(); __nes.step(10); }")
+    k1 = page.evaluate(JS_TAPS, ['START', 'SELECT'])
+    ok('fix4 的「暫停 + SELECT」仍然可用',
+       k1['paused'] is True and k1['selectSecrets'] == 1 and k1['power']['shield'] == 5, k1['selectSecrets'])
+    page.evaluate("() => { CR.ship.power.option = 0; CR.ship.power.shield = 0; CR.ship.syncOptions(); }")
+    k2 = page.evaluate(JS_TAPS, CODE_FC)
+    ok('Konami 序列（一場 1 次）仍然可用，且此時才扣額度',
+       k2['secretLeft'] == 0 and k2['power']['option'] == 2 and k2['power']['shield'] == 5,
+       (k2['secretLeft'], k2['power']))
+
+
 def main():
     if not (ROOT / 'cruiser.html').exists():
         print('找不到 cruiser.html')
@@ -1167,6 +1349,7 @@ def main():
         test_fix2(page)
         test_fix3(page)
         test_fix4(page)
+        test_fix5(page)
         test_no_errors(page, errors)
         browser.close()
 

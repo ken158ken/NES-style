@@ -34,30 +34,30 @@
 <pre id="hint"></pre>
 
 <!-- ===== engine（契約載入順序；缺檔不致命，nes.js 會用 stub 頂替） ===== -->
-<script src="engine/palette.js"></script>
-<script src="engine/fixed.js"></script>
-<script src="engine/input.js"></script>
-<script src="engine/cpu_timing.js"></script>
-<script src="engine/chr.js"></script>
-<script src="engine/ppu.js"></script>
-<script src="engine/nes_lint.js"></script>
-<script src="engine/apu.js"></script>
-<script src="engine/music.js"></script>
-<script src="engine/shmup.js"></script>
-<script src="engine/touch.js"></script>
-<script src="engine/nes.js"></script>
+<script src="engine/palette.js?v=c8345ef2"></script>
+<script src="engine/fixed.js?v=4b0721a0"></script>
+<script src="engine/input.js?v=2038ad30"></script>
+<script src="engine/cpu_timing.js?v=3ea1808b"></script>
+<script src="engine/chr.js?v=967299de"></script>
+<script src="engine/ppu.js?v=e2bb80b9"></script>
+<script src="engine/nes_lint.js?v=230e6bcf"></script>
+<script src="engine/apu.js?v=5e88b263"></script>
+<script src="engine/music.js?v=17d7aefa"></script>
+<script src="engine/shmup.js?v=3c03a5a1"></script>
+<script src="engine/touch.js?v=144579cd"></script>
+<script src="engine/nes.js?v=4bed9ffa"></script>
 
 <!-- ===== 遊戲：games/star「星塵勇者」（R2b 平台動作 W1）=====
      載入順序：chr_hero（star-hero 精靈磚 0..127 + HUD 字型）→ chr_world（star-world 敵人 / 魔王磚 128..255 + 地形）
      → song（star-audio）→ hero → enemies / boss / levels_w1（star-world）→ main（star-hero，最後一檔設 window.GAME）。 -->
-<script src="games/star/chr_hero.js"></script>
-<script src="games/star/chr_world.js"></script>
-<script src="games/star/song.js"></script>
-<script src="games/star/hero.js"></script>
-<script src="games/star/enemies.js"></script>
-<script src="games/star/boss.js"></script>
-<script src="games/star/levels_w1.js"></script>
-<script src="games/star/main.js"></script>
+<script src="games/star/chr_hero.js?v=caecd2f8"></script>
+<script src="games/star/chr_world.js?v=4fd19254"></script>
+<script src="games/star/song.js?v=3a1f7fd9"></script>
+<script src="games/star/hero.js?v=f526d69a"></script>
+<script src="games/star/enemies.js?v=5d9d850f"></script>
+<script src="games/star/boss.js?v=dc46f708"></script>
+<script src="games/star/levels_w1.js?v=ac392842"></script>
+<script src="games/star/main.js?v=4100b8f4"></script>
 
 <script>
 // ---- 啟動：桌機整數放大置中 / 手機小數倍貼齊、鍵盤焦點、F 全螢幕、觸控覆蓋層版面 ----

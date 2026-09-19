@@ -4230,6 +4230,10 @@
  * 4. 設定存 `localStorage.nes_touch`（JSON）。
  * 5. 顯示：mode auto 時「觸控裝置才顯示」，鍵盤 / 手把輸入後淡出，再觸控又出現；on = 強制顯示、
  *    off = 強制隱藏（觸控裝置上點到畫面會自動退回 auto，避免鎖死沒有入口）。
+ * 6. fix5（使用者回饋「一鍵密技，不必暫停」）：第 7 顆按鍵 `cheat`（紫色膠囊「★密技」）。
+ *    **不是 NES 八鍵**（不進 mask / 不碰 inject），按下（pointerdown 邊緣、300ms 防連按）
+ *    只派發 `window` 上的 `nes-cheat` CustomEvent，由各遊戲的 main.js 自己決定效果。
+ *    `layout.cheatButton = false` 可整顆關掉；`NES.Touch.cheat()` 可程式觸發（測試用）。
  */
 (function (root) {
   'use strict';
@@ -4248,12 +4252,16 @@
     NES.Touch = {
       available: false, headless: true,
       active: function () { return false; }, show: function () { }, hide: function () { },
-      layout: { mode: 'auto', side: 'right', size: 1, opacity: 0.8, stick: 'stick', stickFloat: true },
-      setLayout: function (o) { return this.layout; }, rects: function () { return {}; }, mask: function () { return 0; }
+      layout: { mode: 'auto', side: 'right', size: 1, opacity: 0.8, stick: 'stick', stickFloat: true,
+                cheatButton: true },
+      setLayout: function (o) { return this.layout; }, rects: function () { return {}; }, mask: function () { return 0; },
+      cheat: function () { return false; }
     };
     return;
   }
 
+  var CHEAT_LABEL = '\u2605\u5bc6\u6280';   // ★密技
+  var CHEAT_MS = 300;                       // 一鍵密技防連按（毫秒）
   var HAS_PE = !!W.PointerEvent;
   var FS_OK = !!(D.documentElement.requestFullscreen || D.documentElement.webkitRequestFullscreen);
   var HOLD = 1000000000;          // inject 的「按住」幀數（實務上等於永遠，放開時才清掉）
@@ -4288,6 +4296,8 @@
     '#nes-touch .nt-b{background:#e86038;border-color:#7a2810;border-radius:50%;color:#fff;}',
     '#nes-touch .nt-sel{background:#98202c;border-color:#4a0c14;border-radius:999px;color:#ffd8d8;}',
     '#nes-touch .nt-start{background:#98202c;border-color:#4a0c14;border-radius:999px;color:#ffd8d8;}',
+    '#nes-touch .nt-cheat{background:#8a34c8;border-color:#3d1060;border-radius:999px;color:#ffe8ff;',
+    '  letter-spacing:.02em;white-space:nowrap;}',
     '#nes-touch .nt-fs{background:#3860c8;border-color:#14224f;border-radius:22%;color:#fff;}',
     '#nes-touch .nt-pad{background:#2a2a30;border:4px solid #101014;border-radius:50%;',
     '  box-shadow:inset 0 -5px 0 rgba(0,0,0,.34),inset 0 4px 0 rgba(255,255,255,.12),0 2px 0 rgba(0,0,0,.40);}',
@@ -4305,7 +4315,10 @@
     '#nes-touch .nt-fsi{position:relative;display:block;}',
     '#nes-touch .nt-fsi s{position:absolute;display:block;text-decoration:none;}',
     '@keyframes nt-ret{0%{opacity:.18;}100%{opacity:1;}}',
-    '#nes-touch .nt-pad.nt-ret{animation:nt-ret .22s ease;}'
+    '#nes-touch .nt-pad.nt-ret{animation:nt-ret .22s ease;}',
+    '@keyframes nt-flash{0%{filter:brightness(2.6);transform:scale(1.14);}',
+    '  60%{filter:brightness(1.7);transform:scale(1.02);}100%{filter:brightness(1);transform:scale(1);}}',
+    '#nes-touch .nt-btn.nt-flash{animation:nt-flash .34s ease-out;}'
   ].join('\n');
 
   /* ------------------------------------------------------------------ DOM */
@@ -4334,6 +4347,7 @@
   var bB = mk('nt-btn nt-b', 'b', 'B');
   var bSel = mk('nt-btn nt-sel', 'select', 'SELECT');
   var bStart = mk('nt-btn nt-start', 'start', 'START');
+  var bCheat = mk('nt-btn nt-cheat', 'cheat', CHEAT_LABEL);     // fix5：一鍵密技（非 NES 八鍵）
   var bFs = mk('nt-btn nt-fs', 'fs', '');
   (function () {   // 全螢幕圖示：四個角括號（純 CSS，不依賴字型）
     var box = D.createElement('span'); box.className = 'nt-fsi';
@@ -4547,17 +4561,21 @@
     cluBox = { x: Math.min(fa.cx, fb.cx) - btn / 2, y: Math.min(fa.cy, fb.cy) - btn / 2,
                w: Math.abs(fa.cx - fb.cx) + btn, h: Math.abs(fa.cy - fb.cy) + btn };
 
-    /* ---- SELECT / START / 全螢幕 ---- */
+    /* ---- SELECT / START / 密技 / 全螢幕 ---- */
+    // fix5：第 7 顆「★密技」與 SELECT / START 同一群 —— 直向排在 START 旁（同一列），
+    //       橫向接在 SELECT / START 下方（同一欄，右上角那疊）。
+    var chOn = (T.layout.cheatButton !== false);
+    bCheat.style.display = chOn ? '' : 'none';
     var sw = smW(), sh = smH(), fw = fsW();
     bSel.style.borderWidth = px(Math.max(2, border - 1));
     bStart.style.borderWidth = px(Math.max(2, border - 1));
+    bCheat.style.borderWidth = px(Math.max(2, border - 1));
     bFs.style.borderWidth = px(Math.max(2, border - 1));
-    bSel.style.fontSize = px(clamp(sh * 0.36, 8, 15));
-    bStart.style.fontSize = px(clamp(sh * 0.36, 8, 15));
-    var selP, staP, fsP;
+    var selP, staP, chP = null, fsP;
     if (portrait) {
-      // 一排置中放在主排上方：[SELECT][START][全螢幕]
-      var totW = sw * 2 + fw + gap * 2;
+      // 一排置中放在主排上方：[SELECT][START][★密技][全螢幕]
+      var nSm = chOn ? 3 : 2;
+      var totW = sw * nSm + fw + gap * nSm;
       if (totW > right - left - 8) {                 // 太窄 → 縮小
         var kk = (right - left - 8) / totW; sw *= kk; fw *= kk; totW = right - left - 8;
       }
@@ -4565,21 +4583,38 @@
       var rowY = smRowTop - gap - Math.max(sh, fw) / 2;
       selP = avoid(x0 + sw / 2, rowY, sw, sh, 'below', L);
       staP = avoid(x0 + sw + gap + sw / 2, rowY, sw, sh, 'below', L);
-      fsP = avoid(x0 + sw * 2 + gap * 2 + fw / 2, rowY, fw, fw, 'below', L);
+      if (chOn) chP = avoid(x0 + sw * 2 + gap * 2 + sw / 2, rowY, sw, sh, 'below', L);
+      fsP = avoid(x0 + sw * nSm + gap * nSm + fw / 2, rowY, fw, fw, 'below', L);
     } else {
-      // 橫向：SELECT / START 疊在動作鍵那一側的上方；全螢幕在搖桿那一側的上方
+      // 橫向：SELECT / START / ★密技 疊在動作鍵那一側的上方；全螢幕在搖桿那一側的上方
       var gAct2 = actRight ? Math.max(0, right - (L.x + L.w)) : Math.max(0, L.x - left);
       sw = clamp(Math.min(sw, gAct2 - 8), 40, 260);
+      var nSm2 = chOn ? 3 : 2;
+      // 這一疊不可以壓到下面的 A / B（cluBox 已經算好了）⇒ 塞不下就一起縮矮
+      var availH = (cluBox ? cluBox.y : bottom) - 8 - (top + 6);
+      if (availH < nSm2 * sh + (nSm2 - 1) * 6) sh = clamp((availH - (nSm2 - 1) * 6) / nSm2, 14, sh);
       var sxc = actRight ? (right - 6 - sw / 2) : (left + 6 + sw / 2);
       var topY = top + 6 + sh / 2;
       selP = avoid(sxc, topY, sw, sh, actZone, L);
       staP = avoid(sxc, topY + sh + 6, sw, sh, actZone, L);
+      if (chOn) chP = avoid(sxc, topY + (sh + 6) * 2, sw, sh, actZone, L);
       var fxc = actRight ? (left + 6 + fw / 2) : (right - 6 - fw / 2);
       fsP = avoid(fxc, top + 6 + fw / 2, fw, fw, padZone, L);
     }
+    bSel.style.fontSize = px(clamp(sh * 0.36, 8, 15));
+    bStart.style.fontSize = px(clamp(sh * 0.36, 8, 15));
+    bCheat.style.fontSize = px(clamp(Math.min(sh * 0.46, sw * 0.26), 9, 17));
     place(bSel, selP.cx, selP.cy, sw, sh, selP.over);
     place(bStart, staP.cx, staP.cy, sw, sh, staP.over);
+    if (chOn) place(bCheat, chP.cx, chP.cy, sw, sh, chP.over);
     place(bFs, fsP.cx, fsP.cy, fw, fw, fsP.over);
+    // 小鍵那一排 / 那一疊的外框（浮動搖桿感應區要閃開它）
+    var smBox = { x0: Math.min(selP.cx, staP.cx) - sw / 2, x1: Math.max(selP.cx, staP.cx) + sw / 2,
+                  y0: Math.min(selP.cy, staP.cy) - sh / 2, y1: Math.max(selP.cy, staP.cy) + sh / 2 };
+    if (chOn) {
+      smBox.x0 = Math.min(smBox.x0, chP.cx - sw / 2); smBox.x1 = Math.max(smBox.x1, chP.cx + sw / 2);
+      smBox.y0 = Math.min(smBox.y0, chP.cy - sh / 2); smBox.y1 = Math.max(smBox.y1, chP.cy + sh / 2);
+    }
     (function () {
       var k = Math.round(fw * 0.30), box = bFs.firstChild;
       if (!box || box.className !== 'nt-fsi') return;
@@ -4599,8 +4634,8 @@
     if (portrait) {
       zy0 = Math.max(top, L.y + L.h + 2);
       zy1 = bottom;
-      if (actRight) zx1 = Math.min(zx1, Math.min(cluBox.x, selP.cx - sw / 2) - 4);
-      else zx0 = Math.max(zx0, Math.max(cluBox.x + cluBox.w, staP.cx + sw / 2) + 4);
+      if (actRight) zx1 = Math.min(zx1, Math.min(cluBox.x, smBox.x0) - 4);
+      else zx0 = Math.max(zx0, Math.max(cluBox.x + cluBox.w, smBox.x1) + 4);
     } else {
       zy0 = Math.max(top, fsP.cy + fw / 2 + 4);
       if (actRight) { zx0 = left; zx1 = Math.min(L.x - 2, cluBox.x - 4); }
@@ -4692,6 +4727,36 @@
     } catch (e) { }
   }
 
+  /* fix5：一鍵密技 —— 不是 NES 八鍵，只派發 window 的 `nes-cheat` 事件（防連按 300ms）。
+   * 遊戲端（games 各自的 main.js）自己決定 play / gameover / title 各要做什麼。 */
+  var lastCheatMs = -100000;
+  function flashCheat() {
+    try {
+      bCheat.classList.remove('nt-flash');
+      void bCheat.offsetWidth;                  // 重播動畫
+      bCheat.classList.add('nt-flash');
+      W.setTimeout(function () { bCheat.classList.remove('nt-flash'); }, 360);
+    } catch (e) { }
+  }
+  function dispatchCheat(src) {
+    var ev = null;
+    try { ev = new W.CustomEvent('nes-cheat', { detail: { source: src } }); }
+    catch (e) {
+      try { ev = D.createEvent('CustomEvent'); ev.initCustomEvent('nes-cheat', false, false, { source: src }); }
+      catch (e2) { ev = null; }
+    }
+    if (!ev) return false;
+    try { W.dispatchEvent(ev); } catch (e3) { return false; }
+    return true;
+  }
+  function fireCheat(src) {
+    var now = Date.now();
+    if (now - lastCheatMs < CHEAT_MS) return false;   // 防連按
+    lastCheatMs = now;
+    flashCheat();
+    return dispatchCheat(src || 'touch');
+  }
+
   var lastTouch = 0, lastOther = 0;
   function markTouch() {
     lastTouch = Date.now();
@@ -4700,7 +4765,7 @@
   }
 
   var resets = [];
-  function bindButton(el, bit) {
+  function bindButton(el, bit, act) {
     var pid = null;
     function down(e) {
       if (pid !== null) return;
@@ -4709,6 +4774,7 @@
       el.classList.add('nt-on');
       markTouch(); unlockAudio();
       if (bit) setBit(bit, true);
+      if (act && act.down) act.down();           // fix5：密技鍵在 pointerdown 邊緣就發動
       if (e.cancelable) e.preventDefault();
       e.stopPropagation();
     }
@@ -4721,7 +4787,7 @@
       pid = null; el.classList.remove('nt-on');
       if (bit) setBit(bit, false);
       unlockAudio();
-      if (!bit) toggleFullscreen();        // bit = 0 ⇒ 全螢幕鍵（不送遊戲按鍵）
+      if (act && act.up) act.up();         // bit = 0 的鍵（全螢幕 / 密技）自己決定要做什麼
       if (e && e.cancelable) e.preventDefault();
     }
     if (HAS_PE) {
@@ -4830,7 +4896,8 @@
   bindPad(zone, true);
   bindButton(bA, BTN.A); bindButton(bB, BTN.B);
   bindButton(bSel, BTN.SELECT); bindButton(bStart, BTN.START);
-  bindButton(bFs, 0);
+  bindButton(bCheat, 0, { down: function () { fireCheat('touch'); } });
+  bindButton(bFs, 0, { up: toggleFullscreen });
   function releaseAll() {
     for (var i = 0; i < resets.length; i++) resets[i]();
     if (touchMask !== 0) { touchMask = 0; applyInput(true); }
@@ -4882,6 +4949,7 @@
     if (typeof o.opacity === 'number' && isFinite(o.opacity)) T.layout.opacity = clamp(o.opacity, 0.15, 1);
     if (o.stick === 'dpad' || o.stick === 'stick') T.layout.stick = o.stick;
     if (typeof o.stickFloat === 'boolean') T.layout.stickFloat = o.stickFloat;
+    if (typeof o.cheatButton === 'boolean') T.layout.cheatButton = o.cheatButton;
     return true;
   }
   function load() {
@@ -4896,7 +4964,8 @@
     try {
       W.localStorage && W.localStorage.setItem(KEY, JSON.stringify({
         mode: T.layout.mode, side: T.layout.side, size: T.layout.size,
-        opacity: T.layout.opacity, stick: T.layout.stick, stickFloat: T.layout.stickFloat
+        opacity: T.layout.opacity, stick: T.layout.stick, stickFloat: T.layout.stickFloat,
+        cheatButton: T.layout.cheatButton
       }));
       return true;
     } catch (e) { return false; }
@@ -4942,8 +5011,9 @@
   T.available = AVAILABLE;
   T.fullscreenSupported = FS_OK;
   T.VERSION = '1.0.0';
-  T.layout = { mode: 'auto', side: 'right', size: 1, opacity: 0.8, stick: 'stick', stickFloat: true };
-  T.buttons = { dpad: pad, a: bA, b: bB, select: bSel, start: bStart, fs: bFs };
+  T.layout = { mode: 'auto', side: 'right', size: 1, opacity: 0.8, stick: 'stick', stickFloat: true,
+               cheatButton: true };
+  T.buttons = { dpad: pad, a: bA, b: bB, select: bSel, start: bStart, cheat: bCheat, fs: bFs };
   T.overlapping = false;
   T.el = rootEl;
   T.active = function () { return visible; };
@@ -4976,6 +5046,9 @@
   T.floating = function () { return !!padFloat; };
   T.relayout = relayout;
   T.releaseAll = releaseAll;
+  // fix5：程式觸發一鍵密技（= 按下 ★密技 鍵；同樣吃 300ms 防連按）。回傳有沒有真的送出事件。
+  T.cheat = function () { return fireCheat('api'); };
+  T.CHEAT_MS = CHEAT_MS;
   T.toggleFullscreen = toggleFullscreen;
   NES.Touch = T;
 

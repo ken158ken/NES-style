@@ -383,8 +383,8 @@ def run_konami(page, out):
     print('  ---- fix4：一鍵密技（SELECT）----')
     before = fresh()
     p1 = page.evaluate(JS_TAPS, ['START'])
-    chk('暫停畫面兩行：PAUSE / SELECT = SECRET',
-        'PAUSE' in p1['msg'].split('|')[0] and 'SELECT = SECRET' in p1['msg2'].split('|')[0],
+    chk('暫停畫面兩行：PAUSE / C OR $ = SECRET',
+        'PAUSE' in p1['msg'].split('|')[0] and 'C OR $ = SECRET' in p1['msg2'].split('|')[0],
         (p1['msg'].split('|')[0].strip(), p1['msg2'].split('|')[0].strip()))
     a1 = page.evaluate(JS_TAPS, ['SELECT'])
     chk('暫停 SELECT：SPEED %d → %d' % (before['speed'], a1['speed']),
@@ -417,8 +417,8 @@ def run_konami(page, out):
       __nes.step(150);
       return window.GAME.state();
     }""")
-    chk('GAME OVER 畫面多一行 SELECT = CONTINUE',
-        'SELECT = CONTINUE' in o2['msg2'].split('|')[1], o2['msg2'].split('|')[1].strip())
+    chk('GAME OVER 畫面多一行 C OR $ = CONTINUE',
+        'C OR $ = CONTINUE' in o2['msg2'].split('|')[1], o2['msg2'].split('|')[1].strip())
     shot(page, out / 'select_gameover.png')
     c2 = page.evaluate(JS_TAPS, ['SELECT'])
     chk('GAME OVER 按 SELECT → 3 條命續關回檢查點 camX=%d' % c2['camX'],
@@ -438,6 +438,87 @@ def run_konami(page, out):
     chk('SELECT 續關不限次數（第 2 次照樣可用）',
         c3['over'] == 'gameover' and c3['mode'] == 'play' and c3['lives'] == 3 and c3['sc'] == 2, c3)
 
+    # ================================================= fix5：真·一鍵密技（不必暫停）
+    # 使用者回饋：「電腦版也要有一鍵密技，巡航艦一定要…手機跟電腦都要，盡量一鍵，比較直觀。」
+    print('  ---- fix5：真·一鍵密技（鍵盤 C / 觸控 ★密技 / nes-cheat）----')
+
+    def keyC(steps=2):
+        page.keyboard.press('KeyC')
+        page.evaluate('(n)=>__nes.step(n)', steps)
+        return page.evaluate('()=>window.GAME.state()')
+
+    b5 = fresh()
+    page.evaluate("()=>{__nes.release(); __nes.step(20);}")
+    k1 = keyC()
+    chk('play 中按 C：不必暫停就生效（paused=false）', k1['paused'] is False, k1['paused'])
+    chk('play 中按 C：SPEED %d → %d、MISSILE / OPTION×2 / 護盾 5' % (b5['speed'], k1['speed']),
+        k1['speed'] == b5['speed'] + 1 and k1['power']['missile'] and
+        k1['power']['option'] == 2 and k1['power']['shield'] == 5, k1['power'])
+    chk('play 中按 C：畫面出現 SECRET!（只有一行，沒有 PAUSE）',
+        'SECRET' in k1['msg'].split('|')[1] and 'PAUSE' not in k1['msg'].split('|')[0],
+        (k1['msg'].split('|')[1].strip(), k1['msg'].split('|')[0].strip()))
+    chk('play 中按 C：**不消耗** Konami 的一場 1 次額度', k1['secretLeft'] == 1, k1['secretLeft'])
+    shot(page, out / 'onekey_play.png')
+    page.evaluate("()=>{CR.ship.power.option=0; CR.ship.power.shield=0; CR.ship.syncOptions();}")
+    k2 = keyC()
+    chk('連按限制：30 幀內再按 C 無效', k2['cheats'] == 1 and k2['power']['option'] == 0,
+        (k2['cheats'], k2['power']['option']))
+    page.evaluate('()=>__nes.step(32)')
+    k3 = keyC()
+    chk('連按限制：過 30 幀後再按 C 又生效（不限次數）',
+        k3['cheats'] == 2 and k3['power']['option'] == 2, k3['cheats'])
+    page.evaluate('()=>__nes.step(70)')
+    k4 = page.evaluate('()=>window.GAME.state()')
+    lt5 = page.evaluate("()=>{__nes.render(); return __nes.lint();}")
+    chk('SECRET! 1 秒後收回、地形還原、lint 綠',
+        k4['secretMsg'] == 0 and 'SECRET' not in k4['msg'].split('|')[1] and lt5['ok'],
+        (k4['secretMsg'], lt5['ok'], lt5['colors']))
+    shot(page, out / 'onekey_after.png')
+    k5 = page.evaluate("()=>{NES.Touch.cheat(); __nes.step(2); return window.GAME.state();}")
+    chk('NES.Touch.cheat()（觸控 ★密技 鍵）也能發動', k5['cheats'] == 3, k5['cheats'])
+    page.evaluate('()=>__nes.step(32)')
+    k6 = page.evaluate(JS_TAPS, ['START'])
+    k7 = keyC()
+    chk('暫停中按 C 也生效（三行：PAUSE / 提示 / SECRET!）',
+        k7['paused'] is True and 'PAUSE' in k7['msg'].split('|')[0] and
+        'SECRET' in k7['msg'].split('|')[1], (k7['msg'], k7['msg2']))
+    page.evaluate(JS_TAPS, ['START'])
+
+    fresh('&camx=1600')
+    o5 = page.evaluate(r"""()=>{
+      CR.ship.addScore(8800);
+      CR.ship.lives = 1; CR.ship.invul = 0; CR.ship.power.shield = 0; CR.ship.hit(true);
+      __nes.step(150);
+      return window.GAME.state();
+    }""")
+    chk('GAME OVER 第三行 = C OR $ = CONTINUE',
+        'C OR $ = CONTINUE' in o5['msg2'].split('|')[1], o5['msg2'].split('|')[1].strip())
+    shot(page, out / 'onekey_gameover.png')
+    k8 = keyC()
+    chk('GAME OVER 按 C：立刻 3 條命續關、分數保留（%d → %d）' % (o5['score'], k8['score']),
+        k8['mode'] == 'play' and k8['lives'] == 3 and k8['score'] >= o5['score'], k8['mode'])
+    chk('GAME OVER 按 C：回到檢查點 camX≈%d' % k8['camX'],
+        abs(k8['camX'] - o5['continueCam']) <= 2, (o5['continueCam'], k8['camX']))
+    shot(page, out / 'onekey_continue.png')
+    k9 = page.evaluate(r"""()=>{
+      CR.ship.lives = 1; CR.ship.invul = 0; CR.ship.power.shield = 0; CR.ship.hit(true);
+      __nes.step(150); return window.GAME.state().mode;
+    }""")
+    k10 = keyC()
+    chk('GAME OVER 按 C 不限次數（第 2 次照樣續關）',
+        k9 == 'gameover' and k10['mode'] == 'play' and k10['cheatContinues'] == 2,
+        k10['cheatContinues'])
+    fresh()
+    page.evaluate("()=>{__nes.release(); __nes.step(10);}")
+    k11 = page.evaluate(JS_TAPS, ['START', 'SELECT'])
+    chk('fix4 的暫停 + SELECT 仍可用', k11['selectSecrets'] == 1 and k11['power']['shield'] == 5,
+        k11['selectSecrets'])
+    page.evaluate("()=>{CR.ship.power.option=0; CR.ship.power.shield=0; CR.ship.syncOptions();}")
+    k12 = page.evaluate(JS_TAPS, CODE_FC)
+    chk('Konami 序列仍可用（此時才扣額度）',
+        k12['secretLeft'] == 0 and k12['power']['option'] == 2, k12['secretLeft'])
+
+
     print('\n==== 秘技驗證：%s ====' % ('全部通過' if not bad else '%d 項失敗' % len(bad)))
     for b in bad:
         print('  FAIL', b)
@@ -451,9 +532,10 @@ def main():
     ap.add_argument('--max-frames', type=int, default=30000)
     ap.add_argument('--tag', default='')
     ap.add_argument('--shots', action='store_true', help='每 1200 幀截一張')
-    ap.add_argument('--konami', action='store_true',
+    ap.add_argument('--konami', '--cheat', dest='konami', action='store_true',
                     help='不跑通關，改驗秘技：Konami（暫停 / 一次限制 / GAME OVER 續關）'
-                         ' + fix4 一鍵密技（暫停 SELECT / GAME OVER SELECT，不限次數）')
+                         ' + fix4 一鍵密技（暫停 SELECT / GAME OVER SELECT，不限次數）'
+                         ' + fix5 真·一鍵密技（鍵盤 C / 觸控 ★密技 / nes-cheat，不必暫停）')
     args = ap.parse_args()
 
     q = '?debug=1&scale=1&mute=1'

@@ -2060,3 +2060,159 @@ $PY tools/nes_lint.py --palette engine/palette.js shots/agent_fix2star/*.png # 2
 6. 未動、留給下一輪：star 的**標題畫面沒有秘技小字**（暫停畫面與 GAME OVER 畫面自己會寫，所以沒硬加）；
    star 的一鍵無敵**擋不住熔岩 / 掉坑**（那兩者走 `Hero.kill()`，不經 `hurt()` 的 `inv` 判定）——
    要做「真·無敵星」得在 `hero.js` 的危險磚掃描加一個 `h.star` 旗標，那是 star-hero 的檔。
+
+## fix5-onekey（R2c）
+
+2026-09-20 ｜ fix5-onekey agent ｜ 對象：**使用者真機 + 桌機回饋**
+「電腦版也要有一鍵密技，巡航艦一定要，不然很難玩。手機跟電腦都要，盡量一鍵，比較直觀。」
+⇒ fix4 的「START 暫停 → SELECT」是**兩步**，使用者不接受。本輪做成**真正一鍵、不必暫停**。
+
+擁有並修改：`engine/touch.js`、`games/cruiser/main.js`、`games/star/main.js`、
+`games/cruiser/test_cruiser.py`、`games/star/test_star.py`、`tools/test_touch.py`、
+`tools/playthrough_cruiser.py`、`tools/playthrough_star.py`、`docs/ENGINE_API.md` §16、本檔。
+**三個 `*.html`、`games/*/chr_*.js`、其他 `games/*`、其他 `engine/`、其他 `tools/` 一個字都沒動、沒有 git 操作。**
+
+### 0. 規格表（三個入口 × 兩款 × 四種畫面）
+
+| 入口 | 怎麼觸發 | 由誰派發 |
+|---|---|---|
+| **觸控** | 虛擬手把第 7 顆 **紫色「★密技」鍵**（pointerdown 邊緣、300ms 防連按、按下閃一下） | `engine/touch.js` → `window` 的 `nes-cheat` CustomEvent（`detail.source='touch'`） |
+| **鍵盤** | **C**（`window` keydown `code === 'KeyC'`；忽略 `e.repeat` 與 ctrl / alt / meta） | 各遊戲 `main.js` → 派發同一個 `nes-cheat`（`source='key'`） |
+| **程式 / 測試** | `NES.Touch.cheat()`（`source='api'`）或直接 `dispatchEvent(new CustomEvent('nes-cheat'))`；另有 `CR.cheat()` / `ST.cheat()` | — |
+
+> `KeyC` **不在** `engine/input.js` 的 `DEFAULT_MAP` 裡（八鍵是方向 / WASD / Z / X / Enter / Shift）⇒ 零衝突。
+> ★密技鍵也**不進 NES 八鍵**（不碰 `mask()` / `inject` / `setExternal`）⇒ 按它不會打斷正在按的方向。
+> 事件只立旗標（`g.cheatReq`），真正的效果在 `update()` **開頭**處理 ⇒ 一定落在幀邊界、可重現、可測試。
+
+| 遊戲 | 畫面 | 效果 | 次數 |
+|---|---|---|---|
+| **星塵巡航艦** | `play`（**含暫停中**） | SPEED +1（上限 `MAX_SPEED`）、MISSILE、OPTION ×2、護盾 5（＝ Konami / SELECT 同一組，不含 DOUBLE / LASER）；`sfx('powerup')` + 「SECRET!」1 秒 | **不限次數**，連按間隔 **≥ 30 幀** |
+| 星塵巡航艦 | `play`：**已經滿強化** | `secretGrant()` 本來就只在 `speed < MAX_SPEED` 時加速度 ⇒ **只把護盾補滿**，且**仍然顯示 SECRET!** | 同上 |
+| 星塵巡航艦 | `gameover` | **立刻** 3 條命 + 回 `continueCam` 檢查點（分數 / HI 保留、強化歸零） | **不限次數** |
+| 星塵巡航艦 | `title` / `dead` / `stageclear` | **無作用**（`lastCheat = 'none'`） | — |
+| **星塵勇者** | `play`（**含暫停中**） | 命補到 **9**、無敵 **1200 幀 = 20 秒**（走現有 `hero.inv`）、切 `invincible` 曲；`sfx('powerup')` + 「SECRET!」1 秒 | **不限次數**，連按間隔 **≥ 30 幀** |
+| 星塵勇者 | `gameover`（非破關） | **立刻** 3 條命 + `respawn()` 回當前關卡檢查點（分數 / 金幣保留） | **不限次數** |
+| 星塵勇者 | `title` / `dead` / `clear` | **無作用** | — |
+
+> **title 的取捨（本輪定案）**：規格允許「無作用」或「直接開始遊戲並套用密技」二擇一 ⇒ **選「無作用」**。
+> 理由：標題只有 START / A 兩個語意，密技鍵誤觸不該把人丟進遊戲；而且標題小字已經寫明密技在遊戲中按。
+> **fix4 的「暫停 + SELECT」與 fix3 的 Konami 序列（4 組變體）全部保留，三種入口共用同一個效果函式。**
+
+### 1. 畫面文字（NES 字型沒有 `★` ⇒ 用既有的 `$` 磚，`engine/chr.js` 的 `STAR` 就是一顆星）
+
+| 遊戲 | 畫面 | 列 | fix4 | **fix5** |
+|---|---|---|---|---|
+| cruiser | 標題 | 18 | `SECRET: PAUSE + SELECT` | **`SECRET: C KEY OR $ BTN`** |
+| cruiser | 暫停 | 13 | `SELECT = SECRET` | **`C OR $ = SECRET`**（同為 15 字，欄位沒動） |
+| cruiser | 暫停 + 密技 | 11 / 13 / 15 | — | `PAUSE` / `C OR $ = SECRET` / `SECRET!` |
+| cruiser | **遊戲進行中 + 密技** | 15 | — | **只疊 `SECRET!` 一行**（`SECRET_ONLY`，不會冒出 PAUSE） |
+| cruiser | GAME OVER | 17 | `SELECT = CONTINUE` | **`C OR $ = CONTINUE`**（同為 17 字） |
+| star | 標題 | 19 | （沒有） | **新增 `SECRET: C KEY OR $ BTN`** |
+| star | 暫停 | 15 | `SELECT = SECRET` | **`C OR $ = SECRET`** |
+| star | **遊戲進行中 + 密技** | 18 | — | **只疊 `SECRET!` 一行**（`SECRET_ONLY_LINES`） |
+| star | GAME OVER | 18 | `SELECT = CONTINUE` | **`C OR $ = CONTINUE`** |
+
+### 2. 實作位置（給後面的人）
+
+**`engine/touch.js`**（第 7 顆鍵）
+- DOM 多一顆 `bCheat`（`nt-btn nt-cheat`，`data-nt="cheat"`，文字 `★密技`）；CSS 紫色膠囊 `#8a34c8` /
+  邊 `#3d1060`（與 A 紅 / B 橘 / SELECT・START 暗紅 / 全螢幕藍都分得開）＋ `@keyframes nt-flash`（0.34s 亮一下）。
+- 排版：**直向** 小鍵那一列變成 `[SELECT][START][★密技][全螢幕]`（總寬 `sw*3 + fw + gap*3`，太窄就一起縮）；
+  **橫向** 動作鍵側上方那一疊變成 `SELECT / START / ★密技`，並先用 `cluBox`（A/B 的外框，排在前面算好）
+  算 `availH`，塞不下就把三顆的高 `sh` 一起縮 ⇒ **永遠不壓到 A / B**。
+  浮動搖桿感應區的邊界改用新的 `smBox`（整排 / 整疊的外框）而不是只看 SELECT / START。
+- `bindButton(el, bit, act)` 多收一個 `act = {down, up}`：密技鍵走 `act.down`（pointerdown 邊緣就發動），
+  全螢幕鍵改走 `act.up`（行為完全不變，只是從寫死的 `if (!bit) toggleFullscreen()` 換成回呼）。
+- `fireCheat(src)`：`Date.now()` 防連按 300ms → `flashCheat()` → `dispatchCheat(src)`（`CustomEvent` 失敗時
+  退回 `document.createEvent`）。`NES.Touch.cheat()` = `fireCheat('api')`。
+- `layout.cheatButton`（預設 `true`）進 `assign()` / `store()` / `localStorage.nes_touch`；`false` 時
+  `bCheat.style.display='none'`，`rects()` 自然就沒有這一鍵（既有的 display 過濾）。
+- headless 殼（node / 無 DOM）補 `cheat()` 與 `layout.cheatButton`。
+
+**`games/cruiser/main.js`**
+- `CHEAT_COOL = 30`；`g` 多 `cheatReq / cheatCool / cheats / cheatContinues / lastCheat`。
+- `fireSecret(code, lines)` 多收 `lines`（省略 = 暫停版 `SECRET` 三行；進行中傳 `SECRET_ONLY`）。
+- `doCheat()`：`play` → `fireSecret('ONEKEY', g.paused ? SECRET : SECRET_ONLY)`；
+  `gameover` → `konamiClear() + continueGame()`；其他 → `lastCheat='none'`。
+- `requestCheat()` / `CR.cheat` + 一段 IIFE 綁 `nes-cheat` 與 keydown `KeyC`。
+- `update()` **開頭**：`cheatCool--` → 吃 `cheatReq` → **不在暫停時**的 `secretMsg` 倒數
+  （歸零時 `clearMsg` + `stage.redraw()`；暫停版仍由 `paused` 分支自己收回 PAUSE 兩行）。
+- 新 `restorePlayMsg()`：進行中的 SECRET! 還掛著就切畫面時（`pauseGame` / `toGameOver` / `toStageClear`）
+  先 `clearMsg` + `redraw` —— 否則 `clearMsg` 寫進去的空白磚會在畫面上留洞（實測過，已修掉）。
+- `state()` 多 `cheats / cheatContinues / cheatCool / lastCheat`。
+
+**`games/star/main.js`**
+- `CHEAT_COOL = 30`；`g` 多 `cheatReq / cheatCool / cheats / cheatContinues / lastCheat / floatBanner / floatCam`。
+- **浮動疊字**（進行中不暫停也要疊字）：`withCam(cam, fn)` / `showFloat(lines)` / `endFloat(restore)`。
+  `drawBanner` / `clearBanner` 都吃「當下的 `g.camX`」⇒ 畫的時候把 camX 記進 `g.floatCam`，收回時用同一個
+  camX 還原。名稱表是 64 欄的環、1 秒內鏡頭走不到 512px ⇒ 那幾格仍對應同一個世界欄，
+  `scrTileAt` / `attrAt` 還原 **100% 正確**（測試逐格比對 7 格，0 格不符）。
+  整片重畫過的路徑（`loadLevel` / `respawn`）直接把 `floatBanner` 丟掉（`endFloat(false)` 語意）；
+  `pauseGame` / `enterClear` / `enterGameOver` 則先 `endFloat(true)` 還原再畫自己的字。
+- `applySecret()` 抽出三個入口共用的效果（命 9 / `inv` 1200 / `cheatInv` / 音效 / 曲子 /
+  暫停畫三行・進行中疊一行）；`trySelectSecret()` = fix4 的 SELECT 路徑（只多一個 `selectUsed` 判斷）。
+- `doCheat()` / `requestCheat()` / `ST.cheat` + 綁 `nes-cheat` 與 keydown `KeyC`（寫法同 cruiser）。
+- `update()` 開頭：`cheatCool--` → 吃 `cheatReq` → 不在暫停時 `secretMsg` 倒數歸零 `endFloat(true)`。
+- `state()` 多 `cheats / cheatContinues / cheatCool / lastCheat / floatBanner`。
+
+### 3. 測試
+
+| 檔 | 原 | 現 | 新增 |
+|---|---:|---:|---|
+| `tools/test_touch.py` | 180 | **255** | 每組（3 頁 × 2 裝置）**多 12 項**（6 組 72 項 ＋ 桌機 3 項 = 75）：`KEYS` 加 `cheat`（連帶「不與畫面交集 / 不出界」也蓋到）、矩形尺寸 > 0、**與其他 6 顆零重疊**、位置（直向在 START 旁 / 橫向在 START 下方）、按下派發 `nes-cheat`（`source='touch'`）、`nt-flash`、`Input.mask()` 與 `Touch.mask()` 都是 0、300ms 內連按只算 1 次、過 300ms 又能發、`NES.Touch.cheat()`（`source='api'`）、`cheatButton=false` 關得掉 / 設回來版面仍不壓畫面。桌機三頁各 **+1**：覆蓋層隱藏時 `cheat()` 仍能派發 |
+| `games/cruiser/test_cruiser.py` | 230 | **264** | ⑭ fix5 組 **34 項**：play 按 C 不必暫停就生效（paused=false / SPEED+1 / MISSILE・OPTION×2・護盾 5 / 不含 DOUBLE・LASER / 只有列 15 的 SECRET!、列 11・13 乾淨 / `cheats` / `lastCheat` / `powerup` 音效 / 不扣 Konami 額度）、防連按 30 幀、過 30 幀再生效、SECRET! 1 秒收回 + lint 綠、**已滿強化只補護盾且仍顯示 SECRET!**、暫停中按 C 也生效（三行）、`nes-cheat` 事件、`NES.Touch.cheat()`、**Ctrl+C 不觸發**、**`e.repeat` 不觸發**、title 無作用 + 新小字、GAME OVER 按 C 續關 6 項（回遊戲 / 3 命 / 分數保留 / 回檢查點 / 計數 / lint）、續關不限次數、fix4 SELECT 仍可用、Konami 仍可用。另改既有斷言的文字（標題小字 / 列 13 / 列 17） |
+| `games/star/test_star.py` | 193 | **226** | ⑨f fix5 組 **33 項**：同上結構（命 9 / `inv` 1200 / `cheatInv` / `lastSfx` / `floatBanner === ['SECRET!']` 且 `banner === null`）、防連按、SECRET! 收回後 **7 格地形逐格比對還原**、lint 綠、遊戲沒被凍住（x 繼續增加）、暫停中按 C 畫三行 banner、事件 / `Touch.cheat()` / Ctrl+C / `e.repeat`、title 無作用 + **列 19 新小字**、GAME OVER 按 C 續關 6 項、不限次數、fix4 SELECT 仍可用 |
+| `games/cruiser/test_stage1.py` / `games/star/test_w1.py` / 其他 tools 測試 | — | 未動，全過 | — |
+
+`bash tools/run_all.sh`（完整）**17 項全 PASS、總結 PASS**
+（node --check 32 檔 / apu 103 / chr 91 / core / ppu 144 / shmup 157 / **touch 255** /
+**cruiser 264** / stage1 174 / demo / **star 226** / w1 / 三入口 build --check / 冒煙截圖 / lint 抽查 8 張）。
+
+### 4. 機器人
+
+| 指令 | 內容 | 結果 |
+|---|---|---|
+| `$PY tools/playthrough_cruiser.py --konami`（`--cheat` 同義） | 原 41 項 ＋ **fix5 15 項**（play 按 C 生效 / 不扣 Konami 額度 / 防連按 / 過 30 幀再生效 / SECRET! 收回 + lint / `Touch.cheat()` / 暫停中按 C / GAME OVER 第三行 / 按 C 續關 + 回檢查點 / 不限次數 / fix4 SELECT 仍可用 / Konami 仍可用） | **56 項全 PASS**，多存 5 張截圖（`onekey_play` / `onekey_after` / `onekey_gameover` / `onekey_continue` 等，在 `shots/play_cruiser/konami/`） |
+| `$PY tools/playthrough_star.py --cheat`（`--konami` 同義） | 原 21 項 ＋ **fix5 16 項**（同上，另加「7 格地形逐格還原」與「按 C 之後遊戲照樣繼續跑」） | **37 項全 PASS**，多存 4 張截圖（`shots/play_star/cheat/onekey_*.png`） |
+| `$PY tools/playthrough_cruiser.py` | 回歸（不用密技的正常通關） | **cleared、0 死、6455 幀、score 17000**（與 fix3 / fix4 **一幀不差**） |
+| `$PY tools/playthrough_star.py --all` | 回歸 | 1-1 1400/1 死、1-2 1070/0、1-3 1265/0、1-4 1385/1（**與 fix2-star / fix4 完全相同**） |
+
+### 5. 截圖（`shots/agent_fix5/`，每張都 Read 看過圖）
+
+| 檔 | 內容 | lint |
+|---|---|---|
+| `c0_title.png` | cruiser 標題：`SECRET: C KEY OR ★ BTN`（`$` 磚 = 星） | PASS colors=3 |
+| `c1_secret_play.png` | cruiser **遊戲進行中**按 C：只疊一行 `SECRET!`、船已滿強化 | PASS |
+| `c2_gameover.png` | cruiser GAME OVER 三行（第三行 `C OR ★ = CONTINUE`，score 8800） | PASS |
+| `c3_continue.png` | 按 C 續關：score 8800 保留、命 ×3、回檢查點、字全清乾淨 | PASS |
+| `s0_title.png` | star 標題：**新增列 19** `SECRET: C KEY OR ★ BTN` | PASS colors=11 |
+| `s1_secret_play.png` | star **遊戲進行中**按 C：只疊 `SECRET!`、HUD 命變 ×9 | PASS |
+| `s2_gameover.png` | star GAME OVER 三行（第三行 `C OR ★ = CONTINUE`，score 6100） | PASS |
+| `s3_after.png` | star SECRET! 收回後：地形 / 屬性逐格還原（對照 `s1`），主角無敵閃爍中續跑 | PASS |
+| `m1_cruiser_land.png` | **iPhone 13 橫向**：右上角 `SELECT / START / ★密技` 三疊，不壓畫面、不壓 A/B | 整頁圖 |
+| `m2_cruiser_port.png` | **Pixel 5 直向**：`[SELECT][START][★密技][全螢幕]` 一列 | 整頁圖 |
+| `m3_cruiser_touch.png` | 手機橫向點 ★密技：按鍵亮起（nt-flash）+ 畫面 `SECRET!` | 整頁圖 |
+| `m4_star_port.png` | 手機直向點 ★密技：命 ×9 + `SECRET!` | 整頁圖 |
+| `d1_dist_cruiser.png` / `d2_dist_star.png` | **打包後的 dist 單檔**用觸控 ★密技 實測，兩款都生效（護盾 5 / 命 9） | 整頁圖 |
+
+`$PY tools/build.py --src cruiser.html` → `dist/星塵巡航艦.html` 內嵌 20 檔、缺 0 檔、**437 KB**；
+`--src star.html` → `dist/星塵勇者.html` 內嵌 20 檔、缺 0 檔、**466 KB**。
+
+### 6. 給其他 agent / 總控
+
+1. **`engine/touch.js` 有第 7 顆鍵 `cheat`**：`rects()` 多一個 key、`T.buttons.cheat`、`layout.cheatButton`。
+   任何「按鍵數 = 6」「`rects()` 只有 6 個 key」的既有斷言都要改成 7（本輪已改 `tools/test_touch.py`）。
+   `localStorage.nes_touch` 多存一個 `cheatButton` 欄位（舊資料沒有這欄 ⇒ 讀不到就用預設 `true`，相容）。
+2. **新的引擎 ↔ 遊戲契約：`window` 的 `nes-cheat` 事件**（ENGINE_API §16.2）。新遊戲要支援一鍵密技，
+   只要 `window.addEventListener('nes-cheat', ...)` 立旗標 + 在 `update()` 開頭處理即可；
+   要自己加鍵盤入口就照 cruiser / star 的寫法監聽 keydown `KeyC`（`engine/input.js` 完全沒動）。
+3. **`GAME.state()` 兩款各多 4~5 個欄位**：`cheats` / `cheatContinues` / `cheatCool` / `lastCheat`
+   （star 另有 `floatBanner`）。fix4 的 `selectSecrets` / `selectContinues` / `secrets` 語意不變
+   （`secrets` 仍是「所有密技發動次數」的總和，一鍵也會計進去）。
+4. **畫面文字換了 5 行**（見 §1）。任何比對「`SELECT = SECRET`」「`SELECT = CONTINUE`」
+   「`SECRET: PAUSE + SELECT`」的腳本都要改（本輪已改兩個測試檔 + 兩個機器人）。
+5. **star 的標題多了一行（列 19）**；`TITLE` 從 4 行變 5 行，`clearTitle` 會一起還原。
+6. 未動、留給下一輪：一鍵無敵仍然**擋不住熔岩 / 掉坑**（走 `Hero.kill()`，不經 `hurt()` 的 `inv` 判定）——
+   要做「真·無敵星」得在 `games/star/hero.js` 的危險磚掃描加 `h.star` 旗標（那是 star-hero 的檔）；
+   `★密技` 的中文字靠瀏覽器系統字型（覆蓋層是 DOM，不是 PPU），冷門環境缺字會退成方框，
+   要完全無字型相依就得改成純 CSS 畫的星形圖示。

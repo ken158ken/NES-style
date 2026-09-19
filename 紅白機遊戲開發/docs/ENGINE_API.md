@@ -652,7 +652,8 @@ oam.end();                                                 // 排序 + 輪替 + 
 
 ## 16. NES.Touch（engine/touch.js）
 
-擁有者：nes-touch agent ｜ R2 ｜ 借用 `../卡比之星/src/touch.js`（Round 11/11b）的寫法，改成 NES 八鍵
+擁有者：nes-touch agent ｜ R2（fix5-onekey 加第 7 顆「★密技」鍵）｜
+借用 `../卡比之星/src/touch.js`（Round 11/11b）的寫法，改成 NES 八鍵
 
 手機觸控虛擬手把：**純 DOM 覆蓋層**（自己建 `<div>` + 自注入 `<style>`），三個入口頁只要載入
 `engine/touch.js`（排在 `nes.js` 之前）就有按鍵；`tools/build.py` 內嵌後 dist 單檔也自然帶著。
@@ -665,6 +666,7 @@ oam.end();                                                 // 排序 + 輪替 + 
 | `A` | 右下最大顆（紅） |
 | `B` | A 的左邊（橘） |
 | `SELECT` / `START` | 小長條（直向＝主排上方一列；橫向＝動作鍵側上方上下疊） |
+| `cheat`（**fix5**） | 紫色膠囊「★密技」。**不是 NES 八鍵**（不進 `mask()` / 不碰 inject），按下（pointerdown 邊緣、300ms 防連按）派發 `window` 的 `nes-cheat` 事件並閃一下。直向＝小鍵那一列 `[SELECT][START][★密技][全螢幕]`；橫向＝右上角那疊 `SELECT / START / ★密技`（塞不下時三顆一起縮矮，永遠不壓到 A / B）。`layout.cheatButton = false` 可整顆關掉 |
 | 全螢幕 | 四角括號圖示（藍）；`document.fullscreenElement` 切換，iOS Safari 沒有 API 時整顆隱藏 |
 
 ### 16.2 API
@@ -674,9 +676,11 @@ oam.end();                                                 // 排序 + 輪替 + 
 | `NES.Touch.available` | `boolean` | 這台機器有觸控（`ontouchstart` / `maxTouchPoints`） |
 | `active()` | `() → boolean` | 覆蓋層目前顯示中 |
 | `show()` / `hide()` | | 強制顯示 / 隱藏（等於把 `layout.mode` 設成 `'on'` / `'off'` 並存檔） |
-| `layout` | `{mode, side, size, opacity, stick, stickFloat}` | `mode`：`'auto'`（觸控裝置才顯示，預設）/ `'on'` / `'off'`；`side`：`'right'`（A/B 在右，預設）/ `'left'`；`size` 0.6~1.6；`opacity` 0.15~1（預設 0.8）；`stick`：`'stick'`（預設）/ `'dpad'`；`stickFloat` bool |
+| `layout` | `{mode, side, size, opacity, stick, stickFloat, cheatButton}` | `mode`：`'auto'`（觸控裝置才顯示，預設）/ `'on'` / `'off'`；`side`：`'right'`（A/B 在右，預設）/ `'left'`；`size` 0.6~1.6；`opacity` 0.15~1（預設 0.8）；`stick`：`'stick'`（預設）/ `'dpad'`；`stickFloat` bool；**`cheatButton`** bool（預設 `true`，關掉就沒有 ★密技 鍵） |
 | `setLayout(o)` | `(o) → layout` | 即時套用 + 存 `localStorage.nes_touch`；回傳套用後的 `layout` |
-| `rects()` | `() → {dpad,a,b,select,start,fs}` | 各鍵在 viewport 的 CSS px 矩形 `{x,y,w,h,cx,cy}`（測試 / 版面檢查用） |
+| `rects()` | `() → {dpad,a,b,select,start,cheat,fs}` | 各鍵在 viewport 的 CSS px 矩形 `{x,y,w,h,cx,cy}`（測試 / 版面檢查用）。`cheatButton = false` 時沒有 `cheat` 這一鍵 |
+| `cheat()`（**fix5**） | `() → boolean` | 程式觸發一鍵密技（＝按下 ★密技 鍵）：閃一下 + 派發 `nes-cheat`（`detail.source = 'api'`）。一樣吃 300ms 防連按，被擋下時回傳 `false`。桌機（覆蓋層隱藏）也能用 |
+| `CHEAT_MS` | `number` | 防連按毫秒數（300） |
 | `mask()` | `() → int` | 觸控目前按著的 NES 八鍵遮罩 |
 | `dirs()` / `sector()` / `tickOn()` | | 方向狀態 / 目前扇區（-1 ＝ 死區）/ 亮著的刻度 |
 | `floatZone()` / `padHome()` / `floating()` | | 浮動感應區矩形 / 底座原位 / 是否浮動中 |
@@ -685,8 +689,26 @@ oam.end();                                                 // 排序 + 輪替 + 
 
 ```js
 NES.Touch.setLayout({ side: 'left', stick: 'dpad', size: 1.2, opacity: 0.9 });
+NES.Touch.setLayout({ cheatButton: false });   // 關掉 ★密技 鍵
 NES.Touch.rects().a;          // {x, y, w, h, cx, cy}
 NES.Touch.mask();             // 例如 129 = A|RIGHT
+NES.Touch.cheat();            // 程式觸發一鍵密技（= 派發 nes-cheat）
+```
+
+#### `nes-cheat` 事件（fix5-onekey 新增的引擎 ↔ 遊戲契約）
+
+| 項目 | 內容 |
+|---|---|
+| 目標 | `window`（`CustomEvent`，不冒泡、不可取消） |
+| `detail.source` | `'touch'`（按 ★密技 鍵）/ `'api'`（`NES.Touch.cheat()`）/ 遊戲自己派發時給什麼就是什麼（`games/*/main.js` 的鍵盤 C 用 `'key'`） |
+| 誰派發 | `engine/touch.js`（★密技 鍵 / `cheat()`）；各遊戲的 `main.js` 監聽 **window keydown `KeyC`** 後也派發同一個事件（`KeyC` 不在 `engine/input.js` 的映射表裡，不會跟八鍵打架；忽略 `e.repeat` 與 ctrl / alt / meta） |
+| 誰接收 | 各遊戲的 `main.js`。約定：**事件只立旗標，真正的效果在 `update()` 開頭處理**（落在幀邊界上 ⇒ 可重現、可測試） |
+| 效果 | 由遊戲自己定義（引擎完全不碰遊戲狀態）。兩款的規格見 `docs/PROGRESS.md`「fix5-onekey（R2c）」 |
+
+```js
+// 遊戲端（games/<名>/main.js）的標準接法
+window.addEventListener('nes-cheat', function () { g.cheatReq = true; });
+// update() 開頭： if (g.cheatReq) { g.cheatReq = false; doCheat(); }
 ```
 
 ### 16.3 輸入接法（**不改 input.js**）與取捨
@@ -747,4 +769,6 @@ resize 會二次觸發（iOS 工具列收合延遲）、`?touch=1` / `?touch=0` 
 1. 覆蓋層排版**一律避開畫面**：直向放畫面下方，橫向放左右留白；每顆按鍵再做一次 `avoid()`（推出畫面 → 夾進安全區），真的塞不下才半透明壓上去並把 `NES.Touch.overlapping` 設成 `true`。
 2. 浮動搖桿的感應區排在所有按鍵**之前**（同層後者疊在上面）⇒ 手指落在 A/B/START 上時永遠是按鍵優先。
 3. `tools/shot.py`（桌機、`?scale=1`、非觸控）不受影響：覆蓋層在非觸控環境預設隱藏，而且 shot.py 是 `canvas.toDataURL()` 不是頁面截圖。整頁截圖請用 `tools/mobile_shot.py`。
-4. 測試：`tools/test_touch.py`（180 項）。
+4. 測試：`tools/test_touch.py`（**255 項**；fix5 每組多 10 項密技鍵檢查 + 桌機 1 項）。
+5. ★密技 鍵**不進 `NES.Input`**（`mask()` / `setExternal` 都不動）⇒ 按它不會打斷正在按的方向鍵，
+   也不會被 `?debug=1` 的腳本注入干擾。

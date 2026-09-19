@@ -274,24 +274,28 @@
     { row: 8, col: 8, text: 'STARDUST CRUISER' },
     { row: 11, col: 7, text: 'ORIGINAL NES SHMUP' },
     { row: 15, col: 10, text: 'PRESS START' },
-    { row: 18, col: 5, text: 'SECRET: PAUSE + SELECT' },
+    { row: 18, col: 5, text: 'SECRET: C KEY OR $ BTN' },
     { row: 21, col: 8, text: '$ 2026 ORIGINAL' }
   ];
   // fix3：START 暫停（研究 §7-3「暫停」）＋ 暫停中的 Konami 指令（研究 §9-1）
   // fix4：一鍵密技 —— 暫停畫面兩行，第二行明示 SELECT；GAME OVER 多一行 SELECT = CONTINUE
   var PAUSE = [
     { row: 11, col: 13, text: 'PAUSE' },
-    { row: 13, col: 8, text: 'SELECT = SECRET' }
+    { row: 13, col: 8, text: 'C OR $ = SECRET' }
   ];
   var SECRET = [
     { row: 11, col: 13, text: 'PAUSE' },
-    { row: 13, col: 8, text: 'SELECT = SECRET' },
+    { row: 13, col: 8, text: 'C OR $ = SECRET' },
+    { row: 15, col: 12, text: 'SECRET!' }
+  ];
+  // fix5：不暫停也能發動 ⇒ 遊戲進行中只疊「SECRET!」這一行（列 15，與暫停版同一列）
+  var SECRET_ONLY = [
     { row: 15, col: 12, text: 'SECRET!' }
   ];
   var OVER = [
     { row: 11, col: 11, text: 'GAME OVER' },
     { row: 15, col: 10, text: 'PRESS START' },
-    { row: 17, col: 7, text: 'SELECT = CONTINUE' }
+    { row: 17, col: 7, text: 'C OR $ = CONTINUE' }
   ];
   var CLEAR = [
     { row: 11, col: 10, text: 'STAGE CLEAR' },
@@ -360,7 +364,9 @@
     paused: false, secretLeft: 1, secrets: 0, secretMsg: 0,
     continues: 0, continueCam: 0, lastCode: '',
     // fix4：一鍵密技（SELECT）。selectUsed = 這一次暫停已經用過（防連按重複觸發）
-    selectUsed: false, selectSecrets: 0, selectContinues: 0
+    selectUsed: false, selectSecrets: 0, selectContinues: 0,
+    // fix5：真·一鍵（鍵盤 C / 觸控 ★密技 / nes-cheat 事件），不必先暫停
+    cheatReq: false, cheatCool: 0, cheats: 0, cheatContinues: 0, lastCheat: ''
   };
   CR.g = g;
 
@@ -439,11 +445,12 @@
     s2.power.shield = P.SHIELD_HP;
     s2.syncOptions();
   }
-  // 實際發動（兩條路共用）：強化 + 畫 SECRET! + 音效
-  function fireSecret(code) {
+  // 實際發動（三條路共用）：強化 + 畫 SECRET! + 音效
+  // lines 省略 = 暫停版（PAUSE 兩行 + SECRET!）；遊戲進行中傳 SECRET_ONLY（只有一行）
+  function fireSecret(code, lines) {
     g.lastCode = code;
     secretGrant();
-    muteBudget(true); drawMsg(g.ppu, SECRET, 0); muteBudget(false);
+    muteBudget(true); drawMsg(g.ppu, lines || SECRET, 0); muteBudget(false);
     g.secretMsg = 60;                                  // 「SECRET!」顯示 1 秒
     call(CR.Audio, 'sfx', 'powerup');
   }
@@ -462,8 +469,70 @@
     return true;
   }
 
+  /* ============================================ fix5：真·一鍵密技（不必暫停）
+   * 使用者回饋（2026-09-20）：「電腦版也要有一鍵密技，巡航艦一定要，不然很難玩。
+   *   手機跟電腦都要，盡量一鍵，比較直觀。」
+   * 三個入口共用同一個效果函式：
+   *   ① 觸控 ★密技 鍵（engine/touch.js 派發 window 的 `nes-cheat`）
+   *   ② 鍵盤 C（本檔自己監聽 window keydown KeyC → 派發同一個事件）
+   *   ③ 程式 / 測試（`window.dispatchEvent(new CustomEvent('nes-cheat'))` 或 NES.Touch.cheat()）
+   * 事件只把旗標立起來，真正的處理放在 update() 開頭 ⇒ 一定落在幀邊界上（可重現、可測試）。
+   */
+  var CHEAT_COOL = 30;                                 // 連按間隔 ≥ 30 幀
+
+  function doCheat() {
+    if (g.cheatCool > 0) return false;                 // 防連按
+    if (g.mode === 'play') {                           // 含暫停中：立刻套用，不限次數
+      g.cheatCool = CHEAT_COOL;
+      g.secrets++; g.cheats++; g.lastCheat = 'secret';
+      // 已經滿強化時 secretGrant() 仍會把護盾補滿（speed 到 MAX_SPEED 就不再加）
+      fireSecret('ONEKEY', g.paused ? SECRET : SECRET_ONLY);
+      return true;
+    }
+    if (g.mode === 'gameover') {                       // 立即 3 條命續關回檢查點（分數保留）
+      g.cheatCool = CHEAT_COOL;
+      g.cheats++; g.cheatContinues++; g.lastCheat = 'continue';
+      konamiClear();
+      continueGame();
+      return true;
+    }
+    g.lastCheat = 'none';                              // title / dead / stageclear：無作用
+    return false;
+  }
+  function requestCheat() { g.cheatReq = true; return true; }
+  CR.cheat = requestCheat;                             // 測試 / 機器人可直接呼叫
+
+  (function bindCheat() {
+    if (typeof window === 'undefined' || !window.addEventListener) return;
+    window.addEventListener('nes-cheat', function () { requestCheat(); }, false);
+    // 鍵盤 C（不在 NES.Input 的映射表裡 ⇒ 不會跟八鍵打架）
+    window.addEventListener('keydown', function (e) {
+      if (!e || e.repeat || e.ctrlKey || e.altKey || e.metaKey) return;
+      var code = e.code || '';
+      var isC = (code === 'KeyC') || (!code && (e.keyCode === 67 || String(e.key || '').toLowerCase() === 'c'));
+      if (!isC) return;
+      var ev = null;
+      try { ev = new window.CustomEvent('nes-cheat', { detail: { source: 'key' } }); }
+      catch (e2) {
+        try { ev = document.createEvent('CustomEvent'); ev.initCustomEvent('nes-cheat', false, false, { source: 'key' }); }
+        catch (e3) { ev = null; }
+      }
+      if (ev) window.dispatchEvent(ev); else requestCheat();
+    }, false);
+  })();
+
+  // fix5：遊戲進行中的 SECRET! 還掛著的時候切畫面 —— 先把地形整片重畫回來，
+  // 不然 clearMsg 留下的空白磚會變成畫面上的洞（要等下一次 redraw 才補得回來）。
+  function restorePlayMsg() {
+    if (g.secretMsg <= 0) return false;
+    g.secretMsg = 0;
+    clearMsg(g.ppu);
+    call(st(), 'redraw');
+    return true;
+  }
+
   function pauseGame() {
-    muteBudget(true); drawMsg(g.ppu, PAUSE, 0); muteBudget(false);
+    muteBudget(true); restorePlayMsg(); drawMsg(g.ppu, PAUSE, 0); muteBudget(false);
     g.paused = true; g.secretMsg = 0;
     g.selectUsed = false;                              // fix4：每次暫停重新給一次 SELECT 機會
     konamiClear();
@@ -490,7 +559,7 @@
     ship.invul = CR.Ship.INVUL_FRAMES;
     g.mode = 'play'; g.paused = false; g.bossOn = false;
     g.secretLeft = 1; g.secretMsg = 0; g.continues++;
-    g.selectUsed = false;
+    g.selectUsed = false; g.cheatCool = 0;
     hud.score = null; hud.hi = null; hud.lives = null; hud.gauge = -1;
     if (CR.Audio && CR.Audio.play) call(CR.Audio, 'play', 'stage1');
   }
@@ -508,6 +577,7 @@
     g.paused = false; g.secretLeft = 1; g.secrets = 0; g.secretMsg = 0;
     g.continues = 0; g.continueCam = 0; g.lastCode = '';
     g.selectUsed = false; g.selectSecrets = 0; g.selectContinues = 0;
+    g.cheatReq = false; g.cheatCool = 0; g.cheats = 0; g.cheatContinues = 0; g.lastCheat = '';
     konamiClear();
     hud.score = null; hud.hi = null; hud.lives = null; hud.gauge = -1;
     if (CR.Audio && CR.Audio.play) call(CR.Audio, 'play', 'stage1');
@@ -526,6 +596,7 @@
   }
   function toGameOver() {
     muteBudget(true);
+    restorePlayMsg();                    // fix5：先還原進行中的 SECRET!
     drawMsg(g.ppu, OVER, 0);             // P1-2：寫到目前捲動位置對應的名稱表
     muteBudget(false);
     g.mode = 'gameover'; g.paused = false; g.secretMsg = 0;
@@ -534,6 +605,7 @@
   }
   function toStageClear() {
     muteBudget(true);
+    restorePlayMsg();                    // fix5：先還原進行中的 SECRET!
     drawMsg(g.ppu, CLEAR, 0);            // P1-2：魔王在 camX 2816（% 512 = 256）⇒ 文字其實在 nt1
     muteBudget(false);
     g.mode = 'stageclear'; g.paused = false; g.secretMsg = 0;
@@ -778,6 +850,14 @@
       g.input = input;
       g.frames++;
 
+      // fix5：一鍵密技在幀邊界處理（觸控 / 鍵盤 / 事件三條路共用）
+      if (g.cheatCool > 0) g.cheatCool--;
+      if (g.cheatReq) { g.cheatReq = false; doCheat(); }
+      // 不在暫停畫面時的「SECRET!」倒數（暫停版由 paused 分支自己收回 PAUSE 兩行）
+      if (!g.paused && g.secretMsg > 0 && --g.secretMsg === 0) {
+        muteBudget(true); clearMsg(g.ppu); call(st(), 'redraw'); muteBudget(false);
+      }
+
       if (g.mode === 'title') {
         if (input.pressed(BTN.START) || input.pressed(BTN.A)) toPlay();
       } else if (g.mode === 'gameover') {
@@ -872,6 +952,9 @@
         konami: KONAMI_BUF.join(''), lastCode: g.lastCode,
         selectUsed: !!g.selectUsed, selectSecrets: g.selectSecrets | 0,
         selectContinues: g.selectContinues | 0,
+        // fix5：一鍵密技
+        cheats: g.cheats | 0, cheatContinues: g.cheatContinues | 0,
+        cheatCool: g.cheatCool | 0, lastCheat: g.lastCheat || '',
         lastEvent: g.lastEvent
       };
     }

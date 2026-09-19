@@ -46,6 +46,7 @@
   var SECRET_INV = 1200;                      // 無敵 20 秒（60 fps × 20）
   var SECRET_MSG = 60;                        // 「SECRET!」顯示 1 秒
   var CONTINUE_LIVES = 3;                     // GAME OVER 按 SELECT：3 條命續關
+  var CHEAT_COOL = 30;                        // fix5：一鍵密技連按間隔 ≥ 30 幀
 
   /* ===================== 磚語意（star-world 缺席時的後備） ===================== */
   function ensureTiles() {
@@ -192,6 +193,9 @@
       // fix4：暫停 / 一鍵密技 / 續關
       paused: false, secrets: 0, secretMsg: 0, selectUsed: false,
       cheatInv: false, continues: 0,
+      // fix5：真·一鍵密技（鍵盤 C / 觸控 ★密技 / nes-cheat 事件），不必先暫停
+      cheatReq: false, cheatCool: 0, cheats: 0, cheatContinues: 0, lastCheat: '',
+      floatBanner: null, floatCam: 0,
       lastSfx: null, colWrites: 0
     };
   }
@@ -312,6 +316,7 @@
     g.bossMusic = 0;
     g.cheatInv = false;
     g.paused = false;
+    g.floatBanner = null; g.secretMsg = 0;   // fix5：換關整片重畫 ⇒ 浮動疊字記錄作廢
     g.pops.length = 0;
     g.bump = null;
     g.checkpoint = -1;                      // −1 = 還沒過檢查點 ⇒ 死亡回關卡起點
@@ -466,21 +471,26 @@
     { row: 9, col: 9, text: 'STARDUST HERO' },
     { row: 11, col: 11, text: 'WORLD 1' },
     { row: 14, col: 10, text: 'PRESS START' },
-    { row: 17, col: 8, text: '$ 2026 ORIGINAL' }
+    { row: 17, col: 8, text: '$ 2026 ORIGINAL' },
+    { row: 19, col: 5, text: 'SECRET: C KEY OR $ BTN' }      // fix5：標題也寫出一鍵密技
   ];
   var GAMEOVER_LINES = [
     { row: 12, col: 12, text: 'GAME OVER' },
     { row: 16, col: 10, text: 'PRESS START' },
-    { row: 18, col: 7, text: 'SELECT = CONTINUE' }        // fix4：一鍵續關
+    { row: 18, col: 7, text: 'C OR $ = CONTINUE' }        // fix5：真·一鍵續關
   ];
   // fix4：START 暫停（畫兩行）＋ 暫停中按 SELECT 的一鍵密技
   var PAUSE_LINES = [
     { row: 12, col: 13, text: 'PAUSE' },
-    { row: 15, col: 8, text: 'SELECT = SECRET' }
+    { row: 15, col: 8, text: 'C OR $ = SECRET' }
   ];
   var PAUSE_SECRET_LINES = [
     { row: 12, col: 13, text: 'PAUSE' },
-    { row: 15, col: 8, text: 'SELECT = SECRET' },
+    { row: 15, col: 8, text: 'C OR $ = SECRET' },
+    { row: 18, col: 12, text: 'SECRET!' }
+  ];
+  // fix5：不暫停也能發動 ⇒ 遊戲進行中只疊「SECRET!」這一行（列 18，與暫停版同一列）
+  var SECRET_ONLY_LINES = [
     { row: 18, col: 12, text: 'SECRET!' }
   ];
   // 破完 1-4：多一行分數（進入畫面時才算得出來，所以用函式產生）
@@ -573,7 +583,32 @@
     if (lines) drawBanner(ppu0, lines);
   }
 
+  /* fix5：遊戲進行中（沒暫停）也要能疊字。
+   * drawBanner / clearBanner 都吃「當下的 g.camX」，所以畫的時候把 camX 記下來，
+   * 收回時用同一個 camX 還原 —— 名稱表是 64 欄的環，1 秒內鏡頭走不到 512px，
+   * 那幾格仍然對應同一個世界欄 ⇒ scrTileAt / attrAt 還原 100% 正確。 */
+  function withCam(cam, fn) {
+    var keep = g.camX;
+    g.camX = cam | 0;
+    try { fn(); } finally { g.camX = keep; }
+  }
+  function showFloat(lines) {
+    endFloat(true);
+    g.floatBanner = lines;
+    g.floatCam = g.camX;
+    drawBanner(ppu0, lines);
+  }
+  /** restore = true 還原被蓋掉的磚 / 屬性；false = 只把記錄丟掉（畫面已經整片重畫過了） */
+  function endFloat(restore) {
+    var lines = g.floatBanner;
+    if (!lines) return false;
+    g.floatBanner = null;
+    if (restore) withCam(g.floatCam, function () { clearBanner(ppu0, lines); });
+    return true;
+  }
+
   function pauseGame() {
+    endFloat(true);                       // 進暫停前先把進行中的 SECRET! 收掉
     g.paused = true;
     g.secretMsg = 0;
     g.selectUsed = false;                 // 每次暫停重新給一次 SELECT 機會
@@ -585,21 +620,71 @@
     g.secretMsg = 0;
     g.hudDirty = true;
   }
-  function trySelectSecret() {
-    if (g.selectUsed) return false;
-    g.selectUsed = true;
+  // 三個入口（暫停 SELECT / 鍵盤 C / 觸控 ★密技）共用的效果函式
+  function applySecret() {
     g.secrets++;
     var h = g.hero;
     h.lives = SECRET_LIVES;
     h.inv = SECRET_INV;                   // 走現有的受傷無敵（閃爍 + hurt() 直接 return false）
     g.cheatInv = true;
     g.hudDirty = true;
-    setBanner(PAUSE_SECRET_LINES);
+    if (g.paused) setBanner(PAUSE_SECRET_LINES);   // 暫停版：PAUSE 兩行 + SECRET!
+    else showFloat(SECRET_ONLY_LINES);             // 進行中：只疊 SECRET! 一行
     g.secretMsg = SECRET_MSG;
     sfx('powerup');
     audio('play', 'invincible');          // song.js 第 6 首（無敵曲），無敵結束後換回關卡曲
     return true;
   }
+  function trySelectSecret() {
+    if (g.selectUsed) return false;
+    g.selectUsed = true;
+    return applySecret();
+  }
+  /* ============================================ fix5：真·一鍵密技（不必暫停）
+   * 使用者回饋（2026-09-20）：「電腦版也要有一鍵密技…手機跟電腦都要，盡量一鍵，比較直觀。」
+   *   ① 觸控 ★密技 鍵（engine/touch.js 派發 window 的 `nes-cheat`）
+   *   ② 鍵盤 C（本檔監聽 window keydown KeyC → 派發同一個事件；KeyC 不在 NES.Input 映射表）
+   *   ③ 程式 / 測試（dispatchEvent(new CustomEvent('nes-cheat')) 或 NES.Touch.cheat()）
+   * 事件只立旗標，真正處理在 update() 開頭 ⇒ 一定落在幀邊界上（可重現、可測試）。
+   */
+  function doCheat() {
+    if (g.cheatCool > 0) return false;                 // 防連按（30 幀）
+    if (g.mode === 'play') {                           // 含暫停中：立刻套用，不限次數
+      g.cheatCool = CHEAT_COOL;
+      g.cheats++; g.lastCheat = 'secret';
+      applySecret();
+      return true;
+    }
+    if (g.mode === 'gameover' && !g.won) {             // 立即 3 條命續關回檢查點（分數保留）
+      g.cheatCool = CHEAT_COOL;
+      g.cheats++; g.cheatContinues++; g.lastCheat = 'continue';
+      continueGame();
+      return true;
+    }
+    g.lastCheat = 'none';                              // title / dead / clear：無作用
+    return false;
+  }
+  function requestCheat() { g.cheatReq = true; return true; }
+  ST.cheat = requestCheat;                             // 測試 / 機器人可直接呼叫
+
+  (function bindCheat() {
+    if (typeof window === 'undefined' || !window.addEventListener) return;
+    window.addEventListener('nes-cheat', function () { requestCheat(); }, false);
+    window.addEventListener('keydown', function (e) {
+      if (!e || e.repeat || e.ctrlKey || e.altKey || e.metaKey) return;
+      var code = e.code || '';
+      var isC = (code === 'KeyC') || (!code && (e.keyCode === 67 || String(e.key || '').toLowerCase() === 'c'));
+      if (!isC) return;
+      var ev = null;
+      try { ev = new window.CustomEvent('nes-cheat', { detail: { source: 'key' } }); }
+      catch (e2) {
+        try { ev = document.createEvent('CustomEvent'); ev.initCustomEvent('nes-cheat', false, false, { source: 'key' }); }
+        catch (e3) { ev = null; }
+      }
+      if (ev) window.dispatchEvent(ev); else requestCheat();
+    }, false);
+  })();
+
   // GAME OVER → 3 條命 + 回當前關卡的檢查點（**分數 / 金幣不清**）
   function continueGame() {
     setBanner(null);
@@ -607,6 +692,7 @@
     g.hero.lives = CONTINUE_LIVES;
     g.continues++;
     respawn();                            // 內含 rebuildScreen ⇒ 殘字被整片蓋掉
+    g.cheatCool = 0;
     g.hudDirty = true;
   }
 
@@ -721,6 +807,8 @@
 
   /* ------------------------------- 模式 ------------------------------- */
   function enterClear() {
+    endFloat(true);                          // fix5：收回進行中的 SECRET!
+    g.secretMsg = 0;
     g.mode = 'clear';
     g.modeFrames = 0;
     g.clearTally = 0;
@@ -733,6 +821,8 @@
 
   // 輸光命（won = false）與破完 W1（won = true）共用 gameover 模式，但畫**不同的字**
   function enterGameOver(won) {
+    endFloat(true);                          // fix5：先還原 SECRET!（camX 還沒對齊前）
+    g.secretMsg = 0;
     g.won = !!won;
     g.mode = 'gameover';
     g.modeFrames = 0;
@@ -776,6 +866,7 @@
     g.bossMusic = 0;                          // 魔王房復活：重新進房時再切一次 boss 曲
     g.cheatInv = false;
     g.paused = false;
+    g.floatBanner = null; g.secretMsg = 0;   // fix5：rebuildScreen 已整片重畫 ⇒ 記錄作廢
     g.mode = 'play';
     g.modeFrames = 0;
     g.hudDirty = true;
@@ -953,6 +1044,12 @@
       g.modeFrames++;
       var h = g.hero;
 
+      // fix5：一鍵密技在幀邊界處理（觸控 / 鍵盤 / 事件三條路共用）
+      if (g.cheatCool > 0) g.cheatCool--;
+      if (g.cheatReq) { g.cheatReq = false; doCheat(); }
+      // 不在暫停畫面時的「SECRET!」倒數（暫停版由 paused 分支自己收回 PAUSE 兩行）
+      if (!g.paused && g.secretMsg > 0 && --g.secretMsg === 0) endFloat(true);
+
       if (g.mode === 'title') {
         if (input.pressed(BTN.START) || input.pressed(BTN.A)) {
           clearTitle(nes.ppu);
@@ -1090,7 +1187,11 @@
         bossMusic: g.bossMusic,
         // fix4：暫停 / 一鍵密技 / 續關
         paused: !!g.paused, secrets: g.secrets | 0, secretMsg: g.secretMsg | 0,
-        selectUsed: !!g.selectUsed, cheatInv: !!g.cheatInv, continues: g.continues | 0
+        selectUsed: !!g.selectUsed, cheatInv: !!g.cheatInv, continues: g.continues | 0,
+        // fix5：一鍵密技
+        cheats: g.cheats | 0, cheatContinues: g.cheatContinues | 0,
+        cheatCool: g.cheatCool | 0, lastCheat: g.lastCheat || '',
+        floatBanner: g.floatBanner ? g.floatBanner.map(function (t) { return t.text; }) : null
       };
     },
 
