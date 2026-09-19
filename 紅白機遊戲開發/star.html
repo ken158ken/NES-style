@@ -47,14 +47,17 @@
 <script src="engine/touch.js"></script>
 <script src="engine/nes.js"></script>
 
-<!-- ===== 遊戲：games/demo「星塵測試室」（demo agent）=====
-     載入順序有相依：chr（CHR bank / 調色盤）→ song（音樂音效）→ room（關卡 / 狀態列）
-     → main（物理 / 敵人 / 繪製，最後一檔設 window.GAME = {init, update, draw, state}）。
-     新增檔案請同時加到這裡，tools/build.py 會自動內嵌。 -->
-<script src="games/demo/chr.js"></script>
-<script src="games/demo/song.js"></script>
-<script src="games/demo/room.js"></script>
-<script src="games/demo/main.js"></script>
+<!-- ===== 遊戲：games/star「星塵勇者」（R2b 平台動作 W1）=====
+     載入順序：chr_hero（star-hero 精靈磚 0..127 + HUD 字型）→ chr_world（star-world 敵人 / 魔王磚 128..255 + 地形）
+     → song（star-audio）→ hero → enemies / boss / levels_w1（star-world）→ main（star-hero，最後一檔設 window.GAME）。 -->
+<script src="games/star/chr_hero.js"></script>
+<script src="games/star/chr_world.js"></script>
+<script src="games/star/song.js"></script>
+<script src="games/star/hero.js"></script>
+<script src="games/star/enemies.js"></script>
+<script src="games/star/boss.js"></script>
+<script src="games/star/levels_w1.js"></script>
+<script src="games/star/main.js"></script>
 
 <script>
 // ---- 啟動：桌機整數放大置中 / 手機小數倍貼齊、鍵盤焦點、F 全螢幕、觸控覆蓋層版面 ----

@@ -2,7 +2,7 @@
 <html lang="zh-Hant">
 <head>
 <meta charset="utf-8">
-<title>星塵勇者（NES 核心引擎）</title>
+<title>星塵巡航艦（NES 核心引擎）</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -47,14 +47,18 @@
 <script src="engine/touch.js"></script>
 <script src="engine/nes.js"></script>
 
-<!-- ===== 遊戲：games/demo「星塵測試室」（demo agent）=====
-     載入順序有相依：chr（CHR bank / 調色盤）→ song（音樂音效）→ room（關卡 / 狀態列）
-     → main（物理 / 敵人 / 繪製，最後一檔設 window.GAME = {init, update, draw, state}）。
-     新增檔案請同時加到這裡，tools/build.py 會自動內嵌。 -->
-<script src="games/demo/chr.js"></script>
-<script src="games/demo/song.js"></script>
-<script src="games/demo/room.js"></script>
-<script src="games/demo/main.js"></script>
+<!-- ===== 遊戲：games/cruiser「星塵巡航艦」（R2 宇宙巡航艦風格橫向射擊）=====
+     載入順序：chr_ship（ship agent 精靈磚 0..127 + HUD）→ chr_world（stage agent 敵人磚 128..255 + 地形）
+     → song（audio）→ ship → stage1 / enemies / boss（stage）→ main（ship agent，最後一檔設 window.GAME）。
+     新增檔案請同時加到這裡，tools/build.py --src cruiser.html 會自動內嵌。 -->
+<script src="games/cruiser/chr_ship.js"></script>
+<script src="games/cruiser/chr_world.js"></script>
+<script src="games/cruiser/song.js"></script>
+<script src="games/cruiser/ship.js"></script>
+<script src="games/cruiser/enemies.js"></script>
+<script src="games/cruiser/boss.js"></script>
+<script src="games/cruiser/stage1.js"></script>
+<script src="games/cruiser/main.js"></script>
 
 <script>
 // ---- 啟動：桌機整數放大置中 / 手機小數倍貼齊、鍵盤焦點、F 全螢幕、觸控覆蓋層版面 ----

@@ -6,8 +6,9 @@
 - 完成一個段落就在 `docs/PROGRESS.md` 自己的區段追加一行（時間、完成、來源數）。
 - 不要 git 操作（總控處理）。
 
-## 開發階段（2026-09-17 起，R1 已完成）
-- 引擎 `engine/`（全域 `NES`，classic script，零相依）、遊戲 `games/<名>/`、入口 `game.html`（`index.html` 仍是研究總覽）。**API 以 `docs/ENGINE_API.md` 為準**；任務板 `docs/TASKS.md`；QA `docs/QA_REPORT.md`；進度 `docs/PROGRESS.md`（每輪末尾「總結」）。
-- 指令（`PY=../卡比之星/.venv/bin/python`）：`bash tools/run_all.sh`（全測試 + build 檢查 + 冒煙截圖 + lint）；`$PY tools/shot.py --script "press right 40; tap a 1; step 30" --lint --out shots/agent_x/a.png`；`$PY tools/nes_lint.py shots/x.png --scale 0`；`$PY tools/apu_render.py`；`$PY tools/build.py` → `dist/星塵勇者.html`。截圖必用 Read 看圖。
+## 開發階段（2026-09-17 起；R1 引擎完成、R2 兩款遊戲進行中）
+- **專案定位（使用者 2026-09-19 定調）**：不限一款遊戲——深入研究多款紅白機經典並各自實作，共用 `engine/`；與卡比之星（單一獨立作品）不同。
+- 引擎 `engine/`（全域 `NES`，classic script，零相依；載入順序 palette → fixed → input → cpu_timing → chr → ppu → nes_lint → apu → music → shmup → touch → nes）、遊戲 `games/<名>/`、入口：`game.html`《星塵測試室》demo、`star.html`《星塵勇者》（平台，全域 `ST`，games/star）、`cruiser.html`《星塵巡航艦》（宇宙巡航艦風格射擊，全域 `CR`，games/cruiser）；`index.html` 是研究總覽（`tools/build_html.py` 產）。三頁都有手機觸控（`engine/touch.js`，`NES.Touch`）與小數倍縮放。**API 以 `docs/ENGINE_API.md` 為準**；任務板 `docs/TASKS.md`；QA `docs/QA_REPORT.md`；進度 `docs/PROGRESS.md`（每輪末尾「總結」）。
+- 指令（`PY=../卡比之星/.venv/bin/python`）：`bash tools/run_all.sh [--quick]`（全測試 tools/test_*.py + games/*/test_*.py + 三入口 build 檢查 + 冒煙截圖 + lint）；`$PY tools/shot.py --url cruiser.html --script "press right 40; tap a 1; step 30" --lint --out shots/agent_x/a.png`（`--url star.html`、`--query "level=1-2"`；cruiser 有 `?camx=<px>` / `?boss=1|2|3`）；`$PY tools/mobile_shot.py --page cruiser.html --device "iPhone 13" --landscape --touch "..."`（手機模擬 + 觸控）；`$PY tools/nes_lint.py shots/x.png --scale 0`；`$PY tools/apu_render.py [--game cruiser --song stage1]`；`$PY tools/build.py --src star.html|cruiser.html|game.html` → `dist/星塵勇者.html` / `星塵巡航艦.html` / `星塵測試室.html`；`$PY tools/playthrough_star.py --level 1-1`（平台機器人）；`$PY tools/playthrough_cruiser.py`（射擊機器人，qa2 的 bot.py 收進 tools）。截圖必用 Read 看圖。
 - 還原標準（PLAN §1）是硬限制：畫面只能經 PPU（≤25 色 / 每線 8 精靈 / 一層背景 + 分割）、聲音只能經 APU 五聲道、物理定點數、VBlank 預算 160 byte；lint 紅字 = 不合格。
 - 多 agent 規則同卡比：檔案所有權矩陣、只改自己的檔、跨檔需求寫 PROGRESS、不 git。

@@ -116,6 +116,8 @@ def main():
     if not out.is_absolute():
         out = ROOT / out
     url = a.url or PAGE
+    if a.url and '://' not in a.url:   # R2：相對路徑（例如 cruiser.html）→ 專案內檔案
+        url = (ROOT / a.url).resolve().as_uri()
     url += ('&' if '?' in url else '?') + 'debug=1&scale=1&mute=1'
     if a.query:
         url += '&' + a.query.lstrip('?&')

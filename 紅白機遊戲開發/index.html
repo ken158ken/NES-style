@@ -15,7 +15,7 @@ a{color:#8cd0ff}blockquote{border-left:3px solid var(--acc);margin:0;padding:4px
 mark{background:#ffd85c;color:#000}
 @media(max-width:800px){body{display:block}nav{position:static;width:auto;height:auto}main{padding:16px}}
 </style></head><body>
-<nav><h1>紅白機遊戲開發 研究總覽</h1><div style="font-size:12px;color:var(--muted)">編譯：2026-09-12 19:39　文件：25 份</div>
+<nav><h1>紅白機遊戲開發 研究總覽</h1><div style="font-size:12px;color:var(--muted)">編譯：2026-09-19 16:38　文件：27 份</div>
 <input id="q" placeholder="搜尋（Enter 標示）"><div id="nav"><a href="#sec00">01 — 紅白機（Famicom / NES）硬體規格與限制</a>
 <a href="#sec01">02 遊戲名錄與類型（NES / Famicom）</a>
 <a href="#sec02">02b 年表與里程碑（1983–1995 與其後）</a>
@@ -34,13 +34,15 @@ mark{background:#ffd85c;color:#000}
 <a href="#sec15">13 俄羅斯方塊 Tetris（NES, 1989）與 Dr. Mario（1990）深度解析</a>
 <a href="#sec16">14 拳無虛發 Punch-Out!!（NES, 1987）深度解析</a>
 <a href="#sec17">15 忍者蛙 Battletoads（NES, 1991）深度解析</a>
-<a href="#sec18">04 遊戲設計模式（關卡 / 敵人 / 魔王 / 道具 / 難度 / 手感 / UI / 存檔）</a>
-<a href="#sec19">05 美術與像素規範（NES 色彩 / 磁磚經濟 / 精靈 / 動畫 / 掌機差異）</a>
-<a href="#sec20">06 音樂 / 音效：2A03 與 chiptune</a>
-<a href="#sec21">07 掌機規格與差異：Game Boy / Game Boy Color / Game Boy Advance</a>
-<a href="#sec22">08 開發工具鏈與模擬器</a>
-<a href="#sec23">09 法律與原創原則</a>
-<a href="#sec24">10 專案提案：3 個原創遊戲方案</a></div></nav>
+<a href="#sec18">16 宇宙巡航艦 / 沙羅曼蛇（Gradius / Salamander・Life Force，1985–1988）</a>
+<a href="#sec19">04 遊戲設計模式（關卡 / 敵人 / 魔王 / 道具 / 難度 / 手感 / UI / 存檔）</a>
+<a href="#sec20">05 美術與像素規範（NES 色彩 / 磁磚經濟 / 精靈 / 動畫 / 掌機差異）</a>
+<a href="#sec21">06 音樂 / 音效：2A03 與 chiptune</a>
+<a href="#sec22">07 掌機規格與差異：Game Boy / Game Boy Color / Game Boy Advance</a>
+<a href="#sec23">08 開發工具鏈與模擬器</a>
+<a href="#sec24">09 法律與原創原則</a>
+<a href="#sec25">10 專案提案：3 個原創遊戲方案</a>
+<a href="#sec26">11 橫向射擊（橫捲 STG）設計與技術 — NES 實作指南</a></div></nav>
 <main><section id="sec00"><div class="path">01_硬體規格與限制.md</div><h1 id="01-famicom-nes">01 — 紅白機（Famicom / NES）硬體規格與限制</h1>
 <blockquote>
 <p>研究 agent：<strong>hw</strong> ｜ 日期：2026-09-12 ｜ 全文繁體中文，數字皆附來源。
@@ -14555,7 +14557,2532 @@ Mapper 是卡帶上的晶片，負責：<strong>(1) bank switching 換頁</stron
 <li>GameFAQs, "Battletoads Cheats, Codes, and Secrets for NES"（5 條命、關卡 warp）— https://gamefaqs.gamespot.com/nes/587125-battletoads/cheats</li>
 <li>MobyGames, "Battletoads credits (NES, 1991)" — https://www.mobygames.com/game/6134/battletoads/credits/nes/</li>
 </ul></section>
-<section id="sec18"><div class="path">04_遊戲設計模式.md</div><h1 id="04-ui">04 遊戲設計模式（關卡 / 敵人 / 魔王 / 道具 / 難度 / 手感 / UI / 存檔）</h1>
+<section id="sec18"><div class="path">03_經典遊戲深度解析/16_宇宙巡航艦_沙羅曼蛇.md</div><h1 id="16-gradius-salamanderlife-force19851988">16 宇宙巡航艦 / 沙羅曼蛇（Gradius / Salamander・Life Force，1985–1988）</h1>
+<h2 id="10">摘要（10 行內）</h2>
+<ol>
+<li>1985-05 街機《Gradius》（歐美名 <strong>Nemesis</strong>）→ 1986-04-25 FC《宇宙巡航艦》；1986-07 街機《沙羅曼蛇》（北美名 <strong>Life Force</strong>）→ 1987-09-25 FC《沙羅曼蛇》（美版 1988-08 改名 Life Force）。兩者是<strong>不同作品</strong>。[源]</li>
+<li>台灣 / 華語圈的合卡與口耳相傳長期把兩款都叫「沙羅曼蛇」，是本專案資料最容易搞混的一點。[源]</li>
+<li>FC 版《宇宙巡航艦》= <strong>CNROM / mapper 3</strong>，PRG 32 KiB 不分頁、CHR 4 × 8 KiB 整塊切換、垂直鏡像；日本銷量破 <strong>100 萬套</strong>。[源]</li>
+<li>畫面 = <strong>兩個光柵帶</strong>：0–211 線遊戲區、212–239 線狀態列，靠 <strong>sprite 0 命中</strong> 分割，並在分割點換 CHR bank 才有 HUD 字型。[源]</li>
+<li>精靈 8×16、每線 8 顆；閃爍是<strong>遊戲自己做的</strong>——每幀把影子 OAM 基底 <code>$2F</code> 加 <code>$44</code>（= 輪替 17 顆精靈）。[源]</li>
+<li>能量表 6 格 <code>SPEED / MISSILE / DOUBLE / LASER / OPTION / ?</code>；第 7 顆膠囊<strong>回捲到第 1 格（不是 0）</strong>；已擁有的格子按下去<strong>不消耗膠囊</strong>；SPEED UP <strong>沒有上限也沒有已擁有檢查</strong>。[源]</li>
+<li>船速公式（反組譯實測）：<code>速度 = min(($40 + 2) &amp; $FF, 16) / 2</code> px/幀，<code>$40 = 0</code> → <strong>1.0</strong>、<code>$40 = 14</code> → <strong>8.0 飽和</strong>；斜向不正規化 = ×√2。[源]</li>
+<li>Option 是<strong>24 筆環形位置緩衝</strong>，兩顆分別落後 <strong>11 / 22 筆</strong>，而且<strong>只有按著方向鍵時環才前進</strong>（停手 = 整串凍結）。[源]</li>
+<li>捲動基礎速度 <strong>0.5 px/幀</strong>；檢查點 = <code>min(世界X頁碼 &amp; $0E, 8)</code>，<strong>每關 5 個、間隔 512 px</strong>；死亡清光 <code>$40–$46</code> 全部強化。[源]</li>
+<li>rank <code>$17 = (有主武器) + Option 數 + (有護盾) + (關卡旗標)</code>，每幀重算、死亡即歸零；<code>≥2</code> 敵彈加速 25%、<code>≥3</code> 改成預判射擊。[源]</li>
+</ol>
+<h2 id="_1">目錄</h2>
+<ul>
+<li>⓪ 資料來源等級說明</li>
+<li>① 系列史與名稱釐清（含台灣混用現象）</li>
+<li>② FC《宇宙巡航艦》技術規格</li>
+<li>③ 能量表系統完整規則</li>
+<li>④ Option 跟隨演算法</li>
+<li>⑤ 武器行為與數字</li>
+<li>⑥ 敵人 / 編隊 / 魔王</li>
+<li>⑦ 關卡構成、檢查點 / 復活、rank、循環</li>
+<li>⑧ 沙羅曼蛇差異表</li>
+<li>⑨ 隱藏要素（Konami 指令與其他）</li>
+<li>⑩ 手感數字表（給開發 agent 用）</li>
+<li>⑪ 給《星塵巡航艦》的設計建議 10 條</li>
+<li>⑫ 來源</li>
+</ul>
+<hr />
+<h2 id="0">⓪ 資料來源等級說明</h2>
+<p>本篇的數字分三級，<strong>每一條都標了記號</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>記號</th>
+<th>意義</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>[源]</code></td>
+<td>有公開來源可查證（維基、StrategyWiki、NESdev、Data Crystal、反組譯專案、TAS 提交說明）</td>
+</tr>
+<tr>
+<td><code>[源/反組譯]</code></td>
+<td>來自 <strong>Fabulu/Mixup</strong> 這個公開的「把 NES ROM 逐函式手翻成 JavaScript」專案，其 Gradius 部分附上 6502 位元組、Mesen 寫入掛鉤與逐幀比對紀錄。凡是它與 Data Crystal 的 RAM map 有重疊的欄位（<code>$40</code> 速度、<code>$41</code> 飛彈、<code>$42</code> 能量表游標、<code>$44</code> 武器、<code>$45</code> Option 數、<code>$46</code> 護盾、<code>$07A0..</code> 位置環）<strong>兩邊完全吻合</strong>，因此本篇採信其數值</td>
+</tr>
+<tr>
+<td><code>[推論]</code></td>
+<td>找不到一手數字，由已知數字推導或由本專案估計；同時寫出估計方法</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>重要：本專案《星塵巡航艦》<strong>內容全部原創</strong>（自畫船 / 敵人 / 地形、自寫曲），這份文件只記錄<strong>機制與手感數字</strong>，不抄任何原文段落、不引用任何官方圖片、不使用任何 ROM 資產。</p>
+</blockquote>
+<hr />
+<h2 id="1">① 系列史與名稱釐清</h2>
+<h3 id="1-1">1-1 年表</h3>
+<table>
+<thead>
+<tr>
+<th>年月</th>
+<th>作品</th>
+<th>平台</th>
+<th>備註</th>
+<th>標記</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1985-05</td>
+<td><strong>Gradius</strong>（グラディウス）</td>
+<td>街機（Konami Bubble System）</td>
+<td>歐美版名 <strong>Nemesis</strong>；企劃原名「Scramble 2」；監督 町口浩康、音樂 東野美紀</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>1986-04-25</td>
+<td><strong>宇宙巡航艦</strong>（グラディウス）</td>
+<td>Famicom</td>
+<td>本篇主角。日本銷量 <strong>100 萬套</strong>（FC 全 1252 款中第 41 名）</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>1986-07</td>
+<td><strong>沙羅曼蛇</strong>（サラマンダ / Salamander）</td>
+<td>街機</td>
+<td>日 / 歐版名 Salamander</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>1986-11</td>
+<td><strong>Life Force</strong></td>
+<td>街機（北美）</td>
+<td>沙羅曼蛇的北美版，世界觀改成「在生物體內飛行」</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>1986-12</td>
+<td>Gradius</td>
+<td>NES（北美）</td>
+<td>FC 版的北美發行</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>1986</td>
+<td>Gradius</td>
+<td>MSX</td>
+<td>追加「骨之星」關；Option 上限 2；可與 TwinBee 卡帶連動</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>1987</td>
+<td><strong>Life Force</strong>（日版改版）</td>
+<td>街機（日本）</td>
+<td>沙羅曼蛇的<strong>日本再改版</strong>：背景 / 敵人全面有機化，而且<strong>把 Gradius 的能量表系統裝回去</strong></td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>1987-09-25</td>
+<td><strong>沙羅曼蛇</strong></td>
+<td>Famicom（RC821）</td>
+<td>透明藍色卡匣（唯一一款官方透明 FC 卡帶）</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>1988-08</td>
+<td><strong>Life Force</strong></td>
+<td>NES（北美）</td>
+<td>與 FC 沙羅曼蛇是同一款遊戲，只換名字 / 少了多結局</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>1988-03</td>
+<td>Gradius II -GOFER の野望-</td>
+<td>街機</td>
+<td></td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>1988-12-16</td>
+<td><strong>グラディウス II</strong></td>
+<td>Famicom</td>
+<td>街機版上市 9 個月後就移植；用 Konami <strong>VRC4</strong> mapper</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>1991-11</td>
+<td>Gradius</td>
+<td>PC Engine</td>
+<td>追加「Stage X」；Option 跟隨比街機鬆</td>
+<td>[源]</td>
+</tr>
+</tbody>
+</table>
+<h3 id="1-2">1-2 名稱對照（本專案內部統一用法）</h3>
+<table>
+<thead>
+<tr>
+<th>語言</th>
+<th>初代</th>
+<th>續作</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>日文</td>
+<td>グラディウス</td>
+<td>サラマンダ</td>
+</tr>
+<tr>
+<td>英文（日 / 歐）</td>
+<td>Gradius</td>
+<td>Salamander</td>
+</tr>
+<tr>
+<td>英文（北美街機 / NES）</td>
+<td>Gradius（街機歐版 Nemesis）</td>
+<td><strong>Life Force</strong></td>
+</tr>
+<tr>
+<td>繁體中文</td>
+<td><strong>宇宙巡航艦</strong></td>
+<td><strong>沙羅曼蛇</strong></td>
+</tr>
+<tr>
+<td>本專案</td>
+<td>「Gradius」「宇宙巡航艦」</td>
+<td>「沙羅曼蛇」「Life Force」</td>
+</tr>
+</tbody>
+</table>
+<h3 id="1-3">1-3 台灣 / 華語圈的混用現象</h3>
+<ul>
+<li>台灣的 FC 合卡（多合一盜版卡帶）與早期雜誌，<strong>兩款遊戲的選單標題經常都印「沙羅曼蛇」</strong>；許多玩家長大後才知道自己玩的其實是初代 Gradius。[源]</li>
+<li>成因推測：沙羅曼蛇（1987）在台灣普及度高、名字響亮又好記；合卡製作者把同系列、同美術風格的射擊遊戲一律套用同一個標題。[推論]</li>
+<li>另一層混淆：北美 NES 的《Life Force》與日版 FC《沙羅曼蛇》<strong>是同一個 ROM 家族</strong>，但北美街機《Life Force》又是 1986 沙羅曼蛇的改版、日本 1987《Life Force》又是再一次的改版。這條「Salamander → Life Force(US AC) → Life Force(JP AC) → FC 沙羅曼蛇 = NES Life Force」的鏈是資料整理最容易出錯的地方。[源]</li>
+<li><strong>本專案的處理原則</strong>：任何時候提到「Gradius 手感」都指 <strong>FC 初代《宇宙巡航艦》</strong>；提到「沙羅曼蛇式」一律指 <strong>FC 1987 那款（= NES Life Force）</strong>。</li>
+</ul>
+<h3 id="1-4-gradius-iifc1988">1-4 Gradius II（FC，1988）簡述</h3>
+<table>
+<thead>
+<tr>
+<th>項目</th>
+<th>內容</th>
+<th>標記</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Mapper</td>
+<td>Konami <strong>VRC4</strong>（強化圖形 / 音源輔助）</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>改編幅度</td>
+<td>不是單純移植：關卡順序調動（第 3、4 關對調、第 3 關魔王拿掉）、GOFER 之艦換成兩個新關（敵基地 + GOFER 巢穴）、部分曲子重寫</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>能量表</td>
+<td><strong>4 種可選配置</strong>（TYPE 1–4），各自的 MISSILE / DOUBLE / LASER 不同；護盾統一為 FORCE FIELD，可擋 5 下、包住全機</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>Option</td>
+<td>上限 4；第 5 次選 OPTION 會讓 4 顆 Option <strong>繞著本機旋轉 16 秒</strong></td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>DOUBLE / LASER</td>
+<td>要<strong>選兩次</strong>才到滿檔</td>
+<td>[源]</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>對本專案的意義：R2 只做初代規模（能量表 6 格、Option 上限 2）；Gradius II 的「配置選單」與「Option 旋轉」是 R3 以後才考慮的擴充。[推論]</p>
+</blockquote>
+<hr />
+<h2 id="2-fc">② FC《宇宙巡航艦》技術規格</h2>
+<h3 id="2-1-mapper">2-1 卡匣 / Mapper</h3>
+<table>
+<thead>
+<tr>
+<th>項目</th>
+<th>內容</th>
+<th>標記</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Mapper</td>
+<td><strong>CNROM（iNES mapper 3）</strong></td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>PRG-ROM</td>
+<td><strong>32 KiB</strong>（2 × 16 KiB），<code>$8000–$FFFF</code>，<strong>完全不分頁</strong></td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>CHR-ROM</td>
+<td><strong>32 KiB</strong>（4 × 8 KiB），整塊切換</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>鏡像</td>
+<td><strong>垂直</strong>（<code>$2000 == $2800</code>、<code>$2400 == $2C00</code>）</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>電池存檔</td>
+<td>無</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>板子</td>
+<td>NES-CNROM 系（74xx161 + CNROM 保護二極體，1986 年日製 CNROM 常見）</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>中斷</td>
+<td><strong>沒有掃描線 IRQ</strong>（CNROM 沒有），畫面分割只能靠 sprite 0 命中或週期計時</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>日版容量標示</td>
+<td>日文維基寫「384 キロビット」= 48 KiB；與 32 + 32 = 64 KiB（512 Kbit）不一致</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>差異解讀</td>
+<td>日版可能只用 2 條 CHR bank（32 PRG + 16 CHR = 48 KiB = 384 Kbit），美版 ROM 檔則是 4 bank；本專案採 <strong>4 bank 版（Data Crystal / 反組譯所測的美版）</strong> 的行為</td>
+<td>[推論]</td>
+</tr>
+</tbody>
+</table>
+<p><strong>對本專案的啟示</strong>：初代 Gradius 在「32 KB 程式 + 沒有 IRQ」的條件下做出七關橫捲 + 能量表 + Option，證明我們的 <code>engine/</code> + <code>games/cruiser/</code> 規模綽綽有餘；真正的限制不是容量，是<strong>每幀 VBlank 預算與每線 8 精靈</strong>。[推論]</p>
+<h3 id="2-2">2-2 畫面結構（兩個光柵帶）</h3>
+<table>
+<thead>
+<tr>
+<th>帶</th>
+<th>掃描線</th>
+<th>捲動</th>
+<th>CHR bank</th>
+<th>標記</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A（遊戲區）</td>
+<td><strong>0–211</strong></td>
+<td><code>($12, $13)</code>，<code>$13</code> 固定 = <strong>12</strong></td>
+<td>bank 0（地形 + 星空，<strong>沒有 HUD 字型</strong>）</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>B（狀態列）</td>
+<td><strong>212–239</strong></td>
+<td>X = 0（水平重設），<strong>Y 不重設</strong></td>
+<td>bank 1（<code>SPEED UP / MISSILE / DOUBLE / LASER / OPTION</code> 字樣、數字、<code>HI</code>、<code>1P</code>、<code>GAME OVR</code>）</td>
+<td>[源/反組譯]</td>
+</tr>
+</tbody>
+</table>
+<p>分割細節：</p>
+<ul>
+<li><code>$9AA3</code> 是一個 <code>LDA $2002 / AND #$40 / BEQ</code> 的<strong>忙等迴圈</strong>，等 sprite 0 命中；實測會空轉 <strong>1,919–2,186 次</strong>（約 18,358 CPU 週期、161 條掃描線），也就是<strong>半個畫面 CPU 什麼都不做</strong>。[源/反組譯]</li>
+<li>sprite 0 本身固定在 <code>y=206, tile=$6D, attr=$23, x=248</code>。命中在掃描線 <strong>207</strong>，寫 <code>$2005</code> 的時機落在 <strong>211</strong> 線，所以帶 B 實際從 <strong>212</strong> 開始。[源/反組譯]</li>
+<li>分割時寫的 <code>$2005</code> <strong>Y 值其實無效</strong>（PPU 的垂直捲動只在 pre-render 線複製），所以畫面最下面 12 線（228–239）其實是<strong>捲回名稱表第 0、1 列</strong>。[源/反組譯]</li>
+<li>這是 CNROM 沒有 IRQ 的必然結果；我們的引擎有 <code>ppu.split(scanline, {...})</code>，等價於 MMC3 IRQ，<strong>不需要忙等</strong>，可以把那 18k 週期拿來跑遊戲邏輯。[推論]</li>
+</ul>
+<h3 id="2-3">2-3 精靈與閃爍策略</h3>
+<table>
+<thead>
+<tr>
+<th>項目</th>
+<th>內容</th>
+<th>標記</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>精靈尺寸</td>
+<td><strong>8×16</strong></td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>優先權</td>
+<td><strong>只看 OAM 索引</strong>（索引小者畫在上面），與 x 座標無關</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>每線上限</td>
+<td>8；第 9、10 顆被 PPU 直接丟掉（<strong>PPU 不會閃爍</strong>）</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>閃爍</td>
+<td><strong>由遊戲自己做</strong>：<code>$8B39</code> 每幀 <code>$2F = $2F + $44</code>（若結果為 0 再 <code>+4</code>），把影子 OAM 的寫入基底輪替</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>輪替量</td>
+<td><code>$44</code> = 68 位元組 = <strong>17 顆精靈 / 幀</strong></td>
+<td>[推論]（68 ÷ 4 = 17，由 <code>$44</code> 直接算出）</td>
+</tr>
+<tr>
+<td>影子 OAM</td>
+<td><code>$0200–$02FF</code>，NMI 開頭 <code>STY $4014</code> 一次 DMA</td>
+<td>[源/反組譯]</td>
+</tr>
+</tbody>
+</table>
+<p><strong>啟示</strong>：Gradius 的做法就是我們 <code>NES.SH.OAM</code> 契約裡的「同 prio 之間每幀輪替起點」。差別是 Gradius <strong>整張 OAM 一起轉</strong>（連船都會參與輪替），我們的契約是<strong>分優先權層再輪替</strong>（船 / 選項 / 自機彈永遠 prio 0 不閃）——後者對玩家更友善，也仍然是 NES 可實作的做法（只是遊戲邏輯多一點）。[推論]</p>
+<h3 id="2-4">2-4 捲動方式</h3>
+<table>
+<thead>
+<tr>
+<th>項目</th>
+<th>內容</th>
+<th>標記</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>相機</td>
+<td>24-bit：<code>$3D</code> = 子像素、<code>$3E</code> = 世界 X 低位、<code>$3F</code> = 世界 X 高位（= 「頁」）</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>基礎速度</td>
+<td>每幀 <code>$3D += $80</code>（= <strong>0.5 px/幀</strong>），進位才 <code>$3E += 1</code>。4000 幀實測：有跑到的 3207 幀<strong>每幀剛好 +$80</strong>，沒跑到的 789 幀剛好 0</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>強制加速</td>
+<td>關卡結尾的狀態 <code>st_984F</code> 改成 <code>$3E:$3F += 4</code>（<strong>4 px/幀</strong>），跑到 <code>$3F &gt;= $11</code> 為止</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>名稱表</td>
+<td><strong>兩張內容完全相同</strong>（只有第 28、29 列的狀態列不同），所以是一條 256 px 的「跑步機」：<code>$12</code> 由 0 跑到 255 再繞回，PPU 自己的 coarse-X 溢位會從另一張名稱表抓右半邊 → 繞回時看不出接縫</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>一幀延遲</td>
+<td>捲動暫存器影子 <code>$12</code> 是在<strong>上一幀</strong>由 <code>$3E</code> 複製過去的。3206 幀實測 <code>$12[N] == $3E[N-1]</code> <strong>3206/3206</strong>；若直接寫當幀相機，有一半的幀會快一格</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>地形串流</td>
+<td>每幀只補新露出的那一欄（block 系統：半頁 = 4 block 欄 × 7 block 列 = 28 block = 128 × 224 px）</td>
+<td>[源/反組譯]</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>我們的 <code>NES.SH.Scroller</code> 契約（每幀只寫新露出的那一欄、≤ 45 byte）跟 Gradius 的做法在<strong>精神上完全一致</strong>，只是 Gradius 用兩張同內容名稱表 + PPU 溢位，我們用兩張名稱表交替寫。[推論]</p>
+</blockquote>
+<h3 id="2-5-hud">2-5 HUD 版面</h3>
+<table>
+<thead>
+<tr>
+<th>位置</th>
+<th>內容</th>
+<th>標記</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>畫面下方 28 線（212–239）</td>
+<td>分數 / HI / 1P、能量表六格、剩餘船數（生命圖示 <code>$61</code> + 十位 + 個位）</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>重畫時機</td>
+<td><strong>每 8 個遊戲幀重畫一次</strong>（不是撿到膠囊才畫）：<code>$8898</code> 用 <code>$48 &amp; 3</code> 輪流送 4 個罐頭 VRAM 封包，能量表 <code>$89E3</code> 是其中之一，770 幀內執行 <strong>96 次</strong></td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>選中游標</td>
+<td><code>$8A30</code>：把已排入佇列的第 <code>8 - $42</code> 個位元組改成磚 <code>$55</code>；<code>$42 == 0</code> 時<strong>完全不畫游標</strong></td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>「已擁有」字樣</td>
+<td>MISSILE（<code>$41 != 0</code>）、DOUBLE（<code>$44 == 2</code>）、LASER（<code>$44 == 1</code>）、<code>?</code>（<code>$46 != 0</code>）會換成另一組字串；<strong>OPTION 要 <code>$45 &gt;= 2</code> 才換</strong>（只有 1 顆 Option 時仍顯示 OPTION）</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>SPEED UP</td>
+<td><strong>沒有「已擁有」形態</strong>（因為沒有上限），最左邊那格字樣永遠不變</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>玩家死亡時</td>
+<td><code>$89E3</code> 直接 RTS，<strong>狀態列什麼都不畫</strong></td>
+<td>[源/反組譯]</td>
+</tr>
+</tbody>
+</table>
+<h3 id="2-6-fc">2-6 街機 → FC 的刪減一覽</h3>
+<table>
+<thead>
+<tr>
+<th>項目</th>
+<th>街機</th>
+<th>FC</th>
+<th>標記</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Option 上限</td>
+<td>4</td>
+<td><strong>2</strong>（精靈數限制）</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>雷射</td>
+<td>可拉到約 3/4 螢幕寬的連續光束、會跟著發射者上下移動</td>
+<td><strong>縮成約船身長的短光束</strong>、不跟隨 Y、但<strong>貫穿</strong>、同屏最多 2 發</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>護盾</td>
+<td>大、會隨受擊變小</td>
+<td><strong>固定小尺寸不縮水</strong>；剩最後一下時<strong>變紅</strong>；而且<strong>任何方向</strong>都擋（街機只擋正面）</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>垂直捲動關</td>
+<td>第 2、3 關畫面會上下捲</td>
+<td><strong>固定不捲</strong>（摩艾關因此只有下方摩艾會打你，但活動空間也變小）</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>敵人</td>
+<td>全數保留</td>
+<td>全數保留但<strong>調色盤簡化</strong>；Big Core 等大型敵人<strong>縮小</strong></td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>關卡</td>
+<td>7</td>
+<td>7（可循環）</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>新增</td>
+<td>—</td>
+<td><strong>三處 warp</strong>（1→3、2→4、3→5）、前四關各有 5000 分 / 1UP 獎勵點、<strong>Konami 指令</strong>、continue</td>
+<td>[源]</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="3">③ 能量表系統完整規則</h2>
+<h3 id="3-1">3-1 六格順序與效果</h3>
+<table>
+<thead>
+<tr>
+<th>格</th>
+<th>標籤</th>
+<th>對應 RAM</th>
+<th>效果</th>
+<th>已擁有時</th>
+<th>標記</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><strong>SPEED</strong></td>
+<td><code>$40</code></td>
+<td><code>INC $40</code>（船速 +0.5 px/幀）</td>
+<td><strong>沒有檢查、永遠生效、沒有上限</strong></td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>MISSILE</strong></td>
+<td><code>$41</code></td>
+<td><code>INC $41</code>（開啟斜下飛彈）</td>
+<td><code>$41 != 0</code> → 直接返回，<strong>膠囊不消耗</strong></td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong>DOUBLE</strong></td>
+<td><code>$44 = 2</code></td>
+<td>主武器 → 前方 + 45° 上</td>
+<td><code>$44 == 2</code> → 返回，膠囊保留</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>4</td>
+<td><strong>LASER</strong></td>
+<td><code>$44 = 1</code></td>
+<td>主武器 → 貫穿短雷射</td>
+<td><code>$44 == 1</code> → 返回，膠囊保留</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>5</td>
+<td><strong>OPTION</strong></td>
+<td><code>$45</code></td>
+<td><code>INC $45</code>，上限 2</td>
+<td><code>$45 &gt;= 2</code> → 返回，膠囊保留</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>6</td>
+<td><strong>?</strong></td>
+<td><code>$46 = 5</code></td>
+<td>護盾，可吃 5 下</td>
+<td><code>$46 != 0</code> → 返回，膠囊保留</td>
+<td>[源/反組譯]</td>
+</tr>
+</tbody>
+</table>
+<p>幾條<strong>與直覺相反、但實測為真</strong>的規則：</p>
+<ol>
+<li><strong>DOUBLE 與 LASER 互斥</strong>，而且是靠同一個位元組 <code>$44</code> 做到的：選 DOUBLE 時 <code>$44 = 2</code>、選 LASER 時 <code>$44 = 1</code>。<strong>選了另一個，原本那個就沒了</strong>（StrategyWiki 的說法「選 Laser 會讓 Double 回到能量表」即是此意）。[源][源/反組譯]</li>
+<li><strong>「已經有了」的格子按下去不會浪費膠囊</strong>——<code>$42</code> 原地不動，可以繼續等下一次回捲。實測：連按 B 16–20 幀，<code>$42</code> 完全不變。[源/反組譯]</li>
+<li><strong>B 鍵是「按住」不是「按下瞬間」</strong>（讀 <code>$07</code> 而非 <code>$05</code>）。實測：按住 B 並每幀強制 <code>$42 = 1</code>，<code>$40</code> 會<strong>每幀 +1</strong>。[源/反組譯]</li>
+<li><strong>撿膠囊與使用強化可以同一幀完成</strong>。每幀順序是 <code>玩家更新 → 物件更新 → 碰撞（撿膠囊，</code>INC $42<code>）→ 套用（</code>$8974<code>讀</code>$42<code>）</code>，所以按著 B 去撞膠囊，強化在<strong>撞到的那一幀</strong>就生效。[源/反組譯]</li>
+<li><strong>第 7 顆膠囊回捲到「1」不是「0」</strong>：<code>$894B</code> 的 <code>CMP #$07 / BCC</code> 後 <code>LDA #$01 / STA $42</code>。也就是回捲後游標直接停在 SPEED，<strong>不會經過「無選取」狀態</strong>。[源/反組譯]</li>
+</ol>
+<h3 id="3-2">3-2 速度上限的真相</h3>
+<table>
+<thead>
+<tr>
+<th><code>$40</code></th>
+<th>0</th>
+<th>1</th>
+<th>2</th>
+<th>3</th>
+<th>4</th>
+<th>5</th>
+<th>6</th>
+<th>8</th>
+<th>10</th>
+<th>12</th>
+<th>13</th>
+<th><strong>14</strong></th>
+<th>16</th>
+<th>20</th>
+<th><strong>254</strong></th>
+<th><strong>255</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>px/幀</td>
+<td>1.0</td>
+<td>1.5</td>
+<td>2.0</td>
+<td>2.5</td>
+<td>3.0</td>
+<td>3.5</td>
+<td>4.0</td>
+<td>5.0</td>
+<td>6.0</td>
+<td>7.0</td>
+<td>7.5</td>
+<td><strong>8.0</strong></td>
+<td>8.0</td>
+<td>8.0</td>
+<td><strong>0.0</strong></td>
+<td><strong>0.5</strong></td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>公式 <code>速度 = min(($40 + 2) &amp; $FF, $10) × 128</code>（單位 1/256 px/幀）= <code>min($40+2, 16) / 2</code> px/幀。<strong>16 個 <code>$40</code> 值逐一實測，16/16 吻合</strong>。[源/反組譯]</li>
+<li><strong>飽和點是 <code>$40 = 14</code>（8.0 px/幀）</strong>，不是 16。[源/反組譯]</li>
+<li><code>ADC #$02</code> 是 8-bit 且<strong>會溢位</strong>：<code>$40 = 254</code> → 原始值 0 → <strong>船完全不動</strong>；<code>$40 = 255</code> → 原始值 1 → <strong>0.5 px/幀（半速）</strong>。因為 SPEED UP 沒有上限，這是<strong>玩得到的 bug</strong>。[源/反組譯]</li>
+<li>StrategyWiki 記載「Speed Up 可選 5 次」是<strong>街機</strong>規則；FC 版「可以繼續選但沒有好處，只是取消目前的游標反白」的說法與反組譯不符——FC 版<strong>每選一次都真的加速</strong>，只是 <code>$40 &gt;= 14</code> 後看不出差別。[源]（互相矛盾，本專案採反組譯）</li>
+<li>TAS 作者記載「取 13 次 SPEED UP 到最高速、最高速 8 px/幀且無加速度」——與 <code>$40 = 14</code> 飽和只差 1，可能是「從 <code>$40=1</code> 起算」的差異。[源]</li>
+</ul>
+<h3 id="3-3">3-3 膠囊怎麼來</h3>
+<table>
+<thead>
+<tr>
+<th>來源</th>
+<th>規則</th>
+<th>標記</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>編隊全滅</td>
+<td>整隊敵人（<strong>4 隻以上</strong>才算隊）全部打掉時，<strong>最後一隻</strong>掉膠囊；漏掉任何一隻就沒有</td>
+<td>[源][源/反組譯]</td>
+</tr>
+<tr>
+<td>紅色單體</td>
+<td>一般敵人多是灰 / 藍配色，<strong>紅色版本</strong>必掉膠囊</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>內部旗標</td>
+<td>每隻敵人生成時由參數位元組的最低位決定 <code>$03AC</code>；編隊則寫入隊伍 id（2 或 3，兩隊可同時在場），死一隻扣一次隊員數，歸零時最後那隻旗標改成 1 = 掉落</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>掉落率實測</td>
+<td>一段 2700 幀的自然遊玩裡：59 次爆炸腳本結束，<strong>只有 2 次</strong>升格成膠囊</td>
+<td>[源/反組譯]</td>
+</tr>
+</tbody>
+</table>
+<h3 id="3-4">3-4 膠囊本體的行為</h3>
+<table>
+<thead>
+<tr>
+<th>項目</th>
+<th>數值</th>
+<th>標記</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>水平速度</td>
+<td><strong>每 2 幀左移 1 px = 0.5 px/幀</strong>（= 捲動速度，等於<strong>貼在世界座標上不動</strong>）</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>垂直速度</td>
+<td><strong>0</strong>（250 幀實測 Y 完全不變）</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>壽命</td>
+<td><strong>沒有計時器</strong>，一路飄到 X &lt; 8 才消失。實測：X = 101 出生 → 187 幀後在 X = 7 消失，剛好 <code>(101-7) × 2</code></td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>動畫</td>
+<td>3 張圖循環，<strong>每張停 6 個遊戲幀</strong></td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>分數</td>
+<td>撿到 +50（<code>$845B</code>）；某些版本顯示 500 分</td>
+<td>[源/反組譯][源]</td>
+</tr>
+<tr>
+<td>音效</td>
+<td><code>$0D</code></td>
+<td>[源/反組譯]</td>
+</tr>
+</tbody>
+</table>
+<h3 id="3-5">3-5 藍膠囊（清屏）</h3>
+<table>
+<thead>
+<tr>
+<th>項目</th>
+<th>內容</th>
+<th>標記</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>StrategyWiki 說法</td>
+<td>「每出現 15 顆膠囊，下一顆會變成藍色 crash capsule，撞到可清掉畫面上所有基本敵人，<strong>不影響能量表</strong>」</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>反組譯說法</td>
+<td><code>$AEC8: INC $47 / LDA $47 / AND #$0F / BEQ</code> → <strong>每第 16 顆</strong>升格成 type 7（不是 type 6），走完全不同的碰撞分支 <code>$C18C</code>：殺掉自己、播音效 <code>$0B</code>（不是膠囊的 <code>$0D</code>）、把物件 9..0 中所有 <code>class &gt;= 3</code> 的敵人呼叫 <code>$BE93</code> 銷毀，<strong>完全不呼叫 <code>$894B</code></strong>（所以能量表真的不動）</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>圖樣</td>
+<td>type 6 動畫 = 磚 <code>10 11 12</code>，type 7 = 磚 <code>13 14 15</code> → <strong>兩種膠囊外觀不同</strong></td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>重要陷阱</td>
+<td>計數器 <code>$47</code> 會被<strong>死亡 / 過關的記憶體清除</strong>一併歸零，所以「第 16 顆」是<strong>每條命重新數</strong></td>
+<td>[源/反組譯]</td>
+</tr>
+</tbody>
+</table>
+<h3 id="3-6-7">3-6 第 7 顆膠囊的隱藏獎勵（分數位數彩蛋）</h3>
+<p><code>$894B</code> 在 <code>$42</code> 要變成 7 的那一幀，會讀<strong>分數的某一位數</strong>：</p>
+<pre><code>A = ($07E5 + 4 × 玩家index) &amp; $0F      # $07E4..$07E6 是 3 byte BCD 分數
+A == 0 → $35 = 4      （自動連射間隔 20 幀 → 4 幀，= RAPID FIRE）
+A == 5 → 分數 +10000
+其他   → 沒有獎勵
+$42 → 1（回捲）
+</code></pre>
+<ul>
+<li>六組 poke、四種不同結果、含無 poke 對照組，全部實測吻合。[源/反組譯]</li>
+<li>StrategyWiki 的玩家側描述完全一致：「讓 <code>?</code> 反白後再撿一顆，千位數是 0 → 連射、是 5 → 10000 分」。[源]</li>
+<li><strong>RAPID FIRE 死一次就沒了</strong>——不是「被保留」，是死亡流程 <code>$9B5E</code> 把 <code>$35</code> 硬寫回 <code>$14</code>（20）。[源/反組譯]</li>
+</ul>
+<h3 id="3-7">3-7 護盾（<code>?</code>）規則</h3>
+<table>
+<thead>
+<tr>
+<th>項目</th>
+<th>內容</th>
+<th>標記</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>耐久</td>
+<td><code>$46 = 5</code>，<strong>吃 5 下、第 6 下死</strong></td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>外觀</td>
+<td>兩顆光球飛進來停在船頭 / 前方；FC 版<strong>尺寸固定不縮水</strong></td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>快沒了</td>
+<td><code>$46 == 1</code> 時設定閃爍旗標 <code>$9E = 3</code> → <strong>變紅</strong></td>
+<td>[源][源/反組譯]</td>
+</tr>
+<tr>
+<td>方向</td>
+<td>FC 版<strong>任何方向的攻擊都擋</strong>（街機只擋正面）</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>動畫</td>
+<td>力場金屬片用 <code>$02 &gt;&gt; 2 &amp; 3</code> 做 <strong>4 幀循環</strong></td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>不擋什麼</td>
+<td><strong>地形</strong>。碰撞碼 <code>$C2B5–$C2C1</code> 的地形分支<strong>完全沒有測 <code>$46</code></strong>，直接 <code>JMP $C1D6</code>（死亡）</td>
+<td>[源/反組譯]（此條反組譯者標為「從位元組讀出、未能行為驗證」）</td>
+</tr>
+<tr>
+<td>三個消耗點</td>
+<td><code>$C1C1</code>（撞敵人本體）、<code>$C24E</code>、<code>$C293</code>（另外兩個物件陣列）；實測只有第一個在第 1 關被觸發</td>
+<td>[源/反組譯]</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="4-option">④ Option 跟隨演算法</h2>
+<h3 id="4-1">4-1 資料結構</h3>
+<table>
+<thead>
+<tr>
+<th>位址</th>
+<th>內容</th>
+<th>標記</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>$07A0–$07B7</code></td>
+<td><strong>24 筆</strong>過去的 X（整數像素）</td>
+<td>[源][源/反組譯]</td>
+</tr>
+<tr>
+<td><code>$07C0–$07D7</code></td>
+<td><strong>24 筆</strong>過去的 Y</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td><code>$0160</code></td>
+<td>環形游標 <strong>0..23</strong></td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>物件槽</td>
+<td>0 = 本機，<strong>1、2 = 兩顆 Option</strong>（同一組平行陣列）</td>
+<td>[源/反組譯]</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>Data Crystal 的 RAM map 把 <code>$07A0-$07B7</code> 標成「Vic Viper 的水平位置」、<code>$07B0-$07C7</code>（原文如此）標成垂直位置——實際上就是這兩條 24 筆的環形緩衝，兩份資料互相印證。[源]</p>
+</blockquote>
+<h3 id="4-2">4-2 每幀演算法（逐行）</h3>
+<pre><code>if (任一方向鍵被按住) {                 # ← 關鍵：AND #$0F / BEQ
+    cursor = (cursor + 1) % 24
+    ringX[cursor] = shipX
+    ringY[cursor] = shipY
+}
+# 下面兩行「無條件」執行，跟有沒有 Option 無關
+option1.pos = ring[(cursor - 11 + 24) % 24]
+option2.pos = ring[(cursor - 22 + 24) % 24]
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>特性</th>
+<th>說明</th>
+<th>標記</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>緩衝長度</td>
+<td><strong>24</strong></td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>Option 間距</td>
+<td><strong>11 筆</strong>（Option1 落後 11、Option2 落後 22）</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>前進條件</td>
+<td><strong>只有按著方向鍵時</strong>環才前進。玩家放開方向鍵 → 整串 Option <strong>原地凍結</strong>，不會慢慢追上來</td>
+<td>[源/反組譯]（實測：把「每幀都前進」的變體拿去跑，第 362 幀就對不上）</td>
+</tr>
+<tr>
+<td>延遲單位</td>
+<td><strong>是「移動幀」不是「時間幀」</strong>——這是 Gradius 手感的靈魂：貼著船繞小圈 → Option 縮成一團；一路衝刺 → Option 拉成一條長蛇</td>
+<td>[推論]（由上一條直接推得）</td>
+</tr>
+<tr>
+<td>無條件維護</td>
+<td>就算 <code>$45 == 0</code>（一顆 Option 都沒有），槽 1、2 的座標<strong>照樣每幀更新</strong>。所以撿到 Option 的瞬間它就已經在正確位置，不會從船身「長」出來</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>Option 動畫</td>
+<td>自由跑：<code>$0121+i = (($0141+i &gt;&gt; 3) &amp; 1) + 4</code>，<strong>每 8 幀換一張</strong>，兩張交替</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>重生時</td>
+<td>復活時起始座標會<strong>同時寫進槽 0/1/2 與兩條環的全部 24 筆</strong> → Option 不會從上一條命的位置飛過來</td>
+<td>[源/反組譯]</td>
+</tr>
+</tbody>
+</table>
+<h3 id="4-3-option">4-3 死亡後 Option 去向</h3>
+<table>
+<thead>
+<tr>
+<th>遊戲</th>
+<th>規則</th>
+<th>標記</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Gradius（FC / 街機）</strong></td>
+<td><code>$45</code> 被死亡時的 <code>$3D–$97</code> 全區清除一起歸零 → <strong>Option 完全消失</strong>，回檢查點從 0 顆開始</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td><strong>沙羅曼蛇（街機）</strong></td>
+<td>死亡時 Option 會<strong>留在原地變成可撿的道具</strong>，下一條命可以撿回來</td>
+<td>[源]</td>
+</tr>
+</tbody>
+</table>
+<p>這是兩作「懲罰哲學」的根本差異，見 §8。</p>
+<h3 id="4-4">4-4 移植版的差異（供對照）</h3>
+<table>
+<thead>
+<tr>
+<th>版本</th>
+<th>Option 上限</th>
+<th>跟隨特性</th>
+<th>標記</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>街機</td>
+<td>4</td>
+<td>緊貼軌跡</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>FC / MSX</td>
+<td><strong>2</strong></td>
+<td>同上（FC 為 24 筆環、間距 11）</td>
+<td>[源][源/反組譯]</td>
+</tr>
+<tr>
+<td>PC Engine</td>
+<td>4</td>
+<td><strong>比街機鬆</strong>：小幅移動時 Option 會擠得比較近</td>
+<td>[源]</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="5">⑤ 武器行為與數字</h2>
+<h3 id="5-1-fc">5-1 物件槽配置（FC）</h3>
+<table>
+<thead>
+<tr>
+<th>物件 index</th>
+<th>用途</th>
+<th>標記</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td>本機</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>1, 2</td>
+<td>Option ×2</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>3, 4, 5</td>
+<td><strong>彈槽 A</strong>（本機 / Option1 / Option2 各一）</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>6, 7, 8</td>
+<td><strong>彈槽 B</strong></td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>9, 10, 11</td>
+<td>飛彈 ×3</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>12–21</td>
+<td>敵人 / 膠囊</td>
+<td>[源/反組譯]</td>
+</tr>
+</tbody>
+</table>
+<p><strong>「同屏上限 2 發」的真相</strong>：不是全域計數，而是<strong>每個發射體（船 + 每顆 Option）各有 A、B 兩個固定槽</strong>。所以滿配（本機 + 2 Option）時畫面上最多 <strong>6 發自機彈 + 3 發飛彈</strong>。[源/反組譯]</p>
+<h3 id="5-2">5-2 三種主武器</h3>
+<table>
+<thead>
+<tr>
+<th><code>$44</code></th>
+<th>名稱</th>
+<th>槽 A</th>
+<th>槽 B</th>
+<th>標記</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td>標準彈</td>
+<td>type <code>$06</code>，<code>x += 7</code>/幀</td>
+<td>type <code>$06</code>，同上（<strong>B 槽被跳過</strong>）</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>1</td>
+<td><strong>LASER</strong></td>
+<td>type <code>$07</code>，<code>x += $0C</code>（<strong>12 px/幀</strong>）</td>
+<td>同型（B 槽被跳過）</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>DOUBLE</strong></td>
+<td>type <code>$06</code>，<code>x += 7</code></td>
+<td>type <code>$24</code>，<strong>同一幀一起發</strong>，<code>x += 4, y -= 4</code>（= 45° 上）</td>
+<td>[源/反組譯]</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>子彈</th>
+<th>消滅條件</th>
+<th>標記</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>標準彈（sub 0）</td>
+<td><code>x &gt;= $F8</code>（248）</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>45°上（sub 2）</td>
+<td><strong>先測 <code>y &lt; $10</code></strong>，再測 <code>x &gt;= $F8</code></td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>雷射（sub 1）</td>
+<td>X 加法進位，<strong>或 <code>x &gt;= $F0</code>（240）</strong></td>
+<td>[源/反組譯]</td>
+</tr>
+</tbody>
+</table>
+<p>雷射的玩家側描述：<strong>長度只有船身那麼長、速度很快、可貫穿敵人繼續飛、同屏最多 2 發、不跟隨發射者的 Y 座標</strong>。[源]</p>
+<h3 id="5-3">5-3 自動連射節奏</h3>
+<table>
+<thead>
+<tr>
+<th>項目</th>
+<th>數值</th>
+<th>標記</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>連射間隔 <code>$35</code></td>
+<td>預設 <strong>20 幀</strong>；RAPID FIRE 獎勵後 <strong>4 幀</strong></td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>實測發射幀</td>
+<td>槽 A：400, 444, 488, 530, 574, 618, 660；槽 B：421, 465, 509, 551, 595, 639, 681</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>交錯間隔</td>
+<td><strong>21 / 23 幀交替</strong>，不是固定值</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>原因</td>
+<td><strong>子彈還在畫面上時計時器是凍結的</strong>，所以實際節奏 = 子彈壽命 + <code>$35</code></td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>A 鍵</td>
+<td>邊緣（<code>$05</code>）或計時器歸零 + 按住（<code>$07</code>）都能發 → 手動連打可以比自動連射快</td>
+<td>[源][源/反組譯]</td>
+</tr>
+<tr>
+<td>等效 DPS</td>
+<td>約 <strong>每 11 幀 1 發</strong>（兩槽交錯 21/23 的平均），滿配 3 個發射體 ≈ 每幀 0.27 發</td>
+<td>[推論]</td>
+</tr>
+</tbody>
+</table>
+<h3 id="5-4">5-4 飛彈</h3>
+<table>
+<thead>
+<tr>
+<th>狀態</th>
+<th>速度</th>
+<th>精靈</th>
+<th>標記</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>飛行（fly）</strong></td>
+<td><code>y += 2</code>、<code>x += 0.5</code> /幀</td>
+<td>id <code>$0A</code></td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td><strong>爬行（crawl）</strong></td>
+<td><code>y += 0</code>、<code>x += 2</code> /幀</td>
+<td>id <code>$08</code></td>
+<td>[源/反組譯]</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>切換判定：先在飛彈位置做地形探測 <code>$C3AF</code>；回傳 0 → 飛行；非 0 → <strong>再往右上 8 px 探一次</strong>，還是非 0 → <strong>飛彈直接消滅</strong>；為 0 → 進入爬行（沿地面滑）。[源/反組譯]</li>
+<li>消滅條件：<code>y &gt;= $C8</code>（200）、X 進位、或 <code>x &gt;= $F8</code>。[源/反組譯]</li>
+<li>出生位置 = 本機 X、本機 Y + 6，然後當幀就 <code>+2</code>。[源/反組譯]</li>
+<li><strong>貼地射飛彈等於白射</strong>：船被夾在 <code>Y = $C0</code>（192）時，飛彈出生在 <code>y = $C6 + 2 = $C8</code>，<strong>在出生那一幀就被 <code>CMP #$C8 / BCS</code> 殺掉</strong>，而且沒有音效，所以玩家聽不出來；槽位隔幀又立刻重生再死，無限循環。[源/反組譯]</li>
+<li>玩家側描述：飛彈往右下落，落地後沿地面滑行，遇到上坡會爆；<strong>同時只能有一組飛彈</strong>，全部消失才能射下一組。[源]</li>
+</ul>
+<h3 id="5-5">5-5 傷害值</h3>
+<table>
+<thead>
+<tr>
+<th>對象</th>
+<th>傷害</th>
+<th>標記</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>一般敵人</td>
+<td><strong>一發即死</strong>（走 <code>$BE93</code> 銷毀路徑，沒有 hp 概念）</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>硬敵 / 魔王</td>
+<td>自機彈（槽 index &lt; 6）= <strong>1</strong>；飛彈（槽 index &gt;= 6）= <strong>2</strong></td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>無敵閘</td>
+<td>目標的 <code>$048C</code> 為 0 時，打中只會播「鏘」的音效 <code>$05</code>，<strong>不扣血</strong></td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>艙門（hatch）</td>
+<td>需要大量火力才打得掉，快死時會變色</td>
+<td>[源]</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="6">⑥ 敵人 / 編隊 / 魔王</h2>
+<h3 id="6-1">6-1 代表性敵人（只記機制，本專案素材全原創）</h3>
+<table>
+<thead>
+<tr>
+<th>類型</th>
+<th>機制</th>
+<th>可借鑑點</th>
+<th>標記</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Fan（扇形編隊）</strong></td>
+<td>5–9 隻成串，從上方或下方進場 → 換一排靠近你 → 同高度退場；<strong>全滅掉膠囊</strong></td>
+<td>最典型的「膠囊提款機」，出現位置固定，教玩家「先移到那一排」</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td><strong>Garun</strong></td>
+<td>兩隻一組、走<strong>正弦波</strong>軌跡，速度快、軌跡固定不追人</td>
+<td>波峰 / 波谷是唯一好打的點 → 玩家學「等時機」</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td><strong>Rugal / Rugal MkII</strong></td>
+<td>從右邊進、<strong>會追你的 Y</strong>，甚至掉頭再追；MkII 快到就算加速過也追得上</td>
+<td>追蹤型的自我毀滅：追你 = 自己排到你的火線上</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td><strong>Uska</strong></td>
+<td>長列進場，<strong>過半螢幕後突然加速</strong></td>
+<td>「先慢後快」= 一個變速陷阱</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td><strong>Zub</strong></td>
+<td><strong>憑空浮現</strong>後直線衝向你當下的位置</td>
+<td>沒有進場動畫 = 極高壓迫感；只出現在第 2 關 sub-boss 與第 7 關</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td><strong>Uros / Dee-01</strong></td>
+<td>貼著上 / 下地形的砲台，Dee-01 <strong>砲塔可任意角度瞄準</strong></td>
+<td>瞄準射擊（我們的 <code>NES.SH.aim</code>）</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td><strong>Ducker</strong></td>
+<td><strong>兩條機械腿</strong>在地形上跑，會超到你前面再回頭打</td>
+<td>「在地形上移動的敵人」比固定砲台難處理很多</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td><strong>Jumper</strong></td>
+<td>沿地形彈跳，落地時停一下<strong>一次射 3 發散射</strong>；只出現在下方</td>
+<td>節奏感（跳-停-射-跳）讓玩家可預測</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td><strong>Rush</strong></td>
+<td>只從地面艙門生出來，升到你的高度後往左衝</td>
+<td>艙門 = 敵人水龍頭，打掉艙門就是減壓</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td><strong>Amoeba</strong></td>
+<td>第 6 關限定，會停頓、變向、追你，<strong>要打很多發</strong></td>
+<td>唯一的「肉盾型雜魚」</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td><strong>Hatch（Dagumu / Gaomu / Kanimu）</strong></td>
+<td>固定、定時開啟放敵人；耐打，快壞時變色</td>
+<td>「可選的目標」：打或不打是玩家的資源分配題</td>
+<td>[源]</td>
+</tr>
+</tbody>
+</table>
+<h3 id="6-2-big-core">6-2 Big Core（魔王）結構</h3>
+<table>
+<thead>
+<tr>
+<th>項目</th>
+<th>街機 / 通則</th>
+<th>FC 實測</th>
+<th>標記</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>位置</td>
+<td>前 5 關的關底魔王，<strong>同一隻重複用</strong></td>
+<td>同</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>移動</td>
+<td>依玩家位置上下移動一段距離後停下，<strong>停下時四管齊射</strong></td>
+<td>依 rank 調速</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>彈幕</td>
+<td>4 道光束，<strong>間距剛好夠 Vic Viper 鑽過去</strong>，容錯極小</td>
+<td>同</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>結構</td>
+<td>核心被蓋住時<strong>全身無敵</strong> → 核心露出 → 前方 4 片護盾可被打 → 逐片打掉 → 藍色核心露出 → 打核心</td>
+<td>FC 版整隻<strong>縮小</strong></td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>逾時</td>
+<td>拖太久核心<strong>變紅、整艦重新無敵</strong>，再過一段時間<strong>自爆</strong></td>
+<td>FC：<code>$04CC &gt;= 6</code> → 逾時死亡，<strong>不給分、不觸發 warp</strong></td>
+<td>[源][源/反組譯]</td>
+</tr>
+<tr>
+<td>FC 血量</td>
+<td>—</td>
+<td><strong>6 點傷害</strong>（雷射 1 / 飛彈 2 → 6 發雷射或 3 發飛彈或混合）</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>FC 形變表</td>
+<td>—</td>
+<td><code>$B8EF = 6C 6D 6E 6F 70 71 00</code>：<strong>每吃 1 點傷害換一張圖</strong>（核心一格一格打開），第 7 格是終止符 = 死</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>無敵窗</td>
+<td>—</td>
+<td>只有在「齊射窗口」期間 <code>$048C != 0</code> 才吃傷害，其餘時間打中只有金屬聲</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>rank 影響</td>
+<td>—</td>
+<td><strong>只影響移動速度與射擊間隔，不影響血量</strong>：移動 dX <code>$0100</code>（1.0 px/幀，rank 0）→ <code>$02F0</code>（≈2.94 px/幀，rank 7）；射擊間隔 <code>90 → 80 → 70 → 60 → 50 → 40 → 35 → 35</code> 幀</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>分數</td>
+<td>街機 5000 / FC <strong>10000</strong>；護盾片 街機 100 / FC <strong>500</strong></td>
+<td>[源]</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h3 id="6-3">6-3 其他大型敵人（機制）</h3>
+<table>
+<thead>
+<tr>
+<th>名稱</th>
+<th>機制</th>
+<th>標記</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Moai（摩艾）</strong></td>
+<td>平時閉嘴；<strong>玩家進入它的視線</strong>才張嘴吐出一串能量環。環可以被一發打掉，但量大會塞爆你的火線；要打死摩艾必須<strong>趁它張嘴時對嘴巴集火</strong>（雷射較有利，因為一般子彈會被環擋掉）。FC 版 3000 分、能量環 100 分</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td><strong>Mother and Child</strong></td>
+<td>母艦靠近你後停住、<strong>放出 3 顆無敵的子機</strong>（只能閃）；母艦本身可打掉；不打它自己會飄走。高難度時放更多子機</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td><strong>Iron Maiden</strong></td>
+<td>第 4 關末，<strong>沒有任何武器</strong>，唯一攻擊手段是撞你</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td><strong>Tentacle（觸手）</strong></td>
+<td>節狀的多段敵人</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td><strong>Zub Rush</strong></td>
+<td>一群球體在畫面各處隨機浮現後衝刺</td>
+<td>[源]</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>借鑑重點</strong>：Big Core 的「外殼 → 核心」兩段式，把魔王戰變成一道<strong>優先權判斷題</strong>而不是血量消耗戰；而且用「靜止的建築 + 多個部位」拼裝，精靈預算與程式都比會跑的魔王省一半。我們的 <code>CR.Boss</code>（外殼 4 片 hp 8 → 核心 hp 16）就是這個模式的原創版。[推論]</p>
+</blockquote>
+<hr />
+<h2 id="7-rank">⑦ 關卡構成、檢查點 / 復活、rank、循環</h2>
+<h3 id="7-1">7-1 關卡的三段式節奏</h3>
+<p>Gradius 每關固定三段：[源]</p>
+<ol>
+<li><strong>空戰段（air battle）</strong> — 純太空背景、簡單編隊。<strong>這段的功能是讓玩家補強化</strong>，不是挑戰。</li>
+<li><strong>本關段</strong> — 有主題的地形（洞窟 / 摩艾 / 細胞 / 要塞…）、有地形殺、有砲台。</li>
+<li><strong>魔王段</strong> — Big Core（前 5 關）。打完淡出接下一關的導航段。</li>
+</ol>
+<blockquote>
+<p>這個「先給資源、再收租、最後結算」的三拍子，是整個 Gradius 手感的骨架，比任何單一數值都重要。[推論]</p>
+</blockquote>
+<h3 id="7-2-fc">7-2 FC 版七關</h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>主題</th>
+<th>關鍵機制</th>
+<th>標記</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>火山</td>
+<td>下方噴火 + 地面艙門 Dagumu ×4 + 紅色 Jumper</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>2</td>
+<td>巨石陣（Stonehenge）</td>
+<td>可破壞的紅點陣列；sub-boss = <strong>Zub 群</strong></td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>3</td>
+<td>摩艾</td>
+<td>摩艾吐環；FC 版<strong>不上下捲動</strong>，走上面較安全但空間更窄</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>4</td>
+<td>倒立火山</td>
+<td>上下顛倒的火山；末段 Iron Maiden</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>5</td>
+<td>觸手 / 反重力</td>
+<td>有機隕石 + 巨大觸手</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>6</td>
+<td>細胞</td>
+<td>Amoeba（要打多發）+ 艙門 Kanimu；<strong>有 1UP</strong></td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>7</td>
+<td>要塞 / 母體電腦</td>
+<td>狹窄通道 + Zub；最終魔王<strong>幾乎不反擊</strong></td>
+<td>[源]</td>
+</tr>
+</tbody>
+</table>
+<p>（PC Engine 版另有獨占的「Stage X」，MSX 版另有「骨之星」關，<strong>FC 版都沒有</strong>。）[源]</p>
+<h3 id="7-3-fc">7-3 檢查點制度（FC，反組譯實測）</h3>
+<table>
+<thead>
+<tr>
+<th>項目</th>
+<th>內容</th>
+<th>標記</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>檢查點公式</td>
+<td>死亡瞬間 <code>$24 = min($3F &amp; $0E, 8)</code>；<code>$3F</code> 是世界 X 的<strong>高位（頁碼）</strong>，1 頁 = 256 px</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>實際意義</td>
+<td><strong>每關 5 個檢查點，落在頁 0 / 2 / 4 / 6 / 8</strong>，也就是<strong>每 512 px 一個</strong>，超過頁 8 之後一律回頁 8</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>驗證</td>
+<td>poke <code>$3F = 3</code> → <code>$24 = 2</code>；<code>$3F = 7</code> → <code>$24 = 6</code>；<code>$3F = 20</code> → <code>$24 = 4</code>（<code>$14 &amp; $0E = 4</code>）</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>復活時</td>
+<td><code>$3F</code>（與地形指標 <code>$55</code>）由 <code>$24</code> 還原，<code>$3E</code>（低位）清 0 → 從那一頁的頭開始</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>強化</td>
+<td>死亡流程 <code>$9B3E</code> 用 <code>LDX #$5A / STA $3D,X</code> 把 <code>$3D–$97</code> 全部清 0，<strong><code>$40 / $41 / $44 / $45 / $46</code> 一併清空</strong>；只有能量表游標 <code>$42</code> 從 <code>$22,X</code> 還原成 <strong>0 或 1</strong></td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>死亡代價（時間）</td>
+<td>爆炸後 <code>$4C = 120</code> 幀倒數 + 約 26–28 幀的關卡 intro（畫面全黑），實測<strong>共 147 幀 ≈ 2.45 秒</strong></td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>命數</td>
+<td>初始 3（<code>$20</code>）；死亡 <code>DEC $20</code>；<code>$20</code> 變負 → GAME OVER</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>關卡結束</td>
+<td>第 1 關在 <code>$3F &gt;= $0C</code> 結束，即<strong>世界 X ≥ 3072 px = 12 頁 = 12 個畫面寬</strong></td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>暫停</td>
+<td>START 在 <code>$15</code> 設 1，相機凍結，但玩家更新<strong>仍然在跑</strong></td>
+<td>[源/反組譯]</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>「Gradius 症候群」的量化定義</strong>：死亡 = 失去最多 5 次 SPEED + MISSILE + LASER + 2 Option + 護盾（≈ 11 顆膠囊），而且退回最多 512 px 前。玩家用來重建這些的火力只有「每 20 幀一發的單發彈」。這不是難度設計，是<strong>懲罰複利</strong>。[推論]</p>
+</blockquote>
+<h3 id="7-4-rank">7-4 rank（動態難度）</h3>
+<p><strong>rank 在 FC 版是一個叫 <code>$17</code> 的位元組，每幀從零重算：</strong>[源/反組譯]</p>
+<pre><code>$17 = ($44 != 0 ? 1 : 0)      # 有 LASER 或 DOUBLE
+    + $45                      # Option 數（0..2）
+    + ($46 != 0 ? 1 : 0)       # 有護盾
+    + ($19 != 0 ? 1 : 0)       # 關卡旗標（第 1 關 = 0）
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>特性</th>
+<th>內容</th>
+<th>標記</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>範圍</td>
+<td>第 1 關可達 <strong>0..4</strong>；全遊戲最大 <strong>5</strong>（表格設計到 6）</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>是 loadout 的函式</td>
+<td><strong>不是時間、不是分數、不是技術</strong>，純粹看你身上有什麼</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>可以下降</td>
+<td><strong>死亡 → 裝備歸零 → rank 立刻掉到 0</strong></td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>讀取點</td>
+<td>全 NMI 可達範圍內有 <strong>23 處讀 <code>$17</code></strong>，19 處是 <code>LDY $17 / LDA 表,Y</code> 直接查表</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>門檻只有兩個</td>
+<td><code>&gt;= 2</code> 與 <code>&gt;= 3</code>，各出現兩次</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td><code>&gt;= 2</code> 的效果</td>
+<td><strong>敵彈 X、Y 速度各 +25%</strong></td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td><code>&gt;= 3</code> 的效果</td>
+<td><strong>敵人改成「帶隨機提前量的預判射擊」</strong>（rank &lt; 3 是精準瞄現在的位置）；另外（第 2 關起）敵人射擊計時器<strong>一幀扣 2</strong></td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>查表影響</td>
+<td>敵人 / 魔王 hp（<code>05 05 05 05 06 07 08 09 0A</code>、<code>02 02 03 04 05 06 07 08 09</code>）、移動速度、射擊間隔、關卡流程階段長度（<code>03 03 04 04 05 05 06 06</code>）</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td><strong>不影響什麼</strong></td>
+<td><strong>敵人的生成表</strong>。rank 1 與 rank 4 各跑 3600 幀，92 次生成事件<strong>逐位元組相同</strong>；靜態分析五個生成進入點也<strong>沒有任何一條指令讀 <code>$17</code></strong></td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>街機的差異</td>
+<td>街機版另外還有「每約 32 秒自然 +1」的時間項；速度提升在街機<strong>不影響 rank</strong></td>
+<td>[源]</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>給我們的結論</strong>：rank 這種系統最好的形式就是 Gradius 這個——<strong>一個每幀從裝備重算的小整數，只改「敵人怎麼打」不改「敵人是誰」</strong>。錯了只會讓難度偏掉，不會讓關卡結構崩掉。[推論]</p>
+</blockquote>
+<h3 id="7-5-loop">7-5 循環（loop）</h3>
+<table>
+<thead>
+<tr>
+<th>項目</th>
+<th>內容</th>
+<th>標記</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>循環</td>
+<td>七關打完後<strong>從第 1 關重來</strong>，難度更高</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>內部旗標</td>
+<td><code>$1A</code>（loop 計數）。<code>$1A != 0</code> 會<strong>改變敵彈速度</strong>（<code>$BD42</code>）並<strong>打開 <code>$BBE5</code> 這條在第 1 輪永遠碰不到的射速分支</strong> → 「第 2 輪是另一個遊戲」</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>存活</td>
+<td><code>$1A</code> 存在 <code>$28,X</code>，死亡時會被還原（不是歸零）</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>日版彩蛋</td>
+<td>日版每打完一輪會有不同訊息</td>
+<td>[源]</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="8">⑧ 沙羅曼蛇差異表</h2>
+<table>
+<thead>
+<tr>
+<th>面向</th>
+<th>宇宙巡航艦（FC 1986）</th>
+<th>沙羅曼蛇（FC 1987 / NES Life Force 1988）</th>
+<th>標記</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Mapper</td>
+<td><strong>CNROM（mapper 3）</strong></td>
+<td>日版 <strong>Konami VRC3（mapper 73）</strong>，帶 CPU 週期 IRQ 計數器 + 8K PRG-RAM + CHR-<strong>RAM</strong></td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>美版 Mapper</td>
+<td>同上</td>
+<td><strong>UNROM（mapper 2）</strong>，PRG 8 × 16 KiB = 128 KiB、CHR-RAM、垂直鏡像</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>ROM</td>
+<td>PRG 32 KiB + CHR-ROM 32 KiB</td>
+<td>美版 PRG <strong>128 KiB</strong>（4 倍）+ CHR-RAM</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>中斷</td>
+<td>無 IRQ（分割靠 sprite 0 忙等）</td>
+<td><strong>VRC3 有 CPU 週期 IRQ</strong> → 分割不必燒掉半個畫面的 CPU</td>
+<td>[推論]（由 mapper 規格推得）</td>
+</tr>
+<tr>
+<td>關卡方向</td>
+<td>全部橫向（第 2、3 關在街機是直向，FC 版改成固定）</td>
+<td><strong>橫向 / 直向交替</strong>（街機 6 關，FC 版關卡重排 + 2 個全新關：脊椎 / 肋骨與埃及遺跡）</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>人數</td>
+<td>1P（交替）</td>
+<td><strong>2P 同時遊玩</strong>（1P = Vic Viper 藍、2P = Lord British 紅）</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>強化方式（街機沙羅曼蛇）</td>
+<td>—</td>
+<td><strong>掉落式</strong>：敵人直接掉「已經是某個武器」的模組，撿到立刻生效，<strong>沒有能量表</strong></td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>強化方式（FC 沙羅曼蛇）</td>
+<td>能量表</td>
+<td><strong>回到 Gradius 的能量表</strong>（承襲 1987 日版街機 Life Force）</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>兩人的能量表</td>
+<td>—</td>
+<td><strong>兩張表順序不同</strong>：Vic Viper 與 Gradius 相同；Lord British 排成「很快拿到火力、但很難拿到速度」</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>武器差異</td>
+<td>DOUBLE（前 + 45°上）</td>
+<td>DOUBLE 換成 <strong>Ripple Laser</strong>（會擴張的能量環，遠處比近處好打）；LASER 升級成 <strong>Cyclone Laser</strong>（更粗、稍慢、<strong>不會有判定漏格</strong>）</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>飛彈</td>
+<td>只往<strong>斜下</strong></td>
+<td><strong>同時往上下兩個方向</strong>（直捲關時改成左右）；同屏可有<strong>兩組</strong></td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>Option</td>
+<td>上限 2（FC）</td>
+<td><strong>兩位玩家合計上限 4</strong>（一人 3 顆，另一人只能 1 顆）；FC 版<strong>每人上限 2</strong></td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>護盾</td>
+<td><code>?</code> 格，5 下</td>
+<td>Force Field；<strong>撿到第 2、3 個會分別掛到上方 / 下方（或左右）</strong></td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>清屏膠囊</td>
+<td><strong>有</strong>（每 16 顆一次）</td>
+<td><strong>沒有</strong>（Salamander 與 Life Force 都沒有 crash capsule）</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>死亡懲罰</td>
+<td><strong>回檢查點 + 強化全失</strong></td>
+<td><strong>原地復活</strong>（沒有檢查點）；街機版死掉的 Option 會留在原地<strong>可以撿回來</strong></td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>續關</td>
+<td>投幣只是加命，單人用完不能續；雙人可一直續（最後一關除外）</td>
+<td>—</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>音源</td>
+<td>2A03 五聲道</td>
+<td>同（FC 版沒有街機的 FM 與語音，但 PSG 編曲被評價為不輸 FM）</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>捲動速度</td>
+<td>0.5 px/幀（基礎）</td>
+<td><strong>比街機慢</strong>（家用版刻意放慢，沒那麼混亂）</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>作曲</td>
+<td>東野美紀</td>
+<td>東野美紀</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>結局</td>
+<td>—</td>
+<td>FC 版有工作人員名單，駕駛脫下頭盔是女性（致敬 Metroid）；NES 版沒有</td>
+<td>[源]</td>
+</tr>
+</tbody>
+</table>
+<p><strong>一句話總結兩者的設計哲學差異</strong>：[推論]</p>
+<blockquote>
+<p>Gradius 把「失敗」設計成<strong>資源歸零 + 空間倒退</strong>，逼玩家把「不死」當成目標；沙羅曼蛇把「失敗」設計成<strong>只是少一條命</strong>，於是可以把難度全押在<strong>彈幕密度與雙人同樂</strong>上。前者是單人心流，後者是客廳遊戲。</p>
+</blockquote>
+<hr />
+<h2 id="9">⑨ 隱藏要素</h2>
+<h3 id="9-1-konami-ba">9-1 Konami 指令（↑↑↓↓←→←→BA）</h3>
+<table>
+<thead>
+<tr>
+<th>項目</th>
+<th>內容</th>
+<th>標記</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>由來</td>
+<td>FC 版移植負責人 <strong>橋本和久</strong> 在測試時覺得遊戲太難，寫了這組作弊碼讓自己一次拿到全部強化；<strong>出貨前忘了刪掉</strong></td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>首次出現</td>
+<td><strong>1986 FC《宇宙巡航艦》</strong>（比《魂斗羅》早兩年；北美是靠魂斗羅才紅起來的）</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>FC Gradius 的效果</td>
+<td><strong>暫停中</strong>輸入 → 取得 <strong>1 次 SPEED UP、MISSILE、2 顆 OPTION、BARRIER（護盾）</strong>；<strong>不含 DOUBLE 與 LASER</strong></td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>使用次數</td>
+<td><strong>一場遊戲 1 次</strong>，另外<strong>每在核心變紅前打掉一隻 Big Core 就多 1 次</strong></td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>ROM 內的按鍵碼</td>
+<td><code>$9793 = 08 08 04 04 02 01 02 01 40 80</code>（= 上上下下左右左右 B A，用該 ROM 自己的按鍵位元編碼）</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>GAME OVER 續關</td>
+<td>GAME OVER 畫面輸入 Konami 指令（<code>$33 == $0A</code>）→ <strong>給 3 條命</strong>並直接回到剛才的關卡；與按 START 的續關不同（後者 <code>$82D5</code> 會把 <code>$19 / $24 / $26</code> 全部清掉 = <strong>從第 1 關重來</strong>）</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>續關時間窗</td>
+<td>GAME OVER 後 <code>$4C = 120</code> 幀；但 <code>$4C</code> 要等音效變數 <code>$B0</code> 歸零才開始倒數，實測要等約 277 幀音樂跑完</td>
+<td>[源/反組譯]</td>
+</tr>
+<tr>
+<td>FC 沙羅曼蛇</td>
+<td>Konami 指令給 <strong>30 條命</strong></td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>PC Engine Gradius</td>
+<td>同樣指令給 1 SPEED UP、MISSILE、<strong>4 Option</strong>、SHIELD</td>
+<td>[源]</td>
+</tr>
+</tbody>
+</table>
+<h3 id="9-2-fc-gradius">9-2 其他隱藏要素（FC Gradius）</h3>
+<table>
+<thead>
+<tr>
+<th>名稱</th>
+<th>條件</th>
+<th>效果</th>
+<th>標記</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Warp 1→3</strong></td>
+<td>第 1 關把 <strong>4 個艙門全部打掉</strong>，而且打掉時分數的<strong>千位數是偶數</strong></td>
+<td>打完 Big Core 後進 warp（要閃旋轉的摩艾頭）</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td><strong>Warp 2→4</strong></td>
+<td>核心變藍後 <strong>2 秒內</strong>打掉 Big Core（幾乎只有雷射精準命中辦得到）</td>
+<td>同上</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td><strong>Warp 3→5</strong></td>
+<td>打掉 <strong>10 尊以上摩艾</strong></td>
+<td>同上</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>Warp 上限</td>
+<td>最多兩次（1→3、3→5）</td>
+<td></td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>5000 分點 / 1UP 點</td>
+<td>前四關各有兩處「飛過去就拿到」的位置；5000 分無條件，1UP 要<strong>千位數是偶數</strong>；第 6 關另有 1UP</td>
+<td></td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>能量表回捲獎勵</td>
+<td><code>?</code> 反白時再撿一顆：千位數 0 → <strong>RAPID FIRE</strong>；千位數 5 → <strong>10000 分</strong></td>
+<td>見 §3-6</td>
+<td>[源][源/反組譯]</td>
+</tr>
+<tr>
+<td>秘密訊息</td>
+<td>開機 / RESET 時按住特定鍵</td>
+<td>顯示訊息</td>
+<td>[源]</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="10-agent">⑩ 手感數字表（給開發 agent 用）</h2>
+<blockquote>
+<p><strong>這一節是本篇最重要的產出。</strong> 左欄是 FC Gradius 的實測值，右欄是給《星塵巡航艦》的建議值（原創作品，不必照抄，但偏離時要知道自己在偏離什麼）。
+我們的畫面是 <strong>256 × 240 裁成 224</strong>，遊戲區 0–207 線、HUD 208–239 線（Gradius 是 0–211 / 212–239），所以垂直數字要按比例微調。</p>
+</blockquote>
+<h3 id="10-1">10-1 本機</h3>
+<table>
+<thead>
+<tr>
+<th>項目</th>
+<th>FC Gradius 實測</th>
+<th>來源</th>
+<th>《星塵巡航艦》建議</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>位置精度</td>
+<td>X、Y 各 <strong>1 整數 byte + 1 子像素 byte</strong>（1/256 px）</td>
+<td>[源/反組譯]</td>
+<td>用 <code>NES.FX</code> 的 8.8，與 Gradius 同精度</td>
+</tr>
+<tr>
+<td>速度公式</td>
+<td><code>min(($40+2) &amp; $FF, 16) / 2</code> px/幀</td>
+<td>[源/反組譯]</td>
+<td>直接沿用「等差 0.5」的階梯</td>
+</tr>
+<tr>
+<td>速度 1（初始）</td>
+<td><strong>1.0 px/幀</strong></td>
+<td>[源/反組譯]</td>
+<td><strong>1.0</strong>（TASKS 原訂 1.5 偏快，建議改 1.0）</td>
+</tr>
+<tr>
+<td>速度 2</td>
+<td>1.5</td>
+<td>[源/反組譯]</td>
+<td>1.5</td>
+</tr>
+<tr>
+<td>速度 3</td>
+<td>2.0</td>
+<td>[源/反組譯]</td>
+<td>2.0</td>
+</tr>
+<tr>
+<td>速度 4</td>
+<td>2.5</td>
+<td>[源/反組譯]</td>
+<td>2.5</td>
+</tr>
+<tr>
+<td>速度 5</td>
+<td>3.0</td>
+<td>[源/反組譯]</td>
+<td><strong>3.0</strong>（TASKS 原訂 3.5）</td>
+</tr>
+<tr>
+<td>速度飽和</td>
+<td>8.0 px/幀（<code>$40 = 14</code>）</td>
+<td>[源/反組譯]</td>
+<td>我們只做 5 級，上限 3.0；再高在 256 寬畫面會失控</td>
+</tr>
+<tr>
+<td>加速度</td>
+<td><strong>完全沒有</strong>（瞬間到目標速度，瞬間停止）</td>
+<td>[源/反組譯]</td>
+<td><strong>照抄</strong>——這是 Gradius 手感的關鍵，加任何慣性都會變成別的遊戲</td>
+</tr>
+<tr>
+<td>斜向</td>
+<td><strong>不正規化</strong>，<code>速度 × √2</code>（速度 1 時 ≈ 1.414 px/幀）</td>
+<td>[源/反組譯]</td>
+<td>照抄（比較「爽」，且省一次乘法）</td>
+</tr>
+<tr>
+<td>左右同時按</td>
+<td>先加後減，<strong>淨位移 0</strong>（但靠牆時會有不對稱效果）</td>
+<td>[源/反組譯]</td>
+<td>照抄或直接忽略</td>
+</tr>
+<tr>
+<td>上下同時按</td>
+<td><strong>下優先</strong>（因為先測 DOWN）；但若已在下邊界，會落到 UP 分支 → <strong>上生效</strong></td>
+<td>[源/反組譯]</td>
+<td>簡化成「下優先」即可</td>
+</tr>
+<tr>
+<td>X 邊界</td>
+<td><strong>[16, 240]</strong></td>
+<td>[源/反組譯]</td>
+<td>[8, 240]（我們船寬 16）</td>
+</tr>
+<tr>
+<td>Y 邊界</td>
+<td><strong>[16, 192]</strong>（遊戲區 0–211）</td>
+<td>[源/反組譯]</td>
+<td><strong>[16, 184]</strong>（遊戲區 0–207，等比）</td>
+</tr>
+<tr>
+<td>邊界處理差異</td>
+<td>X：先移動再夾（子像素會繼續累積）；Y：<strong>先檢查再移動</strong>（貼牆時連子像素都不動）</td>
+<td>[源/反組譯]</td>
+<td>統一用 Y 的作法（先檢查），行為比較好測</td>
+</tr>
+<tr>
+<td>傾斜動畫</td>
+<td><code>$9B</code> 每幀算，但<strong>每 8 幀才鎖存一次</strong>到顯示圖樣 → 一幀的點按看不出來</td>
+<td>[源/反組譯]</td>
+<td>照抄（省 OAM 抖動，也比較像 NES）</td>
+</tr>
+<tr>
+<td>碰撞框</td>
+<td>判定點 = <code>(playerX + 4, playerY + 8)</code>（8×16 精靈的中心附近）</td>
+<td>[源/反組譯]</td>
+<td>我們用 12×6 的 AABB，比 Gradius 寬容；保留</td>
+</tr>
+<tr>
+<td>地形</td>
+<td><strong>護盾不擋地形，撞到必死</strong></td>
+<td>[源/反組譯]</td>
+<td>照抄（地形殺是橫捲射擊的核心張力）</td>
+</tr>
+</tbody>
+</table>
+<h3 id="10-2">10-2 子彈 / 武器</h3>
+<table>
+<thead>
+<tr>
+<th>項目</th>
+<th>FC Gradius</th>
+<th>來源</th>
+<th>建議</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>標準彈速度</td>
+<td><strong>7 px/幀</strong></td>
+<td>[源/反組譯]</td>
+<td><strong>7</strong></td>
+</tr>
+<tr>
+<td>雷射速度</td>
+<td><strong>12 px/幀</strong>（<code>$0C</code>）</td>
+<td>[源/反組譯]</td>
+<td><strong>12</strong></td>
+</tr>
+<tr>
+<td>DOUBLE 斜上彈</td>
+<td><code>x += 4, y -= 4</code>（45°，合速度 ≈ <strong>5.66 px/幀</strong>）</td>
+<td>[源/反組譯]</td>
+<td>同</td>
+</tr>
+<tr>
+<td>飛彈（空中）</td>
+<td><code>y += 2, x += 0.5</code></td>
+<td>[源/反組譯]</td>
+<td>同</td>
+</tr>
+<tr>
+<td>飛彈（爬地）</td>
+<td><code>y += 0, x += 2</code></td>
+<td>[源/反組譯]</td>
+<td>同</td>
+</tr>
+<tr>
+<td>自機彈同屏</td>
+<td><strong>每個發射體 2 槽</strong>（A / B）；滿配 = 6 發 + 3 飛彈</td>
+<td>[源/反組譯]</td>
+<td>同（我們的池子開 8 發 + 4 飛彈即可）</td>
+</tr>
+<tr>
+<td>連射間隔</td>
+<td><strong>20 幀</strong>（RAPID FIRE = 4 幀）</td>
+<td>[源/反組譯]</td>
+<td><strong>20</strong>；若太悶可降到 16</td>
+</tr>
+<tr>
+<td>實際節奏</td>
+<td>兩槽交錯 <strong>21 / 23 幀</strong> 交替（計時器在槽被占用時凍結）</td>
+<td>[源/反組譯]</td>
+<td>照抄這個「凍結」規則——它就是「子彈飛遠了才能再射」的手感來源</td>
+</tr>
+<tr>
+<td>子彈消滅 X</td>
+<td>標準 / 斜上 248；雷射 240</td>
+<td>[源/反組譯]</td>
+<td>統一 248 即可</td>
+</tr>
+<tr>
+<td>傷害</td>
+<td>自機彈 1、飛彈 2</td>
+<td>[源/反組譯]</td>
+<td>同</td>
+</tr>
+</tbody>
+</table>
+<h3 id="10-3-option">10-3 Option</h3>
+<table>
+<thead>
+<tr>
+<th>項目</th>
+<th>FC Gradius</th>
+<th>來源</th>
+<th>建議</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>位置緩衝長度</td>
+<td><strong>24</strong> 筆</td>
+<td>[源/反組譯]</td>
+<td><strong>24</strong>（TASKS 原訂 64，過長、浪費 RAM）</td>
+</tr>
+<tr>
+<td>Option 1 延遲</td>
+<td><strong>11 筆</strong></td>
+<td>[源/反組譯]</td>
+<td><strong>11</strong>（TASKS 原訂 16 幀）</td>
+</tr>
+<tr>
+<td>Option 2 延遲</td>
+<td><strong>22 筆</strong></td>
+<td>[源/反組譯]</td>
+<td><strong>22</strong></td>
+</tr>
+<tr>
+<td>環前進條件</td>
+<td><strong>只有按著方向鍵那一幀才前進</strong></td>
+<td>[源/反組譯]</td>
+<td><strong>務必照抄</strong>——這一條決定了「停手時 Option 凍結成一排」的招牌畫面</td>
+</tr>
+<tr>
+<td>沒有 Option 時</td>
+<td>槽 1、2 仍每幀更新座標</td>
+<td>[源/反組譯]</td>
+<td>照抄（撿到當下就位）</td>
+</tr>
+<tr>
+<td>Option 動畫</td>
+<td>2 張圖、<strong>每 8 幀換</strong>、自由跑（不同步於船）</td>
+<td>[源/反組譯]</td>
+<td>同</td>
+</tr>
+<tr>
+<td>復活時</td>
+<td>環的 24 筆<strong>全部填成重生座標</strong></td>
+<td>[源/反組譯]</td>
+<td>照抄，否則 Option 會從死亡地點飛過來</td>
+</tr>
+<tr>
+<td>上限</td>
+<td>2</td>
+<td>[源]</td>
+<td>2</td>
+</tr>
+</tbody>
+</table>
+<h3 id="10-4">10-4 捲動 / 相機 / 關卡</h3>
+<table>
+<thead>
+<tr>
+<th>項目</th>
+<th>FC Gradius</th>
+<th>來源</th>
+<th>建議</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>基礎捲動</td>
+<td><strong>0.5 px/幀</strong>（每幀相機子像素 += 128/256）</td>
+<td>[源/反組譯]</td>
+<td><strong>0.5</strong>（TASKS 原訂 1.0 偏快，會讓 12 畫面只有 51 秒）</td>
+</tr>
+<tr>
+<td>強制加速段</td>
+<td><strong>4 px/幀</strong></td>
+<td>[源/反組譯]</td>
+<td>過關演出可用 3–4 px/幀</td>
+</tr>
+<tr>
+<td>捲動暫存器延遲</td>
+<td>寫進 PPU 的是<strong>上一幀</strong>的相機值</td>
+<td>[源/反組譯]</td>
+<td>我們的 <code>Scroller</code> 在 update 內直接寫，<strong>不必照抄這個 bug</strong></td>
+</tr>
+<tr>
+<td>第 1 關長度</td>
+<td>世界 X ≥ <strong>3072 px</strong>（12 個畫面寬）</td>
+<td>[源/反組譯]</td>
+<td>我們規劃 12 畫面 = 384 欄 = 3072 px → <strong>完全吻合</strong>，不用改</td>
+</tr>
+<tr>
+<td>以 0.5 px/幀 跑完</td>
+<td>3072 ÷ 0.5 = <strong>6144 幀 ≈ 102 秒</strong></td>
+<td>[推論]</td>
+<td>一關 100 秒左右是 NES 橫捲的舒適長度</td>
+</tr>
+<tr>
+<td>檢查點</td>
+<td>每 <strong>512 px</strong> 一個（頁 0/2/4/6/8）</td>
+<td>[源/反組譯]</td>
+<td><strong>512 px</strong>（= 每 64 欄一個，12 畫面共 6 個）</td>
+</tr>
+<tr>
+<td>死亡代價</td>
+<td>爆炸 120 幀 + intro ≈ 27 幀 = <strong>147 幀 ≈ 2.45 秒</strong></td>
+<td>[源/反組譯]</td>
+<td>建議縮到 <strong>90 幀</strong>（爆炸 60 + 重生 30）——現代玩家對 2.5 秒黑畫面容忍度低</td>
+</tr>
+<tr>
+<td>初始命數</td>
+<td>3</td>
+<td>[源/反組譯]</td>
+<td>3</td>
+</tr>
+<tr>
+<td>HUD 重畫</td>
+<td>每 8 幀一次（罐頭封包輪替）</td>
+<td>[源/反組譯]</td>
+<td>我們每幀重畫也行（有 160 byte 預算），但<strong>分攤成 4 個封包輪替</strong>更安全</td>
+</tr>
+</tbody>
+</table>
+<h3 id="10-5">10-5 膠囊 / 能量表</h3>
+<table>
+<thead>
+<tr>
+<th>項目</th>
+<th>FC Gradius</th>
+<th>來源</th>
+<th>建議</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>膠囊水平速度</td>
+<td><strong>0.5 px/幀 向左</strong>（= 捲動速度）</td>
+<td>[源/反組譯]</td>
+<td>同（等於固定在世界座標）</td>
+</tr>
+<tr>
+<td>膠囊垂直速度</td>
+<td><strong>0</strong></td>
+<td>[源/反組譯]</td>
+<td>同</td>
+</tr>
+<tr>
+<td>膠囊壽命</td>
+<td>無計時器，飄到 X &lt; 8 消失</td>
+<td>[源/反組譯]</td>
+<td>同</td>
+</tr>
+<tr>
+<td>膠囊動畫</td>
+<td>3 張圖，每張 <strong>6 幀</strong></td>
+<td>[源/反組譯]</td>
+<td>2–3 張，每張 6 幀</td>
+</tr>
+<tr>
+<td>掉落機率</td>
+<td><strong>沒有機率</strong>——由「編隊全滅」或「紅色敵人」旗標決定。實測 59 次擊殺只有 2 顆</td>
+<td>[源/反組譯]</td>
+<td><strong>照抄「沒有隨機」的設計</strong>：膠囊全部來自可預測的來源，玩家才學得會路線</td>
+</tr>
+<tr>
+<td>清屏膠囊</td>
+<td><strong>每第 16 顆</strong></td>
+<td>[源/反組譯]</td>
+<td>每第 16 顆（或 12 顆，關卡較短時）</td>
+</tr>
+<tr>
+<td>能量表回捲</td>
+<td>第 7 顆 → 回到格 1</td>
+<td>[源/反組譯]</td>
+<td>同</td>
+</tr>
+<tr>
+<td>已擁有不消耗</td>
+<td>是</td>
+<td>[源/反組譯]</td>
+<td><strong>務必照抄</strong>（否則玩家會被懲罰誤按）</td>
+</tr>
+<tr>
+<td>B 鍵判定</td>
+<td><strong>按住</strong>（level）</td>
+<td>[源/反組譯]</td>
+<td>建議改成<strong>按下瞬間</strong>（edge）——Gradius 的 level 判定會讓按住 B 連續吃掉數顆膠囊，是設計瑕疵</td>
+</tr>
+<tr>
+<td>撿 + 用同幀</td>
+<td>是</td>
+<td>[源/反組譯]</td>
+<td>照抄（順序：碰撞 → 套用）</td>
+</tr>
+<tr>
+<td>護盾耐久</td>
+<td>5</td>
+<td>[源/反組譯]</td>
+<td>5（最後一下變紅）</td>
+</tr>
+</tbody>
+</table>
+<h3 id="10-6-rank">10-6 敵人 / rank / 魔王</h3>
+<table>
+<thead>
+<tr>
+<th>項目</th>
+<th>FC Gradius</th>
+<th>來源</th>
+<th>建議</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>一般敵人 hp</td>
+<td>1（一發即死）</td>
+<td>[源/反組譯]</td>
+<td>1（硬殼型 3）</td>
+</tr>
+<tr>
+<td>rank 公式</td>
+<td><code>(有主武器) + Option 數 + (有護盾) + (關旗標)</code>，範圍 0–5</td>
+<td>[源/反組譯]</td>
+<td><strong>照抄</strong>：<code>rank = (laser||double) + options + shield</code>，0–4</td>
+</tr>
+<tr>
+<td>rank 門檻</td>
+<td>只有 <code>&gt;=2</code> 與 <code>&gt;=3</code> 兩道</td>
+<td>[源/反組譯]</td>
+<td>兩道就夠</td>
+</tr>
+<tr>
+<td>rank ≥ 2</td>
+<td>敵彈速度 <strong>+25%</strong></td>
+<td>[源/反組譯]</td>
+<td>同</td>
+</tr>
+<tr>
+<td>rank ≥ 3</td>
+<td>敵人改成<strong>帶隨機提前量的預判射擊</strong></td>
+<td>[源/反組譯]</td>
+<td>同（我們的 <code>NES.SH.aim</code> 加一個 0..N 幀的提前量）</td>
+</tr>
+<tr>
+<td>rank 不影響</td>
+<td><strong>敵人生成表</strong>（92 次生成逐位元組相同）</td>
+<td>[源/反組譯]</td>
+<td><strong>務必照抄這個界線</strong></td>
+</tr>
+<tr>
+<td>rank 歸零</td>
+<td>死亡當幀</td>
+<td>[源/反組譯]</td>
+<td>同</td>
+</tr>
+<tr>
+<td>魔王 hp</td>
+<td><strong>6 點</strong>（雷射 1 / 飛彈 2）</td>
+<td>[源/反組譯]</td>
+<td>我們規劃外殼 4×8 + 核心 16 = 48 點，<strong>偏高</strong>；建議降到 外殼 4×4 + 核心 8 = 24 點（用 7 px/幀、20 幀間隔的標準彈約 20 秒）</td>
+</tr>
+<tr>
+<td>魔王移動速度</td>
+<td>rank 0 = 1.0 px/幀 → rank 7 = 2.94 px/幀</td>
+<td>[源/反組譯]</td>
+<td>1.0 → 2.0</td>
+</tr>
+<tr>
+<td>魔王射擊間隔</td>
+<td>rank 0 = <strong>90 幀</strong> → rank 6+ = <strong>35 幀</strong></td>
+<td>[源/反組譯]</td>
+<td>90 → 40</td>
+</tr>
+<tr>
+<td>魔王形變</td>
+<td><strong>每吃 1 點傷害換一張圖</strong>（核心一格一格打開）</td>
+<td>[源/反組譯]</td>
+<td><strong>強烈建議照抄</strong>：這是最便宜的「我有在打中」回饋</td>
+</tr>
+<tr>
+<td>無敵窗</td>
+<td>只有齊射窗口期間可被傷害，其餘打中只有金屬聲</td>
+<td>[源/反組譯]</td>
+<td>可簡化為「外殼打完前核心無敵」</td>
+</tr>
+<tr>
+<td>逾時</td>
+<td>拖太久核心變紅、無敵、然後自爆（<strong>不給分</strong>）</td>
+<td>[源/反組譯]</td>
+<td>建議做：60 秒逾時自爆不給分</td>
+</tr>
+</tbody>
+</table>
+<h3 id="10-7">10-7 無敵幀 / 其他找不到一手數字的項目</h3>
+<table>
+<thead>
+<tr>
+<th>項目</th>
+<th>狀態</th>
+<th>估計方法與建議值</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>復活後無敵幀</strong></td>
+<td><strong>找不到來源</strong>。反組譯文件裡沒有出現任何重生無敵旗標；死亡流程只有 <code>$0100 = 1</code>、<code>$0D = 6</code>（黑畫面計數）與位置重設</td>
+<td>[推論] Gradius 很可能<strong>沒有重生無敵</strong>——因為它回檢查點，重生點本來就是安全區。我們的關卡若在原地復活，<strong>必須自己加</strong>。建議 <strong>90 幀（1.5 秒）閃爍無敵</strong>，前 30 幀連輸入都鎖住</td>
+</tr>
+<tr>
+<td><strong>受擊閃爍頻率</strong></td>
+<td>無一手來源</td>
+<td>[推論] 建議 <strong>每 4 幀切換顯示 / 隱藏</strong>（NES 慣例），90 幀 = 閃 11 次</td>
+</tr>
+<tr>
+<td><strong>膠囊出現機率</strong></td>
+<td><strong>不是機率</strong>（見 10-5）</td>
+<td>[推論] 本專案照 Gradius 用旗標制：編隊（≥4 隻）全滅 100% 掉、指定的「紅色」單體 100% 掉；第 16 顆變清屏。若真要機率，建議雜魚 0%、紅色 100%</td>
+</tr>
+<tr>
+<td><strong>敵彈基礎速度</strong></td>
+<td>反組譯確認有 <code>$BD5F</code>（X）/<code>$BDB3</code>（Y）兩個速度設定點與 rank +25% 分支，但<strong>沒有列出基準數值</strong></td>
+<td>[推論] 由「玩家最高速 3.0、最低速 1.0」反推：敵彈要能追到人但可閃，建議 <strong>2.0 px/幀（rank 0）→ 2.5（rank ≥ 2）</strong>，剛好是 +25%</td>
+</tr>
+<tr>
+<td><strong>敵人移動速度</strong></td>
+<td>只知道魔王的 rank 表</td>
+<td>[推論] 雜魚 1.5–2.5 px/幀、蛇行編隊 2.0、直衝硬殼 3.0</td>
+</tr>
+<tr>
+<td><strong>爆炸動畫幀數</strong></td>
+<td>反組譯顯示爆炸是「腳本」驅動，實測魔王死亡時 <code>$0120</code> 走 <code>$2D → $2E → $2F → $30</code>，<strong>每 10 幀換一張</strong>（f494 / 504 / 514 / 524），共 4 張 50 幀</td>
+<td>[源/反組譯] → 建議 <strong>4 張 × 6 幀 = 24 幀</strong>（雜魚）、<strong>4 張 × 10 幀 = 40 幀</strong>（魔王）</td>
+</tr>
+<tr>
+<td><strong>音效優先權</strong></td>
+<td>反組譯只給了音效 id（膠囊 <code>$0D</code>、強化 <code>$0E</code>、清屏 <code>$0B</code>、打中硬物 <code>$05</code>、死亡 <code>$F7</code>、關卡 <code>$FC</code>）</td>
+<td>[推論] 優先權建議：死亡 &gt; 強化 / 清屏 &gt; 爆炸 &gt; 打中 &gt; 射擊</td>
+</tr>
+</tbody>
+</table>
+<h3 id="10-8-ship-stage-engine-agent">10-8 一頁速查（給 ship / stage / engine agent 直接抄）</h3>
+<pre><code># 本機
+speedLevels   = [1.0, 1.5, 2.0, 2.5, 3.0]   px/frame   (等差 0.5，無加速度)
+diagonal      = 不正規化 (×1.414)
+clampX        = [8, 240]      clampY = [16, 184]
+tiltLatch     = 每 8 幀鎖存一次
+
+# 武器
+shotSpeed     = 7             laserSpeed = 12
+doubleUp      = (+4, -4)      missileFly = (+0.5, +2)   missileCrawl = (+2, 0)
+fireDelay     = 20 幀 (計時器在該槽有彈時凍結 → 實測節奏 21/23 交替)
+slotsPerEmitter = 2 (A/B)     emitters = 1 + options
+
+# Option
+ringLen = 24    lag = [11, 22]    只有按方向鍵時 ring 才 advance
+animFrames = 8  復活時 ring 全部填成重生座標
+
+# 捲動 / 關卡
+scroll        = 0.5 px/frame  (過關演出 4.0)
+stageLen      = 3072 px (12 畫面)   checkpoint = 每 512 px
+deathFreeze   = 90 幀 (建議；原作 147)
+respawnInvul  = 90 幀 (推論，原作無)
+
+# 能量表
+slots = [SPEED, MISSILE, DOUBLE, LASER, OPTION, ?]
+第 7 顆回捲到 slot 1；已擁有 → 不消耗；DOUBLE/LASER 互斥 (同一變數)
+SPEED 無上限無檢查；OPTION ≤ 2；shield = 5 hits；護盾不擋地形
+capsule: vx = -0.5, vy = 0, 無壽命, 每第 16 顆 = 清屏
+
+# rank
+rank = (laser||double ? 1:0) + options + (shield ? 1:0)     # 0..4
+rank &gt;= 2 → 敵彈速度 ×1.25
+rank &gt;= 3 → 敵人預判射擊 (加隨機提前量)
+rank 不影響「生成什麼敵人、何時生成」
+死亡 → rank 立刻歸 0
+
+# 魔王
+hp = 24 (外殼 4×4 + 核心 8)    每受 1 點傷害換一張形變圖
+移動 1.0 → 2.0 px/frame (依 rank)   射擊間隔 90 → 40 幀 (依 rank)
+逾時 60 秒 → 自爆不給分
+</code></pre>
+<hr />
+<h2 id="11-10">⑪ 給《星塵巡航艦》的設計建議 10 條</h2>
+<ol>
+<li><strong>把「無加速度」當成硬規則。</strong> 船的速度切換是瞬間的，沒有慣性、沒有摩擦。這是 Gradius 與所有後來者（R-Type 有蓄力、Thunder Force 有慣性）最根本的分野；一旦加了慣性，玩家就無法在 1 px 的縫隙間做精確操作，整個「能量表選速度」的設計也就失去意義。[源/反組譯]</li>
+<li><strong>Option 的環必須「只有移動時才前進」。</strong> 這一行程式碼就是 Gradius 的視覺簽名：小幅擺動 → Option 聚成一團形成集火；一路衝刺 → Option 拉成長蛇覆蓋前方。用時間驅動的延遲跟隨做不出這個效果。[源/反組譯]</li>
+<li><strong>膠囊不要用機率，用規則。</strong> 「整隊打完才掉」「紅色的一定掉」是可學習的，玩家第二輪就會開始規劃路線；隨機掉落只會讓死亡變成運氣問題。第 16 顆變清屏也維持這個可預測性。[源/反組譯]</li>
+<li><strong>「已經有了的格子不消耗膠囊」一定要做。</strong> 這是原作少數對玩家超級友善的規則，讓玩家敢按 B 試探；反過來，B 鍵建議改成<strong>按下瞬間</strong>觸發（原作是按住，會一口氣吃掉數顆膠囊，是設計瑕疵）。[源/反組譯][推論]</li>
+<li><strong>rank 只改「敵人怎麼打」，絕不改「敵人是誰」。</strong> 原作用 3600 幀、92 次生成證明了這條界線。照做的好處是：rank 算錯只會讓難度偏掉，關卡節奏、出怪表、機器人通關測試全都不受影響——這對我們的 <code>test_stage1.py</code> 是決定性的。[源/反組譯]</li>
+<li><strong>rank 每幀從裝備重算，不要累積。</strong> 一個純函式 <code>rank = f(武器, Option 數, 護盾)</code>，沒有累加器就不會漂移，死亡自動歸零，也不需要存檔。用 4 行程式取代一整套動態難度系統。[源/反組譯]</li>
+<li><strong>魔王用「每吃一點傷害換一張圖」取代血條。</strong> 原作 Big Core 只有 6 點血，但因為每一點都讓核心多開一格，玩家對「打中了」的回饋清晰到不需要任何 UI。我們的核心要塞應該把外殼 + 核心的總傷害點數壓到 <strong>20–24</strong>，每一點都有視覺變化。[源/反組譯][推論]</li>
+<li><strong>死亡懲罰要「重」但「短」。</strong> Gradius 的懲罰（強化全失 + 退回 512 px）是對的，但 147 幀（2.45 秒）的黑畫面在今天太長。建議維持「強化全失 + 回檢查點」，但把停頓壓到 <strong>90 幀</strong>，並補上原作沒有的 <strong>90 幀重生無敵</strong>。[推論]</li>
+<li><strong>HUD 用「4 個罐頭封包每 8 幀輪一個」來畫。</strong> 原作在沒有 IRQ、只有 32KB 程式的條件下，靠這招把 VBlank 寫入攤平；我們有 160 byte/幀 的硬預算，這個模式可以直接讓 <code>budget.over</code> 永遠是 0。[源/反組譯][推論]</li>
+<li><strong>關卡長度抓 3072 px、捲動 0.5 px/幀、檢查點每 512 px。</strong> 這組數字是原作第 1 關的實測值，換算成 102 秒一關、6 個檢查點，節奏上被驗證了 40 年。我們 TASKS 規劃的「12 畫面 = 384 欄」剛好完全吻合，只要把 <code>CR.stage.speed</code> 從 1.0 改成 <strong>0.5</strong>，關卡長度就不用動。[源/反組譯][推論]</li>
+</ol>
+<hr />
+<h2 id="12">⑫ 來源</h2>
+<h3 id="_2">百科 / 通論</h3>
+<ol>
+<li>Wikipedia — Gradius (video game)：https://en.wikipedia.org/wiki/Gradius_(video_game)</li>
+<li>Wikipedia — Gradius（系列）：https://en.wikipedia.org/wiki/Gradius</li>
+<li>Wikipedia — Salamander (video game)：https://en.wikipedia.org/wiki/Salamander_(video_game)</li>
+<li>Wikipedia — Gradius II：https://en.wikipedia.org/wiki/Gradius_II</li>
+<li>Wikipedia — Konami Code：https://en.wikipedia.org/wiki/Konami_Code</li>
+<li>Wikipedia — Kazuhisa Hashimoto（橋本和久）：https://en.wikipedia.org/wiki/Kazuhisa_Hashimoto</li>
+<li>日本語版 Wikipedia — グラディウス (ゲーム)：https://ja.wikipedia.org/wiki/%E3%82%B0%E3%83%A9%E3%83%87%E3%82%A3%E3%82%A6%E3%82%B9_(%E3%82%B2%E3%83%BC%E3%83%A0)</li>
+<li>日本語版 Wikipedia — グラディウスII -GOFERの野望-：https://ja.wikipedia.org/wiki/%E3%82%B0%E3%83%A9%E3%83%87%E3%82%A3%E3%82%A6%E3%82%B9II_-GOFER%E3%81%AE%E9%87%8E%E6%9C%9B-</li>
+<li>中文維基百科 — 宇宙巡航艦：https://zh.wikipedia.org/zh-tw/%E5%AE%87%E5%AE%99%E5%B7%A1%E8%88%AA%E8%89%A6</li>
+<li>中文維基百科 — 沙羅曼蛇：https://zh.wikipedia.org/zh-tw/%E6%B2%99%E7%BD%97%E6%9B%BC%E8%9B%87</li>
+</ol>
+<h3 id="_3">攻略 / 機制</h3>
+<ol start="11">
+<li>StrategyWiki — Gradius / Gameplay（能量表六格、膠囊來源、藍膠囊、各版差異）：https://strategywiki.org/wiki/Gradius/Gameplay</li>
+<li>StrategyWiki — Gradius / Versions（NES 版刪減一覽）：https://strategywiki.org/wiki/Gradius/Versions</li>
+<li>StrategyWiki — Gradius / Enemies（敵人、Big Core、Moai、Mother and Child）：https://strategywiki.org/wiki/Gradius/Enemies</li>
+<li>StrategyWiki — Gradius / Secrets（Konami 指令、warp、獎勵點、能量表回捲）：https://strategywiki.org/wiki/Gradius/Secrets</li>
+<li>StrategyWiki — Salamander / Gameplay（Ripple、Cyclone Laser、Force Field、日版 Life Force 的能量表）：https://strategywiki.org/wiki/Salamander/Gameplay</li>
+<li>StrategyWiki — Salamander / Versions（Famicom 版差異）：https://strategywiki.org/wiki/Salamander/Versions</li>
+<li>Hardcore Gaming 101 — Gradius：https://www.hardcoregaming101.net/gradius/</li>
+<li>Hardcore Gaming 101 — Salamander / Life Force：https://www.hardcoregaming101.net/salamander-life-force/</li>
+<li>shmups.system11.org — RQ: Gradius (1, AC) rank（街機 rank 系統討論）：https://shmups.system11.org/viewtopic.php?f=5&amp;t=57257</li>
+</ol>
+<h3 id="_4">技術規格 / 卡匣</h3>
+<ol start="20">
+<li>Data Crystal — Gradius (NES)（mapper 3 / PRG / CHR / 鏡像）：https://datacrystal.tcrf.net/wiki/Gradius_(NES)</li>
+<li>Data Crystal — Gradius (NES) / RAM map（<code>$40</code> 速度、<code>$41</code> 飛彈、<code>$42</code> 能量表、<code>$44</code> 武器、<code>$45</code> Option、<code>$46</code> 護盾、<code>$07A0-$07B7</code> 位置環）：https://datacrystal.tcrf.net/wiki/Gradius_(NES)/RAM_map</li>
+<li>Data Crystal — Life Force (NES)（UNROM / mapper 2 / PRG 128 KiB / CHR-RAM）：https://datacrystal.tcrf.net/wiki/Life_Force_(NES)</li>
+<li>NESdev Wiki — CNROM：https://www.nesdev.org/wiki/CNROM</li>
+<li>NESdev Wiki — iNES Mapper 003：https://www.nesdev.org/wiki/INES_Mapper_003</li>
+<li>NESdev Wiki — VRC3（mapper 73，只有《沙羅曼蛇》使用；CPU 週期 IRQ）：https://www.nesdev.org/wiki/VRC3</li>
+<li>NESdev Wiki — Cartridge and mappers' history：https://www.nesdev.org/wiki/Cartridge_and_mappers%27_history</li>
+<li>NES Directory — Gradius (USA)（板子 / 74xx161 / 鏡像）：https://nesdir.github.io/350D835E_USA.html</li>
+<li>FamiWiki — Salamander（1987-09-25、RC821、透明藍卡匣）：https://famiwiki.net/wiki/Salamander</li>
+<li>The Cutting Room Floor — Gradius (NES)：https://tcrf.net/Gradius_(NES)</li>
+</ol>
+<h3 id="_5">反組譯 / 逐幀實測（本篇 <code>[源/反組譯]</code> 的來源）</h3>
+<ol start="30">
+<li>GitHub — Fabulu/Mixup（把 NES / GB / 街機 ROM 逐函式手翻成 JavaScript，逐幀與模擬器 RAM 比對；Gradius (NES) 已可全程遊玩）：https://github.com/Fabulu/Mixup</li>
+<li>Mixup — <code>games/gradius/NOTES-player.md</code>（船速公式與 17 級實測表、X/Y 夾限、斜向不正規化、24 筆位置環與 11/22 延遲、傾斜 8 幀鎖存、武器表、連射節奏、一幀的執行順序）：https://raw.githubusercontent.com/Fabulu/Mixup/HEAD/games/gradius/NOTES-player.md</li>
+<li>Mixup — <code>games/gradius/NOTES-rom.md</code>（NMI 結構、影子 OAM <code>$0200</code>、sprite 0 分割 <code>$9AA3</code>、手把讀取、idiom 普查）：https://raw.githubusercontent.com/Fabulu/Mixup/HEAD/games/gradius/NOTES-rom.md</li>
+<li>Mixup — <code>games/gradius/NOTES-render.md</code>（兩個光柵帶 / 分割線 212 / CHR 四 bank 與中途切換 / 8×16 精靈 / 每線 8 顆 / OAM 索引優先權）：https://raw.githubusercontent.com/Fabulu/Mixup/HEAD/games/gradius/NOTES-render.md</li>
+<li>Mixup — <code>games/gradius/NOTES-terrain.md</code>（相機 24-bit、0.5 px/幀、4 px/幀 強制捲動、捲動暫存器一幀延遲、名稱表跑步機）：https://raw.githubusercontent.com/Fabulu/Mixup/HEAD/games/gradius/NOTES-terrain.md</li>
+<li>Mixup — <code>docs/worklog/gradius/00-recon-powerups.md</code>（能量表六臂完整表、已擁有不消耗、B 為按住、第 7 顆回捲與分數位數彩蛋、膠囊物理與壽命、每 16 顆清屏、護盾 5 下與三個消耗點、rank <code>$17</code> 公式與 23 個讀取點、死亡清除範圍、HUD 8 幀輪替）：https://raw.githubusercontent.com/Fabulu/Mixup/HEAD/docs/worklog/gradius/00-recon-powerups.md</li>
+<li>Mixup — <code>docs/worklog/gradius/00-recon-weapons.md</code>（物件槽配置、三種武器的位移、飛彈 fly/crawl 表、子彈消滅門檻、<code>$8989</code> 跳躍表）：https://raw.githubusercontent.com/Fabulu/Mixup/HEAD/docs/worklog/gradius/00-recon-weapons.md</li>
+<li>Mixup — <code>docs/worklog/gradius/00-recon-flow.md</code>（模式機、關卡 intro、檢查點公式 <code>min($3F &amp; $0E, 8)</code>、第 1 關長度 <code>$3F &gt;= $0C</code>、死亡 147 幀、GAME OVER 與兩種續關、暫停）：https://raw.githubusercontent.com/Fabulu/Mixup/HEAD/docs/worklog/gradius/00-recon-flow.md</li>
+<li>Mixup — <code>docs/worklog/gradius/26-recon-boss.md</code>（Big Core 6 點血、傷害 1/2、形變表 <code>$B8EF</code>、無敵閘 <code>$048C</code>、逾時死亡、rank 移動 / 射擊間隔表）：https://raw.githubusercontent.com/Fabulu/Mixup/HEAD/docs/worklog/gradius/26-recon-boss.md</li>
+<li>Mixup — <code>games/gradius/tools/oracle/PROBE.md</code>（手把位元、輸入零延遲、<code>$2F += $44</code> 的軟體精靈輪替）：https://raw.githubusercontent.com/Fabulu/Mixup/HEAD/games/gradius/tools/oracle/PROBE.md</li>
+</ol>
+<h3 id="tas">TAS / 幀計數</h3>
+<ol start="40">
+<li>TASVideos — Submission #1324, NES Gradius by adelikat（最高速 8 px/幀、無加速度、13 次 SPEED UP、自動捲動）：https://tasvideos.org/1324S</li>
+<li>TASVideos — Movie #711, NES Gradius：https://tasvideos.org/711M</li>
+</ol>
+<h3 id="option">演算法參考（Option 跟隨的一般作法）</h3>
+<ol start="42">
+<li>Raspberry Pi / Wireframe #16 — Recreate the sprite-following Options from Gradius：https://www.raspberrypi.com/news/recreate-the-sprite-following-options-from-gradius-using-python-wireframe-issue-16/</li>
+</ol>
+<h3 id="_6">中文圈名稱混用</h3>
+<ol start="43">
+<li>巴哈姆特 — 宇宙巡航艦系列哈啦板「風靡紅白機的沙羅曼蛇到底是什麼呢？」：https://forum.gamer.com.tw/C.php?bsn=192&amp;snA=57</li>
+<li>Mobile01 — 任天堂懷舊遊戲「沙羅曼蛇」討論串：https://www.mobile01.com/topicdetail.php?f=280&amp;t=1684466</li>
+</ol>
+<h3 id="_7">發售日 / 銷量</h3>
+<ol start="45">
+<li>ファミ通.com — ファミコン版『グラディウス』が発売された日（1986-04-25、百萬銷量、Konami 指令首度登場）：https://www.famitsu.com/news/202204/25259219.html</li>
+<li>GAME Watch — ファミコン版「グラディウス」が発売40周年：https://game.watch.impress.co.jp/docs/kikaku/2103012.html</li>
+<li>GAME Watch — ファミコン版「グラディウスII」が35周年：https://game.watch.impress.co.jp/docs/kikaku/1554000.html</li>
+<li>Nintendo Life — Life Force (1988) NES：https://www.nintendolife.com/games/nes/life_force</li>
+<li>NESguide — Life Force (Konami, August 1988)：https://nesguide.com/games/life-force/</li>
+</ol></section>
+<section id="sec19"><div class="path">04_遊戲設計模式.md</div><h1 id="04-ui">04 遊戲設計模式（關卡 / 敵人 / 魔王 / 道具 / 難度 / 手感 / UI / 存檔）</h1>
 <h2 id="10">摘要（10 行內）</h2>
 <ol>
 <li>8 位元時代的關卡設計普遍可用「起承轉合（Kishōtenketsu）」四段結構解讀：安全教學 → 變化 → 翻轉 → 收尾，這是任天堂內部明說過的方法論 [源]。</li>
@@ -16398,7 +18925,7 @@ Mapper 是卡帶上的晶片，負責：<strong>(1) bank switching 換頁</stron
 <li>Knox Game Design — Game Passwords https://www.knoxgamedesign.org/2803/game-passwords-knox-game-design-may-2026/</li>
 <li>Gradius Wiki — Konami Code https://gradius.fandom.com/wiki/Konami_Code</li>
 </ol></section>
-<section id="sec19"><div class="path">05_美術與像素規範.md</div><h1 id="05-nes">05 美術與像素規範（NES 色彩 / 磁磚經濟 / 精靈 / 動畫 / 掌機差異）</h1>
+<section id="sec20"><div class="path">05_美術與像素規範.md</div><h1 id="05-nes">05 美術與像素規範（NES 色彩 / 磁磚經濟 / 精靈 / 動畫 / 掌機差異）</h1>
 <h2 id="10">摘要（10 行內）</h2>
 <ol>
 <li>NES PPU 輸出 64 種色值（實際可見去重後約 54~56 色），背景與精靈各有 4 組「3 色 + 共用底色」的子調色盤 [源]。</li>
@@ -18352,7 +20879,7 @@ Tiled（排關卡，圖塊 = 16×16 元磁磚）
 <li>GB Studio Central — Game Boy Color Modes https://gbstudiocentral.com/tips/game-boy-color-modes/</li>
 <li>nesdoug — 05. Palettes https://nesdoug.com/2018/09/05/05-palettes/</li>
 </ol></section>
-<section id="sec20"><div class="path">06_音樂音效_2A03與chiptune.md</div><h1 id="06-2a03-chiptune">06 音樂 / 音效：2A03 與 chiptune</h1>
+<section id="sec21"><div class="path">06_音樂音效_2A03與chiptune.md</div><h1 id="06-2a03-chiptune">06 音樂 / 音效：2A03 與 chiptune</h1>
 <h2 id="10">摘要（10 行內）</h2>
 <ol>
 <li>NES 的音源是 CPU 內建的 <strong>2A03（NTSC）/ 2A07（PAL）APU</strong>，共 5 聲道：方波 ×2、三角波 ×1、雜訊 ×1、DPCM ×1 [源]。</li>
@@ -19967,7 +22494,7 @@ const bpm = 3600 / (speed * 4);       // 4 row/beat → 150 BPM
 <li><code>docs/research/07_掌機_GB_GBC_GBA_規格與差異.md</code></li>
 <li><code>docs/research/09_法律與原創原則.md</code></li>
 </ul></section>
-<section id="sec21"><div class="path">07_掌機_GB_GBC_GBA_規格與差異.md</div><h1 id="07-game-boy-game-boy-color-game-boy-advance">07 掌機規格與差異：Game Boy / Game Boy Color / Game Boy Advance</h1>
+<section id="sec22"><div class="path">07_掌機_GB_GBC_GBA_規格與差異.md</div><h1 id="07-game-boy-game-boy-color-game-boy-advance">07 掌機規格與差異：Game Boy / Game Boy Color / Game Boy Advance</h1>
 <h2 id="10">摘要（10 行內）</h2>
 <ol>
 <li><strong>GB（1989）</strong>：Sharp SM83 @ 4.194304 MHz、160×144、4 階灰（綠），8 KB WRAM + 8 KB VRAM，APU 4 聲道（2 脈衝 + 波表 + 雜訊）。[源]</li>
@@ -21273,7 +23800,7 @@ const bpm = 3600 / (speed * 4);       // 4 row/beat → 150 BPM
 <li>GBDK-2020 — <em>Getting Started</em> — http://gbdk.org/docs/api/docs_getting_started.html</li>
 <li>Emulation General Wiki — <em>Game Boy Advance emulators</em> — https://emulation.gametechwiki.com/index.php/Game_Boy_Advance_emulators</li>
 </ol></section>
-<section id="sec22"><div class="path">08_開發工具鏈與模擬器.md</div><h1 id="08">08 開發工具鏈與模擬器</h1>
+<section id="sec23"><div class="path">08_開發工具鏈與模擬器.md</div><h1 id="08">08 開發工具鏈與模擬器</h1>
 <h2 id="10">摘要（10 行內）</h2>
 <ol>
 <li>三條路線：<strong>(1) 瀏覽器假復古</strong>（Canvas + Web Audio，如 <code>../卡比之星</code>）、<strong>(2) 真 NES ROM</strong>（cc65/ca65 + neslib、NESmaker）、<strong>(3) 真 GB/GBA ROM</strong>（GBDK-2020 / GB Studio；devkitARM + libtonc / Butano）。[推論]</li>
@@ -22758,7 +25285,7 @@ end)
 <li>Emulation Wiki — <em>Game Boy / Game Boy Color emulators</em> — https://emulation.fandom.com/wiki/Game_Boy/Game_Boy_Color_emulators</li>
 <li>devkitPro Debian 安裝腳本說明 — https://github.com/tristangnl/devkitPro-Debian-based-systems-installer</li>
 </ol></section>
-<section id="sec23"><div class="path">09_法律與原創原則.md</div><h1 id="09">09 法律與原創原則</h1>
+<section id="sec24"><div class="path">09_法律與原創原則.md</div><h1 id="09">09 法律與原創原則</h1>
 <blockquote>
 <p><strong>免責聲明</strong>：本文件是研究整理，<strong>不是法律意見</strong>。各國法律不同（台灣著作權法、美國 DMCA / Copyright Act、日本著作権法），
 實際遇到爭議請諮詢律師。本文件的目的是把「已知的公開事實」與「社群通行慣例」整理成<strong>可執行的自我檢查表</strong>，
@@ -23843,7 +26370,7 @@ grep -rniE 'nintendo|famicom|game ?boy|mario|kirby|zelda|pokemon|sega|konami' \
 <li>NESmaker Development Kit（mapper 30 可重燒卡帶） — https://theretroverse.com/product/nesmaker-development-kit/</li>
 <li>本機專案 — <code>../卡比之星/docs/SPEC.md</code>、<code>../卡比之星/CLAUDE.md</code>、本專案 <code>README.md</code></li>
 </ol></section>
-<section id="sec24"><div class="path">10_專案提案.md</div><h1 id="10-3">10 專案提案：3 個原創遊戲方案</h1>
+<section id="sec25"><div class="path">10_專案提案.md</div><h1 id="10-3">10 專案提案：3 個原創遊戲方案</h1>
 <h2 id="10">摘要（10 行內）</h2>
 <ol>
 <li>本文件依 <code>01</code>～<code>09</code> 的研究結論，提出 <strong>3 個 100% 原創 IP</strong> 的遊戲方案，全部符合文件 09 的 R0/R1 風險等級。[推論]</li>
@@ -25379,7 +27906,3785 @@ grep -rniE 'nintendo|famicom|game ?boy|mario|kirby|zelda|pokemon|sega|konami' \
 <li>SameBoy — https://sameboy.github.io/features/</li>
 <li>Copetti — Game Boy / Color — https://www.copetti.org/writings/consoles/game-boy/</li>
 <li>Copetti — NES — https://www.copetti.org/writings/consoles/nes/</li>
-</ol></section></main>
+</ol></section>
+<section id="sec26"><div class="path">11_橫向射擊設計與技術.md</div><h1 id="11-stg-nes">11 橫向射擊（橫捲 STG）設計與技術 — NES 實作指南</h1>
+<blockquote>
+<p>本文是 R2《星塵巡航艦》的規格來源。技術段落以 NESdev Wiki / NESdev Forums 的一手資料為準，設計段落以 shmups.system11.org 社群、Shmups Wiki、開發者訪談與遊戲資料庫為準。
+所有結論標 <code>[源]</code>（有網址佐證）或 <code>[推論]</code>（本文的推導 / 建議）。<strong>遊戲內容一律原創，本文只借鑑機制與數字。</strong></p>
+</blockquote>
+<h2 id="10">摘要（10 行內）</h2>
+<ol>
+<li>NES 的橫向射擊被三個硬上限決定：OAM <strong>64 個精靈</strong>（256 byte，每個 4 byte）、<strong>每掃描線 8 個</strong>、VBlank 只能寫約 <strong>160 byte</strong> 名稱表 [源]。</li>
+<li>超過 8 個就會「消失」而非「閃爍」；閃爍是<strong>軟體</strong>做出來的——每幀輪替 OAM 槽位順序（OAM cycling），讓被丟掉的對象輪流換人 [源]。</li>
+<li>《宇宙巡航艦》（Gradius NES）與《Parodius》是 NES 上閃爍最兇的代表；Gradius NES 用 <strong>CNROM（mapper 3）</strong>，沒有 IRQ，狀態列只能靠 sprite 0 命中 [源]。</li>
+<li>Konami 最後一款 FC 射擊《Crisis Force》改用自家 <strong>VRC4e</strong>，才換到四向捲動 + 大型魔王 [源]；《Gun-Nac》甚至給玩家「減少閃爍」的開關 [源]。</li>
+<li>瞄準射擊不要用三角函數：把角度切成 256 份查 SIN/COS 表，atan2 用「反射到第一卦限 + 斜率查表」，NES 實測約 <strong>400 cycle</strong>（&lt; 4 條掃描線）[源]。</li>
+<li>自機碰撞框<strong>必須</strong>遠小於精靈——連 1985 年的 Gradius 都已經這麼做；業界常見是 1~4 px 的中心點 [源]。</li>
+<li>復活制度是橫捲 STG 的分水嶺：Gradius / R-Type = <strong>檢查點 + 全裝備清空</strong>（催生「Gradius 症候群」）；沙羅曼蛇 / Life Force = <strong>原地復活</strong>，並保留部分強化 [源]。</li>
+<li>rank（動態難度）在 Gradius 是「難度設定 + 關卡 / 循環 + 已啟用強化 + 特殊項」的加總，III 的範圍是 0~31，初代封頂 15 [源]。</li>
+<li>大型魔王的標準解法是「背景磚做本體 + 精靈只做會動的部位」，因為背景不吃每線 8 精靈的限制，代價是一幀只能換約 32 塊磚 [源]。</li>
+<li>文末給《星塵巡航艦》<strong>8 種敵人原型 / 3 種魔王原型 / 關卡 1 逐欄節奏表 / HUD 版面草案</strong>，可直接當 ship / stage / audio agent 的實作輸入 [推論]。</li>
+</ol>
+<hr />
+<h2 id="_1">目錄</h2>
+<ul>
+<li><a href="#-三個硬上限與本專案的對應">① 三個硬上限與本專案的對應</a></li>
+<li><a href="#-oam-64-精靈的分配與優先權">② OAM 64 精靈的分配與優先權</a></li>
+<li><a href="#-每線-8-精靈閃爍與輪替策略">③ 每線 8 精靈：閃爍與輪替策略</a></li>
+<li><a href="#-子彈池與物件上限">④ 子彈池與物件上限</a></li>
+<li><a href="#-瞄準射擊角度查表">⑤ 瞄準射擊：角度查表</a></li>
+<li><a href="#-名稱表欄串流與-vblank-預算">⑥ 名稱表欄串流與 VBlank 預算</a></li>
+<li><a href="#-以捲動位置為鍵的出怪表">⑦ 以捲動位置為鍵的出怪表</a></li>
+<li><a href="#-碰撞框縮小原則">⑧ 碰撞框縮小原則</a></li>
+<li><a href="#-雷射與長型子彈的精靈拼法">⑨ 雷射與長型子彈的精靈拼法</a></li>
+<li><a href="#-大型魔王背景磚--精靈混合">⑩ 大型魔王：背景磚 + 精靈混合</a></li>
+<li><a href="#-狀態列分割sprite-0-vs-irq">⑪ 狀態列分割：sprite 0 vs IRQ</a></li>
+<li><a href="#-檢查點-vs-原地復活">⑫ 檢查點 vs 原地復活</a></li>
+<li><a href="#-動態難度-rank">⑬ 動態難度 rank</a></li>
+<li><a href="#-膠囊與強化經濟">⑭ 膠囊與強化經濟</a></li>
+<li><a href="#-魔王模式設計">⑮ 魔王模式設計</a></li>
+<li><a href="#-關卡節奏曲線">⑯ 關卡節奏曲線</a></li>
+<li><a href="#-初見殺與記憶型設計">⑰ 初見殺與記憶型設計</a></li>
+<li><a href="#-速度等級的取捨">⑱ 速度等級的取捨</a></li>
+<li><a href="#-同類作品機制對照表">⑲ 同類作品機制對照表</a></li>
+<li><a href="#-音樂技法射擊遊戲特化">⑳ 音樂技法（射擊遊戲特化）</a></li>
+<li><a href="#-給星塵巡航艦的原創設計建議">㉑ 給《星塵巡航艦》的原創設計建議</a></li>
+<li><a href="#-給各-agent-的落地清單">㉒ 給各 agent 的落地清單</a></li>
+<li><a href="#來源">來源</a></li>
+</ul>
+<hr />
+<h2 id="1">① 三個硬上限與本專案的對應</h2>
+<table>
+<thead>
+<tr>
+<th>限制</th>
+<th>硬體數字</th>
+<th>來源</th>
+<th>對橫向射擊的意義</th>
+<th>本專案（engine/shmup.js）對應</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>OAM 容量</td>
+<td><strong>64 個精靈 × 4 byte = 256 byte</strong></td>
+<td>[源] NESdev PPU OAM</td>
+<td>船 + 選項 + 自機彈 + 敵 + 敵彈 + 爆炸全部擠在 64 格</td>
+<td><code>NES.SH.OAM</code> 收集 → 排序 → 寫 0..63，超過計 <code>dropped</code></td>
+</tr>
+<tr>
+<td>每掃描線</td>
+<td><strong>8 個</strong>（secondary OAM 只有 32 byte = 8 × 4）</td>
+<td>[源] NESdev PPU OAM / PPU sprite evaluation</td>
+<td>一排編隊敵人只要同 y 就會少人</td>
+<td>同 prio 每幀輪替起點（軟體 sprite cycling）</td>
+</tr>
+<tr>
+<td>OAM DMA</td>
+<td><code>$4014</code> 一次 <strong>513 CPU cycle</strong>（奇數週期 +1）</td>
+<td>[源] NESdev PPU OAM</td>
+<td>一幀只能整批傳一次 OAM</td>
+<td><code>ppu.sprite()</code> 走獨立 <code>oam</code> 預算通道（256 byte）</td>
+</tr>
+<tr>
+<td>名稱表寫入</td>
+<td>NTSC VBlank 實務 <strong>約 160 byte</strong>（保守 64、理論上限約 4 欄 + 屬性）</td>
+<td>[源] NESdev forums / The frame and NMIs</td>
+<td>每幀最多補「一欄磚 + 屬性」；換場景不能一次重畫</td>
+<td><code>NES.SH.Scroller</code> 每幀 ≤ 45 byte（30 磚 + 15 屬性），<code>budget.over</code> 必須為 0</td>
+</tr>
+<tr>
+<td>精靈優先權</td>
+<td>OAM 位址小的<strong>蓋在</strong>位址大的上面；sprite 0 最高、63 最低</td>
+<td>[源] NESdev PPU OAM</td>
+<td>「誰會被丟掉」＝「誰的 OAM index 大」</td>
+<td><code>add({prio})</code>，0 = 船 / 選項 / 自機彈 … 4 = 爆炸</td>
+</tr>
+<tr>
+<td>精靈溢位旗標</td>
+<td><code>$2002</code> bit 5，<strong>硬體實作有 bug</strong>，會去查錯的 OAM index</td>
+<td>[源] NESdev PPU sprite evaluation</td>
+<td>不能拿來當「這線超過 8 個」的可靠偵測</td>
+<td>本專案用軟體統計（<code>ppu.stats</code> / <code>nes_lint</code>）</td>
+</tr>
+<tr>
+<td>隱藏精靈</td>
+<td>y = <code>$EF</code>~<code>$FF</code>（239~255）即不顯示</td>
+<td>[源] NESdev PPU OAM</td>
+<td>「刪除」物件 = 把 y 寫 255，不用真的搬 OAM</td>
+<td><code>OAM.add</code> 對 y ≥ 240 自動略過</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>[推論] 對《星塵巡航艦》的直接結論：<strong>畫面上「會動的東西」總量請以 40~48 個精靈為設計目標，留 16~24 格給爆炸與魔王</strong>。超過 48 就開始出現肉眼可辨的成片閃爍。</li>
+<li>[推論] 本專案遊戲區只有 <strong>0..207 掃描線</strong>（HUD 佔 208..239），等於 <strong>26 條 8px 精靈列</strong>；每列最多 8 個 ⇒ 理論同屏 208 個，實務被 OAM 64 卡死。瓶頸永遠是 OAM 而不是掃描線，除非敵人排成一直線。</li>
+</ul>
+<hr />
+<h2 id="2-oam-64">② OAM 64 精靈的分配與優先權</h2>
+<h3 id="21-oam-index">2.1 優先權 = OAM index，這是唯一的規則</h3>
+<p>NESdev 講得很清楚：<strong>「OAM 位址較低的精靈會蓋住位址較高的精靈」</strong>，而且「如果任一掃描線上超過 8 個，只有優先權最高的 8 個會被畫出來」[源]。屬性位元組 bit 5 的 priority 只決定「在背景前 / 後」，<strong>不影響精靈彼此的先後</strong>[源]。</p>
+<p>⇒ 所以「精靈排序」與「誰被丟掉」是同一件事，不能分開設計。</p>
+<h3 id="22">2.2 橫向射擊的建議分配表</h3>
+<table>
+<thead>
+<tr>
+<th>prio</th>
+<th>物件</th>
+<th>建議槽數</th>
+<th>理由</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td>自機（16×8 = 2 顆）</td>
+<td>2</td>
+<td>自機絕不可閃爍，玩家靠它定位 [推論]</td>
+</tr>
+<tr>
+<td>0</td>
+<td>選項 / Option（每顆 1 顆精靈）</td>
+<td>2</td>
+<td>與自機同級；它代表火力位置 [推論]</td>
+</tr>
+<tr>
+<td>1</td>
+<td>自機彈 / 雷射段 / 飛彈</td>
+<td>6</td>
+<td>打不到東西比看不到敵人更讓人抓狂 [推論]</td>
+</tr>
+<tr>
+<td>2</td>
+<td>敵彈</td>
+<td>12</td>
+<td><strong>敵彈閃爍 = 不公平</strong>，優先權必須高於敵機本體 [源+推論]</td>
+</tr>
+<tr>
+<td>3</td>
+<td>敵機本體</td>
+<td>28</td>
+<td>最先被犧牲的一層；玩家仍能從敵彈推測位置</td>
+</tr>
+<tr>
+<td>4</td>
+<td>爆炸 / 特效 / 掉落膠囊</td>
+<td>14</td>
+<td>純表演，掉了不影響判定（膠囊可用磚做提示）[推論]</td>
+</tr>
+<tr>
+<td>—</td>
+<td>保留（sprite 0 / HUD 指標）</td>
+<td>0~1</td>
+<td>本專案用掃描線分割，不需要真 sprite 0</td>
+</tr>
+<tr>
+<td>合計</td>
+<td></td>
+<td>64</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>[推論] 「敵彈優先權高於敵機」是橫捲 STG 的鐵則，跟平台動作遊戲的直覺相反。平台遊戲把敵人本體放前面沒問題，射擊遊戲把敵彈丟掉會直接造成「不明死亡」。</p>
+</blockquote>
+<h3 id="23-oam">2.3 兩種 OAM 寫入策略</h3>
+<table>
+<thead>
+<tr>
+<th>策略</th>
+<th>做法</th>
+<th>優點</th>
+<th>缺點</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>固定分區</strong></td>
+<td>槽 0-3 給自機、4-9 給自機彈、10-21 給敵彈…各區固定</td>
+<td>實作最簡單、除錯容易</td>
+<td>區內滿了不能借用別區，浪費</td>
+</tr>
+<tr>
+<td><strong>依 prio 排序後緊縮</strong>（本專案）</td>
+<td>每幀收集 → 依 prio 穩定排序 → 依序寫 0..63</td>
+<td>不浪費一格；閃爍層級可控</td>
+<td>每幀要排序（64 筆，成本可忽略）</td>
+</tr>
+<tr>
+<td><strong>隨機洗牌</strong></td>
+<td>每幀 Fisher-Yates 打亂 0..63</td>
+<td>閃爍最均勻，N 個物件每個的消失機率 = (N−8)/N</td>
+<td>優先權失控，自機也會閃 [源]</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>[源] NESdev 討論串提到「隨機洗牌能保證閃爍均勻分布，但計算較貴、視覺較佳」；同串也提到「Tokumaru 的做法是打亂<strong>物件</strong>的繪製順序，但保留物件<strong>內部</strong>各精靈的層次」。</li>
+<li>[推論] 本專案採第二種 + 「同 prio 內每幀輪替起點」，等於在保留分層的前提下做局部洗牌，是成本與品質的平衡點。</li>
+</ul>
+<hr />
+<h2 id="3-8">③ 每線 8 精靈：閃爍與輪替策略</h2>
+<h3 id="31">3.1 為什麼要「製造」閃爍</h3>
+<p>硬體行為是<strong>消失（dropout）</strong>，不是閃爍。NESdev 的說法：「在 NES 上唯一能把 dropout 變成 flicker 的方法，就是每幀旋轉 OAM 本身，讓精靈每幀都落在新的 OAM 槽，於是輪流被丟掉、看起來就是閃爍」[源]。</p>
+<table>
+<thead>
+<tr>
+<th>現象</th>
+<th>玩家感受</th>
+<th>可接受度</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Dropout（固定同一批消失）</td>
+<td>「這隻敵人根本沒畫出來」→ 不明死亡</td>
+<td>✗ 不可接受</td>
+</tr>
+<tr>
+<td>Flicker（輪流消失）</td>
+<td>「畫面很忙但我看得到大概位置」</td>
+<td>✓ NES 時代的共識</td>
+</tr>
+<tr>
+<td>Slowdown（幀率掉）</td>
+<td>「變慢了但看得清楚」</td>
+<td>✓ 街機 STG 甚至刻意保留</td>
+</tr>
+</tbody>
+</table>
+<h3 id="32">3.2 四種實作手法</h3>
+<table>
+<thead>
+<tr>
+<th>手法</th>
+<th>具體做法</th>
+<th>成本</th>
+<th>代表</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>固定步進旋轉</strong></td>
+<td>每幀把 OAM 寫入指標的起點 +4（或 +8）</td>
+<td>幾乎為 0</td>
+<td>最通用</td>
+</tr>
+<tr>
+<td><strong>質數步進（+9×4）</strong></td>
+<td>「每加一個精靈就把指標 +9×4 = +36」，繞回時剛好填滿 64 格</td>
+<td>極低</td>
+<td>[源] NESdev「stupid easy way」</td>
+</tr>
+<tr>
+<td><strong>$34 偏移法</strong></td>
+<td>清 OAM 時 <code>Offset += $34; CurrIndex = Offset</code>，每配一顆 <code>CurrIndex -= $0C</code></td>
+<td>低</td>
+<td>[源] Dwedit 於 NESdev 論壇</td>
+</tr>
+<tr>
+<td><strong>完全洗牌</strong></td>
+<td>每幀 Fisher-Yates 打亂 0..63 對照表</td>
+<td>中（64 次交換 + 亂數）</td>
+<td>[源] Bregalad 於 NESdev 論壇</td>
+</tr>
+<tr>
+<td><strong>條件式閃爍</strong></td>
+<td>先統計每條掃描線的精靈數，只有 &gt; 8 的那幾條參與輪替</td>
+<td>高（要掃 240 線）</td>
+<td>[源] NESdev「Implementing Conditional Sprite Flickering」</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>[推論] 「質數步進」之所以有效，是因為 9 與 16（64 ÷ 4）互質，指標會走遍所有 4-byte 對齊位置後才回到原點；換成 +8×4 就只會踩 8 個位置，輪替效果差一半。</li>
+<li>[源] NESdev 也提到<strong>設計層面</strong>的兩招：①「把精靈換成背景磚」（SMB 的 <code>?</code> 磚與磚塊就是這樣省下來的）②「刻意讓精靈互相重疊」，這樣掉一顆遮住的內容比較少。</li>
+</ul>
+<h3 id="33-fc">3.3 三款 FC 射擊各用什麼</h3>
+<table>
+<thead>
+<tr>
+<th>作品</th>
+<th>閃爍狀況</th>
+<th>佐證</th>
+<th>[推論] 推測策略</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>宇宙巡航艦（Gradius, FC 1986）</strong></td>
+<td>嚴重；NESdev 直接點名「Gradius 系列與史上閃爍 + 降速最慘的 Parodius 就是這樣」[源]</td>
+<td>NESdev 論壇；Gradius NES 用 mapper 3 CNROM，無 IRQ、無額外 RAM [源]</td>
+<td>簡單的固定步進輪替；同時<strong>大砍規格</strong>（選項從 4 顆減到 2 顆、雷射不再貫穿整個畫面）來降低同屏精靈數 [源]</td>
+</tr>
+<tr>
+<td><strong>沙羅曼蛇 / Life Force（FC 1987）</strong></td>
+<td>仍有閃爍，但編隊規模比街機小</td>
+<td>移植時刪掉 Meteorite Space / Asteroid Hell 兩關、選項上限 2 顆（街機 3 顆）[源]</td>
+<td>用「減少同屏物件」而非「更好的輪替」來解問題 [推論]</td>
+</tr>
+<tr>
+<td><strong>超惑星戰記（Blaster Master, FC 1988）</strong></td>
+<td><strong>不是橫向射擊</strong>（載具 / 步行混合的探索動作），本文只把它當復活制度的對照</td>
+<td>Wikipedia [源]</td>
+<td>—</td>
+</tr>
+<tr>
+<td><strong>Crisis Force（FC 1991，Konami 最後一款 FC 射擊）</strong></td>
+<td>Famitsu 評論仍批評「物件多時會閃」[源]</td>
+<td>TCRF 指出用 <strong>VRC4e</strong></td>
+<td>有 mapper IRQ 可做多段分割，把「大型魔王」改用背景層畫，把精靈省給彈幕 [推論]</td>
+</tr>
+<tr>
+<td><strong>Gun-Nac（FC 1990，Compile）</strong></td>
+<td><strong>內建「減少閃爍」選項</strong>讓玩家自選 flicker / slowdown [源]</td>
+<td>Destructoid 比較文</td>
+<td>提供兩套策略切換：輪替（閃）vs 降速（不閃）[推論]</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>[推論] 給本專案的結論：我們是「現代程式還原」，可以直接做<strong>最好的那一種</strong>——同 prio 內每幀輪替起點 + 分層優先權。這比 1986 年的 Gradius 好，但仍嚴守「每線 8 個」的視覺結果，所以看起來仍是 NES。</p>
+</blockquote>
+<h3 id="34">3.4 驗收標準</h3>
+<table>
+<thead>
+<tr>
+<th>檢查項</th>
+<th>判定</th>
+<th>工具</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>任一掃描線同幀 &gt; 8 個精靈被畫出</td>
+<td>✗ 不合格</td>
+<td><code>engine/nes_lint.js</code> 執行期</td>
+</tr>
+<tr>
+<td>同一物件連續 3 幀都被丟掉</td>
+<td>✗ 輪替沒生效</td>
+<td><code>test_shmup.py</code>：連號 16 個同線精靈，兩幀聯集應為 16</td>
+</tr>
+<tr>
+<td>自機 / 選項 / 敵彈曾被丟掉</td>
+<td>✗ 優先權設錯</td>
+<td><code>OAM.dropped</code> 只允許 prio ≥ 3</td>
+</tr>
+<tr>
+<td><code>dropped &gt; 0</code> 的幀數比例</td>
+<td>&gt; 20% 表示編隊設計過密</td>
+<td>stage agent 調整出怪表</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="4">④ 子彈池與物件上限</h2>
+<h3 id="41">4.1 為什麼一定要「池」而不是動態配置</h3>
+<p>NES 沒有堆積（heap），所有物件都是<strong>固定大小的陣列 + alive 旗標</strong>。這帶來一個 NES 特有的設計語彙：</p>
+<blockquote>
+<p><strong>「池滿了就不生成」</strong>——不排隊、不擠掉舊的、不擴充。射一發沒子彈就是沒射出去。</p>
+</blockquote>
+<ul>
+<li>[推論] 這其實是<strong>手感的一部分</strong>：Gradius 的「自機彈同時最多 2 發」讓玩家必須貼近開火（近距離 = 子彈回收快 = DPS 高），是刻意的風險回報設計，不是偷工減料。</li>
+<li>本專案 <code>NES.SH.Pool(n, factory)</code> 的 <code>alloc()</code> 失敗回 <code>null</code>，正是這個語彙的實作。</li>
+</ul>
+<h3 id="42">4.2 建議池大小表（《星塵巡航艦》）</h3>
+<table>
+<thead>
+<tr>
+<th>池</th>
+<th>建議上限</th>
+<th>每個佔 OAM</th>
+<th>最壞 OAM 佔用</th>
+<th>理由</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>自機彈（一般 / 雙向）</td>
+<td><strong>4</strong>（同時在畫面上，含斜上彈）</td>
+<td>1</td>
+<td>4</td>
+<td>Gradius 是 2 發；我們有雙向，實質等價 [推論]</td>
+</tr>
+<tr>
+<td>雷射段</td>
+<td><strong>4 段</strong>（一條雷射，每段 1 顆精靈）</td>
+<td>1</td>
+<td>4</td>
+<td>與一般彈互斥，不疊加</td>
+</tr>
+<tr>
+<td>飛彈</td>
+<td><strong>2</strong></td>
+<td>1</td>
+<td>2</td>
+<td>沿地面滾動，壽命長，要限量</td>
+</tr>
+<tr>
+<td>敵人</td>
+<td><strong>12</strong></td>
+<td>1~4</td>
+<td>約 20</td>
+<td>編隊 5 隻 + 砲台 3 + 散兵 4</td>
+</tr>
+<tr>
+<td>敵彈</td>
+<td><strong>16</strong></td>
+<td>1</td>
+<td>16</td>
+<td>超過 16 在 NES 上一定閃到看不見 [推論]</td>
+</tr>
+<tr>
+<td>膠囊</td>
+<td><strong>4</strong></td>
+<td>1</td>
+<td>4</td>
+<td>同時 4 顆已經很多</td>
+</tr>
+<tr>
+<td>爆炸</td>
+<td><strong>8</strong>（4 幀動畫）</td>
+<td>1</td>
+<td>8</td>
+<td>最先被犧牲</td>
+</tr>
+<tr>
+<td>魔王部位</td>
+<td><strong>1 隻 × 最多 12 顆精靈</strong></td>
+<td>—</td>
+<td>12</td>
+<td>本體盡量用背景磚</td>
+</tr>
+<tr>
+<td><strong>合計最壞</strong></td>
+<td></td>
+<td></td>
+<td><strong>約 70</strong></td>
+<td>超過 64 ⇒ 靠 prio 丟爆炸與敵機，符合預期</td>
+</tr>
+</tbody>
+</table>
+<h3 id="43">4.3 池的記憶體與遍歷</h3>
+<table>
+<thead>
+<tr>
+<th>項</th>
+<th>做法</th>
+<th>備註</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>配置</td>
+<td>開機時一次建好 n 個物件，之後只切換 <code>alive</code></td>
+<td>零 GC；本專案要求「無 GC」</td>
+</tr>
+<tr>
+<td>遍歷</td>
+<td><code>each(fn)</code> 只走 <code>alive</code> 的；<strong>不要</strong>用 <code>filter</code> / <code>map</code>（會配置新陣列）</td>
+<td>現代 JS 陷阱</td>
+</tr>
+<tr>
+<td>釋放</td>
+<td><code>free(obj)</code> 只設 <code>alive = false</code>，不搬移</td>
+<td>保持索引穩定，測試好寫</td>
+</tr>
+<tr>
+<td>出界回收</td>
+<td>每幀檢查 <code>x &lt; -16 || x &gt; 272 || y &lt; -16 || y &gt; 224</code></td>
+<td>敵彈忘記回收是最常見的「池滿了」bug [推論]</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="5">⑤ 瞄準射擊：角度查表</h2>
+<h3 id="51-mathatan2">5.1 為什麼不用 <code>Math.atan2</code></h3>
+<ul>
+<li>在真機上根本沒有浮點數與三角函數。為了「原汁原味」，本專案規定用 <code>NES.SH.atan2</code> 查表。</li>
+<li>[源] NESdev 上有實測：《Thwaite》用「部分查表式的 atan2」——<strong>把向量反射到第一卦限 → 算斜率（1 次除法）→ 查斜率表 → 反射回去</strong>，整趟約 <strong>400 cycle，不到 4 條掃描線</strong>。</li>
+<li>[源] 另一派更省的做法是<strong>時間式瞄準</strong>：<code>velocity = (target − position) / 64</code>，讓子彈在固定 64 幀內抵達目標當時的位置，完全不需要三角函數，也不需要正規化速度。</li>
+</ul>
+<h3 id="52">5.2 三種瞄準精度的取捨</h3>
+<table>
+<thead>
+<tr>
+<th>方案</th>
+<th>角度數</th>
+<th>實作</th>
+<th>手感</th>
+<th>適用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>8 方向</strong></td>
+<td>8</td>
+<td>比較 dx / dy 的符號與大小</td>
+<td>明顯「格子感」，玩家容易預判</td>
+<td>雜兵、低階砲台 [推論]</td>
+</tr>
+<tr>
+<td><strong>16 方向</strong></td>
+<td>16</td>
+<td>8 方向 + 22.5° 中間值（斜率門檻 tan22.5 ≈ 0.414、tan67.5 ≈ 2.414）</td>
+<td>夠圓滑，仍可預判</td>
+<td><strong>本專案建議的預設</strong> [推論]</td>
+</tr>
+<tr>
+<td><strong>256 方向（一圈 = 256）</strong></td>
+<td>256</td>
+<td><code>SIN[256]</code> / <code>COS[256]</code>，8.8 定點（256 = 1.0）</td>
+<td>完全平滑，與街機同級</td>
+<td>魔王環形彈、追蹤彈 [推論]</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>[源] Contra（NES）反組譯專案的 <code>Aim Documentation.md</code> 顯示：白色 blob 敵人用一個 <code>#$00</code>~<code>#$16</code>（= 23 個值）的瞄準方向變數，<code>#$00</code> 是正右方（3 點鐘），順時針遞增。這是「<strong>有限方向表</strong>」在真實 NES 商業遊戲裡的實例。</p>
+</blockquote>
+<h3 id="53-88">5.3 8.8 定點的角度表規格（本專案）</h3>
+<table>
+<thead>
+<tr>
+<th>項</th>
+<th>規格</th>
+<th>說明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>角度單位</td>
+<td><code>0..255</code> = 一整圈（每單位 1.40625°）</td>
+<td>用 <code>&amp; 255</code> 就能環繞，不用取模</td>
+</tr>
+<tr>
+<td><code>SIN[a]</code> / <code>COS[a]</code></td>
+<td><code>Int16Array</code>，值域 <code>−256..256</code>（256 = 1.0）</td>
+<td><code>COS[a] === SIN[(a + 64) &amp; 255]</code></td>
+</tr>
+<tr>
+<td><code>aim(sx, sy, tx, ty, speed88)</code></td>
+<td>回 <code>{vx, vy}</code>，單位 = px/幀 × 256</td>
+<td><code>vx = (COS[a] * speed88) &gt;&gt; 8</code></td>
+</tr>
+<tr>
+<td>誤差要求</td>
+<td>每個值與 <code>round(256 * sin(2πa/256))</code> 誤差 0</td>
+<td>建表時直接四捨五入，測試逐項比對</td>
+</tr>
+<tr>
+<td><code>atan2</code> 八方驗證</td>
+<td>正右 = 0、右上 = 224、正上 = 192、左上 = 160、正左 = 128 … 允許 ±1</td>
+<td>注意 <strong>y 軸向下</strong>，所以「上」是角度遞減方向</td>
+</tr>
+</tbody>
+</table>
+<h3 id="54">5.4 常見彈幕形狀的產生式</h3>
+<table>
+<thead>
+<tr>
+<th>形狀</th>
+<th>公式（角度 <code>a0</code> = 瞄準角，<code>n</code> = 彈數）</th>
+<th>用途</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>單發瞄準</td>
+<td><code>a0</code></td>
+<td>砲台基本攻擊</td>
+</tr>
+<tr>
+<td>扇形（spread）</td>
+<td><code>a0 + (i − (n−1)/2) * step</code>，<code>step</code> 建議 8~16（≈ 11°~22°）</td>
+<td>中階敵人</td>
+</tr>
+<tr>
+<td>環形（ring）</td>
+<td><code>i * 256 / n</code></td>
+<td>魔王爆開型</td>
+</tr>
+<tr>
+<td>螺旋（spiral）</td>
+<td>每 k 幀發一發，角度 <code>+= step</code>（step 與 256 互質才不會重疊）</td>
+<td>魔王第二階段</td>
+</tr>
+<tr>
+<td>交錯環（offset ring）</td>
+<td>第 m 波的角度加上 <code>128 / n</code></td>
+<td>讓兩波之間留出「安全縫」[推論]</td>
+</tr>
+<tr>
+<td>牆型（wall）</td>
+<td>同角度、不同初始 y，速度略有差</td>
+<td>逼玩家往固定缺口跑</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>[推論] NES 的可讀性要求：<strong>同時在畫面上的敵彈 ≤ 16 顆</strong>，而且相鄰兩顆的間距至少 12 px（自機碰撞框 12×6 才過得去）。環形彈 8 顆就已經很滿。</p>
+</blockquote>
+<hr />
+<h2 id="6-vblank">⑥ 名稱表欄串流與 VBlank 預算</h2>
+<h3 id="61">6.1 預算數字</h3>
+<table>
+<thead>
+<tr>
+<th>數字</th>
+<th>值</th>
+<th>來源</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>NTSC VBlank 實務可寫名稱表 / 調色盤</td>
+<td><strong>約 160 byte</strong>（中度展開迴圈）</td>
+<td>[源] NESdev 論壇</td>
+</tr>
+<tr>
+<td>保守常見值</td>
+<td>多數遊戲每個 NMI <strong>不超過 64 byte</strong></td>
+<td>[源] NESdev 論壇</td>
+</tr>
+<tr>
+<td>理論上限（4 cycle LDA/STA 估算）</td>
+<td>約 284 byte</td>
+<td>[源] NESdev 論壇</td>
+</tr>
+<tr>
+<td>用最快緩衝法的實務上限</td>
+<td><strong>約 4 欄（或 4 列）名稱表 + 對應屬性</strong></td>
+<td>[源] NESdev 論壇</td>
+</tr>
+<tr>
+<td>另外的 OAM DMA</td>
+<td>256 byte / 513 cycle，<strong>不佔上面那 160</strong></td>
+<td>[源] NESdev PPU OAM</td>
+</tr>
+<tr>
+<td>捲動 32 px 需要</td>
+<td>略多於 128 byte / VBlank（「完全在合理範圍內」）</td>
+<td>[源] NESdev 論壇</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>本專案 <code>engine/cpu_timing.js</code> 已把 <strong>160 byte</strong> 設成硬預算，並且 OAM 走獨立通道（256 byte）。R1 的 demo 實測單幀尖峰 51 byte。</li>
+</ul>
+<h3 id="62">6.2 一欄要寫多少</h3>
+<table>
+<thead>
+<tr>
+<th>項目</th>
+<th>byte 數</th>
+<th>說明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>一整欄磚（30 列可見 + 邊界）</td>
+<td><strong>30</strong></td>
+<td>名稱表 32×30</td>
+</tr>
+<tr>
+<td>對應屬性（每 16×16 一格，一欄 16px 寬 ⇒ 每兩欄才換一次屬性欄）</td>
+<td><strong>8</strong>（15 列 ÷ 2 向上取整）；實務每兩欄寫一次</td>
+<td>屬性表 8×8</td>
+</tr>
+<tr>
+<td>合計</td>
+<td><strong>約 38</strong>（尖峰），平均約 34</td>
+<td>遠低於 160 ✓</td>
+</tr>
+</tbody>
+</table>
+<p>⇒ [推論] <strong>本專案每幀寫一欄綽綽有餘，甚至支援捲動速度 2 px/幀 以上</strong>（2 px/幀 時每 4 幀寫一欄）。真正的限制是：<code>camX</code> 每前進 8 px 就必須補好一欄，否則右緣會出現殘影。</p>
+<h3 id="63">6.3 欄串流的實作要點</h3>
+<table>
+<thead>
+<tr>
+<th>要點</th>
+<th>做法</th>
+<th>陷阱</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>雙名稱表</td>
+<td>水平捲動用 <strong>垂直鏡像</strong>（左右兩張 NT 並排 512 px 寬）</td>
+<td>鏡像設錯會變成上下接</td>
+</tr>
+<tr>
+<td>寫哪一欄</td>
+<td><code>col = (camX &gt;&gt; 3) + 32</code>（右緣外一欄）；<code>nt = (col &gt;&gt; 5) &amp; 1</code>；<code>ntCol = col &amp; 31</code></td>
+<td>一定要「<strong>先寫、後捲</strong>」，否則玩家會看到空欄</td>
+</tr>
+<tr>
+<td>觸發條件</td>
+<td><code>(camX &amp; 7) === 0</code> 且 camX 有前進</td>
+<td>用 <code>lastCol</code> 比對比用餘數安全（速度 &gt; 8 px/幀 時要補多欄）</td>
+</tr>
+<tr>
+<td>屬性</td>
+<td>每 <code>(col &amp; 1) === 0</code> 時寫一次該屬性欄（8 byte）</td>
+<td>屬性欄 16px 寬，晚寫一格會出現色塊錯位</td>
+</tr>
+<tr>
+<td>初始化</td>
+<td>rendering 關閉時一次補滿兩張 NT（1920 byte），<strong>不計預算</strong></td>
+<td>遊戲中途換場景要分攤到多幀（R1 的教訓）</td>
+</tr>
+<tr>
+<td>倒退</td>
+<td>本專案是強制捲動，<code>camX</code> 單調遞增 ⇒ 不處理倒退</td>
+<td>若未來要做「被魔王逼退」，需要寫左緣欄</td>
+</tr>
+</tbody>
+</table>
+<h3 id="64-vblank">6.4 一幀的順序（VBlank 預算的分配）</h3>
+<pre><code>NMI（VBlank 開始）
+ ├─ ① OAM DMA（$4014）           256 byte / 513 cycle  ← 獨立通道
+ ├─ ② 名稱表欄緩衝 flush          ≤ 38 byte
+ ├─ ③ 屬性緩衝 flush              ≤ 8 byte（每兩欄一次）
+ ├─ ④ HUD 數字更新（分數 / 能量表） ≤ 24 byte（只寫變動的格）
+ ├─ ⑤ 調色盤更新（閃白 / 淡入）     ≤ 32 byte（只在特效幀）
+ └─ ⑥ 設定捲動 $2005 / $2006
+VBlank 結束 → 可見畫面
+ └─ 掃描線 208：分割，捲動歸零、切 HUD 用的名稱表區
+</code></pre>
+<ul>
+<li>[推論] 上表最壞情況 = 38 + 8 + 24 + 32 = <strong>102 byte</strong>，留 58 byte 餘裕給魔王背景磚動畫。這是本專案「魔王本體用背景磚」可行的關鍵預算依據。</li>
+</ul>
+<hr />
+<h2 id="7">⑦ 以捲動位置為鍵的出怪表</h2>
+<h3 id="71">7.1 為什麼用「位置」而不是「時間」</h3>
+<table>
+<thead>
+<tr>
+<th>鍵</th>
+<th>優點</th>
+<th>缺點</th>
+<th>適用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>捲動位置（欄 / px）</strong></td>
+<td>關卡是「空間」，編輯器所見即所得；地形與敵人永遠對齊；玩家可記憶</td>
+<td>捲動停下來（魔王戰）時要另一套機制</td>
+<td><strong>橫捲 STG 的標準</strong> [源]</td>
+</tr>
+<tr>
+<td>幀數（時間）</td>
+<td>停止捲動時仍能運作；節奏好控</td>
+<td>一旦有降速就全歪掉</td>
+<td>魔王戰、過場</td>
+</tr>
+<tr>
+<td>混合</td>
+<td>主表用位置，魔王段切成幀表</td>
+<td>兩套邏輯</td>
+<td><strong>本專案採用</strong> [推論]</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>[源] 社群的實作共識：「觸發出怪的就是關卡的捲動；攻擊編隊在特定捲動位置被觸發，然後才插進『活動物件表』，所以任何時刻只需要處理一小部分敵人。」</li>
+<li>[源] 另一個常見技巧：「敵人<strong>依出現順序排序</strong>，於是每幀只需要檢查一個元素就知道要不要生成。」</li>
+</ul>
+<h3 id="72-nesshspawner">7.2 資料格式建議（本專案 <code>NES.SH.Spawner</code>）</h3>
+<pre><code class="language-js">// stage1.js：以「欄」為鍵，遞增排序，單次觸發
+CR.SPAWN_TABLE = [
+  { col:  24, fn: (s) =&gt; s.wave('bee', { y:  64, n: 5, drops: true }) },
+  { col:  32, fn: (s) =&gt; s.turret({ y: 'floor', x: 256 }) },
+  { col:  40, fn: (s) =&gt; s.wave('bee', { y: 120, n: 5, drops: true }) },
+  // ...
+  { col: 352, fn: (s) =&gt; s.boss('core') },
+];
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>欄位</th>
+<th>型別</th>
+<th>說明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>col</code></td>
+<td>整數，<strong>必須遞增</strong></td>
+<td>關卡欄座標（1 欄 = 8 px）；<code>camCol = camX &gt;&gt; 3</code></td>
+</tr>
+<tr>
+<td><code>fn(ctx)</code></td>
+<td>函式</td>
+<td>呼叫 stage 的生成器；<strong>不可</strong>假設池一定有空位（<code>alloc()</code> 可能回 null）</td>
+</tr>
+<tr>
+<td>觸發規則</td>
+<td><code>camCol &gt;= col</code> 且尚未觸發過</td>
+<td>倒退不重觸發（本專案 camX 單調遞增，僅檢查點重置時 <code>reset()</code>）</td>
+</tr>
+<tr>
+<td>指標</td>
+<td>只保留一個 <code>next</code> 索引</td>
+<td>每幀 O(1)，不掃全表</td>
+</tr>
+</tbody>
+</table>
+<h3 id="73-wave">7.3 編隊（wave）的參數化</h3>
+<table>
+<thead>
+<tr>
+<th>參數</th>
+<th>說明</th>
+<th>建議值</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>n</code></td>
+<td>隻數</td>
+<td>3 / 5 / 8</td>
+</tr>
+<tr>
+<td><code>gap</code></td>
+<td>前後間隔幀</td>
+<td>6~10（太密會同線 &gt; 8）</td>
+</tr>
+<tr>
+<td><code>y</code></td>
+<td>入場高度</td>
+<td>距地板 / 天花板至少 24 px</td>
+</tr>
+<tr>
+<td><code>path</code></td>
+<td>路徑 ID（直線 / 蛇行 / U 轉 / 繞圈）</td>
+<td>一個 wave 只用一種</td>
+</tr>
+<tr>
+<td><code>drops</code></td>
+<td>全滅是否掉膠囊</td>
+<td>Gradius 規則：<strong>整隊全滅</strong>才掉一顆 [源]</td>
+</tr>
+<tr>
+<td><code>pal</code></td>
+<td>用精靈調色盤 2 或 3</td>
+<td>「會掉膠囊的那隊」用不同色 = 視覺告知 [源]</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>[源] Gradius 的規則明確：「摧毀特定敵人（以<strong>不同顏色</strong>標示）或敵人編隊時會掉落 Power Capsule。」顏色是給玩家的合約，本專案必須遵守。</p>
+</blockquote>
+<h3 id="74">7.4 檢查點與出怪表的互動</h3>
+<table>
+<thead>
+<tr>
+<th>情境</th>
+<th>處理</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>玩家死亡 → 回檢查點</td>
+<td><code>Spawner.reset()</code> 後把 <code>next</code> 指標二分搜到 <code>camCol</code> 之後的第一筆</td>
+</tr>
+<tr>
+<td>已生成但未被殺的敵人</td>
+<td>全部 <code>free()</code>，畫面清空</td>
+</tr>
+<tr>
+<td>檢查點在編隊中間</td>
+<td>✗ 禁止；檢查點必須放在<strong>編隊之間的空隙</strong>，否則玩家一復活就被包 [推論]</td>
+</tr>
+<tr>
+<td>復活救濟</td>
+<td>Gradius 的做法：死亡後生成「一大群橘色敵人」讓玩家撿膠囊回復 [源]。本專案建議照做</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="8">⑧ 碰撞框縮小原則</h2>
+<h3 id="81">8.1 業界事實</h3>
+<table>
+<thead>
+<tr>
+<th>事實</th>
+<th>來源</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>「連 Gradius 的碰撞框都比精靈小，而且這不是彈幕遊戲專屬——90 年代中期以後幾乎每款知名作品（含 Psikyo、Seibu 等非彈幕廠）都是精靈大、判定小。」</td>
+<td>[源] shmups.system11.org</td>
+</tr>
+<tr>
+<td>「判定通常只有 1~4 px，遠小於自機精靈，這就是密集彈幕還能活下來的訣竅。」</td>
+<td>[源] Dinogame 彈幕定義文</td>
+</tr>
+<tr>
+<td>「玩家判定應該是放在精靈<strong>質心</strong>的一個小圓，而且要在<strong>所有動畫幀</strong>保持在同一位置。」</td>
+<td>[源] shmups.system11.org</td>
+</tr>
+<tr>
+<td>「玩家子彈與敵人精靈的判定要<strong>寬鬆</strong>，讓瞄準感覺準確又公平；敵彈的判定要<strong>緊</strong>，讓密集彈幕可以精準閃避。」</td>
+<td>[源] SLYNYRD Pixelblog 63</td>
+</tr>
+</tbody>
+</table>
+<h3 id="82-tasks">8.2 本專案的判定框規格（TASKS 契約 + 本文補充理由）</h3>
+<table>
+<thead>
+<tr>
+<th>對象</th>
+<th>精靈尺寸</th>
+<th>判定框</th>
+<th>比例</th>
+<th>理由</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>自機</td>
+<td>16×8</td>
+<td><strong>12×6</strong>（置中，左右各縮 2、上下各縮 1）</td>
+<td>56% 面積</td>
+<td>保留「擦彈」的餘裕，但不至於讓玩家覺得穿模 [推論]</td>
+</tr>
+<tr>
+<td>自機 vs <strong>敵彈</strong></td>
+<td>—</td>
+<td>建議進一步縮到 <strong>6×4</strong>（核心）</td>
+<td>19%</td>
+<td>彈幕段落的公平性；可用「兩個框」：對地形用 12×6、對敵彈用 6×4 [推論]</td>
+</tr>
+<tr>
+<td>自機彈</td>
+<td>8×8</td>
+<td><strong>4×4</strong> ×（對敵人放寬到 8×8）</td>
+<td>—</td>
+<td>打擊感優先</td>
+</tr>
+<tr>
+<td>敵機</td>
+<td>16×16</td>
+<td><strong>12×12</strong></td>
+<td>56%</td>
+<td>讓玩家「看起來擦到」也能打中</td>
+</tr>
+<tr>
+<td>敵彈</td>
+<td>8×8</td>
+<td><strong>4×4</strong></td>
+<td>25%</td>
+<td>緊</td>
+</tr>
+<tr>
+<td>膠囊</td>
+<td>8×8</td>
+<td><strong>12×12</strong>（比精靈<strong>大</strong>）</td>
+<td>225%</td>
+<td>撿道具要好撿；這是唯一應該放大的框 [推論]</td>
+</tr>
+<tr>
+<td>地形</td>
+<td>磚 8×8</td>
+<td>用 <code>solidAt(x, y)</code> 查磚，取自機框 4 角</td>
+<td>—</td>
+<td>4 角取樣足夠；不要逐像素</td>
+</tr>
+</tbody>
+</table>
+<h3 id="83">8.3 兩段式判定（建議）</h3>
+<pre><code>自機 hitbox
+┌──────────────┐  ← 12×6：對地形、對敵機本體（撞到 = 死）
+│  ┌──────┐    │
+│  │ 6×4  │    │  ← 核心：對敵彈（擦彈不死）
+│  └──────┘    │
+└──────────────┘
+</code></pre>
+<ul>
+<li>[推論] 這讓「貼著地板飛」變得刺激但可控，同時彈幕段落不會因為船身長 16 px 而變成不可能。</li>
+<li>[推論] 護盾（Force Field）啟動時，把<strong>對敵彈</strong>的框直接關掉 N 次命中，而不是放大框——放大框在 NES 的整數座標下會有奇怪的邊界行為。</li>
+</ul>
+<h3 id="84">8.4 判定順序（每幀）</h3>
+<table>
+<thead>
+<tr>
+<th>順序</th>
+<th>檢查</th>
+<th>結果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>自機彈 × 敵人</td>
+<td><code>enemy.hit(dmg)</code>；子彈 <code>free()</code>（雷射不消失）</td>
+</tr>
+<tr>
+<td>2</td>
+<td>自機彈 × 魔王部位</td>
+<td>只有「露出的弱點」可被打中</td>
+</tr>
+<tr>
+<td>3</td>
+<td>自機 × 膠囊</td>
+<td><code>gauge++</code>，膠囊 <code>free()</code></td>
+</tr>
+<tr>
+<td>4</td>
+<td>自機 × 敵彈</td>
+<td>有護盾 → 扣護盾；無 → <code>die()</code></td>
+</tr>
+<tr>
+<td>5</td>
+<td>自機 × 敵人</td>
+<td><code>die()</code>（並讓敵人也爆）</td>
+</tr>
+<tr>
+<td>6</td>
+<td>自機 × 地形</td>
+<td><code>die()</code></td>
+</tr>
+<tr>
+<td>—</td>
+<td>無敵幀</td>
+<td><code>invul &gt; 0</code> 時跳過 4/5/6，建議 <strong>90 幀</strong>（1.5 秒）</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>[推論] 順序很重要：<strong>先撿膠囊再判死</strong>。同一幀同時撿到膠囊又撞到彈，玩家會覺得「我明明撿到了」——先給獎勵比較不會被罵。</p>
+</blockquote>
+<hr />
+<h2 id="9">⑨ 雷射與長型子彈的精靈拼法</h2>
+<h3 id="91">9.1 問題</h3>
+<p>NES 的精靈是 8×8（或 8×16），一條橫貫畫面的雷射需要 32 顆精靈 —— <strong>一定會爆掉每線 8 個的限制</strong>（同一條掃描線上排 32 顆）。</p>
+<ul>
+<li>[源] 這正是 Gradius FC 版的妥協：「雷射在 NES 版沒那麼好用了，因為它不再貫穿整個畫面。」</li>
+</ul>
+<h3 id="92">9.2 五種拼法</h3>
+<table>
+<thead>
+<tr>
+<th>拼法</th>
+<th>描述</th>
+<th>每線精靈數</th>
+<th>成本</th>
+<th>適用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>A. 短雷射（段數上限）</strong></td>
+<td>只畫 3~4 段（24~32 px），隨自機前進</td>
+<td>4</td>
+<td>4 顆 OAM</td>
+<td><strong>本專案採用</strong>（契約：最長 4 段）</td>
+</tr>
+<tr>
+<td><strong>B. 粗雷射（8×16 疊兩層）</strong></td>
+<td>用 8×16 精靈模式，一段只要 1 顆就有 16 px 高</td>
+<td>4</td>
+<td>4 顆</td>
+<td>想要「厚重」感時</td>
+</tr>
+<tr>
+<td><strong>C. 背景磚雷射</strong></td>
+<td>雷射畫在背景層，寫名稱表</td>
+<td><strong>0</strong></td>
+<td>每幀 ~8 byte</td>
+<td>位置只能 8px 對齊，動起來很卡 [推論]</td>
+</tr>
+<tr>
+<td><strong>D. 閃爍雷射</strong></td>
+<td>段落之間刻意留空隙，每幀交錯（像虛線）</td>
+<td>2~4</td>
+<td>少</td>
+<td>復古味濃，但可讀性差</td>
+</tr>
+<tr>
+<td><strong>E. 掃描線分段</strong></td>
+<td>雷射每段 y 稍微錯開 1~2 px，讓它們不在同一條掃描線</td>
+<td>≤ 8</td>
+<td>多</td>
+<td>只適合斜向雷射</td>
+</tr>
+</tbody>
+</table>
+<h3 id="93-ship-agent">9.3 本專案雷射規格（建議給 ship agent）</h3>
+<table>
+<thead>
+<tr>
+<th>項</th>
+<th>規格</th>
+<th>理由</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>段長</td>
+<td>每段 8×8 精靈，最長 <strong>4 段 = 32 px</strong></td>
+<td>契約已定；4 顆 OAM 可接受</td>
+</tr>
+<tr>
+<td>生成</td>
+<td>按住 B 蓄力？→ <strong>不</strong>。按一下就發射完整 4 段</td>
+<td>NES Gradius 是「按住可延長」，但我們的自機彈上限是 2，簡化為固定長度 [推論]</td>
+</tr>
+<tr>
+<td>前進</td>
+<td>整條以 <strong>6 px/幀</strong> 前進（比一般彈 4 px/幀 快）</td>
+<td>雷射要有「快」的感覺</td>
+</tr>
+<tr>
+<td>貫穿</td>
+<td>命中敵人<strong>不消失</strong>，但同一隻敵人每 8 幀只吃一次傷害</td>
+<td>避免一幀打 4 次</td>
+</tr>
+<tr>
+<td>傷害</td>
+<td>每次 2（一般彈 1）</td>
+<td>讓「選雷射」有意義</td>
+</tr>
+<tr>
+<td>磚</td>
+<td>頭段 / 中段 / 尾段 三種磚（<code>S_LASER_H</code> / <code>_M</code> / <code>_T</code>）</td>
+<td>中段可重複用，省 CHR</td>
+</tr>
+<tr>
+<td>互斥</td>
+<td>與 DOUBLE 互斥（Gradius 規則 [源]）</td>
+<td>逼玩家做選擇</td>
+</tr>
+</tbody>
+</table>
+<h3 id="94">9.4 其他長型物件</h3>
+<table>
+<thead>
+<tr>
+<th>物件</th>
+<th>拼法</th>
+<th>精靈數</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>敵人雷射掃射（魔王第三階段）</td>
+<td>3 條各 3 段 = 9 顆，但<strong>三條 y 錯開 ≥ 16 px</strong></td>
+<td>9（每線 ≤ 3）</td>
+</tr>
+<tr>
+<td>觸手 / 鎖鏈</td>
+<td>每節 8×8，最多 6 節；節與節間隔 8px 且<strong>呈斜線</strong></td>
+<td>6（每線 1~2）</td>
+</tr>
+<tr>
+<td>大型敵機（32×16）</td>
+<td>8 顆 8×8，或 4 顆 8×16</td>
+<td>4（8×16 較省）</td>
+</tr>
+<tr>
+<td>地形凸起上的砲管</td>
+<td>背景磚畫底座，只有砲管頭是精靈</td>
+<td>1</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>[推論] <strong>通則：任何「長」的東西都要盡量走斜的或走背景</strong>。橫平豎直 + 精靈 = 每線 8 個的地雷。</p>
+</blockquote>
+<hr />
+<h2 id="10_1">⑩ 大型魔王：背景磚 + 精靈混合</h2>
+<h3 id="101">10.1 為什麼要用背景</h3>
+<table>
+<thead>
+<tr>
+<th>事實</th>
+<th>來源</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>「掃描線限制與同屏精靈限制讓大量用精靈很困難，所以很多遊戲<strong>用背景層做魔王</strong>。」</td>
+<td>[源] MegaCat Studios</td>
+</tr>
+<tr>
+<td>「聰明的設計者用<strong>動畫背景磚</strong>做出大型敵人，完全沒有精靈閃爍問題。」</td>
+<td>[源] MegaCat Studios</td>
+</tr>
+<tr>
+<td>「動畫背景魔王很麻煩，因為<strong>一次只能換約 32 塊磚</strong>。解法是在幀之間做『混合』，重用上一幀的部分磚，減少需要新換的磚數。」</td>
+<td>[源] MegaCat Studios</td>
+</tr>
+<tr>
+<td>「背景是一整片磚格，<strong>只能整塊一起移動</strong>。所以像《洛克人 6》那種大魔王出現時背景通常是空的——你沒辦法只移動魔王。」</td>
+<td>[源] NESdev 論壇</td>
+</tr>
+<tr>
+<td>實例：洛克人系列的巨型魔王、《忍者蛙》Snake Pit 的蛇、《Bucky O'Hare》的背景敵人 + 視差 + 丟石頭</td>
+<td>[源] NESdev 論壇</td>
+</tr>
+</tbody>
+</table>
+<h3 id="102">10.2 三層混合方案（本專案建議）</h3>
+<table>
+<thead>
+<tr>
+<th>層</th>
+<th>內容</th>
+<th>更新成本</th>
+<th>可動性</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>背景磚</strong></td>
+<td>魔王本體外殼、要塞牆面、不動的裝甲板</td>
+<td>每幀 ≤ 32 byte（改磚 index）</td>
+<td>只能 8px 對齊，或整體跟著捲動</td>
+</tr>
+<tr>
+<td><strong>CHR bank 動畫</strong></td>
+<td>外殼的「發光 / 破損」動畫：<strong>不換磚 index，換磚的圖樣內容</strong></td>
+<td>若是現代還原，直接改 CHR 資料（真機需要 CHR-RAM 或 bank 切換）</td>
+<td>原地動畫，成本最低 [推論]</td>
+</tr>
+<tr>
+<td><strong>精靈</strong></td>
+<td>會移動的部位：核心、砲管、觸手、開合的裝甲門</td>
+<td>OAM 12 顆以內</td>
+<td>完全自由</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>[推論] 本專案《星塵巡航艦》的魔王在契約上是 48×48。若全用精靈 = 6×6 = <strong>36 顆 8×8 精靈</strong>，且每條掃描線 6 顆 —— 加上敵彈立刻爆線。<strong>建議改成：背景磚畫 48×48 的要塞本體（36 塊磚），精靈只畫「4 片會開合的外殼板」+「核心」+「砲口閃光」= 約 10~12 顆。</strong></p>
+</blockquote>
+<h3 id="103">10.3 魔王進場的預算分攤</h3>
+<table>
+<thead>
+<tr>
+<th>幀</th>
+<th>動作</th>
+<th>名稱表 byte</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td>停止捲動（<code>stage.speed = 0</code>），播 boss 曲</td>
+<td>0</td>
+</tr>
+<tr>
+<td>1~12</td>
+<td>每幀寫 3 塊磚，把 36 塊魔王磚逐步「浮現」（配合閃白調色盤）</td>
+<td>3/幀</td>
+</tr>
+<tr>
+<td>13</td>
+<td>屬性表寫 9 byte（3×3 個 16×16 區塊）</td>
+<td>9</td>
+</tr>
+<tr>
+<td>14~20</td>
+<td>精靈部位淡入（OAM，不佔名稱表）</td>
+<td>0</td>
+</tr>
+<tr>
+<td>21</td>
+<td>戰鬥開始</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>[推論] 這比「一幀寫 36 byte」更安全，而且「逐步浮現」本身就是很有戲的登場演出。</li>
+</ul>
+<h3 id="104">10.4 魔王受擊表現</h3>
+<table>
+<thead>
+<tr>
+<th>表現</th>
+<th>實作</th>
+<th>成本</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>閃白</td>
+<td>換背景調色盤（<code>$30</code> 白）2 幀</td>
+<td>3~4 byte</td>
+</tr>
+<tr>
+<td>裝甲破損</td>
+<td>把該區磚換成「裂痕」版本（9 塊）</td>
+<td>9 byte</td>
+</tr>
+<tr>
+<td>部位脫落</td>
+<td>精靈消失 + 生成爆炸</td>
+<td>0（OAM）</td>
+</tr>
+<tr>
+<td>核心露出</td>
+<td>外殼磚換成「開口」版本 + 核心精靈開始畫</td>
+<td>12 byte</td>
+</tr>
+<tr>
+<td>死亡大爆炸</td>
+<td>8 個爆炸精靈依序在魔王範圍隨機位置生成，每 6 幀一個，共 48 幀</td>
+<td>OAM 8</td>
+</tr>
+<tr>
+<td>死亡後清除</td>
+<td>分 12 幀把 36 塊磚換回背景</td>
+<td>3/幀</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="11-sprite-0-vs-irq">⑪ 狀態列分割：sprite 0 vs IRQ</h2>
+<h3 id="111">11.1 兩種做法</h3>
+<table>
+<thead>
+<tr>
+<th>做法</th>
+<th>原理</th>
+<th>優點</th>
+<th>缺點</th>
+<th>來源</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>sprite 0 命中</strong></td>
+<td>在狀態列邊界放一顆不透明精靈，與不透明背景重疊 → <code>$2002</code> bit 6 置位；CPU 忙迴圈輪詢</td>
+<td>不需要特殊 mapper（Gradius NES 的 CNROM 只能這樣）</td>
+<td><strong>浪費大量 CPU 等待時間</strong>；一幀只能一次；x = 0~7（左裁切開啟時）與 x = 255 不觸發</td>
+<td>[源] NESdev PPU OAM / nesdoug</td>
+</tr>
+<tr>
+<td><strong>mapper 掃描線 IRQ</strong>（MMC3 / VRC4）</td>
+<td>卡帶計數 A12 翻轉，到指定掃描線發 IRQ</td>
+<td>不用輪詢、<strong>一幀可多次分割</strong>、時序穩</td>
+<td>需要 mapper</td>
+<td>[源] NESdev 論壇</td>
+</tr>
+<tr>
+<td>混合</td>
+<td>用 IRQ 在 sprite 0 命中前一點觸發，減少輪詢時間</td>
+<td>兩者之長</td>
+<td>複雜</td>
+<td>[源] NESdev 論壇</td>
+</tr>
+</tbody>
+</table>
+<h3 id="112">11.2 本專案的選擇</h3>
+<ul>
+<li>R1 的 <code>ppu.split(scanline)</code> 在效果上等價於 MMC3 IRQ（QA 報告 P2-3 已確認），<strong>R2 直接沿用</strong>。</li>
+<li>本專案 HUD 在<strong>下方</strong>（掃描線 208..239），屬於「底部狀態列」：</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>掃描線</th>
+<th>內容</th>
+<th>捲動設定</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0..207</td>
+<td>遊戲區</td>
+<td><code>scrollX = camX &amp; 255</code>，<code>nt = (camX &gt;&gt; 8) &amp; 1</code></td>
+</tr>
+<tr>
+<td><strong>208</strong>（split）</td>
+<td>分割點</td>
+<td><code>scrollX = 0</code>，<code>nt = 0</code>，並把 PPU 位址指到 HUD 用的名稱表列</td>
+</tr>
+<tr>
+<td>208..239</td>
+<td>HUD（4 列磚）</td>
+<td>固定</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>[推論] 底部狀態列比頂部好處理：頂部狀態列需要在畫面<strong>開始</strong>時就是固定的、然後中途切成捲動；底部則是「先捲動、後固定」，只需要一次分割，而且 VBlank 的設定順序更自然。</li>
+<li>[推論] 注意：分割發生在可見區間，<strong>分割那一刻不能寫名稱表</strong>（PPU 正在讀）。所有名稱表寫入都必須在 VBlank 完成。</li>
+</ul>
+<h3 id="113-hud-byte">11.3 HUD 更新的省 byte 技巧</h3>
+<table>
+<thead>
+<tr>
+<th>技巧</th>
+<th>說明</th>
+<th>省下</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>只寫變動的位數</td>
+<td>分數 7 位，實際每幀通常只有 1~2 位變</td>
+<td>5~6 byte</td>
+</tr>
+<tr>
+<td>能量表用<strong>屬性表</strong>反白</td>
+<td>不換磚，只改 16×16 區塊的調色盤（1 byte 改 4 個磚的顏色）</td>
+<td>每次切換省 ~6 byte</td>
+</tr>
+<tr>
+<td>剩餘船數用「重複同一塊磚」</td>
+<td>寫 n 塊「船圖示」磚 + 空白磚</td>
+<td>3 byte</td>
+</tr>
+<tr>
+<td>分數只在變動時寫</td>
+<td>加分時設 dirty 旗標</td>
+<td>大多數幀 0 byte</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="12-vs">⑫ 檢查點 vs 原地復活</h2>
+<h3 id="121">12.1 四款代表作的制度</h3>
+<table>
+<thead>
+<tr>
+<th>作品</th>
+<th>死亡後</th>
+<th>強化</th>
+<th>難度後果</th>
+<th>來源</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>宇宙巡航艦 / Gradius</strong></td>
+<td>退回<strong>預設檢查點</strong></td>
+<td>全部清空</td>
+<td>「Gradius 症候群」：rank 在你全裝時升高，死了卻要裸機面對高 rank</td>
+<td>[源] Shmups Wiki / Mother Shmupper</td>
+</tr>
+<tr>
+<td><strong>沙羅曼蛇 / Life Force</strong></td>
+<td><strong>原地復活</strong>（失去一命後自動在原地重生）</td>
+<td>清空（FC 版仍有能量表）</td>
+<td>大幅降低挫折；也讓「硬撐推進」變成可行策略</td>
+<td>[源] Gradius Wiki / HG101</td>
+</tr>
+<tr>
+<td><strong>R-Type</strong></td>
+<td>退回檢查點，<strong>武器、Force Pod、Bits、Speed 全失</strong></td>
+<td>全部清空</td>
+<td>「練習檢查點復活」是這款的核心技術；某些檢查點在低火力下極難</td>
+<td>[源] Shmups Wiki</td>
+</tr>
+<tr>
+<td><strong>超惑星戰記 / Blaster Master</strong></td>
+<td>（非橫捲 STG）無存檔、無密碼</td>
+<td>—</td>
+<td>純粹靠一命通關的耐力</td>
+<td>[源] Wikipedia</td>
+</tr>
+</tbody>
+</table>
+<h3 id="122">12.2 制度的設計後果</h3>
+<table>
+<thead>
+<tr>
+<th>面向</th>
+<th>檢查點制</th>
+<th>原地復活制</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>學習方式</td>
+<td><strong>記憶 + 路線規劃</strong>（memorizer）</td>
+<td>反射 + 應變</td>
+</tr>
+<tr>
+<td>挫折點</td>
+<td>「復活地獄」：裸機面對為全裝設計的段落</td>
+<td>幾乎沒有，但可能變成「用命換推進」</td>
+</tr>
+<tr>
+<td>單次遊玩長度</td>
+<td>短（死了要重打一段）</td>
+<td>長</td>
+</tr>
+<tr>
+<td>適合的關卡</td>
+<td>有明確「段落」的（通過閘門 / 打完中王）</td>
+<td>連續流動的</td>
+</tr>
+<tr>
+<td>觀賞性</td>
+<td>高手的 1CC 很有價值</td>
+<td>較低</td>
+</tr>
+<tr>
+<td>社群評價</td>
+<td>「Gradius 症候群」是負面詞 [源]</td>
+<td>沙羅曼蛇被視為系列的體貼分支 [源]</td>
+</tr>
+</tbody>
+</table>
+<h3 id="123">12.3 本專案建議</h3>
+<blockquote>
+<p>[推論] <strong>《星塵巡航艦》採「檢查點 + 三層救濟」</strong>，理由：我們是 Gradius 風格致敬，檢查點是這個類型的識別特徵；但要用救濟避開純粹的懲罰。</p>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>層</th>
+<th>機制</th>
+<th>數值建議</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>①</td>
+<td>檢查點密集（每 ~64 欄一個，關卡 384 欄 ⇒ 6 個）</td>
+<td>每段約 40~60 秒</td>
+</tr>
+<tr>
+<td>②</td>
+<td><strong>復活救濟編隊</strong>：死後 90 幀內生成一隊「必掉膠囊」的橘色敵人（Gradius 原作就有 [源]）</td>
+<td>保證掉 3 顆膠囊</td>
+</tr>
+<tr>
+<td>③</td>
+<td><strong>速度不歸零</strong>：死亡後 SPEED 保留 1 級（不回到 1 級）</td>
+<td>唯一保留的強化；速度 1 級太慢會連鎖死亡 [推論]</td>
+</tr>
+<tr>
+<td>④</td>
+<td>無敵幀 90 幀 + 閃爍</td>
+<td>復活瞬間不會被既有敵彈殺</td>
+</tr>
+<tr>
+<td>⑤</td>
+<td>死亡時<strong>清空所有敵彈</strong></td>
+<td>NES 時代常見的體貼；避免「復活即死」[推論]</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>[推論] ③ 是本專案對 Gradius 的<strong>刻意改良</strong>。玩家測試若覺得太寬鬆，把它改成「保留但只在本關有效」。</li>
+<li>[推論] 檢查點位置的硬規則：<strong>檢查點前後 16 欄內不可有敵人、不可有地形收窄</strong>。這是唯一能避免復活地獄的結構性保證。</li>
+</ul>
+<hr />
+<h2 id="13-rank">⑬ 動態難度 rank</h2>
+<h3 id="131-gradius-rank">13.1 Gradius 系列的 rank</h3>
+<table>
+<thead>
+<tr>
+<th>作品</th>
+<th>rank 公式 / 因子</th>
+<th>範圍</th>
+<th>來源</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Gradius（初代 AC）</strong></td>
+<td>難度設定 + 關卡 / 循環 + 已啟用的強化</td>
+<td>封頂 <strong>15</strong>（Nemesis 版另計存活幀、關卡數、強化、選項數、難度）</td>
+<td>[源] shmups.system11 / Shmups Wiki</td>
+</tr>
+<tr>
+<td><strong>Gradius III（AC）</strong></td>
+<td>難度設定 + 循環 / 關卡 + 強化 + 特殊項 = rank</td>
+<td><strong>0~31</strong>；高段的每一級差距比低段大（21→22 比 5→6 明顯得多）</td>
+<td>[源] shmups.system11</td>
+</tr>
+<tr>
+<td><strong>Gradius IV</strong></td>
+<td><strong>動態 rank 計數器</strong>（類似《Battle Garegga》），上升速率由當前強化決定；<strong>每次死亡會降 rank</strong></td>
+<td>—</td>
+<td>[源] shmups.system11</td>
+</tr>
+<tr>
+<td><strong>Zanac（Compile, 1986/NES）</strong></td>
+<td><strong>ALC（Automatic Level of Difficulty Control）</strong>：依開火頻率、目前特殊武器、掉命頻率、擊落藍色偵察機的數量調整敵人生成</td>
+<td>MSX 版畫面上會顯示一個 16 進位的 ALC 值</td>
+<td>[源] Wikipedia / HG101</td>
+</tr>
+</tbody>
+</table>
+<h3 id="132-rank">13.2 rank 的原始目的</h3>
+<blockquote>
+<p>[源] 社群的共識說法：「初代 Gradius 的 rank 會上升，好讓你<strong>全副武裝時仍有挑戰</strong>；當你的船裸機時 rank 會下降，給你一個能推進的機會。」</p>
+</blockquote>
+<ul>
+<li>[推論] 也就是說 rank 的本質是<strong>「難度跟著火力走」的自動平衡器</strong>，不是懲罰高手。它會壞掉，是因為「死亡清空火力」與「rank 不同步下降」這兩件事撞在一起 —— Gradius IV 加上「死亡降 rank」就修好了大半。</li>
+</ul>
+<h3 id="133-rank">13.3 rank 可以調整什麼</h3>
+<table>
+<thead>
+<tr>
+<th>可調項</th>
+<th>低 rank</th>
+<th>高 rank</th>
+<th>對 NES 的成本</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>敵彈速度</td>
+<td>1.5 px/幀</td>
+<td>3.0 px/幀</td>
+<td>0（同一個 speed88）</td>
+</tr>
+<tr>
+<td>砲台開火間隔</td>
+<td>90 幀</td>
+<td>40 幀</td>
+<td>0</td>
+</tr>
+<tr>
+<td>一次發幾發</td>
+<td>1（瞄準）</td>
+<td>3（扇形）</td>
+<td>0</td>
+</tr>
+<tr>
+<td>敵人 hp</td>
+<td>×1</td>
+<td>×1.5</td>
+<td>0</td>
+</tr>
+<tr>
+<td>編隊隻數</td>
+<td>n</td>
+<td>n + 2</td>
+<td>池要夠</td>
+</tr>
+<tr>
+<td>敵人移動速度</td>
+<td>×1</td>
+<td>×1.25</td>
+<td>0</td>
+</tr>
+<tr>
+<td>是否生成額外散兵</td>
+<td>否</td>
+<td>是</td>
+<td>池要夠</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>[推論] rank 調「敵彈速度」與「開火間隔」的<strong>體感回饋最明顯、實作成本最低</strong>，是首選兩項。調敵人 hp 會讓玩家覺得「我的槍變弱了」，反而傷手感。</p>
+</blockquote>
+<h3 id="134-rank">13.4 本專案的 rank 設計（建議）</h3>
+<pre><code>rank = clamp(0, 15,
+      floor(camCol / 48)          // 進度：關卡 384 欄 ⇒ 0..8
+    + speed - 1                   // 速度等級：0..4
+    + (double ? 1 : 0)
+    + (laser ? 2 : 0)
+    + options                     // 0..2
+    - deaths * 3                  // 每死一次降 3，最低 0
+)
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>rank 區間</th>
+<th>名稱</th>
+<th>敵彈速度</th>
+<th>砲台間隔</th>
+<th>額外散兵</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0~3</td>
+<td>寬鬆</td>
+<td>1.5 px/f</td>
+<td>100 幀</td>
+<td>無</td>
+</tr>
+<tr>
+<td>4~7</td>
+<td>標準</td>
+<td>2.0 px/f</td>
+<td>75 幀</td>
+<td>無</td>
+</tr>
+<tr>
+<td>8~11</td>
+<td>緊</td>
+<td>2.5 px/f</td>
+<td>55 幀</td>
+<td>每 96 欄 1 隻</td>
+</tr>
+<tr>
+<td>12~15</td>
+<td>高壓</td>
+<td>3.0 px/f</td>
+<td>40 幀</td>
+<td>每 64 欄 1 隻</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>[推論] <code>- deaths * 3</code> 是採納 Gradius IV 的修正；<code>deaths</code> 在過關時歸零。</li>
+<li>[推論] <strong>rank 必須可在 debug 面板看到</strong>（<code>state().rank</code>），否則 QA 沒辦法複現問題。</li>
+</ul>
+<hr />
+<h2 id="14">⑭ 膠囊與強化經濟</h2>
+<h3 id="141-gradius-power-meter">14.1 Gradius 能量表（Power Meter）的經濟學</h3>
+<table>
+<thead>
+<tr>
+<th>事實</th>
+<th>內容</th>
+<th>來源</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>取得</td>
+<td>摧毀<strong>特定顏色</strong>的敵人或<strong>整個編隊</strong>會掉 Power Capsule</td>
+<td>[源] Shmups Wiki / Gradius Wiki</td>
+</tr>
+<tr>
+<td>累積</td>
+<td>每撿一顆，能量表的反白格往右移一格</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>兌現</td>
+<td>按按鈕啟用當前反白格的能力；<strong>能量表歸零重來</strong></td>
+<td>[源]</td>
+</tr>
+<tr>
+<td>格位順序（初代）</td>
+<td>Speed Up → Missile → Double → Laser → Option → ?（護盾）</td>
+<td>[源] Shmups Wiki</td>
+</tr>
+<tr>
+<td>沙羅曼蛇 FC 版格位</td>
+<td>Speedup → Missile → <strong>Ripple</strong> → Laser → Option → <strong>Force</strong>（Force Field：耐打次數較少但<strong>包覆整艘船</strong>）</td>
+<td>[源] Gradius Wiki</td>
+</tr>
+<tr>
+<td>速度上限</td>
+<td>Speed Up 最多買 <strong>5 次</strong></td>
+<td>[源] Shmups Wiki</td>
+</tr>
+<tr>
+<td>選項上限</td>
+<td>街機 4 顆，<strong>部分移植只有 2 顆</strong>（FC 版 2 顆）</td>
+<td>[源] Shmups Wiki / Gradius Wiki</td>
+</tr>
+<tr>
+<td>互斥</td>
+<td>Laser 與 Double 互斥</td>
+<td>[源] Shmups Wiki</td>
+</tr>
+</tbody>
+</table>
+<h3 id="142">14.2 為什麼這套經濟好玩</h3>
+<blockquote>
+<p>[源]「這種進程本身就有風險回報：你會想<strong>留著膠囊等更好的選項</strong>，但有些升級根本是活下去的必需品。為了一個更強的能力而不兌現較弱的那個，往往很危險。」</p>
+</blockquote>
+<ul>
+<li>[推論] 精髓在於「膠囊是<strong>通用貨幣</strong>，而能量表是<strong>一條單向的價目表</strong>」。你不能跳格買，只能一路往右走；走過頭就繞回第一格。這讓「什麼時候按 B」變成每一局最重要的決策。</li>
+<li>[推論] 對比之下，《Gun-Nac》把強化直接撒給玩家（甚至有商店可買 [源]），《Zanac》用特殊武器槽位切換 —— 兩者都更「爽」，但決策深度不如 Gradius。</li>
+</ul>
+<h3 id="143">14.3 本專案的能量表（沿用契約 + 數值建議）</h3>
+<table>
+<thead>
+<tr>
+<th>格</th>
+<th>名稱</th>
+<th>效果</th>
+<th>可重複</th>
+<th>建議數值</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><strong>SPEED</strong></td>
+<td>移動速度 +1 級</td>
+<td>是，上限 5</td>
+<td>1級 1.5 / 2級 2.0 / 3級 2.5 / 4級 3.0 / 5級 3.5 px/幀</td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>MISSILE</strong></td>
+<td>按射擊時同時斜下發射飛彈，落地後沿地面滾</td>
+<td>否（有 / 無）</td>
+<td>飛彈速度 2 px/幀 下墜 + 3 px/幀 前進；滾動 3 px/幀；傷害 2</td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong>DOUBLE</strong></td>
+<td>前方 + 斜上 45° 各一發（與 LASER 互斥）</td>
+<td>否</td>
+<td>各 4 px/幀，傷害各 1</td>
+</tr>
+<tr>
+<td>4</td>
+<td><strong>LASER</strong></td>
+<td>4 段貫穿雷射（與 DOUBLE 互斥）</td>
+<td>否</td>
+<td>6 px/幀，傷害 2，貫穿</td>
+</tr>
+<tr>
+<td>5</td>
+<td><strong>OPTION</strong></td>
+<td>增加一顆選項（複製自機全部火力）</td>
+<td>是，上限 2</td>
+<td>延遲 16 幀 / 顆，歷史緩衝 64 筆</td>
+</tr>
+<tr>
+<td>6</td>
+<td><strong>?（SHIELD）</strong></td>
+<td>護盾，可擋 3 次</td>
+<td>是（補滿）</td>
+<td>覆蓋全船；被打破時閃爍 30 幀</td>
+</tr>
+</tbody>
+</table>
+<h3 id="144">14.4 膠囊掉落率設計</h3>
+<table>
+<thead>
+<tr>
+<th>來源</th>
+<th>掉落</th>
+<th>頻率</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>編隊全滅（5 隻）</td>
+<td><strong>必掉 1 顆</strong></td>
+<td>關卡 1 安排 8 隊 ⇒ 8 顆</td>
+</tr>
+<tr>
+<td>特殊色敵人（單隻）</td>
+<td>必掉 1 顆</td>
+<td>4 隻</td>
+</tr>
+<tr>
+<td>砲台</td>
+<td>不掉</td>
+<td>—</td>
+</tr>
+<tr>
+<td>硬殼敵（hp 3）</td>
+<td>25%</td>
+<td>4 隻 ⇒ 期望 1 顆</td>
+</tr>
+<tr>
+<td>復活救濟編隊</td>
+<td>必掉 3 顆</td>
+<td>死亡時</td>
+</tr>
+<tr>
+<td><strong>關卡 1 總供給</strong></td>
+<td><strong>約 13 顆</strong></td>
+<td>足夠買到 SPEED×2 + MISSILE + DOUBLE + OPTION×1（= 5+2+3+... 依路徑）[推論]</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>[推論] 膠囊總供給要「<strong>剛好不夠全買</strong>」。Gradius 的張力來自稀缺；如果玩家關卡 1 就能滿裝，rank 會爆掉而且後面沒東西追求。</li>
+<li>[推論] 膠囊要有<strong>壽命</strong>（約 300 幀後閃爍、360 幀消失），否則玩家會在畫面上囤積，OAM 被吃光。</li>
+</ul>
+<hr />
+<h2 id="15">⑮ 魔王模式設計</h2>
+<h3 id="151">15.1 原則</h3>
+<table>
+<thead>
+<tr>
+<th>原則</th>
+<th>說明</th>
+<th>來源</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>節奏是魔王的本質</td>
+<td>「魔王戰應該有好的節奏——隨時間<strong>堆疊與釋放</strong>張力與難度。」</td>
+<td>[源] Game Developer</td>
+</tr>
+<tr>
+<td>魔王是關卡的標點符號</td>
+<td>「知道魔王要來了，就是把接連幾關的強度往上堆的好藉口。」</td>
+<td>[源] Game Developer</td>
+</tr>
+<tr>
+<td>最終魔王 = 總複習</td>
+<td>「最終魔王該讓人覺得是到目前為止所學的總結。」</td>
+<td>[源] Game Developer</td>
+</tr>
+<tr>
+<td>中王的位置</td>
+<td>「大約在關卡中段、玩家理解了這個機制的時候，是放中王的正確時機，作為獎勵掌握的高潮。」</td>
+<td>[源] Game Developer</td>
+</tr>
+<tr>
+<td>出場即休息</td>
+<td>「戲劇化的魔王登場讓玩家有機會伸展與心理準備。」</td>
+<td>[源] Game Developer</td>
+</tr>
+</tbody>
+</table>
+<h3 id="152">15.2 魔王階段的標準三段式</h3>
+<table>
+<thead>
+<tr>
+<th>階段</th>
+<th>觸發</th>
+<th>玩家在學什麼</th>
+<th>彈幕密度</th>
+<th>弱點</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>① 外殼 / 探索</strong></td>
+<td>進場</td>
+<td>認識形狀、找哪裡可以打</td>
+<td>低（瞄準單發）</td>
+<td>外部裝甲（多個，各自 hp 低）</td>
+</tr>
+<tr>
+<td><strong>② 露出 / 施壓</strong></td>
+<td>外殼全破</td>
+<td>在既有攻擊下維持輸出</td>
+<td>中（扇形 + 直線牆）</td>
+<td>核心（hp 高）</td>
+</tr>
+<tr>
+<td><strong>③ 絕命 / 解放</strong></td>
+<td>核心 hp &lt; 40%</td>
+<td>用上所有走位技巧</td>
+<td>高（環形 + 掃射雷射）</td>
+<td>核心（不變）</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>[推論] 每階段之間必須有 <strong>30~60 幀的「靜止 / 轉場」</strong>，讓玩家看到變化、也給一個呼吸點。沒有轉場的階段切換會讓玩家覺得被偷襲。</li>
+<li>[推論] 三個階段的<strong>攻擊要可疊加但不可同時滿載</strong>：階段 3 = 階段 1 的攻擊（降頻）+ 新攻擊，而不是全部一起來。</li>
+</ul>
+<h3 id="153">15.3 弱點露出的三種表現</h3>
+<table>
+<thead>
+<tr>
+<th>方式</th>
+<th>視覺</th>
+<th>實作</th>
+<th>NES 可行性</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>裝甲板脫落</strong></td>
+<td>4 片板子逐一爆掉，露出中間</td>
+<td>精靈消失 + 背景磚換成「開口」</td>
+<td>✓ 最省</td>
+</tr>
+<tr>
+<td><strong>開合窗口</strong></td>
+<td>砲口週期開合，只有開的時候能打</td>
+<td>精靈換磚 + <code>vulnerable</code> 旗標</td>
+<td>✓；要有 ≥ 20 幀的預警</td>
+</tr>
+<tr>
+<td><strong>發光核心</strong></td>
+<td>核心變色（調色盤循環）表示可打</td>
+<td>換 1 個調色盤 byte</td>
+<td>✓ 最省 byte</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>[推論] 一定要有<strong>明確的「打不中」回饋</strong>：打到裝甲時子彈彈開 + 短促「鏘」音效，不能只是子彈消失。否則玩家不知道自己有沒有在輸出。</p>
+</blockquote>
+<h3 id="154-nes">15.4 彈幕型態庫（NES 可行版）</h3>
+<table>
+<thead>
+<tr>
+<th>型態</th>
+<th>彈數</th>
+<th>週期</th>
+<th>難度</th>
+<th>說明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>瞄準單發</td>
+<td>1</td>
+<td>60 幀</td>
+<td>★</td>
+<td>教學用；玩家只要動一下就躲掉</td>
+</tr>
+<tr>
+<td>三連瞄準</td>
+<td>3</td>
+<td>每 8 幀一發，共 3 發後歇 60 幀</td>
+<td>★★</td>
+<td>逼玩家持續移動</td>
+</tr>
+<tr>
+<td>扇形 5 發</td>
+<td>5</td>
+<td>90 幀</td>
+<td>★★</td>
+<td>step = 12（約 17°）</td>
+</tr>
+<tr>
+<td>環形 8 發</td>
+<td>8</td>
+<td>120 幀</td>
+<td>★★★</td>
+<td>相鄰間距 45°，必留缺口</td>
+</tr>
+<tr>
+<td>交錯雙環</td>
+<td>8 + 8</td>
+<td>兩波隔 30 幀，第二波偏移 22.5°</td>
+<td>★★★★</td>
+<td>逼玩家在第一波的縫裡就定位</td>
+</tr>
+<tr>
+<td>牆型 6 發</td>
+<td>6</td>
+<td>100 幀</td>
+<td>★★★</td>
+<td>垂直排列留 1~2 個缺口，缺口隨機</td>
+</tr>
+<tr>
+<td>雷射掃射</td>
+<td>3 條</td>
+<td>蓄力 45 幀 + 掃射 90 幀</td>
+<td>★★★★</td>
+<td>三條 y 錯開 ≥ 16 px；蓄力時有明顯充能光</td>
+</tr>
+<tr>
+<td>自機狙 + 散</td>
+<td>1 + 4</td>
+<td>150 幀</td>
+<td>★★★</td>
+<td>一發精準 + 四發亂數 ±24 角度</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>[推論] <strong>同一時刻畫面上的敵彈不得超過 16 顆</strong>（池上限），所以「交錯雙環」必須等第一波部分出界才發第二波。這是 NES 的硬限制，也順便替我們控制了難度。</li>
+</ul>
+<h3 id="155">15.5 魔王的公平性檢查表</h3>
+<table>
+<thead>
+<tr>
+<th>☐</th>
+<th>項目</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>☐</td>
+<td>每種攻擊都有 ≥ 20 幀的預警動作（充能光 / 砲口張開 / 身體後仰）</td>
+</tr>
+<tr>
+<td>☐</td>
+<td>任一時刻都存在至少一條「不需要像素級精度」的安全路徑</td>
+</tr>
+<tr>
+<td>☐</td>
+<td>魔王本體的碰撞框不會突然伸到玩家所在位置（衝撞攻擊要有預警）</td>
+</tr>
+<tr>
+<td>☐</td>
+<td>弱點在畫面上永遠可見（不會跑到 HUD 後面或畫面外）</td>
+</tr>
+<tr>
+<td>☐</td>
+<td>裸機（速度 1、單發彈）可以在 90 秒內打完 —— 檢查點復活的可通過性</td>
+</tr>
+<tr>
+<td>☐</td>
+<td>滿裝（雷射 + 2 選項）不會在 10 秒內秒殺 —— 有戲的下限</td>
+</tr>
+<tr>
+<td>☐</td>
+<td>有「超時」處理：180 秒未打完，魔王自爆或撤退（避免卡關）</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="16">⑯ 關卡節奏曲線</h2>
+<h3 id="161">16.1 理論</h3>
+<table>
+<thead>
+<tr>
+<th>原則</th>
+<th>來源</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>「持續的高強度加上重度堆疊會消耗玩家，<strong>製造強度的起伏</strong>反而能讓高潮更突出。」</td>
+<td>[源] Game Developer</td>
+</tr>
+<tr>
+<td>「在最終階段，設計者應該放慢、為最終魔王蓄勢，給玩家時間休息與準備。」</td>
+<td>[源] Game Developer</td>
+</tr>
+<tr>
+<td>「視覺上很強烈但機制上較簡單的段落，可以在中王之前提供休息。」</td>
+<td>[源] Game Developer</td>
+</tr>
+<tr>
+<td>難度曲線應為<strong>鋸齒狀</strong>（緊張—放鬆交替）而非直線（心流通道）</td>
+<td>[源] 本研究 <code>04_遊戲設計模式.md</code> §⑤</td>
+</tr>
+</tbody>
+</table>
+<h3 id="162-stg">16.2 橫捲 STG 的五段式（本文提出）</h3>
+<table>
+<thead>
+<tr>
+<th>段</th>
+<th>佔比</th>
+<th>強度</th>
+<th>內容</th>
+<th>目的</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>① 開場（establishing）</strong></td>
+<td>0~10%</td>
+<td>2/10</td>
+<td>稀疏的單向敵人、第一隊必掉膠囊</td>
+<td>讓玩家取得第一批強化；建立視覺主題</td>
+</tr>
+<tr>
+<td><strong>② 教學（teaching）</strong></td>
+<td>10~30%</td>
+<td>4/10</td>
+<td>一次引入一種新敵人 / 一種地形危險</td>
+<td>每個新元素第一次出現時<strong>只有它</strong></td>
+</tr>
+<tr>
+<td><strong>③ 組合（combining）</strong></td>
+<td>30~55%</td>
+<td>6/10</td>
+<td>兩種元素疊加（砲台 + 編隊、狹道 + 之字敵）</td>
+<td>考驗剛學會的東西</td>
+</tr>
+<tr>
+<td><strong>④ 高潮（peak）</strong></td>
+<td>55~75%</td>
+<td>8/10</td>
+<td>最密的一段；狹窄地形 + 三面砲台</td>
+<td>本關的真正考驗</td>
+</tr>
+<tr>
+<td><strong>⑤ 呼吸 + 魔王（breath &amp; boss）</strong></td>
+<td>75~100%</td>
+<td>3 → 9/10</td>
+<td><strong>一段幾乎沒有敵人的開闊區</strong>，然後魔王登場</td>
+<td>讓玩家調整位置、看能量表、心理準備</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>[推論] 第 ⑤ 段的「呼吸」極其重要：Gradius 每關魔王前都有一段相對空曠。沒有它，玩家會帶著上一段的殘血與慌亂進魔王戰，感覺是被連坐而不是被挑戰。</li>
+<li>[推論] 節奏曲線用<strong>「每 16 欄的敵人威脅值」</strong>量化：威脅值 = Σ(敵人危險度)，畫成折線圖應該看得到鋸齒與一個明顯的峰。</li>
+</ul>
+<h3 id="163-384-35">16.3 強度曲線的量化模板（關卡長度 384 欄 ≈ 3~5 分鐘）</h3>
+<pre><code>威脅值
+ 10 |                                            ████ ← 魔王
+  8 |                        ████████
+  6 |              ██████            ████
+  4 |      ████████                        ██
+  2 |  ████                                    ▁▁    ← 呼吸區
+  0 +--------------------------------------------------
+    0    48   96   144  192  240  288  336  384（欄）
+    └①─┘└──②──┘└───③───┘└──④──┘└⑤┘└魔王┘
+</code></pre>
+<hr />
+<h2 id="17">⑰ 初見殺與記憶型設計</h2>
+<h3 id="171">17.1 兩種學習模型</h3>
+<table>
+<thead>
+<tr>
+<th>模型</th>
+<th>定義</th>
+<th>代表</th>
+<th>玩家的成長曲線</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>反應型（reaction）</strong></td>
+<td>資訊在畫面上，靠反射與判斷即時應對</td>
+<td>彈幕系、《沙羅曼蛇》大部分段落</td>
+<td>平滑上升</td>
+</tr>
+<tr>
+<td><strong>記憶型（memorizer）</strong></td>
+<td>必須知道「下一個會發生什麼」才活得下來</td>
+<td><strong>R-Type</strong>（「memorizer shooter 的第一與終極範例」[源]）</td>
+<td>階梯狀（每學會一段跳一級）</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>[源] R-Type 的說明：「死亡極度懲罰——你會被丟回檢查點，沒有武器、沒有 Force Pod、沒有 Bits、沒有加速。因此玩家通常被鼓勵不惜一切避免死亡，並且打得非常保守。」</li>
+<li>[源] 另一個角度：「早期的橫捲遊戲（如 R-Type）把注意力大量放在<strong>環境危害</strong>上。閃避子彈是次要的，主要是撿強化與<strong>記住關卡配置</strong>，免得自己撞上去。」</li>
+</ul>
+<h3 id="172-instant-death-on-first-encounter">17.2 初見殺（instant death on first encounter）的分級</h3>
+<table>
+<thead>
+<tr>
+<th>等級</th>
+<th>描述</th>
+<th>可接受？</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>A. 完全無預警</strong></td>
+<td>沒有任何線索，第一次一定死（例如畫面外突然射出的高速彈）</td>
+<td>✗ <strong>禁止</strong></td>
+</tr>
+<tr>
+<td><strong>B. 有線索但需要辨識</strong></td>
+<td>地形紋理不同、敵人顏色不同、有 20 幀的預警動畫</td>
+<td>✓ 這是「學習」</td>
+</tr>
+<tr>
+<td><strong>C. 有預警且可即時反應</strong></td>
+<td>預警 ≥ 40 幀、且安全區明顯</td>
+<td>✓ 最佳</td>
+</tr>
+<tr>
+<td><strong>D. 需要事前佈局</strong></td>
+<td>必須在 3 秒前就選對路徑（R-Type 式）</td>
+<td>△ 只在最終關使用 [推論]</td>
+</tr>
+</tbody>
+</table>
+<h3 id="173">17.3 本專案的規則</h3>
+<blockquote>
+<p>[推論] 《星塵巡航艦》定位是「致敬 Gradius 的可玩原創作」，不是苦行。規則：
+1. <strong>關卡 1 全部只用 C 級</strong>。
+2. 任何從畫面外（x &gt; 256）出現的敵人，出現後 <strong>至少 30 幀內不得開火</strong>。
+3. 高速敵彈（≥ 3 px/幀）<strong>只能從畫面內的敵人</strong>射出，且射出前砲口要閃 2 幀。
+4. 地形的致命凸起在進入前 48 px（約 1 秒）就要完全可見。
+5. 沒有任何「必須先知道才能過」的段落。</p>
+</blockquote>
+<h3 id="174">17.4 給記憶留空間，而不是強迫記憶</h3>
+<table>
+<thead>
+<tr>
+<th>手法</th>
+<th>說明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>可選的高風險路徑</td>
+<td>記住的人可以走上方狹道拿額外膠囊；不記得的人走安全下路</td>
+</tr>
+<tr>
+<td>提前資訊</td>
+<td>大型敵人進場前先有一小隊同色的斥候</td>
+</tr>
+<tr>
+<td>重複的動機</td>
+<td>同一種編隊模式在關卡中出現 3 次（第 3 次疊加變化）——玩家自然記住</td>
+</tr>
+<tr>
+<td>節奏可預測</td>
+<td>砲台開火間隔固定，玩家可以數拍子</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="18">⑱ 速度等級的取捨</h2>
+<h3 id="181">18.1 問題</h3>
+<p>Gradius 的 SPEED 可以買 5 次 [源]。但速度是<strong>雙面刃</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>速度</th>
+<th>優點</th>
+<th>缺點</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>慢（1~2 級）</td>
+<td>好微調、狹道安全</td>
+<td>追不上膠囊、躲不掉快彈、被地形夾死</td>
+</tr>
+<tr>
+<td>中（3 級）</td>
+<td>平衡</td>
+<td>—</td>
+</tr>
+<tr>
+<td>快（4~5 級）</td>
+<td>撿膠囊快、能大幅換位</td>
+<td><strong>過衝</strong>（overshoot）撞牆；在狹道等於自殺</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>[推論] Gradius 老手的共識是「速度 3 級最好用」；很多人刻意不買到 5 級。這代表這條升級線<strong>做對了</strong>——它創造了一個真實的取捨，而不是單調的變強。</li>
+</ul>
+<h3 id="182">18.2 本專案的速度表</h3>
+<table>
+<thead>
+<tr>
+<th>等級</th>
+<th>px/幀</th>
+<th>8.8 定點</th>
+<th>橫越 240px 需要</th>
+<th>適合</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>1.5</td>
+<td>384</td>
+<td>160 幀（2.7 秒）</td>
+<td>太慢，起始值</td>
+</tr>
+<tr>
+<td>2</td>
+<td>2.0</td>
+<td>512</td>
+<td>120 幀（2.0 秒）</td>
+<td>舒適下限</td>
+</tr>
+<tr>
+<td><strong>3</strong></td>
+<td><strong>2.5</strong></td>
+<td><strong>640</strong></td>
+<td><strong>96 幀（1.6 秒）</strong></td>
+<td><strong>甜蜜點</strong> [推論]</td>
+</tr>
+<tr>
+<td>4</td>
+<td>3.0</td>
+<td>768</td>
+<td>80 幀（1.3 秒）</td>
+<td>開闊區好用</td>
+</tr>
+<tr>
+<td>5</td>
+<td>3.5</td>
+<td>896</td>
+<td>69 幀（1.1 秒）</td>
+<td>狹道危險</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>[推論] 斜向移動要不要正規化？<strong>不要</strong>。NES 遊戲普遍是「上 + 右 = 各自全速」，斜向實際速度 ×1.414。這是那個時代的手感，而且斜衝更快本身就是一種技巧。</li>
+<li>[推論] <strong>無慣性</strong>。SLYNYRD 說得直接：「不要加慣性……在 shmup 裡玩法至上。」[源] 自機的加速度應為無限大（按下即全速、放開即停）。</li>
+</ul>
+<h3 id="183">18.3 速度與其他系統的互動</h3>
+<table>
+<thead>
+<tr>
+<th>互動</th>
+<th>設計</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>速度 vs 地形</td>
+<td>狹道段落的縫隙高度應 ≥ 32 px（4 格），讓 5 級速度也能通過</td>
+</tr>
+<tr>
+<td>速度 vs 選項延遲</td>
+<td>延遲 16 幀固定 ⇒ 速度越快，選項拖得越遠（5 級時落後 56 px）。這是<strong>正確的</strong>——高速時選項像尾巴甩出去，是招牌視覺 [推論]</td>
+</tr>
+<tr>
+<td>速度 vs 膠囊壽命</td>
+<td>1 級速度要能在膠囊消失前撿到 ⇒ 膠囊壽命 ≥ 300 幀</td>
+</tr>
+<tr>
+<td>死亡後</td>
+<td>保留 1 級（見 §⑫）；否則 1 級速度 + 高 rank = 復活地獄</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="19">⑲ 同類作品機制對照表</h2>
+<blockquote>
+<p><strong>只列機制，不列內容</strong>（不抄關卡、敵人外型、音樂、劇情）。</p>
+</blockquote>
+<h3 id="191">19.1 主對照表</h3>
+<table>
+<thead>
+<tr>
+<th>作品（年 / 平台）</th>
+<th>強化系統</th>
+<th>復活</th>
+<th>選項 / 子機</th>
+<th>武器互斥</th>
+<th>動態難度</th>
+<th>分歧</th>
+<th>技術亮點</th>
+<th>來源</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>宇宙巡航艦 Gradius</strong>（1985 AC / 1986 FC）</td>
+<td>能量表 + 膠囊貨幣</td>
+<td>檢查點、全清</td>
+<td>街機 4 / FC <strong>2</strong></td>
+<td>Laser ⇄ Double</td>
+<td>rank（封頂 15）</td>
+<td>無</td>
+<td>FC 版 <strong>mapper 3 CNROM</strong>，2×16K PRG + 4×8K CHR；雷射不貫穿全螢幕</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td><strong>沙羅曼蛇 / Life Force</strong>（1986 AC / 1987 FC）</td>
+<td>FC 版能量表（Speedup / Missile / <strong>Ripple</strong> / Laser / Option / <strong>Force</strong>）；街機版掉落式</td>
+<td><strong>原地復活</strong></td>
+<td>FC 2（街機 3）</td>
+<td>Ripple ⇄ Laser</td>
+<td>—</td>
+<td>無</td>
+<td>橫 / <strong>直</strong>向關卡交替；雙人同時</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td><strong>Gradius II</strong>（1988 AC / 1988 FC）</td>
+<td>能量表 + <strong>四組武器配置可選</strong></td>
+<td>檢查點</td>
+<td>4</td>
+<td>依配置</td>
+<td>rank</td>
+<td>無</td>
+<td>FC 版用 Konami <strong>VRC4</strong></td>
+<td>[源]</td>
+</tr>
+<tr>
+<td><strong>Abadox</strong>（1989/1990 FC，Natsume 開發）</td>
+<td>掉落式強化</td>
+<td>檢查點</td>
+<td>有</td>
+<td>—</td>
+<td>—</td>
+<td>無</td>
+<td>橫 / 直向交替；自機精靈<strong>偏大</strong>導致閃避困難</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td><strong>Over Horizon</strong>（1991 FC，Pixel / Hot-B）</td>
+<td><strong>可自訂射擊配置</strong>（編輯彈道）</td>
+<td>—</td>
+<td>有</td>
+<td>—</td>
+<td>—</td>
+<td>無</td>
+<td>環境機關關卡；難度偏低、長度偏短</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td><strong>Crisis Force</strong>（1991 FC，Konami）</td>
+<td>三段變形機體</td>
+<td>—</td>
+<td>有</td>
+<td>變形切換</td>
+<td>—</td>
+<td>無</td>
+<td><strong>VRC4e</strong>：四向捲動 + 大型魔王；仍有閃爍抱怨</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td><strong>Gun-Nac</strong>（1990 FC，Compile，<strong>縱向</strong>）</td>
+<td>5 種武器 × 多級；<strong>商店可買</strong>；炸彈多種</td>
+<td>命制</td>
+<td>Wing 系統</td>
+<td>炸彈用掉會退回武器 1</td>
+<td>—</td>
+<td>無</td>
+<td><strong>玩家可切換 flicker / slowdown</strong></td>
+<td>[源]</td>
+</tr>
+<tr>
+<td><strong>Zanac</strong>（1986 MSX / FC，Compile，<strong>縱向</strong>）</td>
+<td>8 種特殊武器可切換</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td><strong>ALC 動態難度</strong>（依開火率、武器、死亡率、擊落偵察機）</td>
+<td>無</td>
+<td>最早的 rank 系統之一</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td><strong>R-Type</strong>（1987 AC / 1988 PCE 對照）</td>
+<td><strong>Force Pod</strong>（可裝可脫的無敵子機）+ Bits + 三種雷射</td>
+<td>檢查點、全清（含 Force / Bits / Speed）</td>
+<td>Force + 2 Bits</td>
+<td>三種雷射擇一</td>
+<td>—</td>
+<td>無</td>
+<td>PCE 版日本拆成<strong>兩張 2Mbit HuCard</strong>（I = 前 4 關、II = 後半）；美版 4Mbit 單卡；為塞下畫面改成<strong>垂直可捲動</strong></td>
+<td>[源]</td>
+</tr>
+<tr>
+<td><strong>Darius</strong>（1987 AC，Taito）</td>
+<td>掉落式（紅 = 主砲、綠 = 副砲、藍 = 護盾）</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td><strong>二元樹分歧</strong>（每關結束選兩條路之一，多結局）</td>
+<td><strong>三螢幕</strong>全景顯示（寬度 3 倍）</td>
+<td>[源]</td>
+</tr>
+<tr>
+<td><strong>超惑星戰記 Blaster Master</strong>（1988 FC）</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td><strong>不是橫向射擊</strong>（載具 / 步行探索動作），本表<strong>排除</strong>；僅在 §⑫ 作復活制度對照</td>
+<td>[源]</td>
+</tr>
+</tbody>
+</table>
+<h3 id="192">19.2 機制維度的取捨對照</h3>
+<table>
+<thead>
+<tr>
+<th>維度</th>
+<th>選項 A</th>
+<th>選項 B</th>
+<th>誰用 A</th>
+<th>誰用 B</th>
+<th>本專案</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>強化取得</td>
+<td>能量表貨幣（延遲兌現）</td>
+<td>掉落式即時生效</td>
+<td>Gradius / 沙羅曼蛇 FC</td>
+<td>Darius / Abadox</td>
+<td><strong>A</strong></td>
+</tr>
+<tr>
+<td>復活</td>
+<td>檢查點</td>
+<td>原地</td>
+<td>Gradius / R-Type</td>
+<td>沙羅曼蛇</td>
+<td><strong>A + 救濟</strong></td>
+</tr>
+<tr>
+<td>子機</td>
+<td>跟隨式（軌跡）</td>
+<td>固定式（可脫離）</td>
+<td>Gradius Option</td>
+<td>R-Type Force</td>
+<td><strong>A</strong></td>
+</tr>
+<tr>
+<td>難度</td>
+<td>靜態</td>
+<td>動態 rank</td>
+<td>Abadox</td>
+<td>Gradius / Zanac</td>
+<td><strong>動態（簡化）</strong></td>
+</tr>
+<tr>
+<td>關卡路徑</td>
+<td>線性</td>
+<td>分歧</td>
+<td>絕大多數</td>
+<td>Darius</td>
+<td><strong>線性</strong></td>
+</tr>
+<tr>
+<td>閃爍策略</td>
+<td>硬吃（輪替）</td>
+<td>提供降速選項</td>
+<td>Gradius / Crisis Force</td>
+<td>Gun-Nac</td>
+<td><strong>輪替（現代還原做到最好）</strong></td>
+</tr>
+<tr>
+<td>方向</td>
+<td>橫</td>
+<td>橫 + 直交替</td>
+<td>Gradius / R-Type</td>
+<td>沙羅曼蛇 / Abadox</td>
+<td><strong>橫</strong>（R2 只做橫）</td>
+</tr>
+</tbody>
+</table>
+<h3 id="193">19.3 從對照表學到的三件事</h3>
+<ol>
+<li>[推論] <strong>「能量表 + 檢查點」是一組</strong>：延遲兌現的樂趣建立在「我攢的東西很寶貴」之上，而檢查點制度讓它真的寶貴。如果改成原地復活，能量表的張力會下降一半——所以沙羅曼蛇 FC 版即使有能量表，體驗也偏向「爽」。</li>
+<li>[推論] <strong>選項（Option）是這個類型的招牌視覺</strong>。它同時是火力、是拖尾特效、是玩家操作的延伸。技術上只要一個環形歷史緩衝就能做到，CP 值極高。</li>
+<li>[推論] <strong>FC 上的技術天花板是 mapper</strong>。Gradius 用 CNROM 就已經很吃力；Crisis Force 用 VRC4e 才做到四向捲動 + 大魔王。我們是軟體還原，不受此限，但<strong>要自我約束在「一張水平鏡像的雙名稱表 + 一次分割」的範圍內</strong>，才像 1986 年的 Konami 而不是 1991 年的。</li>
+</ol>
+<hr />
+<h2 id="20">⑳ 音樂技法（射擊遊戲特化）</h2>
+<blockquote>
+<p>通用的 2A03 技法見 <code>docs/research/06_音樂音效_2A03與chiptune.md</code>（§1.6 聲道優先與音效搶聲道、§2.1 琶音、§2.2 回音）。本節只補<strong>橫向射擊特有</strong>的部分。</p>
+</blockquote>
+<h3 id="201-06">20.1 引用 06 的既有結論</h3>
+<p><code>06_音樂音效_2A03與chiptune.md</code> 已確立（不重複論證，直接沿用）：實務編制 = 旋律（方波 1）+ 和聲／回音（方波 2）+ 低音（三角波）+ 鼓（雜訊）+ DPCM，<strong>音效必須搶其中一軌</strong>（摘要 §3）；核心技法 = 琶音模擬和弦、第二方波做回音、震音／顫音、滑音、占空比切換、三角波兼任低音與大鼓（摘要 §4）；回音軌<strong>微微失諧（detune，FamiTracker <code>Pxx</code>）</strong>可做合唱／閃爍效果，但會整個佔用 Pulse 2 ⇒ 需要和聲的段落必須放棄回音（§2.2）；同時最多 3~4 個音效，超過丟棄低優先權（§5）；引擎給每個音效一個 priority，高優先權可打斷低的，同軌上新音效直接覆蓋舊的（§1.6）。</p>
+<h3 id="202-konami">20.2 「Konami 式回音軌」的具體配方</h3>
+<p>[源] 通用的 NES 延遲做法是「用音量控制把同一個聲音重複、一次比一次小聲」——NES 沒有真的 delay，回音是<strong>手工排出來的</strong>。</p>
+<p>[推論] 射擊遊戲版的具體參數（給 audio agent）：</p>
+<table>
+<thead>
+<tr>
+<th>參數</th>
+<th>建議值</th>
+<th>說明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>延遲</td>
+<td><strong>3 row</strong>（以 6 row/beat 計 = 半拍）</td>
+<td>太短會糊成和聲，太長會變成對位</td>
+</tr>
+<tr>
+<td>音量</td>
+<td>主旋律的 <strong>40%</strong>（例如主 15 → 回音 6）</td>
+<td>再低就聽不到</td>
+</tr>
+<tr>
+<td>占空比</td>
+<td>主旋律 25%，回音軌 <strong>12.5%</strong>（更細）</td>
+<td>音色上區分主從</td>
+</tr>
+<tr>
+<td>detune</td>
+<td><strong>+2 ~ +4</strong>（以 11-bit timer 的 LSB 計）</td>
+<td>產生每秒數次的緩慢拍頻，像合唱</td>
+</tr>
+<tr>
+<td>何時關掉</td>
+<td>需要三度 / 六度和聲的段落、魔王曲的緊張段</td>
+<td>Pulse 2 一次只能做一件事</td>
+</tr>
+</tbody>
+</table>
+<h3 id="203">20.3 射擊遊戲的聲部分配模板</h3>
+<table>
+<thead>
+<tr>
+<th>聲道</th>
+<th>開場 / 關卡曲</th>
+<th>魔王曲</th>
+<th>過關 jingle</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Pulse 1</strong>（25%）</td>
+<td>16 分音符主旋律，大量滑音與上行</td>
+<td>短動機重複 + 半音上行（緊張）</td>
+<td>大三和弦琶音上行</td>
+</tr>
+<tr>
+<td><strong>Pulse 2</strong>（12.5%）</td>
+<td><strong>回音軌</strong>（延遲 3 row、40% 音量、detune +3）</td>
+<td>切換成<strong>琶音和弦墊</strong>（<code>0-3-7</code> 小三和弦，每幀換一音）</td>
+<td>三度平行</td>
+</tr>
+<tr>
+<td><strong>Triangle</strong></td>
+<td><strong>走動式低音線</strong>（幾乎是第二旋律，八分音符不停）</td>
+<td>持續低音（踏板音）+ 偶爾的半音下行</td>
+<td>根音</td>
+</tr>
+<tr>
+<td><strong>Noise</strong></td>
+<td>16 beat 鼓組（短模式 hi-hat + 長模式 snare）</td>
+<td>密集 16 分 + 每 4 小節一次 fill</td>
+<td>一擊 crash</td>
+</tr>
+<tr>
+<td><strong>DPCM</strong></td>
+<td>不用（省 ROM / 省 CPU）</td>
+<td>不用</td>
+<td>不用</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>[推論] 橫向射擊的關卡曲<strong>必須有持續前進感</strong>。做法：三角波走十六分或八分音符的 walking bass，<strong>不停</strong>。這是 Gradius / 沙羅曼蛇 系列辨識度的來源之一，也是最容易被新手漏掉的一點。</li>
+<li>[推論] 曲長建議 <strong>32~64 小節後循環</strong>，關卡長度 3~5 分鐘 ⇒ 循環 2~3 次，不會膩。</li>
+</ul>
+<h3 id="204">20.4 音效搶聲道優先權表（射擊遊戲版）</h3>
+<blockquote>
+<p>規則：音效要用哪一軌，就把音樂那一軌「靜音」N 幀，結束後音樂自動接回（音樂資料照跑，只是不寫暫存器）。</p>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>音效</th>
+<th>建議軌</th>
+<th>優先權</th>
+<th>長度（幀）</th>
+<th>音色</th>
+<th>音樂影響</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>shot</code>（一般射擊）</td>
+<td><strong>Pulse 2</strong></td>
+<td>1（最低）</td>
+<td>3</td>
+<td>12.5%，高音下掃</td>
+<td>幾乎聽不出來；<strong>每 4 幀最多一次</strong>，避免連射蓋掉音樂</td>
+</tr>
+<tr>
+<td><code>laser</code></td>
+<td>Pulse 2</td>
+<td>2</td>
+<td>8</td>
+<td>12.5% + 快速下掃</td>
+<td>短</td>
+</tr>
+<tr>
+<td><code>missile</code></td>
+<td>Noise</td>
+<td>2</td>
+<td>6</td>
+<td>短模式高頻</td>
+<td>借鼓一拍</td>
+</tr>
+<tr>
+<td><code>hit</code>（打中敵人）</td>
+<td>Noise</td>
+<td>3</td>
+<td>4</td>
+<td>短模式</td>
+<td>借鼓</td>
+</tr>
+<tr>
+<td><code>capsule</code>（撿膠囊）</td>
+<td>Pulse 2</td>
+<td>4</td>
+<td>10</td>
+<td>上行兩音（完全五度）</td>
+<td>明確的正回饋</td>
+</tr>
+<tr>
+<td><code>powerup</code>（按 B 啟用）</td>
+<td><strong>Pulse 1 + 2</strong></td>
+<td>6</td>
+<td>20</td>
+<td>上行琶音 4 音</td>
+<td>搶主旋律 20 幀是值得的</td>
+</tr>
+<tr>
+<td><code>explode</code>（敵人爆炸）</td>
+<td>Noise</td>
+<td>5</td>
+<td>14</td>
+<td>長模式 + 音量下滑</td>
+<td>借鼓</td>
+</tr>
+<tr>
+<td><code>bossHit</code></td>
+<td>Noise</td>
+<td>5</td>
+<td>8</td>
+<td>長模式低頻</td>
+<td>借鼓</td>
+</tr>
+<tr>
+<td><code>die</code>（自機死亡）</td>
+<td><strong>全部</strong></td>
+<td>9（最高）</td>
+<td>60</td>
+<td>下行半音階 + 雜訊爆</td>
+<td><strong>音樂停止</strong>，死亡演出結束後才重啟</td>
+</tr>
+<tr>
+<td><code>extend</code>（加命）</td>
+<td>Pulse 1 + 2</td>
+<td>8</td>
+<td>40</td>
+<td>上行琶音 8 音</td>
+<td>音樂 duck（音量減半）</td>
+</tr>
+<tr>
+<td><code>bossWarn</code>（魔王警報）</td>
+<td>Pulse 1</td>
+<td>8</td>
+<td>90</td>
+<td>兩音交替（大二度）</td>
+<td><strong>音樂切到 boss 曲</strong>之前的空檔播</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>[推論] 射擊遊戲的特殊問題是<strong>射擊音效太頻繁</strong>。若每發子彈都搶 Pulse 2，音樂會變成篩子。解法三選一：① 射擊音效限流（每 4 幀最多一次）② 射擊音效改用 Noise 的極短脈衝 ③ 射擊音效音量壓到 6~8（不搶滿）。<strong>本專案建議 ① + ③ 並用。</strong></li>
+<li>[推論] <code>die</code> 是唯一應該<strong>完全停止音樂</strong>的音效。其他都只是暫借一軌。</li>
+</ul>
+<h3 id="205-audio-agent">20.5 曲目清單（給 audio agent）</h3>
+<table>
+<thead>
+<tr>
+<th>key</th>
+<th>用途</th>
+<th>長度</th>
+<th>情緒</th>
+<th>特別要求</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>title</code></td>
+<td>標題畫面</td>
+<td>16 小節循環</td>
+<td>莊嚴、期待</td>
+<td>慢速、三角波長音</td>
+</tr>
+<tr>
+<td><code>stage1</code></td>
+<td>關卡 1</td>
+<td>48 小節循環</td>
+<td>前進、明亮</td>
+<td><strong>回音軌 + 走動低音</strong>；BPM 150~165</td>
+</tr>
+<tr>
+<td><code>boss</code></td>
+<td>魔王戰</td>
+<td>24 小節循環</td>
+<td>緊迫</td>
+<td>Pulse 2 改琶音；BPM 170+</td>
+</tr>
+<tr>
+<td><code>clear</code></td>
+<td>過關</td>
+<td>8 小節，<strong>不循環</strong></td>
+<td>勝利</td>
+<td>大三和弦上行</td>
+</tr>
+<tr>
+<td><code>gameover</code></td>
+<td>結束</td>
+<td>6 小節，不循環</td>
+<td>下沉</td>
+<td>下行、慢</td>
+</tr>
+<tr>
+<td>（無）</td>
+<td>死亡瞬間</td>
+<td>—</td>
+<td>—</td>
+<td>音樂停止，只播 <code>die</code> 音效</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="21">㉑ 給《星塵巡航艦》的原創設計建議</h2>
+<blockquote>
+<p>以下全為 <strong>[推論]</strong>（本文原創提案）。所有名稱、外型、行為都是本專案自創，不對應任何現有作品的具體內容。</p>
+</blockquote>
+<h3 id="211-8">21.1 敵人 8 種原型</h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>代號</th>
+<th>名稱</th>
+<th>行為描述</th>
+<th>hp</th>
+<th>分數</th>
+<th>掉膠囊</th>
+<th>OAM</th>
+<th>出現段</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><code>bee</code></td>
+<td><strong>蜂群（Swarm）</strong></td>
+<td>5 隻一隊從右側同高度進場，以 <code>y = y0 + 16*sin(t/12)</code> 蛇行左行，速度 2 px/幀；不開火；飛到 x &lt; −16 消失</td>
+<td>1</td>
+<td>100</td>
+<td><strong>整隊全滅 → 1 顆</strong>（隊伍用精靈調色盤 3 標示）</td>
+<td>1/隻</td>
+<td>全關</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>turret</code></td>
+<td><strong>鏽鐵砲塔（Rust Turret）</strong></td>
+<td>貼地板或天花板不動，隨地形捲動；每 N 幀（依 rank 40~100）朝自機發一發瞄準彈；被打時砲管閃白</td>
+<td>2</td>
+<td>200</td>
+<td>否</td>
+<td>1（砲管；底座用背景磚）</td>
+<td>教學段起</td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>zig</code></td>
+<td><strong>鋸齒機（Zigzag）</strong></td>
+<td>從右上或右下角進場，以 45° 直線飛行，碰到地形 / 邊界就反彈（最多 3 次）後離場；速度 2.5 px/幀</td>
+<td>2</td>
+<td>150</td>
+<td>否</td>
+<td>1</td>
+<td>組合段起</td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>shell</code></td>
+<td><strong>裝甲衝鋒（Shelled Rammer）</strong></td>
+<td>直線高速左衝（3.5 px/幀），<strong>正面免疫</strong>（只有尾部 4px 可被打中），不開火；純粹逼玩家讓位</td>
+<td>3</td>
+<td>300</td>
+<td>25%</td>
+<td>2（16×8）</td>
+<td>組合段起</td>
+</tr>
+<tr>
+<td>5</td>
+<td><code>popper</code></td>
+<td><strong>爆裂囊（Popper）</strong></td>
+<td>緩慢飄浮（0.5 px/幀）；被擊破時<strong>朝 4 個對角方向各噴一發彈</strong>；不主動攻擊</td>
+<td>1</td>
+<td>250</td>
+<td>否</td>
+<td>1</td>
+<td>高潮段</td>
+</tr>
+<tr>
+<td>6</td>
+<td><code>weaver</code></td>
+<td><strong>織網者（Weaver）</strong></td>
+<td>進場後停在 x = 200 附近上下巡邏（±48 px），每 90 幀發<strong>扇形 3 發</strong>；巡邏 480 幀後離場</td>
+<td>4</td>
+<td>400</td>
+<td><strong>必掉 1 顆</strong>（單隻特殊色）</td>
+<td>2（16×16 用 8×16 ×2）</td>
+<td>組合段、高潮段</td>
+</tr>
+<tr>
+<td>7</td>
+<td><code>crawler</code></td>
+<td><strong>爬行蟲（Crawler）</strong></td>
+<td>貼著地板 / 天花板表面爬行（跟隨 <code>solidAt</code> 輪廓），速度 1.5 px/幀；每 120 幀垂直朝場中噴一發</td>
+<td>2</td>
+<td>200</td>
+<td>否</td>
+<td>1</td>
+<td>狹道段</td>
+</tr>
+<tr>
+<td>8</td>
+<td><code>hatch</code></td>
+<td><strong>孵化艙（Hatch）</strong></td>
+<td>嵌在地形裡不動的艙門，每 100 幀打開並放出 1 隻 <code>bee</code>（最多 4 隻後關閉）；hp 高，破壞可提前終止</td>
+<td>5</td>
+<td>500</td>
+<td><strong>必掉 1 顆</strong></td>
+<td>1（門；艙體背景磚）</td>
+<td>高潮段</td>
+</tr>
+</tbody>
+</table>
+<h4 id="_2">敵人設計的內在邏輯</h4>
+<table>
+<thead>
+<tr>
+<th>類別</th>
+<th>成員</th>
+<th>對玩家的要求</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>走位型</strong>（不開火，逼你移動）</td>
+<td><code>bee</code>、<code>shell</code></td>
+<td>空間判斷</td>
+</tr>
+<tr>
+<td><strong>射擊型</strong>（要你躲彈）</td>
+<td><code>turret</code>、<code>weaver</code>、<code>crawler</code></td>
+<td>彈幕閃避</td>
+</tr>
+<tr>
+<td><strong>陷阱型</strong>（打法有講究）</td>
+<td><code>popper</code>（打了會噴）、<code>shell</code>（正面免疫）</td>
+<td>判斷「該不該打」</td>
+</tr>
+<tr>
+<td><strong>資源型</strong>（給膠囊）</td>
+<td><code>bee</code> 整隊、<code>weaver</code>、<code>hatch</code></td>
+<td>風險回報決策</td>
+</tr>
+<tr>
+<td><strong>壓力型</strong>（會越來越多）</td>
+<td><code>hatch</code></td>
+<td>逼你改變優先目標</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>8 種原型剛好覆蓋 5 個功能類別，且每種都能用 1~2 顆精靈表現 —— 這是 NES 的約束下應有的密度。</li>
+<li><strong>每種第一次登場都必須單獨出現</strong>（見 §⑯ 第 ② 段），第二次起才允許組合。</li>
+</ul>
+<h3 id="212-3">21.2 魔王 3 種原型</h3>
+<h4 id="acore-fortress-1">原型 A：核心要塞（Core Fortress）— 關卡 1 魔王（契約已定）</h4>
+<table>
+<thead>
+<tr>
+<th>項</th>
+<th>規格</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>尺寸</td>
+<td>48×48；<strong>本體 36 塊背景磚</strong>，精靈只畫 4 片外殼板 + 1 個核心 + 2 個砲口閃光（≤ 12 顆 OAM）</td>
+</tr>
+<tr>
+<td>位置</td>
+<td>進場後停在 x = 176，垂直緩慢上下漂移 ±16 px（週期 240 幀）</td>
+</tr>
+<tr>
+<td>階段 1</td>
+<td>4 片外殼板各 hp 8（共 32）。攻擊：交替從上下兩個砲口發<strong>瞄準單發</strong>（間隔 60 幀）。打掉一片，該片精靈消失 + 背景磚換成裂痕</td>
+</tr>
+<tr>
+<td>轉場</td>
+<td>全部外殼破 → 停火 45 幀、閃白 3 次、背景磚換成「開口」版（12 byte），核心精靈淡入</td>
+</tr>
+<tr>
+<td>階段 2</td>
+<td>核心 hp 16。攻擊：<strong>扇形 5 發</strong>（間隔 90 幀）+ 保留階段 1 的瞄準單發（間隔拉長到 100 幀）</td>
+</tr>
+<tr>
+<td>階段 3（核心 hp ≤ 6）</td>
+<td>加入<strong>三連雷射掃射</strong>（蓄力 45 幀，3 條 y 錯開 24 px，掃射 90 幀）+ <strong>環形 8 發</strong>（間隔 120 幀）</td>
+</tr>
+<tr>
+<td>死亡</td>
+<td>8 個爆炸精靈依序在 48×48 範圍隨機生成（每 6 幀一個，共 48 幀）→ 背景磚分 12 幀清除 → <code>cleared = true</code></td>
+</tr>
+<tr>
+<td>超時</td>
+<td>180 秒未打完 → 魔王往右退場，關卡照樣過（不給分數）</td>
+</tr>
+<tr>
+<td>裸機可通過性</td>
+<td>單發彈（傷害 1）需 32 + 16 = 48 發；4 px/幀 的彈、每 2 發一輪 ⇒ 約 90 秒。<strong>通過</strong> ✓</td>
+</tr>
+</tbody>
+</table>
+<h4 id="bsplitter-swarm-2">原型 B：分裂群體（Splitter Swarm）— 中王 / 關卡 2 用</h4>
+<table>
+<thead>
+<tr>
+<th>項</th>
+<th>規格</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>概念</td>
+<td>一個 32×32 的母體，被打破後<strong>分裂成 4 個 16×16 子體</strong>，子體再破分裂成 4 個 8×8 —— 難度隨進度<strong>增加物件數</strong>而不是增加 hp</td>
+</tr>
+<tr>
+<td>階段 1</td>
+<td>母體 hp 12，緩慢繞 8 字形；每 100 幀發環形 6 發</td>
+</tr>
+<tr>
+<td>階段 2</td>
+<td>4 個子體 hp 4，速度較快，各自瞄準單發（錯開 25 幀）</td>
+</tr>
+<tr>
+<td>階段 3</td>
+<td>8 個孫體 hp 1，直線衝撞，不開火</td>
+</tr>
+<tr>
+<td>OAM</td>
+<td>階段 1：4 顆；階段 2：4 顆；階段 3：8 顆。<strong>全程 ≤ 8 顆</strong> ✓</td>
+</tr>
+<tr>
+<td>設計意圖</td>
+<td>教玩家「範圍 vs 單體」的武器取捨：雷射對階段 1 好，DOUBLE 對階段 3 好</td>
+</tr>
+</tbody>
+</table>
+<h4 id="cserpent-3">原型 C：長蛇（Serpent）— 關卡 3 / 最終王前哨用</h4>
+<table>
+<thead>
+<tr>
+<th>項</th>
+<th>規格</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>概念</td>
+<td>由 <strong>1 個頭 + 8 節身體</strong>組成的蛇，沿正弦路徑游動；<strong>只有頭可被打中</strong>（身體反彈子彈）</td>
+</tr>
+<tr>
+<td>節的位置</td>
+<td>用與選項相同的<strong>歷史緩衝</strong>技術：頭記錄位置，第 n 節取 <code>history[n * 8]</code></td>
+</tr>
+<tr>
+<td>OAM</td>
+<td>9 顆；<strong>每節 y 錯開</strong> ⇒ 同一掃描線最多 2~3 顆 ✓（正弦路徑天然避開每線 8 精靈）</td>
+</tr>
+<tr>
+<td>階段 1</td>
+<td>頭 hp 20，沿大振幅正弦（振幅 64 px）左右穿越畫面，不開火</td>
+</tr>
+<tr>
+<td>階段 2（hp ≤ 12）</td>
+<td>振幅縮小到 32 px、速度 +50%；頭每 80 幀發瞄準 3 連</td>
+</tr>
+<tr>
+<td>階段 3（hp ≤ 5）</td>
+<td>身體節逐一脫落變成獨立的慢速彈（每 20 幀掉一節）；頭全速衝撞</td>
+</tr>
+<tr>
+<td>設計意圖</td>
+<td>展示「歷史緩衝」這個技術的第二種用法；也是天然不吃每線 8 精靈的形狀</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>三種原型的技術分工</strong>：A 驗證「背景磚 + 精靈混合」；B 驗證「物件池的動態增減」；C 驗證「歷史緩衝路徑」。三個都做完，引擎的橫向射擊能力就完整了。</p>
+</blockquote>
+<h3 id="213-1-384-10-px-3072-51-34">21.3 關卡 1 節奏表（384 欄，捲動 1.0 px/幀 ⇒ 約 3072 幀 ≈ 51 秒 × 捲動；實際含魔王約 3~4 分鐘）</h3>
+<blockquote>
+<p>欄 = 8 px。<code>camCol = camX &gt;&gt; 3</code>。地形主題：<strong>小行星帶（0~191 欄）→ 星際要塞內部（192~384 欄）</strong>。</p>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>欄區間</th>
+<th>段</th>
+<th>地形</th>
+<th>事件</th>
+<th>累計威脅</th>
+<th>膠囊</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0~15</td>
+<td>① 開場</td>
+<td>開闊，無地形危險</td>
+<td>無敵人；星空背景建立</td>
+<td>0</td>
+<td>—</td>
+</tr>
+<tr>
+<td>16~23</td>
+<td>①</td>
+<td>開闊</td>
+<td><code>bee</code> ×5（y=64，蛇行）<strong>第一隊，必掉</strong></td>
+<td>2</td>
+<td>+1</td>
+</tr>
+<tr>
+<td>24~31</td>
+<td>①</td>
+<td>開闊</td>
+<td>空檔（讓玩家按 B 買 SPEED）</td>
+<td>1</td>
+<td>—</td>
+</tr>
+<tr>
+<td>32~39</td>
+<td>② 教學</td>
+<td>地板出現第一個凸起（高 16 px）</td>
+<td><code>turret</code> ×1（地板，間隔 100 幀）</td>
+<td>3</td>
+<td>—</td>
+</tr>
+<tr>
+<td>40~47</td>
+<td>②</td>
+<td>開闊</td>
+<td><code>bee</code> ×5（y=120）<strong>必掉</strong></td>
+<td>3</td>
+<td>+1</td>
+</tr>
+<tr>
+<td>48~55</td>
+<td>②</td>
+<td>天花板凸起</td>
+<td><code>turret</code> ×1（天花板）</td>
+<td>3</td>
+<td>—</td>
+</tr>
+<tr>
+<td>56~63</td>
+<td>②</td>
+<td>開闊</td>
+<td>空檔</td>
+<td>1</td>
+<td>—</td>
+</tr>
+<tr>
+<td>64~71</td>
+<td>②</td>
+<td>開闊</td>
+<td><code>zig</code> ×2（右上 / 右下進場，45° 反彈）</td>
+<td>4</td>
+<td>—</td>
+</tr>
+<tr>
+<td>72~79</td>
+<td>②</td>
+<td>小行星散布（地板 + 天花板各 1 凸起）</td>
+<td><code>bee</code> ×5（y=88）<strong>必掉</strong></td>
+<td>4</td>
+<td>+1</td>
+</tr>
+<tr>
+<td><strong>80</strong></td>
+<td>—</td>
+<td>—</td>
+<td><strong>★ 檢查點 1</strong>（前後 16 欄淨空）</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td>81~95</td>
+<td>②</td>
+<td>開闊</td>
+<td>空檔 + <code>weaver</code> ×1（<strong>特殊色，必掉</strong>）</td>
+<td>4</td>
+<td>+1</td>
+</tr>
+<tr>
+<td>96~111</td>
+<td>③ 組合</td>
+<td>地板連續 3 個凸起</td>
+<td><code>turret</code> ×2（地板）+ <code>bee</code> ×5（y=56）<strong>必掉</strong></td>
+<td>6</td>
+<td>+1</td>
+</tr>
+<tr>
+<td>112~127</td>
+<td>③</td>
+<td>通道收窄到 128 px 高</td>
+<td><code>zig</code> ×3 + <code>crawler</code> ×1（地板爬行）</td>
+<td>6</td>
+<td>—</td>
+</tr>
+<tr>
+<td>128~143</td>
+<td>③</td>
+<td>開闊</td>
+<td><code>shell</code> ×2（高速衝鋒，前後相隔 40 幀）</td>
+<td>6</td>
+<td>+0~1</td>
+</tr>
+<tr>
+<td><strong>144</strong></td>
+<td>—</td>
+<td>—</td>
+<td><strong>★ 檢查點 2</strong></td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td>145~159</td>
+<td>③</td>
+<td>開闊 → 要塞入口（背景主題轉換）</td>
+<td>空檔（過場：背景磚由岩石換金屬，分 16 幀寫完）</td>
+<td>2</td>
+<td>—</td>
+</tr>
+<tr>
+<td>160~175</td>
+<td>③</td>
+<td>要塞走廊，天花板 + 地板各有凸起</td>
+<td><code>turret</code> ×2（上下對射）+ <code>bee</code> ×5（y=104）<strong>必掉</strong></td>
+<td>7</td>
+<td>+1</td>
+</tr>
+<tr>
+<td>176~191</td>
+<td>③</td>
+<td>走廊</td>
+<td><code>weaver</code> ×1（<strong>必掉</strong>）+ <code>crawler</code> ×2</td>
+<td>7</td>
+<td>+1</td>
+</tr>
+<tr>
+<td>192~207</td>
+<td>④ 高潮</td>
+<td>通道收窄到 96 px</td>
+<td><code>hatch</code> ×1（地板，放 <code>bee</code>）+ <code>turret</code> ×2</td>
+<td>8</td>
+<td>+1</td>
+</tr>
+<tr>
+<td><strong>208</strong></td>
+<td>—</td>
+<td>—</td>
+<td><strong>★ 檢查點 3</strong></td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td>209~223</td>
+<td>④</td>
+<td>狹道 96 px，有交錯凸起（Z 字路徑）</td>
+<td><code>crawler</code> ×3（沿凸起輪廓）</td>
+<td>8</td>
+<td>—</td>
+</tr>
+<tr>
+<td>224~239</td>
+<td>④</td>
+<td>狹道</td>
+<td><code>popper</code> ×4（飄浮在路徑上，打了會噴）</td>
+<td>8</td>
+<td>—</td>
+</tr>
+<tr>
+<td>240~255</td>
+<td>④</td>
+<td>開闊一點（128 px）</td>
+<td><code>bee</code> ×5（y=72）<strong>必掉</strong> + <code>zig</code> ×2</td>
+<td>8</td>
+<td>+1</td>
+</tr>
+<tr>
+<td>256~271</td>
+<td>④</td>
+<td>狹道 96 px</td>
+<td><code>turret</code> ×3（上下上）+ <code>shell</code> ×1</td>
+<td>9</td>
+<td>+0~1</td>
+</tr>
+<tr>
+<td><strong>272</strong></td>
+<td>—</td>
+<td>—</td>
+<td><strong>★ 檢查點 4</strong></td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td>273~287</td>
+<td>④</td>
+<td>開闊</td>
+<td><code>hatch</code> ×1 + <code>weaver</code> ×1（<strong>必掉</strong>）</td>
+<td>9</td>
+<td>+1</td>
+</tr>
+<tr>
+<td>288~303</td>
+<td>④</td>
+<td>狹道 → 最窄 80 px</td>
+<td><code>crawler</code> ×2 + <code>popper</code> ×3</td>
+<td>9</td>
+<td>—</td>
+</tr>
+<tr>
+<td>304~319</td>
+<td>⑤ 呼吸</td>
+<td><strong>完全開闊，無地形危險</strong></td>
+<td><strong>無敵人</strong>；只有背景的要塞核心逐漸放大（背景磚）</td>
+<td>1</td>
+<td>—</td>
+</tr>
+<tr>
+<td>320~335</td>
+<td>⑤</td>
+<td>開闊</td>
+<td><code>bee</code> ×5（y=96）<strong>必掉</strong>，作為最後補給</td>
+<td>3</td>
+<td>+1</td>
+</tr>
+<tr>
+<td>336~351</td>
+<td>⑤</td>
+<td>開闊</td>
+<td>空檔 + <strong>魔王警報</strong>（HUD 閃爍 + <code>bossWarn</code> 音效 90 幀）</td>
+<td>1</td>
+<td>—</td>
+</tr>
+<tr>
+<td><strong>352</strong></td>
+<td>—</td>
+<td>—</td>
+<td><strong>★ 檢查點 5（魔王前）</strong>；<code>stage.speed = 0</code>，魔王進場</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td>352~384</td>
+<td>魔王</td>
+<td>固定畫面</td>
+<td><strong>核心要塞</strong>（三階段，見 §21.2-A）</td>
+<td>10</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<h4 id="1_1">關卡 1 的數字總結</h4>
+<table>
+<thead>
+<tr>
+<th>項</th>
+<th>值</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>總長</td>
+<td>384 欄 = 3072 px = 12 畫面</td>
+</tr>
+<tr>
+<td>捲動速度</td>
+<td>1.0 px/幀（8.8 定點 = 256）</td>
+</tr>
+<tr>
+<td>捲動時間</td>
+<td>3072 幀 ≈ 51 秒（不含魔王與停頓）</td>
+</tr>
+<tr>
+<td>檢查點</td>
+<td>5 個（欄 80 / 144 / 208 / 272 / 352），間距 64~80 欄</td>
+</tr>
+<tr>
+<td>敵人總數</td>
+<td><code>bee</code> 40 隻（8 隊）、<code>turret</code> 13、<code>zig</code> 7、<code>shell</code> 3、<code>weaver</code> 3、<code>crawler</code> 8、<code>popper</code> 7、<code>hatch</code> 2 = <strong>83 隻</strong></td>
+</tr>
+<tr>
+<td>膠囊供給</td>
+<td>必掉 11 顆 + 機率 2 顆 ≈ <strong>13 顆</strong>（見 §14.4）</td>
+</tr>
+<tr>
+<td>最大同屏敵人</td>
+<td>8（<code>bee</code> 5 + <code>turret</code> 2 + 1） ⇒ 精靈約 10 顆 ✓</td>
+</tr>
+<tr>
+<td>最大同屏物件（含彈與爆炸）</td>
+<td>估 42 顆 ⇒ OAM 尚有 22 格餘裕 ✓</td>
+</tr>
+<tr>
+<td>目標通關時間（熟練）</td>
+<td>約 3 分 30 秒</td>
+</tr>
+</tbody>
+</table>
+<h3 id="214-hud">21.4 HUD 版面草案</h3>
+<blockquote>
+<p>畫面 256×240；遊戲區掃描線 <strong>0..207</strong>；HUD = 掃描線 <strong>208..239</strong>（4 列 8px 磚 = 32 px）。
+名稱表列 26..29（<code>row = scanline &gt;&gt; 3</code>）。每列 32 格磚。</p>
+</blockquote>
+<pre><code>掃描線
+  0 ┌────────────────────────────────────────────────────────────────┐
+    │                                                                │
+    │                     遊 戲 區（26 列 × 32 格）                    │
+    │                                                                │
+207 └────────────────────────────────────────────────────────────────┘
+208 ╔════════════════════════════════════════════════════════════════╗  ← split
+    ║ 1P  0 0 1 2 3 4 0      HI  0 5 0 0 0 0 0            STAGE 1    ║  列 26
+216 ║    SPD  MSL  DBL  LSR  OPT  ?                                  ║  列 27
+224 ║    ───  ███  ───  ───  ───  ─                                  ║  列 28（底線＝目前格位）
+232 ║ ▲▲                                              SHIELD ███     ║  列 29
+239 ╚════════════════════════════════════════════════════════════════╝
+</code></pre>
+<h4 id="32_1">逐列磚配置（32 格 / 列）</h4>
+<table>
+<thead>
+<tr>
+<th>列</th>
+<th>格 0-3</th>
+<th>格 4-11</th>
+<th>格 12-15</th>
+<th>格 16-23</th>
+<th>格 24-31</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>26</strong></td>
+<td><code>1P</code></td>
+<td>分數 7 位 + 空白</td>
+<td><code>HI</code></td>
+<td>最高分 7 位 + 空白</td>
+<td><code>STAGE 1</code></td>
+</tr>
+<tr>
+<td><strong>27</strong></td>
+<td>能量表項目（縮寫版，見下）</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><strong>28</strong></td>
+<td>能量表底線（每項一段 <code>───</code>，目前格位換成 <code>███</code>）</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><strong>29</strong></td>
+<td><code>▲▲</code> 剩餘船數（最多 4 個圖示）</td>
+<td>空白</td>
+<td>空白</td>
+<td>空白</td>
+<td><code>SHIELD ███</code>（有護盾時）</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>[推論] 32 格放不下 <code>SPEED MISSILE DOUBLE LASER OPTION ?</code> 六個完整英文字，<strong>改用縮寫</strong>：<code>SPD  MSL  DBL  LSR  OPT  ?</code> = 26 格，左右各留 3 格 ✓。</li>
+</ul>
+<pre><code>格:  0123456789.....................31
+列27 ░░░SPD  MSL  DBL  LSR  OPT  ?░░░
+列28 ░░░───  ───  ───  ───  ───  ─░░░   ← 目前格位的底線換成 █
+</code></pre>
+<h4 id="_3">能量表反白的實作</h4>
+<table>
+<thead>
+<tr>
+<th>方式</th>
+<th>做法</th>
+<th>成本</th>
+<th>選用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>換磚</td>
+<td>準備「正常」與「反白」兩組字型磚（52 塊 → 104 塊）</td>
+<td>CHR 吃掉一半；每次切換寫 ~8 byte</td>
+<td>✗</td>
+</tr>
+<tr>
+<td><strong>換屬性</strong></td>
+<td>能量表的 6 個項目各佔一個 16×16 屬性格區；切換時只改屬性表 <strong>1~2 byte</strong></td>
+<td>極省；但字的位置要對齊 16px 邊界</td>
+<td><strong>✓ 採用</strong></td>
+</tr>
+<tr>
+<td>換底線磚</td>
+<td>只有列 28 的底線換成實心條</td>
+<td>每次 ~6 byte</td>
+<td>✓ 備選（視覺更明顯）</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>[推論] <strong>建議兩者並用</strong>：屬性換色（字變亮黃）+ 列 28 的底線從 <code>─</code> 換成 <code>█</code>。玩家在戰鬥中掃一眼就能看到。</li>
+<li>欄位對齊（列 27，格 0..31）：留白(0-2) <code>SPD</code>(3-5) 留白(6-7) <code>MSL</code>(8-10) 留白(11-12) <code>DBL</code>(13-15) 留白(16-17) <code>LSR</code>(18-20) 留白(21-22) <code>OPT</code>(23-25) 留白(26-27) <code>?</code>(28) 留白(29-31)。每項起點都落在偶數格 ⇒ 可用 16×16 屬性格區換色 ✓。</li>
+</ul>
+<h4 id="hud">HUD 更新時機與成本</h4>
+<table>
+<thead>
+<tr>
+<th>元素</th>
+<th>何時更新</th>
+<th>byte</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>分數</td>
+<td>加分時（只寫變動的位）</td>
+<td>1~3</td>
+</tr>
+<tr>
+<td>HI</td>
+<td>超過時</td>
+<td>1~3</td>
+</tr>
+<tr>
+<td>能量表反白</td>
+<td>撿膠囊 / 按 B 時</td>
+<td>2（屬性）+ 6（底線）</td>
+</tr>
+<tr>
+<td>剩餘船數</td>
+<td>死亡 / 加命時</td>
+<td>2</td>
+</tr>
+<tr>
+<td>護盾格</td>
+<td>護盾變化時</td>
+<td>3</td>
+</tr>
+<tr>
+<td>STAGE</td>
+<td>過關時</td>
+<td>1</td>
+</tr>
+<tr>
+<td><strong>每幀平均</strong></td>
+<td></td>
+<td><strong>&lt; 2 byte</strong> ✓</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="22-agent">㉒ 給各 agent 的落地清單</h2>
+<table>
+<thead>
+<tr>
+<th>agent</th>
+<th>必須照做的規格（§ = 本文章節）</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>engine</strong><br><code>engine/shmup.js</code></td>
+<td><code>SIN/COS[256]</code> 誤差 0、<code>atan2</code> 八方 ±1（<strong>y 軸向下</strong>）、<code>aim()</code> 向量長度誤差 &lt; 2%（§5.3）；<code>Pool.alloc()</code> 滿了回 <code>null</code> 不擠舊的（§4.1）；<code>OAM.end()</code> 依 prio <strong>穩定</strong>排序 + 同 prio 每幀輪替起點 + <code>dropped</code> 可讀 + y ≥ 240 略過（§2.2 / §3.2）；<code>Scroller</code> 每幀 ≤ 45 byte、<code>(camX &amp; 7) === 0</code> 觸發、<strong>先寫後捲</strong>（§6.2 / §6.3）；<code>Spawner</code> 單指標 O(1)、<code>reset()</code> 可二分搜到指定 col（§7.2 / §7.4）</td>
+</tr>
+<tr>
+<td><strong>ship</strong><br><code>ship.js</code>／<code>main.js</code></td>
+<td>速度 5 級 = 1.5 / 2.0 / 2.5 / 3.0 / 3.5 px/幀、<strong>無慣性</strong>、斜向不正規化（§18.2）；自機判定 12×6 + 對敵彈 6×4 兩段式、膠囊框 <strong>12×12 比精靈大</strong>（§8.2 / §8.3）；判定順序 自機彈×敵 → ×魔王弱點 → <strong>撿膠囊</strong> → ×敵彈 → ×敵 → ×地形（§8.4）；無敵 90 幀、死亡清空敵彈、<strong>保留 SPEED 1 級</strong>（§12.3）；能量表 6 格數值 + LASER ⇄ DOUBLE 互斥（§14.3）；雷射 4 段 / 6 px 幀 / 貫穿但同敵 8 幀一次（§9.3）；HUD 縮寫 <code>SPD MSL DBL LSR OPT ?</code> + 屬性表反白（§21.4）；<code>state()</code> 暴露 <code>rank</code>（§13.4）</td>
+</tr>
+<tr>
+<td><strong>stage</strong><br><code>enemies.js</code>／<code>boss.js</code>／<code>stage1.js</code></td>
+<td>8 種敵人原型（§21.1）；池 敵 12 / 敵彈 16 / 膠囊 4 / 爆炸 8（§4.2）；膠囊 300 幀閃爍、360 幀消失（§14.4）；出怪表以「欄」為鍵、遞增、單次觸發（§7.2）；5 個檢查點（欄 80/144/208/272/352）前後 16 欄淨空 + 復活救濟編隊必掉 3 顆（§12.3 / §21.3）；魔王本體 <strong>背景磚 36 塊</strong>、精靈 ≤ 12 顆、進場分 12 幀寫（§10.2 / §10.3）；魔王三階段 + 轉場 45 幀 + 超時 180 秒撤退（§21.2-A）；每種攻擊預警 ≥ 20 幀、環形彈 ≤ 8 發（§15.4 / §15.5）；狹道最窄 80 px（§18.3）；rank 公式（§13.4）</td>
+</tr>
+<tr>
+<td><strong>audio</strong><br><code>song.js</code>／<code>music.js</code></td>
+<td>補 <code>slide</code> / <code>detune</code> 效果欄（§20.2）；<code>stage1</code> 回音軌 = 延遲 3 row / 音量 40% / 占空比 12.5% / detune +3（§20.2）；三角波持續走動低音（§20.3）；<code>boss</code> 把 Pulse 2 改琶音和弦墊（§20.3）；音效優先權表 11 項、<code>shot</code> 每 4 幀最多一次且音量壓到 6~8、<code>die</code> 停止音樂（§20.4）；5 首曲 <code>title</code>/<code>stage1</code>/<code>boss</code>/<code>clear</code>/<code>gameover</code>（§20.5）</td>
+</tr>
+<tr>
+<td><strong>qa2</strong></td>
+<td>任一幀任一掃描線 &gt; 8 精靈被畫出 = 不合格；自機 / 選項 / 敵彈從未被 <code>dropped</code>（§3.4）；<code>__nes.stats().budget.over === 0</code>（400 幀以上，§6.1）；裸機從各檢查點出發皆可通過、魔王裸機 180 秒內可打完（§12.3 / §21.2-A）；關卡 1 膠囊供給 ≈ 13 顆（§21.3）；威脅曲線呈鋸齒 + 單峰 + 魔王前呼吸區（§16.3）</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="_4">來源</h2>
+<ol>
+<li>NESdev Wiki — PPU OAM（64 精靈 / 4 byte / 優先權 / 每線 8 個 / sprite 0 hit 條件 / OAM DMA 513 cycle / OAM decay）https://www.nesdev.org/wiki/PPU_OAM</li>
+<li>NESdev Wiki — PPU sprite evaluation（secondary OAM 32 byte、溢位旗標的硬體 bug）https://www.nesdev.org/wiki/PPU_sprite_evaluation</li>
+<li>NESdev Wiki — PPU registers https://www.nesdev.org/wiki/PPU_registers</li>
+<li>NESdev Wiki — PPU rendering https://www.nesdev.org/wiki/PPU_rendering</li>
+<li>NESdev Wiki — PPU scrolling https://www.nesdev.org/wiki/PPU_scrolling</li>
+<li>NESdev Wiki — The frame and NMIs（VBlank 可寫 byte 數）https://www.nesdev.org/wiki/The_frame_and_NMIs</li>
+<li>NESdev Forum — Standard flicker mitigation techniques?（OAM cycling、+9×4、$34 偏移、Fisher-Yates 洗牌、精靈換背景磚、刻意重疊；點名 Gradius / Parodius）https://forums.nesdev.org/viewtopic.php?f=2&amp;t=10591</li>
+<li>NESdev Forum — using OAM priority rotation to reduce sprite flicker https://forums.nesdev.org/viewtopic.php?t=23772</li>
+<li>NESdev Forum — Implementing Conditional Sprite Flickering on the NES https://forums.nesdev.org/viewtopic.php?t=25003</li>
+<li>NESdev Forum — Controlled sprite flicker https://forums.nesdev.org/viewtopic.php?t=18010</li>
+<li>NESdev Forum — Question about Sprites and the 8 per scanline "law" https://forums.nesdev.org/viewtopic.php?t=4287</li>
+<li>NESdev Forum — Updating columns on the name table during VBlank https://forums.nesdev.org/viewtopic.php?t=417</li>
+<li>NESdev Forum — Filling Nametables: Scrolling and Metatiles（metatile 緩衝 24~30 byte）https://forums.nesdev.org/viewtopic.php?t=12636</li>
+<li>NESdev Forum — Maximum Scroll Speeds https://forums.nesdev.org/viewtopic.php?t=18580</li>
+<li>NESdev Forum — Fastest Scroll Speed https://forums.nesdev.org/viewtopic.php?t=12874</li>
+<li>NESdev Forum — "The frame and NMIs" - buffering issues https://forums.nesdev.org/viewtopic.php?f=10&amp;t=15619</li>
+<li>NESdev Forum — Shooting projectiles at the player from predefined angles（Thwaite 的 atan2 約 400 cycle）https://forums.nesdev.org/viewtopic.php?p=251355</li>
+<li>NESdev Forum — Trajectory shooting https://forums.nesdev.org/viewtopic.php?f=2&amp;t=14528</li>
+<li>NESdev Forum — Diagonal movement with arbitrary angle https://forums.nesdev.org/viewtopic.php?t=15133</li>
+<li>GitHub — vermiceli/nes-contra-us（Contra NES 反組譯；<code>docs/Aim Documentation.md</code>、敵人瞄準方向 <code>#$00</code>~<code>#$16</code>）https://github.com/vermiceli/nes-contra-us</li>
+<li>GitHub — vermiceli/nes-contra-us — Enemy Glossary.md https://github.com/vermiceli/nes-contra-us/blob/main/docs/Enemy%20Glossary.md</li>
+<li>NESdev Forum — Did any games use background tiles for "sprites"?（洛克人 / 忍者蛙 / Bucky O'Hare 的背景魔王）https://forums.nesdev.org/viewtopic.php?t=10807</li>
+<li>NESdev Forum — Limits of using spare background layer for a "sprite"? https://forums.nesdev.org/viewtopic.php?t=23836</li>
+<li>MegaCat Studios — Blending Tiles for Animated NES Bosses（背景魔王、一次只能換約 32 塊磚）https://megacatstudios.com/blogs/retro-development/blending-tiles-for-animated-nes-bosses</li>
+<li>NESdev Forum — Techniques to detect scanline（sprite 0 vs mapper IRQ）https://forums.nesdev.org/viewtopic.php?t=17813</li>
+<li>NESdev Forum — Fun with MMC3 Scanline IRQs https://forums.nesdev.org/viewtopic.php?f=2&amp;t=13360</li>
+<li>nesdoug — 18. Sprite Zero https://nesdoug.com/2018/09/05/18-sprite-zero/</li>
+<li>NESdev Wiki — Tricky-to-emulate games https://www.nesdev.org/wiki/Tricky-to-emulate_games</li>
+<li>NESdev Wiki — VRC2 and VRC4 https://www.nesdev.org/wiki/VRC2_and_VRC4</li>
+<li>Data Crystal — Gradius (NES)（mapper 3 CNROM、2×16KiB PRG、4×8KiB CHR）https://datacrystal.tcrf.net/wiki/Gradius_(NES)</li>
+<li>The Cutting Room Floor — Gradius (NES) https://tcrf.net/Gradius_(NES)</li>
+<li>The Cutting Room Floor — Crisis Force（VRC4e）https://tcrf.net/Crisis_Force</li>
+<li>Wikipedia — Crisis Force（Konami 最後一款 FC 射擊、VRC4、四向捲動、Famitsu 批評閃爍）https://en.wikipedia.org/wiki/Crisis_Force</li>
+<li>Destructoid — Crisis Force is perhaps the most Famicom of Famicom shoot-'em-ups（與 Recca、Gun*Nac 的閃爍選項比較）https://www.destructoid.com/famicom-friday-crisis-force-retro-nes/</li>
+<li>Wikipedia — Gradius (video game)（1986-04-25 Famicom 發售、日本銷量破百萬）https://en.wikipedia.org/wiki/Gradius_(video_game)</li>
+<li>Shmups Wiki — Gradius（能量表順序、Speed Up 上限 5、Option 上限 4／部分移植 2、Laser ⇄ Double 互斥、rank 封頂 15、死亡後橘色敵人救濟）https://shmups.wiki/library/Gradius</li>
+<li>Gradius Wiki — Salamander（FC 版能量表 Speedup / Missile / Ripple / Laser / Option / Force、原地復活、Force Field、關卡增刪、NES 版 2 顆 option）https://gradius.fandom.com/wiki/Salamander</li>
+<li>Hardcore Gaming 101 — Salamander / Life Force https://www.hardcoregaming101.net/salamander-life-force/</li>
+<li>Wikipedia — Salamander (video game)（原地復活、橫直向交替、街機版用能量表）https://en.wikipedia.org/wiki/Salamander_(video_game)</li>
+<li>Wikipedia — Gradius II https://en.wikipedia.org/wiki/Gradius_II</li>
+<li>shmups.system11.org — Gradius III (AC) Rank System（rank = 難度 + 循環/關卡 + 強化 + 特殊，範圍 0~31）https://shmups.system11.org/viewtopic.php?t=42968</li>
+<li>shmups.system11.org — RQ: Gradius (1, AC) rank https://shmups.system11.org/viewtopic.php?f=5&amp;t=57257</li>
+<li>shmups.system11.org — What's the 'original' purpose of rank（rank 的設計原意）https://shmups.system11.org/viewtopic.php?t=5336</li>
+<li>shmups.system11.org — GD: Ranking in Gradiuses (esp. Gradius V)（Gradius IV 的動態 rank 計數器、死亡降 rank）https://shmups.system11.org/viewtopic.php?f=5&amp;t=12494</li>
+<li>Mother Shmupper — Power Loss, Gradius Syndrome, and the Value of a Bad Run https://www.mothershmupper.com/power-loss-gradius-syndrome-and-the-value-of-a-bad-run/</li>
+<li>Gradius Wiki — Power Capsule https://gradius.fandom.com/wiki/Power_Capsule</li>
+<li>Gradius Wiki — Option https://gradius.fandom.com/wiki/Option</li>
+<li>Raspberry Pi / Wireframe #16 — Recreate the sprite-following Options from Gradius（位置歷史緩衝，每 20 筆一個 option）https://www.raspberrypi.com/news/recreate-the-sprite-following-options-from-gradius-using-python-wireframe-issue-16/</li>
+<li>Shmups Wiki — R-Type（memorizer shooter、死亡失去 Force Pod / Bits / Speed、檢查點復活練習）https://shmups.wiki/library/R-Type</li>
+<li>StrategyWiki — R-Type / Versions（PCE 日版拆兩張 2Mbit HuCard、美版 4Mbit 單卡）https://strategywiki.org/wiki/R-Type/Versions</li>
+<li>Wikipedia — R-Type https://en.wikipedia.org/wiki/R-Type</li>
+<li>Wikipedia — Abadox（Natsume 開發、1990-03、程式 Kimiya Sasaki / Seiichi Tajima / Kōichi Dekune）https://en.wikipedia.org/wiki/Abadox</li>
+<li>Hardcore Gaming 101 — Abadox https://www.hardcoregaming101.net/abadox/</li>
+<li>Wikipedia — Over Horizon（1991、Pixel + Hot-B、可自訂射擊配置、環境機關）https://en.wikipedia.org/wiki/Over_Horizon</li>
+<li>Wikipedia — Gun-Nac（Compile 1990）https://en.wikipedia.org/wiki/Gun-Nac</li>
+<li>1CC Log for Shmups — Gun-Nac (NES)（五種武器、炸彈退回武器 1、Wing 系統）http://1cclog.blogspot.com/2023/11/gun-nac-nes.html</li>
+<li>Wikipedia — Zanac（ALC 自動難度控制的因子）https://en.wikipedia.org/wiki/Zanac</li>
+<li>Hardcore Gaming 101 — Zanac https://www.hardcoregaming101.net/zanac/</li>
+<li>Wikipedia — Darius (video game)（1987 Taito、三螢幕、二元樹分歧關卡、Silver Hawk）https://en.wikipedia.org/wiki/Darius_(video_game)</li>
+<li>Wikipedia — Darius (series) https://en.wikipedia.org/wiki/Darius_(series)</li>
+<li>Wikipedia — Blaster Master (video game)（非橫向射擊；無存檔無密碼）https://en.wikipedia.org/wiki/Blaster_Master_(video_game)</li>
+<li>shmups.system11.org — Hitboxes: lazy/bad programming or best idea ever?（Gradius 的判定就已小於精靈；90 年代中後期的業界通例；判定為質心小圓且各動畫幀不變）https://shmups.system11.org/viewtopic.php?f=1&amp;t=45122</li>
+<li>Dinogame — What Is a Bullet Hell? The Shoot-Em-Up Subgenre Defined（判定 1~4 px）https://dinogame.gg/blog/what-is-a-bullet-hell/</li>
+<li>Significant Bits — The 1-Pixel Collision Box https://significant-bits.com/the-1-pixel-collision-box/</li>
+<li>SLYNYRD — Pixelblog 63: Horizontal Shmup（自機精靈尺寸、不要慣性、玩家子彈判定寬鬆 / 敵彈判定緊、背景降飽和提升可讀性）https://www.slynyrd.com/blog/2026/7/26/pixelblog-63-horizontal-shmup</li>
+<li>Shmups Wiki — Boghog's bullet hell shmup 101（移動速度與彈型要配合遊玩區大小）https://shmups.wiki/library/Boghog's_bullet_hell_shmup_101</li>
+<li>Game Developer — Video Game Boss Design For Shmups https://www.gamedeveloper.com/design/video-game-boss-design-for-shmups</li>
+<li>Game Developer — Boss Battle Design and Structure（魔王的節奏、張力堆疊與釋放、最終魔王 = 總複習）https://www.gamedeveloper.com/design/boss-battle-design-and-structure</li>
+<li>Game Developer — Designing smart, meaningful SHMUPs https://www.gamedeveloper.com/design/designing-smart-meaningful-shmups</li>
+<li>shmups.system11.org — Pacing: On Filler, Breaks, and Stage Length https://shmups.system11.org/viewtopic.php?f=9&amp;t=60212</li>
+<li>shmups.system11.org — How do <em>you</em> organize level data and shot patterns?（以捲動位置觸發編隊、活動物件表）https://shmups.system11.org/viewtopic.php?f=9&amp;t=58947</li>
+<li>shmups.system11.org — How to store levels and enemy patterns?（敵人依出現順序排序，每幀只檢查一筆）https://shmups.system11.org/viewtopic.php?t=64410</li>
+<li>GameDev.net — Shmup Level Design/Scripting（時間軸 / 捲動位置的資料格式）https://gamedev.net/forums/topic/661568-shmup-level-designscripting-i39m-so-lost/</li>
+<li>MegaCat Studios — Creating Music and Sound for the NES: A Primer for Using FamiTracker https://megacatstudios.com/blogs/retro-development/creating-music-and-sound-for-nes-games</li>
+<li>Ozzed — How to make 8-bit Music: A comprehensive guide（回音要靠音量遞減手工排、三角波低音、雜訊鼓、琶音）https://ozzed.net/how-to-make-8-bit-music.shtml</li>
+<li>NESdev Wiki — Audio drivers https://www.nesdev.org/wiki/Audio_drivers</li>
+<li>VGMPF Wiki — Famicom/NES Sound Driver List https://vgmpf.com/Wiki/index.php?title=Famicom/NES_Sound_Driver_List</li>
+<li>本專案內部研究 — <code>docs/research/01_硬體規格與限制.md</code>、<code>04_遊戲設計模式.md</code>（§⑤ 難度曲線 / 心流通道、§⑦ HUD 慣例）、<code>05_美術與像素規範.md</code>（閃爍章）、<code>06_音樂音效_2A03與chiptune.md</code>（§1.6 / §2.1 / §2.2 / §5）</li>
+</ol>
+<hr />
+<blockquote>
+<p>本文完。技術段落的數字若與 <code>docs/ENGINE_API.md</code> 衝突，以 ENGINE_API 為準（它是實作契約）；設計段落的數值是<strong>建議起始值</strong>，實測手感後由 ship / stage agent 調整並回寫 <code>docs/PROGRESS.md</code>。</p>
+</blockquote></section></main>
 <script>
 const q=document.getElementById('q');q.addEventListener('keydown',e=>{if(e.key!=='Enter')return;const t=q.value.trim();document.querySelectorAll('mark').forEach(m=>m.replaceWith(m.textContent));if(!t)return;
 const w=document.createTreeWalker(document.querySelector('main'),NodeFilter.SHOW_TEXT);const nodes=[];while(w.nextNode())nodes.push(w.currentNode);let first=null;

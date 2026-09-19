@@ -19,6 +19,8 @@
 12. [game 物件介面（games/*）](#12-game-物件介面)
 13. [工具：shot.py / build.py / run_all.sh](#13-工具)
 14. [實作差異（實測核對）](#14-實作差異實測核對)
+15. [NES.SH — engine/shmup.js（R2 射擊共用工具）](#15-nessh-engineshmupjs)
+16. [NES.Touch — engine/touch.js（R2 手機觸控虛擬手把）](#16-nestouch-enginetouchjs)
 
 ---
 
@@ -27,8 +29,8 @@
 | 項目 | 規則 |
 |---|---|
 | 檔案型態 | 每個 `engine/*.js` 都是 classic script + IIFE、**零相依**；開頭 `window.NES = window.NES \|\| {};` 再掛自己的模組 |
-| 載入順序 | `palette → fixed → input → cpu_timing → chr → ppu → nes_lint → apu → music → nes.js → games/*`（`game.html` 與 `tools/build.py` 都以此為準，build.py `--check` 會驗證） |
-| 解析度 | PPU 內部 256×240，顯示裁上下各 8 列 → **256×224**；整數倍放大、無平滑 |
+| 載入順序 | `palette → fixed → input → cpu_timing → chr → ppu → nes_lint → apu → music → shmup → touch → nes.js → games/*`（三個入口頁與 `tools/build.py` 都以此為準，build.py `--check` 會驗證） |
+| 解析度 | PPU 內部 256×240，顯示裁上下各 8 列 → **256×224**；桌機整數倍放大、無平滑。手機（觸控裝置或短邊 < 600）允許 **CSS 小數倍**：backing store 仍是整數倍（`nes.setScale` 只收整數），CSS 縮到目標尺寸 + `image-rendering: pixelated`（§16） |
 | 幀率 | NTSC `60.0988` Hz 固定步；無 delta-time 補間；每幀一次輸入取樣 |
 | 單位 | 位置 1/16 px、速度 8.8（1/256 px/幀）；全部整數運算 |
 | 色彩 | 只能用 64 色 NES 調色盤（`$0D` 禁用）；同屏 ≤ 25 色 |
@@ -337,6 +339,8 @@ const r = NES.Lint.frame(ppu);     // {ok:false, colors:27, badPixels:12, overLi
 | `write(addr, val)` | `$4000`~`$4017` 暫存器語意（方波 ×2 占空比 / 掃頻 / 包絡、三角波、雜訊 LFSR、DPCM、frame counter） |
 | `tick()` | 每幀呼叫一次（內含 240 Hz frame counter 走 4 次）。**由 `NES.boot` 自動呼叫**（game.update 之後） |
 | `render(nSamples)` | `→ Float32Array`，離線渲染（`tools/apu_render.py` 產 wav 驗頻譜） |
+
+> `tools/apu_render.py` 遊戲曲目模式（R2）：`$PY tools/apu_render.py --game cruiser [--song stage1] --seconds 10` → `shots/agent_audio/*.wav` + 五聲道成分四段檢查（暫存器稽核 / 逐聲道單獨渲染 / 頻譜覆蓋 / 無 NaN 不削波）。
 | `connect(audioContext)` | 即時播放（AudioWorklet，退 ScriptProcessor）。**由 `nes.connectAudio()` 在使用者第一次按鍵 / 點擊時呼叫** |
 | `mix()` | 非線性混音公式（研究 06 §1） |
 
@@ -352,7 +356,7 @@ const pcm = apu.render(44100);  // 離線 1 秒
 
 擁有者：apu agent ｜ 來源：研究 06 §2（作曲技法）、§4（音效設計）
 
-song 格式定義寫在 `engine/music.js` 檔頭（pattern 陣列；每列 = 1 幀或 speed 幀；指令 `note / inst / vol / arp / vib / duty / stop`）。
+song 格式定義寫在 `engine/music.js` 檔頭（pattern 陣列；每列 = 1 幀或 speed 幀；指令 `note / inst / vol / arp / vib / duty / cut / detune / slide / stop`）。
 
 **入口**：`NES.Music.attach(apu)` 先把 APU 綁給預設 driver，之後 `NES.Music.play/stop/sfx/tick/define`
 才能用（否則 throw「請先呼叫 NES.Music.attach(apu)」）。**`NES.boot` 已經幫你 attach**，
@@ -366,6 +370,16 @@ song 格式定義寫在 `engine/music.js` 檔頭（pattern 陣列；每列 = 1 �
 | `sfx(name, {priority, channels})` | 音效搶聲道：優先權高者佔用，結束後音樂復原 |
 | `define(name, sfxData)` | 註冊音效 |
 | `tick()` | 每幀呼叫一次，**由遊戲的 `update()` 呼叫**（不是 nes.js） |
+| `state()` | channel 快照，R2 起新增 `detune / slide / slideAcc` 三欄 |
+
+### 效果欄（R2 audio agent 新增；格式向下相容，demo 曲零改動）
+| 欄 | 說明 |
+|---|---|
+| `detune: n` | 固定週期偏移（+ = 音變低），持續到下次改寫，**換音不歸零**（回音軌用） |
+| `slide: n` | 每幀週期 ±n（累積） |
+| `slide: {rate, to: 'C-5'}` | portamento：滑到目標音停 |
+| `slide: {rate, limit: m}` | 夾在 ±m |
+最終週期 = 基礎音高（note + arp + vib + 樂器 pitch）+ detune + slide 累積量；觸發新音 → slideAcc 歸零、detune 保留。雜訊 / DMC 軌不受影響；音效的幀也吃數字型 `detune` / `slide`。
 
 ```js
 NES.Music.define('jump', { ch: 'pulse1', priority: 2, rows: [/* … */] });
@@ -461,6 +475,8 @@ window.GAME = {
 | `tools/shot.py` | `$PY tools/shot.py --script "press right 40; tap a 1; step 30; shot jump" --seq 6:4 --scale 3 --lint --out shots/agent_x/run.png`<br>script：`press <k,k> <n> \| tap <k> <n> \| step <n> \| release \| shot <name>`；key：`a b select start up down left right`；`--lint` 截完跑 `__nes.lint()`，違規 exit 1；另有 `--state --stats --console --steps --keys --query --url` |
 | `tools/build.py` | `$PY tools/build.py` → `dist/星塵勇者.html`（單檔）；`--check` 只驗載入順序與 engine 缺檔 |
 | `tools/run_all.sh` | `bash tools/run_all.sh [--quick] [--shots N]`：node --check → **`tools/test_*.py` + `games/*/test_*.py`**（fix1 起涵蓋遊戲層，QA P1-1 / X1）→ `build.py --check` → 冒煙截圖 → `nes_lint.py` 抽查 → PASS/FAIL 表 |
+| `tools/mobile_shot.py` | `$PY tools/mobile_shot.py --page cruiser.html --device "iPhone 13" --landscape --touch "tap 697 75 3; step 90; down 0 147 253; up 0" --rects --out shots/agent_x/m.png`：以 Playwright 手機裝置描述（觸控 / DPR）開入口頁，截**整個 viewport**（含觸控按鍵）；touch 指令 `tap/down/move/up/step/key/shot`；另有 `--dist --url --scale --query --eval --state --rects --run --console --hint --list` |
+| `tools/test_touch.py` | `$PY tools/test_touch.py [--only cruiser]`：三頁 × iPhone 13 橫 / Pixel 5 直 × 18 項 + 桌機 1280×800 × 6 項 = **180 項**（版面不壓畫面 / 不出界、backing 整數、小數倍 CSS、觸控輸入端對端、鍵盤淡出） |
 | `tools/nes_lint.py` | `$PY tools/nes_lint.py --palette engine/palette.js shots/**/*.png`：逐像素驗 64 色 / ≤ 25 色 / 整數放大無平滑 |
 
 `$PY = ../卡比之星/.venv/bin/python`（已裝 playwright / pillow）。
@@ -493,9 +509,242 @@ nes_lint 5/5、apu 8/8、music 6/6、nes 2/2）；10 檔語法全 OK、載入全
 | D9 | cpu_timing.js ↔ ppu.js（fix1 新增） | `timing.budget` 只是介面，**沒有任何呼叫端** | PPU 的 `setTile/setAttr/fillTiles/fillAttr/sprite/clearSprites/setBgPalette/setSprPalette/setBackdrop` 都會以實際 byte 數計帳；`NES.boot` 把 `timing.budget` 綁到 `ppu.budget` | 兩條通道：`'ppu'` 160 byte/幀、`'oam'` 256 byte/幀（$4014 DMA）。超支 → `over=true` + `overFrames++`，`__nes.stats().budget` 看得到，`budget.strict=true` 直接 throw。`ppu.budget` 為 `null`（單元測試）時全部 no-op。QA P1-6 / X5 結案 |
 | D10 | fixed.js（fix1 新增） | 契約沒寫跳躍規則 | `NES.FX.SMB.jumpState/jumpStart/jumpGravity/jumpBounce/jumpSim` 是**唯一一套**規則，`games/demo` 與 `tools/test_core.py` 共用；`skipGravityFirstFrame` 預設開（起跳首幀半格重力） | 長按靜止跳 **64.00 px（4 格）**、全速跳 **80.00 px（5 格）**、點按 1 幀 **19.6875 px**，兩邊量到同一個數字。QA P1-4 / P1-5 / X4 結案 |
 | D11 | chr.js（fix1 新增） | — | 新增 `NES.CHR.DEMO.spr16`（8×16 配對 bank，已註冊為 `demo_spr16`）與 `DEMO.oam16(name)` | 用 8×16 的遊戲不用再自己 `tile16()` 重建一次（`games/demo/chr.js` 已改用）。QA P2-4 / X12 結案 |
+| D12 | music.js（R2 audio） | P2-7 / X15 滑音 / detune 未實作 | 已實作 `slide`（數字 / portamento / limit）與 `detune`，格式向下相容 | demo 曲零改動、R1 57 項零修改全綠；test_apu 103 項。QA R1 P2-7 / X15 結案 |
 
 **跨模組實測（`game.html` + 注入測試 game，50 幀）**：CHR bank → 名稱表 / 16×16 屬性 → 捲動 → `split(32)` 狀態列分割 →
 12 個同線精靈（實際畫 8 個、`flickered` 生效）→ `NES.Lint.frame` = `{ok:true, colors:6, badPixels:0}`；
 `NES.Music.play(DEMO)` + `sfx('jump')` 跑 30 幀後 `apu.render(2000)` 樣本全非零；
 `dist/星塵勇者.html`（153 KB 單檔）在 1024×768 視窗自動放大 3 倍置中（768×672）、0 console error、非 debug 下 Timing 自動跑約 60 fps。
 截圖：`shots/agent_tools/boot.png`（無 demo 的黑畫面）、`shots/agent_tools/e2e_test.png`（注入測試 game）。
+
+---
+
+## 15. NES.SH（engine/shmup.js）
+
+擁有者：engine agent（R2）｜ 契約來源：`docs/TASKS.md`「R2《星塵巡航艦》§ engine/shmup.js」
+載入順序：**`ppu.js` 之後、`nes.js` 之前**（`cruiser.html` / `build.py` 已排好）。零相依（只用傳進來的 `ppu`）。
+
+橫向射擊（宇宙巡航艦式）的共用工具：整數三角函數、瞄準、AABB、物件池、
+每幀 OAM 配置（含軟體 sprite cycling）、名稱表欄串流、以關卡欄為鍵的出怪表。
+
+### 15.1 角度與單位
+
+| 項目 | 規則 |
+|---|---|
+| 角度 | **一圈 = 256 單位**（0..255）；`0 = 右(+x)`、`64 = 下(+y)`、`128 = 左(-x)`、`192 = 上(-y)`（螢幕 y 向下 ⇒ 角度增加 = 順時針） |
+| 三角函數 | 8.8 定點（`256 = 1.0`），`Int16Array` 查表；**執行期不呼叫 Math 的三角函數**（只在載入時建表） |
+| 速度 | 8.8（1/256 px/幀），與 `NES.FX.v88` 同單位 ⇒ 可直接餵 `NES.FX.vadd(vec, v)` |
+| 碰撞 | 整數像素 `{x, y, w, h}`（左上 + 寬高），碰撞框比精靈小（船 12×6、敵 12×12、彈 4×4） |
+
+### 15.2 數學 / 工具
+
+| 成員 | 簽章 | 說明 |
+|---|---|---|
+| `NES.SH.SIN` / `COS` | `Int16Array(256)` | 8.8 正弦 / 餘弦表（與 `Math` 的誤差 ≤ 0.5/256） |
+| `sin(a)` / `cos(a)` | `(int) → int` | 同上但自動 `a & 255` |
+| `atan2(dy, dx)` | `(int, int) → 0..255` | 八分法 + 反正切查表；八個主方向精確、全 256 個方向誤差 ≤ 1 單位；`(0,0) → 0` |
+| `aim(sx, sy, tx, ty, speed88[, out])` | `→ {vx, vy, a}` | 瞄準射擊的 8.8 速度向量；長度誤差 < 1%。**傳 `out` 就重複使用該物件**（每幀零配置） |
+| `vel(angle, speed88[, out])` | `→ {vx, vy, a}` | 直接用角度算速度（環形彈幕、固定角度彈） |
+| `aabb(a, b)` | `({x,y,w,h}, {x,y,w,h}) → bool` | 整數 AABB；**相鄰不算重疊**（`a.x + a.w === b.x` → false），寬或高為 0 一律 false |
+| `inRect(x, y, r)` / `clamp(v, lo, hi)` | | 點在矩形內 / 整數夾限 |
+| `every(frame, n[, phase])` | `→ bool` | 每 n 幀成立一次 |
+| `Timer(period[, phase])` | `→ {t, period, tick(), reset(p)}` | 小計時器：`tick()` 每 period 幀回一次 true |
+
+### 15.3 `NES.SH.Pool(n, factory)` — 固定大小物件池（無 GC）
+
+| 成員 | 說明 |
+|---|---|
+| `alloc()` | 取一個空槽（`obj.alive = true`）；**沒槽了回 `null`**（NES 風：不生成） |
+| `free(obj)` | 歸還（`obj.alive = false`）；重複釋放 / 外來物件安全回 `false` |
+| `each(fn, ctx)` | 走訪活著的物件 `fn(obj, i)`；**途中或先前被設成 `alive = false` 的會就地回收** |
+| `count` / `size` / `items` / `isAlive(i)` | 活著幾個 / 總槽數 / 全部物件（含死的）/ 某槽是否活著 |
+| `freeAll()`（別名 `reset()`） | 全部歸還（換關 / 檢查點復活） |
+
+> 建構時就把 n 個物件全造好，之後只切換「活 / 死」⇒ **執行期零配置、零 GC**。
+> 物件由 `factory(i)` 提供，本模組只加一個 `alive` 旗標與非列舉的 `_pi`（槽號）。
+
+### 15.4 `NES.SH.OAM(ppu, {reserve, step, max, hideY, margin})` — 每幀精靈配置
+
+| 成員 | 說明 |
+|---|---|
+| `begin()` | 開始收集這一幀（清空 `n / dropped / skipped`） |
+| `add(s)` | 收集一個 `{x, y, tile, pal, flipH, flipV, behind, prio}`（**可以重複使用同一個物件**）；回傳是否收下 |
+| `push(x, y, tile, pal, prio, flags)` | 低階版（`flags` bit0 flipH / bit1 flipV / bit2 behind），完全不配置物件 |
+| `end()` | 依 `prio` 穩定排序後寫進 OAM `reserve..63`，回傳實際寫入數 |
+| `used` / `dropped` / `skipped` / `n` / `capacity` / `frames` | 本幀寫入 / 被丟棄 / 越界略過 / 收集數 / 可用槽數 / 已跑幀數 |
+| `resetCycle()` | 輪替指標歸零（換關、要可重現的截圖時用） |
+
+- **`prio` 0 最高**（船 / 選項 / 自機彈 → 1 敵彈 → 2 敵 → 3 爆炸…，0..7）；同 `prio` 內維持 `add` 的順序。
+- **同 `prio` 每幀輪替起點**（預設 `step = 8`）＝ 軟體 sprite cycling：同一條掃描線上 12 顆同 `prio` 的精靈，**連續兩幀的聯集會畫齊全部 12 顆**（PPU 每線只畫 8 個）。
+- 超過可用槽數的**丟棄並計 `dropped`**（因為有輪替，每幀被丟的是不同的那幾顆）。
+- `y >= 240`、`y < -margin`、`x >= 256`、`x < -margin`（`margin` 預設 16）的在 `add()` 就**略過並計 `skipped`**，不佔槽。
+- 沒用到的槽會寫成 `y = 240` 隱藏（`hideUnused: false` 可關）。
+- `reserve: n` 保留 OAM 前 n 槽給遊戲自己寫（例如固定的船），本模組從第 n 槽開始寫。
+
+### 15.5 `NES.SH.Scroller(ppu, {nt: 2, cols, tileAt, attrAt, row0, rows, ahead, maxCols, mirror})`
+
+| 成員 | 說明 |
+|---|---|
+| `reset(camX)` | **一次補滿兩張名稱表（64 欄）**＋屬性，並套用 `ppu.mirroring('v')`；回傳寫入 byte 數（2400）。只能在 `init` / 換關 / 檢查點復活（rendering 關閉）時呼叫 |
+| `update(camX)` | 每幀呼叫：只寫「新露出」的欄（預設最多 1 欄 / 幀）；**回傳本幀寫入 byte 數（≤ 45）** |
+| `writeColumn(c)` / `colBytes(c)` | 手動寫世界第 c 欄 / 查一欄要幾 byte |
+| `next` / `bytes` / `peak` / `columns` / `pending(camX)` | 下一個待寫的世界欄 / 上一幀 byte / 單幀尖峰 / 累計欄數 / 落後幾欄（>0 = 相機太快） |
+
+- 映射：世界第 `c` 欄固定寫進 **`c & 63`** → 名稱表 `(c >> 5) & 1` 的第 `c & 31` 欄；
+  所以水平捲動必須是 **垂直鏡像 `ppu.mirroring('v')`（左右兩張不同）**，`reset()` 會自動設好（`{mirror: false}` 可關）。
+- 一欄 = `rows` 個磁磚（預設 30 列，row 0..29）+ **每 2 欄一次**的 16×16 屬性（15 個）= **最多 45 byte / 幀**，
+  遠低於 NTSC 的 160 byte VBlank 預算（§5）。
+- `row0` / `rows`：**下方有 HUD 的話請用 `{row0: 0, rows: 26}`**，把列 26..29 留給狀態列（否則地形會蓋掉 HUD 的名稱表）。此時一欄 = 26 + 13 = 39 byte。
+- `cols`：關卡總欄數（0 = 不限），到底之後不再往前寫。
+- `ahead`（預設 34）：補到「畫面右緣再往右 2 欄」；`maxCols`（預設 1）：每幀最多補幾欄——**改大會超出 VBlank 預算**，只在相機速度 > 8 px/幀 時才考慮。
+- **不會**動 `ppu.scroll` / `ppu.split`：那是遊戲自己的事（見下方範例）。
+
+### 15.6 `NES.SH.Spawner(table)` — 以關卡欄為鍵的出怪表
+
+`table` = `[{col, fn}, …]`（沒排序也可以，建構時會排）。
+
+| 成員 | 說明 |
+|---|---|
+| `update(camCol, ctx)` | 觸發所有 `col <= camCol` 且還沒觸發過的項目，呼叫 `fn(ctx, col, entry)`；回傳本幀觸發數。**一幀跨多欄會全部觸發；相機倒退不重觸發** |
+| `reset()` | 全部重來（關卡重啟） |
+| `seek(camCol)` | 檢查點復活：把 `col <= camCol` 的直接標成已觸發（**不執行 `fn`**） |
+| `index` / `fired` / `remaining()` | 進度 / 已觸發數 / 還剩幾筆 |
+
+### 15.7 最小射擊迴圈（20 行）
+
+```js
+const SH = NES.SH, ppu = nes.ppu;
+ppu.flickerStep = 0;                                      // ★ 輪替改由 SH.OAM 做
+const oam = SH.OAM(ppu, { reserve: 0 });
+const scr = SH.Scroller(ppu, { nt: 2, cols: 384, rows: 26,   // 下 4 列留給 HUD
+  tileAt: (c, r) => stage.tile(c, r), attrAt: (c16, r16) => stage.pal(c16, r16) });
+const bullets = SH.Pool(16, () => ({ x: 0, y: 0, w: 4, h: 4, vx: 0, vy: 0 }));
+const spawn = SH.Spawner([{ col: 40, fn: (g) => g.addEnemy(260, 80) }]);
+scr.reset(0);                                             // init：一次補滿兩張名稱表
+// ---- 每幀 update ----
+camX += 1;                                                 // 相機 1 px/幀
+scr.update(camX);                                          // ≤ 45 byte
+spawn.update(camX >> 3, game);
+bullets.each(b => { b.x += b.vx >> 8; if (b.x > 255) b.alive = false; });
+const v = SH.aim(turret.x, turret.y, ship.x, ship.y, 384, tmp);   // 瞄準射擊（tmp 重複使用）
+if (SH.aabb(ship, enemy)) ship.die();
+// ---- 每幀 draw ----
+ppu.scroll(camX % 512, 0, 0);                              // 捲動由遊戲設
+ppu.split(208, { x: 0, y: 208, nt: 0 });                   // 下方 32 線 HUD
+oam.begin();
+oam.add({ x: ship.x, y: ship.y, tile: T_SHIP, pal: 0, prio: 0 });
+bullets.each(b => oam.add({ x: b.x, y: b.y, tile: T_SHOT, pal: 1, prio: 1 }));
+stage.draw(oam);                                           // 敵 prio 3、敵彈 2、爆炸 4
+oam.end();                                                 // 排序 + 輪替 + 寫 OAM
+```
+
+### 15.8 注意事項
+
+1. **一定要先設 `ppu.flickerStep = 0`**：`SH.OAM` 自己做軟體 sprite cycling，PPU 內建的輪替會跟它打架（畫面變成隨機閃）。`ppu.flicker` 維持 `'rotate'` 即可（`stats.flickered` 仍會統計超線）。
+2. **VBlank 預算**：`Scroller.update()` ≤ 45 byte / 幀；HUD 的分數更新等其他寫入要自己算進 160 byte（`__nes.stats().budget`）。`Scroller.reset()` 是 2400 byte，**只能在 init / 關閉 rendering 時做**。
+3. **OAM DMA 是另一條通道**：`oam.end()` 每幀寫滿 64 槽 = 256 byte，剛好等於 `oamLimit`，不算超支（§5 D9）。
+4. **`aim()` / `vel()` 預設會 new 一個物件**：每幀會跑很多次的地方請傳 `out` 重複使用。
+5. **相機瞬移**（換關 / 檢查點復活）要呼叫 `Scroller.reset(camX)` + `Spawner.seek(col)` + `Pool.freeAll()`，不要只改 `camX`。
+6. 角度 0 是**右**、64 是**下**。敵人「往左飛」= 角度 128。
+7. 測試：`tools/test_shmup.py`（157 項，含 `indexFrame` 實測兩幀聯集畫齊 12 顆、600 幀預算不超支）。
+
+---
+
+## 16. NES.Touch（engine/touch.js）
+
+擁有者：nes-touch agent ｜ R2 ｜ 借用 `../卡比之星/src/touch.js`（Round 11/11b）的寫法，改成 NES 八鍵
+
+手機觸控虛擬手把：**純 DOM 覆蓋層**（自己建 `<div>` + 自注入 `<style>`），三個入口頁只要載入
+`engine/touch.js`（排在 `nes.js` 之前）就有按鍵；`tools/build.py` 內嵌後 dist 單檔也自然帶著。
+
+### 16.1 按鍵配置
+
+| 元件 | 說明 |
+|---|---|
+| 搖桿 / 十字鍵 | `layout.stick = 'stick'`（預設，圓形搖桿 + 旋鈕 + 8 刻度）或 `'dpad'`（四箭頭）。**8 方向**（45° 扇區 + **±6° 磁滯**）、死區（stick 0.20 / dpad 0.26 × 底座半徑）、**浮動底座**（`stickFloat`，在感應區內落指就把底座搬過去，放開回原位） |
+| `A` | 右下最大顆（紅） |
+| `B` | A 的左邊（橘） |
+| `SELECT` / `START` | 小長條（直向＝主排上方一列；橫向＝動作鍵側上方上下疊） |
+| 全螢幕 | 四角括號圖示（藍）；`document.fullscreenElement` 切換，iOS Safari 沒有 API 時整顆隱藏 |
+
+### 16.2 API
+
+| 成員 | 簽章 | 說明 |
+|---|---|---|
+| `NES.Touch.available` | `boolean` | 這台機器有觸控（`ontouchstart` / `maxTouchPoints`） |
+| `active()` | `() → boolean` | 覆蓋層目前顯示中 |
+| `show()` / `hide()` | | 強制顯示 / 隱藏（等於把 `layout.mode` 設成 `'on'` / `'off'` 並存檔） |
+| `layout` | `{mode, side, size, opacity, stick, stickFloat}` | `mode`：`'auto'`（觸控裝置才顯示，預設）/ `'on'` / `'off'`；`side`：`'right'`（A/B 在右，預設）/ `'left'`；`size` 0.6~1.6；`opacity` 0.15~1（預設 0.8）；`stick`：`'stick'`（預設）/ `'dpad'`；`stickFloat` bool |
+| `setLayout(o)` | `(o) → layout` | 即時套用 + 存 `localStorage.nes_touch`；回傳套用後的 `layout` |
+| `rects()` | `() → {dpad,a,b,select,start,fs}` | 各鍵在 viewport 的 CSS px 矩形 `{x,y,w,h,cx,cy}`（測試 / 版面檢查用） |
+| `mask()` | `() → int` | 觸控目前按著的 NES 八鍵遮罩 |
+| `dirs()` / `sector()` / `tickOn()` | | 方向狀態 / 目前扇區（-1 ＝ 死區）/ 亮著的刻度 |
+| `floatZone()` / `padHome()` / `floating()` | | 浮動感應區矩形 / 底座原位 / 是否浮動中 |
+| `relayout()` / `releaseAll()` | | 手動重排 / 放掉所有按鍵 |
+| `buttons` / `el` / `overlapping` | | 按鍵 DOM / 覆蓋層根節點 / 這次排版有沒有壓到畫面 |
+
+```js
+NES.Touch.setLayout({ side: 'left', stick: 'dpad', size: 1.2, opacity: 0.9 });
+NES.Touch.rects().a;          // {x, y, w, h, cx, cy}
+NES.Touch.mask();             // 例如 129 = A|RIGHT
+```
+
+### 16.3 輸入接法（**不改 input.js**）與取捨
+
+`engine/input.js` 沒有可以「OR 進去」的第三來源（沒有 `setExternal`），因此 touch.js 用既有的
+`NES.Input.inject(mask, frames)`（來源優先權 `replay > inject > 鍵盤 | Gamepad`）：
+
+| 狀態 | 動作 |
+|---|---|
+| 觸控有按鍵（遮罩變動時） | `NES.Input.clearInject()` → `NES.Input.inject(mask, 1e9)`（＝按住到放開） |
+| 觸控全部放開 | `NES.Input.inject(0, 0)`（清空佇列 ⇒ 鍵盤 / 手把**立刻**恢復） |
+| 看門狗（每 6 幀） | 佇列被別人清掉 / 耗盡時（`injectPending() < 4096`）自動補回來 |
+
+> **取捨（要知道的兩件事）**
+> 1. 觸控按著的期間，鍵盤 / 手把被 inject 蓋掉（不會 OR 起來）；全部放開後立即恢復。手機上不會同時用兩種輸入，桌機上覆蓋層預設不顯示 ⇒ 實務上不衝突。
+> 2. 觸控按著的期間，腳本注入（`__nes.press/tap`、`tools/shot.py`）會被 `clearInject()` 清掉。截圖 / 測試工具不會同時做這兩件事。
+> 若之後要「觸控 OR 鍵盤」，需要 core agent 在 input.js 加 `setExternal(mask)`（跨檔需求，見 PROGRESS）。
+
+### 16.4 顯示 / 淡出 / 音訊解鎖 / 設定
+
+- `mode: 'auto'`：觸控裝置才顯示；**鍵盤 / 手把輸入後淡出**（`transition: opacity .22s`），**再觸控又出現**。
+- 第一次觸控會做音訊解鎖：`nes.apu.unlock()`（若有）→ 否則 `nes.connectAudio()`（§9 / §11）→ 再 `audioCtx.resume()`；`pointerdown` 與 `pointerup` 都呼叫一次（iOS 要在 `touchend` 裡 resume）。
+- 設定存 `localStorage.nes_touch`（JSON，欄位同 `layout`）。純觸控裝置若存成 `'off'` 會自動退回 `'auto'`（避免沒有任何入口能點回來）。
+- 切到背景（`visibilitychange`）/ 失焦（`blur`）會 `releaseAll()` + `inject(0,0)`，不會卡住方向。
+
+### 16.5 入口頁契約：`window.NES_LAYOUT` 與 `nes-resize`
+
+三個入口頁（`game.html` / `star.html` / `cruiser.html`）的啟動段每次 `fit()` + `place()` 之後都會設：
+
+```js
+window.NES_LAYOUT = { x, y, w, h, scale, back, portrait, mobile, safe:{t,r,b,l}, vw, vh };
+window.dispatchEvent(new Event('nes-resize'));
+```
+
+| 欄位 | 說明 |
+|---|---|
+| `x, y, w, h` | canvas 在 viewport 的 CSS px 矩形（`w = 256 × scale`，可小數） |
+| `scale` | **顯示**倍率（手機可小數） |
+| `back` | **backing store** 倍率（整數 1~4，= `nes.scale`；`nes.setScale` 只改 backing store，QA R1 P2-1） |
+| `portrait` / `mobile` | 直向 / 手機（觸控裝置或短邊 < 600；`?scale=N` 時強制 false） |
+| `safe` | `env(safe-area-inset-*)` 實測 px（隱藏探針量的） |
+
+`fit()` 規則：
+
+| 情況 | 倍率 | 位置 |
+|---|---|---|
+| `?scale=N` | N（整數，維持截圖可重現） | 置中（等同桌機） |
+| 桌機（非觸控且短邊 ≥ 600） | `floor(min(vw/256, vh/224))`，至少 1 | 置中、座標取整 |
+| 手機直向 | `vw / 256`（寬填滿；`224×s` 超高才縮） | 貼上方（`y = safe.top`），下方整片給按鍵 |
+| 手機橫向 | `min(vh/224, (vw − 留白)/256)`；留白 = 手機 220 / 平板（短邊 ≥ 500）340 + safe | 置中 ⇒ 兩側各 ≥ 110px（平板 170px）給按鍵 |
+
+小數倍時 backing store 取 `ceil(scale)`（1~4 的整數），CSS 縮到目標尺寸 + `image-rendering: pixelated`。
+其他：viewport `viewport-fit=cover, user-scalable=no`、`100dvh`、`touch-action:none`、旋轉 / `visualViewport`
+resize 會二次觸發（iOS 工具列收合延遲）、`?touch=1` / `?touch=0` 可強制顯示 / 隱藏按鍵（桌機截圖用）。
+
+### 16.6 注意事項
+
+1. 覆蓋層排版**一律避開畫面**：直向放畫面下方，橫向放左右留白；每顆按鍵再做一次 `avoid()`（推出畫面 → 夾進安全區），真的塞不下才半透明壓上去並把 `NES.Touch.overlapping` 設成 `true`。
+2. 浮動搖桿的感應區排在所有按鍵**之前**（同層後者疊在上面）⇒ 手指落在 A/B/START 上時永遠是按鍵優先。
+3. `tools/shot.py`（桌機、`?scale=1`、非觸控）不受影響：覆蓋層在非觸控環境預設隱藏，而且 shot.py 是 `canvas.toDataURL()` 不是頁面截圖。整頁截圖請用 `tools/mobile_shot.py`。
+4. 測試：`tools/test_touch.py`（180 項）。

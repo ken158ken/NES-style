@@ -5,7 +5,7 @@
 | 專案 | 說明 | 線上玩 |
 |------|------|--------|
 | [卡比之星](卡比之星/) | Canvas 同人像素遊戲，純前端、不需後端；**手機可玩**（觸控按鍵、可加到主畫面離線玩，建議橫向） | [開啟遊戲](https://ken158ken.github.io/NES-style/卡比之星/) |
-| [紅白機遊戲開發](紅白機遊戲開發/) | 紅白機研究基地（研究文件、總覽頁） | [總覽](https://ken158ken.github.io/NES-style/紅白機遊戲開發/) |
+| [紅白機遊戲開發](紅白機遊戲開發/) | 紅白機研究基地 + 自製 NES 核心引擎，多款原創遊戲共用引擎 | [研究總覽](https://ken158ken.github.io/NES-style/紅白機遊戲開發/) ・ [星塵勇者](https://ken158ken.github.io/NES-style/紅白機遊戲開發/star.html) ・ [星塵巡航艦](https://ken158ken.github.io/NES-style/紅白機遊戲開發/cruiser.html) |
 
 ## 📱 手機遊玩（卡比之星）
 

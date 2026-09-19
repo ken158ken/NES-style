@@ -71,7 +71,9 @@ done
 [ "$found_test" = 0 ] && add "test_*.py" SKIP "尚無測試檔"
 
 echo "== ③ 打包檢查 build.py --check =="
-run "build.py --check" "$PY" tools/build.py --check
+run "build.py --check game.html" "$PY" tools/build.py --check --src game.html
+run "build.py --check star.html" "$PY" tools/build.py --check --src star.html
+run "build.py --check cruiser.html" "$PY" tools/build.py --check --src cruiser.html
 
 if [ "$QUICK" = 0 ]; then
   echo "== ④ 冒煙截圖 shot.py =="

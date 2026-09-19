@@ -20,14 +20,20 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 SRC = ROOT / 'game.html'
 # 契約載入順序（build 會驗證 game.html 是否照這個順序列出 engine 檔）
 ENGINE_ORDER = ['palette.js', 'fixed.js', 'input.js', 'cpu_timing.js', 'chr.js',
-                'ppu.js', 'nes_lint.js', 'apu.js', 'music.js', 'nes.js']
+                'ppu.js', 'nes_lint.js', 'apu.js', 'music.js', 'shmup.js', 'touch.js',
+                'nes.js']   # R2：+shmup.js、+touch.js（觸控覆蓋層，必須在 nes.js 之前）
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--out', default='dist/星塵勇者.html')
+    ap.add_argument('--out', default='')
+    ap.add_argument('--src', default='game.html', help='入口頁（game.html = 星塵測試室 demo；star.html = 星塵勇者；cruiser.html = 星塵巡航艦）')
     ap.add_argument('--check', action='store_true', help='只檢查不寫檔')
     a = ap.parse_args()
+    global SRC
+    SRC = ROOT / a.src
+    if not a.out:
+        a.out = {'cruiser.html': 'dist/星塵巡航艦.html', 'star.html': 'dist/星塵勇者.html'}.get(a.src, 'dist/星塵測試室.html')
 
     html = SRC.read_text(encoding='utf-8')
     found, missing, order = [], [], []
@@ -50,7 +56,9 @@ def main():
     listed = set(found) | set(missing)
     extra = sorted(str(p.relative_to(ROOT)).replace('\\', '/')
                    for p in (ROOT / 'games').rglob('*.js')) if (ROOT / 'games').exists() else []
-    extra = [s for s in extra if s not in listed]
+    # R2：只補「入口頁已經用到的遊戲資料夾」底下的漏列檔（games/demo 與 games/cruiser 各自成一款）
+    used_dirs = {s.rsplit('/', 1)[0] for s in listed if s.startswith('games/')}
+    extra = [s for s in extra if s not in listed and s.rsplit('/', 1)[0] in used_dirs]
     if extra:
         blocks = []
         for src in extra:

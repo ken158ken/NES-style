@@ -443,3 +443,1338 @@ bash tools/run_all.sh                                     → 全 PASS（node --
 - 文件：docs/ENGINE_API.md 為正式契約（TASKS.md 契約段已作廢）；QA_REPORT.md R1 章。
 ## R2 待辦（PLAN §4）
 主角完整狀態機（蹲 / 滑 / 受傷 / 死亡）、碰撞斜坡可選、鏡頭雙向鎖、W1 四關 + 3 敵 + 1 魔王、手感測試 ±1 幀、W1 機器人通關；qa1 P2 未修項見 QA_REPORT R1-1。
+
+---
+# R2 《星塵巡航艦》（2026-09-19）
+總控：骨架完成（cruiser.html、engine/shmup.js 空殼、shot.py 相對 --url、build.py --src、TASKS R2 契約）；派 research-gradius / research-shmup / engine / ship / stage / audio 六 agent 平行。各 agent 在下方自己區段回報。
+總控（更正）：使用者說明紅白機專案不限一款遊戲，宇宙巡航艦是新增；星塵勇者 W1 同步開工（R2b：star-hero / star-world / star-audio 三 agent，入口 star.html）。
+
+## engine（R2）
+**2026-09-19｜`engine/shmup.js`（`NES.SH`）整檔實作完成｜`tools/test_shmup.py` 157 項全綠｜`docs/ENGINE_API.md` 新增 §15 + 目錄列**
+
+零相依 classic script + IIFE、`'use strict'`、每個函式一行 JSDoc；**執行期不呼叫 Math 的三角函數**（只在載入時建表）、**每幀路徑零物件配置**（Pool / OAM 預配 typed array，OAM 寫入重複使用同一個 scratch 物件）。
+
+### API 表（完整版見 ENGINE_API §15）
+| 成員 | 簽章 | 重點 |
+|---|---|---|
+| `SH.SIN` / `SH.COS` | `Int16Array(256)`，8.8 | 一圈 256 單位，**0 = 右、64 = 下、128 = 左、192 = 上**；與 Math 誤差 ≤ 0.5/256 |
+| `SH.sin(a)` / `cos(a)` | `(int) → int` | 同上、自動 `& 255`（超集） |
+| `SH.atan2(dy, dx)` | `→ 0..255` | 八分法 + `ATAN` 查表；八主方向精確、全 256 方向誤差 ≤ 1；`(0,0) → 0` |
+| `SH.aim(sx,sy,tx,ty,speed88[,out])` | `→ {vx, vy, a}` | 長度誤差 < 1%（96..512 全方向實測 ≤ 0.75%）；**傳 `out` 就零配置** |
+| `SH.vel(angle, speed88[, out])` | `→ {vx, vy, a}` | 環形彈 / 固定角度彈（超集） |
+| `SH.aabb(a, b)` | `→ bool` | 相鄰不算重疊、寬或高 0 一律 false |
+| `SH.inRect / clamp / every / Timer` | | 小工具（`Timer` 是契約裡「可有可無」那項） |
+| `SH.Pool(n, factory)` | `{alloc, free, each, count, items, size, isAlive, freeAll/reset}` | 建構時造好 n 個物件；`alloc` 失敗回 `null`；**把 `alive` 設 false 等同 free**（`each` 就地回收） |
+| `SH.OAM(ppu, {reserve, step, max, hideY, margin})` | `{begin, add, push, end, used, dropped, skipped, capacity, frames, resetCycle}` | prio 0..7 穩定排序、同 prio 每幀輪替起點（`step` 預設 8）、超槽丟棄計 `dropped`、越界略過計 `skipped`、空槽 `y = 240` |
+| `SH.Scroller(ppu, {nt:2, cols, tileAt, attrAt, row0, rows, ahead, maxCols, mirror})` | `{reset, update, writeColumn, colBytes, pending, next, bytes, peak, columns}` | 世界欄 `c` → `c & 63`（nt `(c>>5)&1` 第 `c&31` 欄）；`update` 回傳本幀 byte（**≤ 45**）；`reset` 一次補 64 欄（2400 byte，只能 init 用） |
+| `SH.Spawner(table)` | `{update(camCol, ctx), reset, seek, index, fired, remaining}` | 單次觸發、倒退不重觸發、一幀跨多欄全觸發、`seek` 給檢查點復活 |
+
+### 測試 `tools/test_shmup.py`（157 項，0 失敗）
+載入 `palette / fixed / input / cpu_timing / chr / ppu / shmup`。
+SIN/COS 誤差 0.499/256、atan2 八主方向全中 + 全 256 方向誤差 0、aim 四種速度 × 256 方向長度最差 0.744%、
+aabb 10 項邊界、Pool 18 項、OAM 25 項（含 **`ppu.indexFrame` 實測**：12 顆同線同 prio → 每幀畫 8 顆、兩幀聯集 12 顆全到；80 顆 → `dropped = 16`；OAM DMA 256/256 不超支）、
+Scroller 19 項（reset 後 64 欄 × 30 列 + 32×15 屬性與 `tileAt`/`attrAt` 完全一致；**600 幀每幀 ≤ 45 byte、`timing.budget.over === false` / `overFrames === 0`、尖峰 45**；回退不寫；600 幀後可見 33 欄內容一致）、
+Spawner 12 項、原始碼靜態檢查 6 項（零相依 / 無 `Math.atan2` / Math 只在建表區 / 每個函式有 JSDoc）。
+效能：600 幀（Scroller + 40 精靈 OAM + Pool + aim）**2.3 ms ≈ 0.004 ms/幀**。
+`bash tools/run_all.sh --quick` 全 PASS（apu 57 / chr 91 / core / ppu 144 / demo + shmup 157，R1 的 455 項不受影響）。
+
+### 契約異動（ship / stage / audio agent 請看這段）
+| # | TASKS.md 契約 | 實作 | 為什麼 |
+|---|---|---|---|
+| S1 | `Scroller.update()` 「…+ `ppu.scroll`」 | **Scroller 不碰 `ppu.scroll` / `ppu.split`**，遊戲自己設 | 捲動與 HUD 分割是遊戲的節奏決策。正確寫法是 **`ppu.scroll(camX % 512, 0, 0)`**（不是 `camX & 255`：兩張名稱表 = 512 px 虛擬寬，PPU 的 `_bgLine` 會自己在 x ≥ 256 時換 nt；只取 `& 255` 會少換一張） |
+| S2 | 「名稱表水平鏡像時 nt 0/1 交替」 | 水平捲動必須是 **`ppu.mirroring('v')`（垂直鏡像 = 左右兩張不同）**，`Scroller.reset()` 會自動設 | PPU 的 `'h'` 是**上下**兩張不同（nt0 = nt1），水平捲動會看到同一張。`games/demo/room.js` 也是用 `'v'` |
+| S3 | 「處理 30 列（0..29）」 | 預設就是 30 列 = 45 byte/幀；**但下方 HUD（`split(208)`）讀的是名稱表列 26..29，會被地形蓋掉** ⇒ stage agent 請建成 `SH.Scroller(ppu, {row0: 0, rows: 26, …})`（26 + 13 = **39 byte/幀**），列 26..29 留給 ship agent 的 HUD | 兩張名稱表所有 64 欄都會被串流寫過，HUD 不可能「躲在某幾欄」 |
+| S4 | `OAM(ppu, {reserve})` | `reserve` = **保留 OAM 前 n 槽給遊戲自己 `ppu.sprite()`**，`end()` 從第 n 槽開始寫、`capacity = 64 - reserve` | 讓固定不閃的東西（例如船）可以佔死前幾槽 |
+| S5 | 「同 prio 之間每幀輪替起點」 | 輪替量 `step` **預設 8**（NESdev 慣例），不是 1 | 每幀只轉 1 顆的話，12 顆同線精靈要 5 幀才畫得齊；轉 8 顆**兩幀**就聯集畫齊（測試有驗） |
+| S6 | `Pool` | 多了「**把 `obj.alive` 設成 `false` 等同 `free()`**」的語意（下次 `each()` 就地回收） | 敵人 / 子彈用 `e.alive = false` 是最自然的寫法，不用記得呼叫 `free` |
+| S7 | `Spawner` 的 `fn(ctx)` | 實際呼叫 `fn(ctx, col, entry)`（多的參數可忽略，相容） | 同一個 `fn` 可以依 col 做不同事 |
+| S8 | — | 新增超集：`sin/cos/vel/inRect/clamp/every/Timer`、`OAM.push()`（完全零配置的 add）、`Scroller.writeColumn/colBytes/pending`、`Spawner.seek()`、`Pool.freeAll/isAlive` | 都不影響契約成員 |
+| S9 | — | **角度定義**：0 = 右、64 = 下、128 = 左、192 = 上（螢幕 y 向下 ⇒ 角度增加是順時針）。敵人「往左飛」= 角度 128 | 契約沒定義，這裡定死 |
+
+**給 ship / stage 的三條硬規定**：① `ppu.flickerStep = 0`（否則 PPU 內建輪替會跟 `SH.OAM` 打架）；
+② 每幀名稱表寫入（Scroller 45 + HUD）要留在 160 byte 內，`Scroller.reset()` 只能在 `init` / 換關 / 檢查點做；
+③ 相機瞬移要 `Scroller.reset(camX)` + `Spawner.seek(col)` + `Pool.freeAll()` 一起做。
+
+**沒有對別的 agent 的檔案提出需求**（`ppu.getTile / getAttr / mirroring / sprite / setTile / setAttr` 都是 R1 既有 API，PPU 不用改）。
+
+---
+## research-shmup（R2）
+
+- **時間**：2026-09-19（單輪完成）
+- **完成**：新增 `docs/research/11_橫向射擊設計與技術.md`（繁體中文，**1233 行**，22 章 + 摘要 + 目錄 + 來源）。涵蓋：① NES 實作技術（OAM 64 分配與優先權、每線 8 精靈的四種輪替手法 + Gradius / 沙羅曼蛇 / Crisis Force / Gun-Nac 各自對策、子彈池上限表、8/16/256 方向瞄準查表、名稱表欄串流與 VBlank 預算逐項、以捲動欄為鍵的出怪表、兩段式碰撞框、雷射五種拼法、背景磚 + 精靈混合魔王、sprite 0 vs mapper IRQ 分割）② 設計面（檢查點 vs 原地復活、rank 公式、膠囊經濟、魔王三階段與彈幕型態庫、關卡五段節奏曲線、初見殺分級、速度等級取捨）③ 11 款同類作品機制對照表 ④ 射擊遊戲特化音樂技法 + 11 項音效搶聲道優先權表 ⑤《星塵巡航艦》原創設計：敵人 8 原型、魔王 3 原型、關卡 1 逐欄節奏表（384 欄 / 5 檢查點 / 83 隻敵人 / 13 顆膠囊）、HUD 版面草案。
+- **來源數**：**78 條**（77 個網址 + 1 條內部研究交叉引用）；主要來自 NESdev Wiki（6）、NESdev Forums（13）、shmups.system11.org（7）、Shmups Wiki（3）、Gradius Wiki / HG101 / TCRF / Data Crystal、Game Developer（3）、SLYNYRD、Contra NES 反組譯專案、Wikipedia（12）。
+- **附帶**：跑 `../卡比之星/.venv/bin/python tools/build_html.py` → `index.html` 26 份文件（已確認 `11_橫向射擊設計與技術.md` 在左側目錄與內文）；`README.md` 研究目錄加入 `11_` 與 `03_經典遊戲深度解析/16_宇宙巡航艦_沙羅曼蛇.md` 兩列並更新研究狀態段。
+- **⚠ 待總控處理**：編譯 `index.html` 時 `16_宇宙巡航艦_沙羅曼蛇.md` 尚未存在（research-gradius 平行作業中），該檔完成後**需再跑一次 `build_html.py`**。
+
+### 給 engine / ship / stage agent 的關鍵建議（10 條）
+
+1. **敵彈的 OAM 優先權必須高於敵機本體**（prio：船 / 選項 0 → 自機彈 1 → **敵彈 2** → 敵機 3 → 爆炸 4）。敵彈被丟掉 = 不明死亡；敵機被丟掉玩家還能從彈推位置。（§②）
+2. **輪替步進用與 16 互質的數**（如每顆 +9×4 = +36），不要用 +8×4 —— 後者只會踩到 8 個槽位，輪替效果減半。（§3.2）
+3. **自機用兩段式判定**：對地形 / 敵機 12×6，對敵彈縮到 **6×4 核心**；**膠囊判定框反而要放大到 12×12**（比精靈大，好撿）。判定順序務必「**先撿膠囊、後判死**」。（§⑧）
+4. **`Scroller` 要先寫後捲**：`(camX & 7) === 0` 時先補右緣外一欄（30 磚 + 每兩欄 8 byte 屬性 ≈ 38 byte），再設 `$2005`。每幀實際用量遠低於 160 預算，餘裕 ≈ 58 byte 正是魔王背景磚動畫的來源。（§⑥）
+5. **魔王本體改用背景磚**：48×48 全精靈 = 36 顆 OAM + 每線 6 顆，加敵彈必爆線。建議 36 塊背景磚做本體、精靈只畫 4 片外殼板 + 核心 + 砲口閃光（≤ 12 顆）；進場分 12 幀寫（每幀 3 磚），不要一次 36 byte。（§⑩ / §21.2-A）
+6. **雷射最長 4 段**，且任何「長」的東西要走斜線或走背景——橫平豎直 + 精靈 = 每線 8 個的地雷。敵方三連雷射的三條 y 必須錯開 ≥ 16 px。（§⑨）
+7. **rank 公式**：`clamp(0,15, floor(camCol/48) + (speed−1) + double + laser*2 + options − deaths*3)`；只調「敵彈速度（1.5→3.0 px/幀）」與「砲台間隔（100→40 幀）」兩項，體感最明顯、成本 0。`deaths*3` 是採納 Gradius IV 的修正，避免「復活地獄」。`state()` 要暴露 `rank` 供 QA。（§⑬）
+8. **檢查點 5 個（欄 80 / 144 / 208 / 272 / 352），前後 16 欄必須淨空**；死亡時清空所有敵彈、無敵 90 幀、生成必掉 3 顆的救濟編隊，並**保留 SPEED 1 級**（速度 1 級 + 高 rank = 連鎖死亡）。(§⑫ / §21.3)
+9. **膠囊要「剛好不夠全買」**：關卡 1 供給約 13 顆（編隊全滅必掉 ×8、特殊色單隻 ×3、硬殼機率 ×2）；膠囊壽命 300 幀閃爍 / 360 幀消失，否則會囤在畫面上吃光 OAM。速度甜蜜點是 3 級（2.5 px/幀），5 級在 80 px 狹道會過衝——狹道最窄不得低於 80 px。（§⑭ / §⑱）
+10. **音樂**：`stage1` 的回音軌 = 延遲 3 row、音量 40%、占空比 12.5%、detune +3；三角波要**持續走動低音**（橫捲 STG 前進感的來源）。`shot` 音效必須限流（每 4 幀最多一次）且音量壓到 6~8，否則會把 Pulse 2 打成篩子；只有 `die` 該完全停音樂，其餘只暫借一軌。（§⑳）
+
+## research-gradius（R2）
+- **時間**：2026-09-19 16:36 完成（單輪，無中斷）
+- **完成**：新增 `docs/research/03_經典遊戲深度解析/16_宇宙巡航艦_沙羅曼蛇.md`（821 行，繁體中文，12 章）。涵蓋系列史與台灣「沙羅曼蛇」混用釐清、FC 技術規格（CNROM/mapper 3、sprite 0 兩帶分割、軟體精靈輪替）、能量表完整規則、Option 環形緩衝演算法、武器數字、敵人/Big Core、檢查點/rank/循環、沙羅曼蛇差異表、Konami 指令、**手感數字表**、設計建議 10 條。**只動這一個檔**（未跑 build_html.py、未改 README/index.html）。
+- **來源數**：**49 個網址**（Wikipedia 4 語版 / StrategyWiki 6 頁 / NESdev 4 / Data Crystal 3 / TCRF / HG101 2 / TASVideos 2 / famiwiki / 巴哈+Mobile01 / ファミ通・GAME Watch 3 / **公開反組譯專案 Fabulu/Mixup 的 Gradius(NES) 逐幀實測文件 10 份**）。每個結論標 `[源]` / `[源/反組譯]` / `[推論]`。
+- **重大發現**：找到一份把 Gradius (NES) 逐函式手翻成 JS 並與 Mesen RAM 逐幀比對的公開專案，取得**位元組級的確定數字**，且其 `$40/$41/$42/$44/$45/$46/$07A0` 與 Data Crystal 的 RAM map 完全吻合 → 手感表幾乎不需要 `[推論]`。
+
+### 給開發 agent 的關鍵數字摘要（10 行）
+1. **船速無加速度**，`min(($40+2)&$FF,16)/2` px/幀 → 等差 0.5：**1.0 / 1.5 / 2.0 / 2.5 / 3.0**（建議 5 級；原作 14 級飽和 8.0）。斜向**不正規化**（×1.414）。夾限 X[16,240]、Y[16,192]（我們建議 Y[16,184]）。
+2. **子彈**：標準 **7 px/幀**、雷射 **12**、DOUBLE 斜上 `(+4,-4)`、飛彈空中 `(+0.5,+2)` / 爬地 `(+2,0)`。
+3. **連射**：`$35 = 20 幀`，**子彈還在畫面上時計時器凍結** → 實測節奏 21/23 交替。每個發射體 2 槽（A/B），滿配 6 彈 + 3 飛彈。
+4. **Option**：環 **24 筆**、延遲 **11 / 22**、**只有按著方向鍵那一幀環才前進**（停手 = 整串凍結）；沒 Option 時槽照樣更新；復活時 24 筆全填重生座標。→ 契約的「64 筆 / 16 幀」建議改成 **24 筆 / 11、22**。
+5. **捲動 0.5 px/幀**（過關演出 4.0）；第 1 關 **3072 px = 12 畫面**（與我們 384 欄完全吻合）→ 建議把 `CR.stage.speed` 從 1.0 改成 **0.5**（否則一關只有 51 秒）。
+6. **檢查點每 512 px**（`min(頁碼 & $0E, 8)`，每關 5 個）；死亡**清光 `$40–$46` 全部強化**，只留能量表游標 0 或 1；原作死亡停頓 147 幀，**建議縮到 90 幀 + 補 90 幀重生無敵**（原作沒有無敵幀，查無來源）。
+7. **能量表**：第 7 顆**回捲到格 1（不是 0）**；**已擁有的格子按下去不消耗膠囊**；DOUBLE/LASER 共用同一變數 `$44`（2 / 1）所以天然互斥；SPEED **無上限無檢查**；OPTION ≤ 2；護盾 5 下、**不擋地形**；B 鍵原作是「按住」，**建議我們改「按下瞬間」**。
+8. **膠囊**：`vx = -0.5`（= 捲動速度，等於釘在世界座標）、`vy = 0`、**無壽命**、X<8 消失、動畫 3 張 ×6 幀；**沒有機率**——編隊（≥4 隻）全滅或紅色單體 100% 掉；**每第 16 顆變清屏膠囊**（不進能量表、音效不同、圖也不同）。
+9. **rank**：`(有主武器) + Option 數 + (有護盾)`，**每幀重算、死亡歸零**，門檻只有兩道——`≥2` 敵彈速度 ×1.25、`≥3` 改預判射擊；**實測 rank 完全不影響出怪表**（92 次生成逐位元組相同）→ 我們照抄這條界線，`test_stage1.py` 的出怪數斷言才會穩定。
+10. **魔王**：原作 Big Core 只有 **6 點血**（自機彈 1 / 飛彈 2），**每受 1 點換一張形變圖**（核心一格格打開）；rank 只改移動 1.0→2.94 px/幀 與射擊間隔 90→35 幀，**不改血量**。→ 建議 `CR.Boss` 從「外殼 4×8 + 核心 16 = 48 點」**降到 24 點**（外殼 4×4 + 核心 8），並加上每點傷害的形變。
+
+---
+## audio（R2）
+2026-09-19 ｜ 擁有檔案：`games/cruiser/song.js`（新）、`engine/music.js`、`tools/test_apu.py`、`tools/apu_render.py`
+｜ 測試 **103 項全綠**（R1 的 57 項 + 本輪新增 46 項）｜ `bash tools/run_all.sh --quick` 全 PASS（26 檔 node --check、6 支測試）
+
+### ① engine/music.js 新增兩個效果欄（結案 QA R1 **P2-7 / X15**）
+| 欄位 | 寫法 | 語意 | 有效聲道 |
+|---|---|---|---|
+| `detune` | `detune: n`（`0` / `null` 取消） | **固定週期偏移**，+ = 週期變大 = 音變低；持續到下次改寫，**換音不歸零** | p1 / p2 / tri |
+| `slide` | `slide: n` | **滑音**：每幀週期 `+n`（正 = 下滑、負 = 上滑）；觸發幀偏移 0 | p1 / p2 / tri |
+| `slide` | `slide: {rate, to:'C-5'}` | portamento（FamiTracker `3xx`）：滑到目標音的週期就停住 | p1 / p2 / tri |
+| `slide` | `slide: {rate, limit:m}` | 累積偏移夾在 `±m` | p1 / p2 / tri |
+
+- 一幀最終週期 = `基礎音高（note + arp + vib + 樂器 pitch 包絡）+ detune + slide 累積量`，再夾 `0..$7FF`。
+- **觸發新音 → `slideAcc` 歸零、`detune` 保留**；`slide` 重新指定時 `slideAcc` 也歸零。
+- **音效（sfx）的幀也吃 `detune` / `slide`**（數字型），下滑 / 上滑音效不必逐幀列音名。
+- **雜訊 / DMC 軌不受影響**（note 是週期索引 / 取樣名）。
+- **完全向下相容**：`driver.state().channels[i]` 多了 `detune / slide / slideAcc` 三個欄位；`games/demo` 與 `NES.Music.DEMO` 一個字都沒改，R1 的 57 項 apu 測試零修改全綠（測試 14.1 明確驗證 demo 曲 600 幀內 `detune===0 && slide===null`）。
+
+### ② games/cruiser/song.js — `CR.Audio` API
+| 函式 | 說明 |
+|---|---|
+| `CR.Audio.init(nes)` | 綁 driver + 註冊 9 個音效（冪等，重複呼叫無害）；回傳 `false` = 沒有 driver |
+| `CR.Audio.play(key)` | `key`：`'title' \| 'stage1' \| 'boss' \| 'clear' \| 'gameover' \| 'extend'`；循環與否自動判斷 |
+| `CR.Audio.stop()` | 停音樂（不動音效）；`CR.Audio.stopAll()` 連音效一起停 |
+| `CR.Audio.sfx(name, opt)` | `opt` 原封不動轉給 `driver.sfx`（可覆寫 `channels` / `priority`） |
+| `CR.Audio.tick(nes)` | **每幀一次，放在 `game.update()` 的最後一行** |
+| `CR.Audio.state(nes)` | 測試用快照 `{song, playing, orderIndex, row, sfx[], owners{}}` |
+| `CR.Audio.PRIORITY` / `CR.SONGS` / `CR.SFX` | 優先權表 / 曲目資料 / 音效資料（`tools/apu_render.py --game cruiser` 直接讀這兩個） |
+- 容錯：五個函式的第一個參數都可以傳 `nes`（`play(nes,'stage1')` 也接受）；driver 缺席 / 丟例外一律回 `false`，**不會拖垮遊戲迴圈**。
+- 全部原創（旋律 / 和聲 / 鼓組 / 音效自寫），只借鑑研究 06 §2 的編曲技法與 §4 的音效設計原則。
+
+### ③ 曲目表（一小節 = 16 row = 4 拍；BPM = 3600 / (speed × 4)）
+| key | speed | BPM | 小節 | 長度 | 循環 | p1 | p2 | tri | noi |
+|---|---|---|---|---|---|---|---|---|---|
+| `title` | 8 | 112.5 | 8 | 17.04 s | 是 | 長音主旋律 50% | 和弦琶音墊（`arp` 037 / 047） | 半音下行低音 | 稀疏 crash / kick |
+| `stage1` | 6 | **150** | **16** | 25.56 s | 是 | 主旋律 25%（E 小調，★上行動機 E-G-B-E，7 / 13 小節換位再現） | **回音軌**：主旋律延後 **4 row（1 拍）**、音量 **-2 級**、**detune +3**、duty 12.5% | 八度跳躍走低音 | 16 beat 鼓 + 每 4 小節過門 |
+| `boss` | 5 | 180 | 8 | 10.65 s | 是 | **半音下行 16 分音符** 50% + duty 包絡（鋸齒感） | **減七 / 小七快速琶音**（每幀換音） | 半音走音低音 | 16 beat |
+| `clear` | 5 | 180 | 3 | **3.99 s** | 否 | 上行號角 | 回音（延後 2 row、-2 級、detune +3） | 根音 | 滾奏 + crash |
+| `gameover` | 6 | 150 | 2（16+14 row） | **3.00 s** | 否 | 半音下行、末音 `slide:6` 下墜 | 回音 detune +5、末音 `slide:6` | 末音 `slide:4` | 低頻 rumble |
+| `extend` | 3 | 300 | 1（20 row） | **1.00 s** | 否 | 大三和弦上行琶音 | 回音延後 1 row、detune +4 | 根音 | — |
+- **沒有任何曲子用到 DMC 軌**（R2 不放取樣，卡帶預算留給圖）。
+- 樂器包絡集中在 `INST`：`lead / echo / pad / horn / fanfare / bass / kick / snare / hat / crash / rumble`。
+
+### ④ 音效表（搶聲道優先權，數字大者搶得走小者）
+| name | 優先權 | 聲道 | 幀數 | 內容 |
+|---|---|---|---|---|
+| `die` | **15** | p1 + p2 + tri + noi | 36 | 唯一會搶主旋律與低音的音效：三軌同時 `slide` 下滑 + 雜訊由高到低。**`CR.Audio.sfx('die')` 會自動先停音樂**（研究 06 §4「death 通常停止音樂再播」） |
+| `explode` | 8 | noi + p2 | 19 | 雜訊長模式 period 3→15 + p2 低頻 `slide:34` 下滑 |
+| `powerup` | 7 | p2 | 14 | 上行大三和弦琶音 C-E-G-C-E-G-C |
+| `extend` | 7 | p2 | 18 | 1-UP 短版（不想中斷音樂時用；完整 jingle 用 `play('extend')`） |
+| `laser` | 6 | p2 | 17 | 高頻持續音，**占空比每幀輪替 0/2/1** 做鋸齒感（研究 06 §2.5） |
+| `capsule` | 5 | p2 | 13 | 兩音上行「叮」（E-6 → B-6） |
+| `missile` | 4 | p2 | 10 | 低頻 50% 方波 `slide:-26` 快速上滑 |
+| `hit` | 3 | noi | 5 | 雜訊短模式一擊 |
+| `shot` | 2 | p2 | 7 | 12.5% 方波 `slide:16` 短下滑 |
+- **除了 `die`，音效一律只用 p2 / noi**，主旋律 p1 與低音 tri 不受干擾（測試 16.3 / 16.7 / 16.9 驗證）。
+- 契約原文 `explode` =「雜訊長 + **三角波**下滑」，為了遵守「不搶三角波」，下滑軀幹改走 p2（音色等價、不切斷低音線）。要原汁原味可覆寫：`CR.Audio.sfx('explode', {channels:['noi','tri']})`。
+
+### ⑤ tools/apu_render.py — 遊戲曲目模式
+```
+$PY tools/apu_render.py --game cruiser --song stage1 --seconds 10
+$PY tools/apu_render.py --game cruiser --seconds 10            # --song 省略 = 全部曲目
+```
+「只含五聲道成分」檢查（四段，全部 PASS）：
+1. **暫存器稽核**：driver 寫出去的位址全部落在 `$4000~$4017`，且只碰到五個聲道區塊 + `$4015`/`$4017`（實測 stage1 只用 16 個位址，沒碰 `$4010~$4013`）。
+2. **逐聲道單獨渲染**：把其它聲道的寫入濾掉、`$4015` 遮罩 → 印各軌 RMS；宣告用到的軌必須有聲、沒宣告的軌必須完全靜音（前 0.5 s 是 APU 高通的啟動暫態，已跳過）。
+3. **頻譜覆蓋**：全混音頻譜的前 12 個峰值，每一個都要在某一軌的單獨渲染中找得到對應能量（-20 dB 內）→ 找不到 = 有第六個音源 → FAIL。
+4. **波形健康度**：無 NaN / Inf、峰值 ≤ 1.0、無削波。
+
+實測 6 首 × 7 項 = **42 項全 PASS**；wav 在 `shots/agent_audio/`（`shots/` 已 gitignore）：
+| 檔案 | 長度 | RMS | 峰值 | 單軌 RMS（p1 / p2 / tri / noi / dmc） |
+|---|---|---|---|---|
+| `cruiser_title.wav` | 10 s | 0.0840 | 0.5070 | 0.0548 / 0.0148 / 0.0632 / 0.0048 / **0.0000** |
+| `cruiser_stage1.wav` | 10 s | 0.0901 | 0.5409 | 0.0598 / 0.0115 / 0.0639 / 0.0187 / **0.0000** |
+| `cruiser_boss.wav` | 10 s | 0.0892 | 0.5618 | 0.0598 / 0.0322 / 0.0571 / 0.0235 / **0.0000** |
+| `cruiser_clear.wav` | 10 s | 0.0918 | 0.4930 | 0.0644 / 0.0109 / 0.0620 / 0.0202 / **0.0000** |
+| `cruiser_gameover.wav` | 10 s | 0.0780 | 0.4539 | 0.0481 / 0.0077 / 0.0610 / 0.0074 / **0.0000** |
+| `cruiser_extend.wav` | 10 s | 0.0954 | 0.3806 | 0.0652 / 0.0142 / 0.0689 / 0.0000 / 0.0000 |
+（離線渲染一律 `loop:true`，所以 clear / gameover / extend 這些短曲會重複播到 10 秒。原本的 demo 模式 `$PY tools/apu_render.py` 完全沒動，18 項仍全 PASS。）
+
+### ⑥ tools/test_apu.py — 新增 46 項（57 → 103）
+| 段 | 項數 | 內容 |
+|---|---|---|
+| 14 slide / detune | 13 | demo 曲向下相容（600 幀 `detune===0 && slide===null`）、detune 固定偏移 / 持續 / 歸零、slide 數字逐幀、`{rate,to}` 滑到目標就停、`{rate,limit}` 正負夾限、換音 slideAcc 歸零但 detune 保留、三角波生效、**雜訊軌不受影響**、音效幀吃 slide / detune、`slide:0` 關閉 |
+| 15 cruiser 曲目合法性 | 19 | 六首齊全、p1/p2/tri 音域 midi 24..107、**三角波不超過 C-5**、雜訊 note 0..15、vol 0..15 / duty 0..3、order 索引有效、每首都有 p1+tri、**零 DMC**、六首的 BPM / pattern 數 / 實測秒數、stage1 回音軌 **256/256 row 完全對齊延後 4 row（含 loop 接點）**、音量差 2 級、detune > 0 而主旋律 = 0、duty 12.5% |
+| 16 音效優先權 / 搶佔 / 回復 | 12 | 九個音效齊全、優先權排序、**除 die 外不宣告 p1/tri**、die 搶四軌、`sfx('die')` 自動停音樂、shot 搶不走 explode、搶佔期間 p2/noi 被佔而 p1/tri 沒有、音樂不寫被佔的暫存器、音樂照常寫 p1/tri、結束後音樂重寫 p2/noi 拿回聲道、APU 值回到音樂音高且四軌仍在播、`CR.Audio` 介面齊全 |
+| 17 離線渲染 | 2 | stage1 / boss 各 10 秒：無 NaN、峰值 ≤ 1.0、RMS > 0.01 |
+> 陷阱備忘（本輪踩到）：`page.evaluate(JS)` 如果 **JS 的最後一個完成值是函式，playwright 會直接呼叫它**。`tools/test_apu.py` 的 `JS` 字串結尾因此固定放一行 `true;`，新增測試函式時不要動它。
+
+### 跨檔需求（給總控 / 其他 agent）
+**(1) `docs/ENGINE_API.md` §10 NES.Music 請增補下表**（`ENGINE_API.md` 不屬 audio agent，故未自行修改）：
+
+| 位置 | 增補內容 |
+|---|---|
+| §10 開頭那句「指令 `note / inst / vol / arp / vib / duty / stop`」 | 改成 **「指令 `note / inst / vol / arp / vib / duty / cut / detune / slide / stop`」** |
+| §10 新增「效果欄」小節 | `detune: n` 固定週期偏移（+ = 音變低，持續到下次改寫，換音不歸零）；`slide: n` 每幀週期 ±n；`slide:{rate,to:'C-5'}` 滑到目標音停（portamento）；`slide:{rate,limit:m}` 夾在 ±m。**最終週期 = 基礎音高 + detune + slide 累積量**，觸發新音 → slideAcc 歸零。雜訊 / DMC 軌不受影響。音效的幀也吃 `detune` / `slide`（數字型） |
+| §10 函式表 | `state()` 的 channel 快照新增 `detune / slide / slideAcc` 三欄 |
+| §13 工具表 `apu_render.py` | 新增遊戲曲目模式：`$PY tools/apu_render.py --game cruiser [--song stage1] --seconds 10` → `shots/agent_audio/*.wav` + 五聲道成分檢查（暫存器稽核 / 逐聲道單獨渲染 / 頻譜覆蓋 / 無 NaN 不削波） |
+| §14 實作差異表 | **P2-7 / X15 已結案**（R2 audio），可加一列 D12：「`music.js` 滑音 / detune 已實作，格式向下相容，demo 曲零改動」 |
+
+**(2) ship agent（`games/cruiser/main.js` / `ship.js`）的呼叫方式**：
+```js
+init(nes)  { CR.Audio.init(nes); CR.Audio.play('title'); }
+update(nes){
+  // …讀輸入 → 船 / 選項 / 自機彈 → CR.stage.update(g) → 碰撞 → 撿膠囊 → HUD …
+  CR.Audio.tick(nes);                 // ★ 一定要放在 update() 的最後一行（一幀一次）
+}
+```
+| 時機 | 呼叫 |
+|---|---|
+| 進遊戲 / 重新開始 | `CR.Audio.play('stage1')` |
+| 魔王出現 | `CR.Audio.play('boss')` |
+| 過關 | `CR.Audio.play('clear')`（4 秒後自己停，`CR.Audio.state(nes).playing === false` 可當結束旗標） |
+| 剩餘船歸零 | `CR.Audio.play('gameover')`（3 秒） |
+| 加命 | `CR.Audio.play('extend')`（1 秒）或 `CR.Audio.sfx('extend')`（不中斷音樂） |
+| 開火 / 雷射 / 飛彈 | `CR.Audio.sfx('shot')` / `sfx('laser')` / `sfx('missile')` |
+| 打到敵人 / 敵人爆炸 | `CR.Audio.sfx('hit')` / `sfx('explode')` |
+| 撿膠囊 / 啟用強化 | `CR.Audio.sfx('capsule')` / `sfx('powerup')` |
+| 自機被擊墜 | `CR.Audio.sfx('die')`（**會自動停音樂**，復活後自己 `play('stage1')`） |
+- `shot` 優先權最低（2），連射時會被 `explode`（8）蓋掉——這是刻意的 NES 行為，不是 bug。
+- `CR.Audio` 不依賴 `NES.boot` 以外的東西；`song.js` 已在 `cruiser.html` 的載入清單裡，不需要改 html。
+
+**(3) 沒有跨檔改動**：本輪只動 `engine/music.js`、`games/cruiser/song.js`、`tools/test_apu.py`、`tools/apu_render.py` 四個自己的檔，`docs/ENGINE_API.md` / `cruiser.html` / 其他 agent 的檔一律沒碰，未做任何 git 操作。
+
+---
+
+## star-audio（R2b）
+
+**2026-09-19 ｜完成 R2b W1 音樂層｜只改 `games/star/song.js`（808 行，新檔）｜9 首原創曲 + 9 個原創音效｜驗證 0 失敗｜未做 git 操作**
+
+擁有檔案：`games/star/song.js`（唯一）。驗證腳本自寫在 `shots/agent_star_audio/render.py`（`shots/` 不進 git；`tools/apu_render.py` 的 `--song` 只吃「一個全域變數 = 一首曲」，我們是 IIFE + 9 首，所以照 TASKS 指示自寫，並**匯入**它的 `write_wav / rms / spectrum` 不重複實作、沒改它）。
+**沒有使用 R2 audio agent 正在加的 `slide` / `detune`**——滑音音效一律逐幀列音、回音一律用「第二方波延遲 N 個 row + 降音量 + 12.5% 占空比」（研究 06 §2.2）做到，所以 `engine/music.js` 之後怎麼改都不影響本檔。
+
+### 1. API（`ST.Audio`，games/star/song.js）
+
+| 成員 | 簽章 | 說明 |
+|---|---|---|
+| `init(nes)` | `→ boolean` | 記住 `nes`、把 9 個音效 `define` 到 driver（冪等）。`game.init()` 裡呼叫一次 |
+| `play(key[, nes])` | `→ boolean` | `key` ∈ `ground / cave / sky / castle / boss / invincible / clear / death / gameover`；jingle（clear / death / gameover）自動 **不 loop**，播完 `state().playing === false` |
+| `stop([nes])` | `→ boolean` | 停音樂 + 停所有音效 |
+| `sfx(name[, nes])` | `→ boolean` | `name` ∈ `jump / stomp / coin / powerup / hurt / bump / goal / oneup / death` |
+| `tick(nes)` | `→ boolean` | **每幀一次，放在 `update()` 最後一行**；內含 ground 的 groove（見下） |
+| `state([nes])` | `→ {song, playing, row, orderIndex, speed, sfx[], owners{}, p1,p2,tri,noi}` | 測試 / 除錯用 |
+| `validate()` | `→ string[]` | 資料自檢（pattern 長度 / 音名 / order / 音效只佔 p2+noi / 音效 ≤ 60 幀）；**不在載入時跑**，給測試腳本用，回空陣列 = 全對 |
+| `SONGS / SFX / INFO / PRIORITY / KEYS / NAMES` | | 曲目物件、音效定義、曲目資訊表、優先權表、名稱清單（離線渲染與測試用） |
+
+全部函式都吞例外回傳 boolean：**音樂出錯不會拖垮遊戲迴圈**；`NES.Music` 缺席時所有呼叫安靜回 `false`。
+
+### 2. 曲目表（全部原創；BPM = 3600 / (speed × 每拍 row 數)，研究 06 §1.7）
+
+| key | 曲名 | BPM | speed | row/小節 | 小節 | pattern 數 | 一圈 | 聲道配置 | 情緒 |
+|---|---|---|---|---|---|---|---|---|---|
+| `ground` | 星塵草原 | **163.6** | 5 + groove `[5,6]` | 16（16 分） | **32**（A A2 B A3） | 30 | 2816 幀 / 46.86 s | p1 主旋律（lead：50%→25% 音頭）／ p2 8 分和弦琶音彈跳 ／ tri 八度跳躍低音 ／ noi 搖滾鼓 + 過門 | 明亮跳躍、C 大調 |
+| `cave` | 地底回聲 | 100.0 | 9 | 16 | 16 | 26 | 2304 幀 / 38.34 s | p1 稀疏長音（顫音 delay 14）／ **p2 = p1 延後 3 row 的回音**（音量 7、12.5%）／ tri 半音符低音（主角）／ noi 只有每 4 小節一滴悶響 | 低沉、空曠、A 自然小調 |
+| `sky` | 雲上的階梯 | 150.0 | 4 | **24（每拍 6 row → 2 row = 一個三連音）** | 16 | 26 | 1536 幀 / 25.56 s | p1 **8 分三連音**琶音跑動（高至 G-6）／ p2 長音和弦 ／ tri 四分低音 ／ noi 輕鼓 | 輕快、飄浮、C 大調 |
+| `castle` | 鐵鎚王的城 | 90.0 | 10 | 16 | 16 | 26 | 2560 幀 / 42.60 s | p1 **半音級進**風琴（占空比顫動 + 顫音）／ p2 減和弦長音（arp `[0,3,6]`）／ tri **半音下行低音** D3→A1 ／ noi 每小節一記低鳴 | 緊張、壓迫、慢，D 小調 |
+| `boss` | 鐵鎚落下 | 225.0 | 4 | 16 | 16 | 26 | 1024 幀 / 17.04 s | p1 **16 分下行動機**（A→G→F→E→D 半音收束）／ p2 延後 2 row 回音 ／ tri 8 分八度踏板 ／ noi 疾走 16 分 + 過門 | 快速、下行、A 小調 |
+| `invincible` | 星光疾走 | 300.0 | 3 | 16 | 10 | 17 | 480 幀 / **7.99 s** | p1 大三和弦琶音**每小節升半音**（C→C#→D→D#→E）／ p2 和弦 ／ tri 8 分低音 ／ noi 16 分 | 急促、上衝 |
+| `clear` | 過關 | 150.0 | 6 | 30（單段） | — | 4 | 180 幀 / **3.00 s**（不 loop） | p1 鐘聲上行 C→E→G→C6→E6→D6→C6 ／ p2 三度和聲 ／ tri 根音 ／ noi 鈸 + 小鼓漸強 | 勝利號角 |
+| `death` | 死亡 | 180.0 | 5 | 18（單段） | — | 4 | 90 幀 / **1.50 s**（不 loop） | p1 半音下行 8 音 ／ p2 低八度跟隨 ／ tri 下行低音 ／ noi 一記悶響 | 墜落 |
+| `gameover` | 遊戲結束 | 100.0 | 9 | 20（單段） | — | 4 | 180 幀 / **3.00 s**（不 loop） | p1 風琴 A→G→F→E ／ p2 內聲部 C→B→A→G# ／ tri 低音 ／ noi 兩記低鳴 | 低沉終止、A 小調 |
+
+**ground 為什麼要 groove**：驅動的 `speed` 是整數幀，16 row/小節時只做得出 180（speed 5）或 150（speed 6）BPM，做不出契約要的 165。所以 `ST.Audio.tick()` 在每個 row 開頭把 `driver.speed` 在 5 / 6 之間交替（FamiTracker 的 groove），平均 5.5 幀/row = **163.6 BPM**；因為 8 分音符 = 2 row = 固定 11 幀，只有 16 分反拍被挪後半幀，是很輕的 shuffle 而不是搖擺。實測一圈 2816 幀（speed 5 佔 1280 幀、speed 6 佔 1536 幀），與 `INFO.ground.frames` 完全一致。
+
+**編曲共通手法**（研究 06）：§2.1 琶音假和弦（p2）、§2.2 第二方波延遲回音（cave / boss）、§2.3 顫音（cave 長音 delay 14、castle delay 20）、§2.5 占空比包絡（lead 音頭 50% → 身體 25%、organ 每 2 幀 50%↔25%）、§2.6 三角波八度跳躍 / 走音線 / 半音下行、§2.7 雜訊鼓 pattern + 段末過門、§2.8 order table 重用（32 小節只用 30 個 pattern）。
+
+### 3. 音效表（只搶 **p2 / noi**；p1 主旋律與 tri 低音永不被搶，研究 06 §1.6）
+
+| 音效 | 優先權 | 佔用 | 長度 | 設計 |
+|---|---|---|---|---|
+| `death` | 9 | p2 + noi | 22 幀 | 下行琶音 A5→C4 + 雜訊由高到低（完整 1.5 秒版請用 `play('death')`） |
+| `goal` | 8 | p2 | 38 幀 | 旗桿滑下：C 大調音階 G-6 一路下行 15 音，每音 2 幀 |
+| `oneup` | 7 | p2 | 29 幀 | 上行三音 G-5 → C-6 → E-6（+ G-6 收尾），每音 5 幀 |
+| `powerup` | 6 | p2 | 26 幀 | 大三和弦上行琶音兩個八度，每音 2 幀 |
+| `hurt` | 5 | p2 + noi | 20 幀 | 50% 方波半音下滑 13 音 + 一記雜訊 |
+| `coin` | 4 | p2 | 21 幀 | 兩音上跳 E-6 → B-6（上行五度），第二音長衰減 |
+| `stomp` | 3 | p2 + noi | 8 幀 | 雜訊短擊（週期 8→14）+ 方波下滑增加重量 |
+| `jump` | 2 | p2 | 12 幀 | 25% → 12.5% 兩個八度上滑 D-5 → G-6 |
+| `bump` | 1 | noi | 4 幀 | 撞頭悶響：雜訊最低的兩段週期（14 / 15），4 幀就收 |
+
+- 契約寫 bump 是「悶響三角 / 雜訊」，這裡**只用雜訊**：契約同時規定音效只搶 p2 / 雜訊，而三角波一斷整首會空掉（研究 06 §1.6），所以改用週期 14/15 的雜訊做悶響。
+- 實測優先權：`jump→coin` 變 coin、`coin→jump` 仍是 coin、`hurt→death` 變 death、`goal`（p2）與 `bump`（noi）可以同時存在。
+
+### 4. 驗證結果（`../卡比之星/.venv/bin/python shots/agent_star_audio/render.py --seconds 10`，**失敗 0 項**）
+
+| 項目 | 結果 |
+|---|---|
+| `node --check games/star/song.js` | PASS |
+| `ST.Audio.validate()` | 0 問題（pattern 長度 = rows、音名全可解析且在 A0~C8、order 指向存在的軌、音效只佔 p2/noi 且 ≤ 60 幀並以 `{off:true}` 收尾） |
+| 離線渲染 9 首 × 10 秒 → wav | 全部 **無 NaN / Inf**、峰值 0.364~0.569（**≤ 1.0**、不削波）、低/中/高頻都有能量 |
+| 「只含五聲道」暫存器稽核 | 每首用 `driver.record()` 抓全部寫入：位址一律落在 **$4000~$4017**，聲道集合 = `p1, p2, tri, noi, ctl($4015/$4017)`；**沒有任何 DPCM / 非 APU 寫入** |
+| 9 首 × 600 幀連續 tick（含 loop 邊界） | 全 PASS、無錯、峰值 ≤ 1.0 |
+| 9 個音效 × 觸發後復原 | **p1 主旋律 0 幀被搶、tri 0 幀被搶**；p2/noi 最晚 38 幀（goal）還給音樂，全部 **≤ 60 幀** |
+| 音效優先權 | 3 項情境全 PASS（見上表） |
+| `star.html?debug=1&mute=1` 整合（playwright 載全套 engine + song.js） | `ST.Audio.init(nes)` 成功、9 個 key 各 `play` + `tick` 600 幀 0 錯、9 個音效復原 ≤ 39 幀、**0 pageerror / 0 console error** |
+| `bash tools/run_all.sh --quick` | **PASS**（node --check 27 檔、test_apu 103、test_chr 91、test_core、test_ppu 144、test_shmup 157、demo 全過、build --check PASS）→ 沒有變紅 |
+
+**wav 路徑**（`shots/` 已 gitignore）：
+`shots/agent_star_audio/{ground,cave,sky,castle,boss,invincible,clear,death,gameover}.wav`（各 10 秒、44.1 kHz 16-bit 單聲道）
+`shots/agent_star_audio/sfx_{jump,stomp,coin,powerup,hurt,bump,goal,oneup,death}.wav`（各 2 秒＝ground 底 + 第 30 幀觸發該音效，可直接聽搶聲道與復原）
+
+### 5. 跨檔需求（給 star-hero 的呼叫點）
+
+`games/star/song.js` 已在 `star.html` 的載入清單裡（總控建好），**不需要改 html、不需要改任何別的檔**。star-hero 的 `main.js` 只要：
+
+```js
+init(nes)   { ST.Audio.init(nes); ST.Audio.play(level.music || 'ground'); }
+update(nes) {
+  /* …輸入 → hero → 敵人 → 碰撞 → 鏡頭 → HUD… */
+  ST.Audio.tick(nes);            // ★ 一定要放在 update() 的最後一行（一幀一次）
+}
+```
+
+| 時機 | 呼叫 | 備註 |
+|---|---|---|
+| 關卡開始 / 回檢查點 | `ST.Audio.play(ST.LEVELS[id].music)` | `music` 值 = `'ground' \| 'cave' \| 'sky' \| 'castle'`（star-world 的關卡表，1-1~1-4 正好對到四首） |
+| 魔王出現 | `ST.Audio.play('boss')` | |
+| 吃到無敵星 | `ST.Audio.play('invincible')` | 7.99 s loop；無敵結束時自己 `play(關卡曲)` 接回去 |
+| 碰到 GOAL 旗桿 | `ST.Audio.sfx('goal')` → 結算時 `ST.Audio.play('clear')` | clear 3.00 s，播完 `ST.Audio.state(nes).playing === false` 可當「可以切下一關」的旗標 |
+| 死亡 | `ST.Audio.play('death')` | 1.50 s，播完 `playing === false`；**play 會自動蓋掉正在播的關卡曲**，不必先 stop |
+| lives 歸零 | `ST.Audio.play('gameover')` | 3.00 s |
+| 跳躍 | `ST.Audio.sfx('jump')` | 起跳那一幀呼叫（不要每幀呼叫，會疊成噪音牆） |
+| 踩敵回彈 | `ST.Audio.sfx('stomp')` | |
+| 撞磚 / 撞到不可破壞的頂 | `ST.Audio.sfx('bump')` | 只佔雜訊軌，最短（4 幀），連打也不吵 |
+| 金幣 | `ST.Audio.sfx('coin')` | |
+| ? 磚出道具 / 吃到道具 | `ST.Audio.sfx('powerup')` | |
+| 100 金幣加命 | `ST.Audio.sfx('oneup')` | |
+| 受傷（不死） | `ST.Audio.sfx('hurt')` | |
+
+- `tick()` 沒被呼叫 → 音樂完全不動（driver 是每幀驅動的），**`update()` 提早 return 的分支也要記得呼叫**。
+- 音效 `jump`（2）會被 `coin`（4）以上的音效蓋掉，這是刻意的 NES 行為（研究 06 §1.6），不是 bug。
+- `?mute=1` 只代表不接喇叭，`ST.Audio` 的邏輯與離線渲染照跑，測試可以放心用。
+- **契約異動：無**。`docs/TASKS.md` 的音效清單（jump/stomp/coin/powerup/hurt/bump/goal）之外，依本輪指示多做了 `oneup`、`death` 兩個音效與 `invincible` 一首曲，都是**新增**、不影響既有契約。
+
+---
+
+## ship（R2）
+
+2026-09-19 ｜ ship agent ｜ 擁有檔案：`games/cruiser/chr_ship.js`、`ship.js`、`main.js`、`test_cruiser.py`
+（**沒有動任何別人的檔**，`cruiser.html` 未修改、沒有新增檔案）
+
+《星塵巡航艦》自機側完成：CHR（精靈磚 0..127 + HUD 字型磚 0..63）、自機物理 / 武器 / Option /
+能量表 / 死亡復活、主程式（模式機、OAM 配置、碰撞、HUD、下方 32 線 split）、124 項自動測試。
+**手感數字全部改用 `docs/research/03_經典遊戲深度解析/16_宇宙巡航艦_沙羅曼蛇.md` §⑩ 的 byte-level 逆向值**
+（見下方「契約異動」），每個常數在原始碼裡都標了 `[源]` / `[推論]`。
+
+### API 表
+
+| 命名空間 | 成員 | 說明 |
+|---|---|---|
+| `CR.SPR_SHIP` | 35 個磚（`S_` 前綴） | 船 16×8 ×2 幀（`S_SHIP_L0/R0/L1/R1`，噴焰閃爍）、Option 光球 ×2（`S_OPT0/1`）、自機彈 `S_BULLET`、斜彈 `S_BULLET_D`、雷射段 / 頭 `S_LASER` / `S_LASER_H`（可橫向無縫拼 4 段）、飛彈 ×2 `S_MISSILE0/1`、爆炸 4 幀 ×4 磚 `S_EXP{0..3}_{TL,TR,BL,BR}`、紅膠囊 ×2 `S_CAP_R0/1`、藍膠囊 `S_CAP_B`、護盾弧 ×2 `S_SHIELD0/1`、碎片 ×2 `S_DEBRIS0/1` |
+| `CR.BG_HUD` | 51 個磚（`H_` 前綴） | 空白 `H_SP`（磚 0）、數字 `H_N0..N9`、字母 `H_A..H_Z`（全 26 個）、`H_QUEST / H_MUL / H_DOT / H_DASH / H_COLON / H_ARROW / H_STAR`、能量格框 `H_GL/GM/GR`（未選）與 `H_GLON/GMON/GRON`（選中）、剩餘船圖示 `H_SHIP` |
+| `CR.PAL` | `{backdrop:$0F, spr[4], bg[4]}` | spr0 船（$01/$30/$27 深藍 / 白 / 橘）、spr1 自機彈 / 雷射 / 飛彈 / 爆炸 / 紅膠囊（$16/$28/$30）、spr2/3 與 bg1..3 是預設值，**stage 的 `init(ppu)` 在之後呼叫、可以直接覆蓋** |
+| `CR.tileNameFor(ch)` / `CR.CHARMAP` | `(char) → 磚名` | HUD 文字 → `H_*` 磚名 |
+| `CR.Ship.create()` | `→ ship` | 建立自機（main 已建好一個，見 `CR.ship`） |
+| `CR.Ship.*`（常數） | `SPEED_PX / SPEED_V / MAX_SPEED / PLAY / SPAWN_X / SPAWN_Y / SHOT_V / LASER_V / KILL_X / SLOTS_PER_EMITTER / FIRE_DELAY / LASER_MAX_SEG / LASER_STEP / MAX_OPTION / RING / OPT_LAG / OPT_ANIM / DEATH_FRAMES / INVUL_FRAMES / BLINK / SHIELD_HP / CHECKPOINT_PX / START_LIVES / EXTEND_EVERY / CLEAR_CAPSULE_EVERY / GAUGE_MAX / GAUGE_NAME / GAUGE_LABEL / BOOM_FRAME / DMG_SHOT / DMG_MISSILE / K` | 所有手感數字都在這裡，測試與 stage 都從這裡讀，不要各自寫死 |
+| `CR.ship`（契約物件） | `{x, y, w:12, h:6, alive, speed, power:{missile,double,laser,option,shield}, gauge, shots[], options[], invul, lives, score, hi}` | 另有內部 `sx, sy`（精靈左上，碰撞框 = `sx+2, sy+1`）、`ring/head`、`emit[3].timer`、`debris[6]` |
+| `CR.ship` 方法 | `update(g) → '' \| 'deathdone'`、`move(input)`、`fire()`、`activate() → 能力名 \| ''`、`capsule(blue?) → gauge \| 'clear'`、`hit(terrain?) → 是否死亡`、`die()`、`addScore(n)`、**`rank() → 0..4`**、`reset(hard)`、`newGame()`、`place(x,y)`、`rect()`、`blink()`、`speedPx()`、`checkpointOf(camX)`、`state()` | `hit(true)` = 地形（護盾無效）。`rank()` 給 stage 調難度用 |
+| `CR.Fx` | `boom(x, y)`（中心座標，16×16 四幀 ×6 幀）、`booms[]`、`count()`、`reset()`、`FRAME` | **stage 也可以直接呼叫**；目前 stage 自己有爆炸池，本池只用在自機死亡與飛彈撞牆 |
+| `CR.sprBank` / `CR.bgBank` | `NES.CHR.bank` 物件（`cr_spr` / `cr_bg`） | main.init 合併 SPR_SHIP+SPR_WORLD、BG_HUD+BG_WORLD 後建立並 `setPattern(0/1)` |
+| `CR.TILE` / `CR.BGTILE` | `{磚名: 索引}` | 合併後的查表，**stage / audio / 測試都可以直接用**，不必自己 `bank.index()` |
+| `CR.PLAY_ROWS = 26` / `CR.HUD_ROW = 26` / `CR.SPLIT_LINE = 208` / `CR.PLAY_H = 208` | 常數 | 版面契約：名稱表列 0..25 = 遊戲區、列 26..29 = HUD |
+| `CR._fallback` | `{aabb, OAM, Pool}` | `NES.SH` 缺席時的最小替代（**現在 NES.SH 已到位，實際走 engine 版**，`state().oam.engine === true` 可驗） |
+| `CR.SH` | 實際採用的實作 | `{aabb, OAM, Pool, usingEngine}` |
+| `window.GAME` | `{init, update, draw, state}` | `state()` 回 `{mode, x, y, speed, speedPx, gauge, gaugeName, power, rank, options, shots, shotCount, timers, capsules, ringSteps, moved, invul, lives, score, hi, deathTimer, deaths, booms, camX, enemies, kills, hits, stage, oam, hud, lastEvent}`；`hud` 是**從名稱表讀回來**的 3 列字串（`'1P …|標籤|格框'`），可直接驗 HUD |
+
+模式機：`title` →（START）`play` ⇄ `dead` →（命數 0）`gameover` →（START）`title`；`CR.stage.cleared` → `stageclear`。
+
+每幀順序（契約）：`update` = 輸入 → 船 / Option / 自機彈 → `CR.stage.update(g)` → 碰撞（自機彈 × 敵 / 魔王；敵 / 敵彈 / 地形 × 船）→ 撿膠囊 → `CR.stage.takeScore()` → `CR.Audio.tick()`；
+`draw` = HUD 差分寫入 → `ppu.scroll(camX % 512, 0, 0)` → `ppu.split(208, {x:0, y:208, nt:0})` → OAM `begin` → 船 / Option（prio 0）→ 自機彈（1）→ `CR.stage.draw(oam)`（敵彈 2 / 敵 3）→ 爆炸・碎片（4）→ `end`。
+
+### 測試
+
+`games/cruiser/test_cruiser.py`（playwright，`cruiser.html?debug=1&scale=1&mute=1`）：**124 項，全部通過、0 SKIP**。
+① 啟動 / CHR / 調色盤 / 契約欄位 16 項 ② 速度 5 級 × 60 幀位移 + 4 個邊界 + 左右同按 + 上下同按 + 斜向 19 項
+③ 武器（彈速 7 / 雷射 12 段數 / DOUBLE (+4,−4) / 飛彈 (+0.5,+2) / 2 槽上限 / 20 幀間隔 / 計時器凍結 / 互斥 / 出界消滅）17 項
+④ 能量表（回捲、已擁有不消耗、上限、護盾 5 下、不擋地形、第 16 顆清屏、rank）16 項
+⑤ Option（環 24、延遲 11 / 22 逐幀比對船軌跡、停手凍結、跟著發射、復活就位）7 項
+⑥ 死亡 / 復活 / 命數 / 檢查點 / 無敵閃爍 / GAME OVER / EXTEND 16 項
+⑦ HUD（3 列內容、6 格反白、分數 / 船數更新、**400 幀 `budget.over === 0` 且尖峰 ≤ 160 byte**、捲動 120 幀 HUD 不被蓋）14 項
+⑧ PPU（240 幀同屏 ≤ 25 色 + lint 全綠、**OAM 12 顆同線兩幀聯集蓋滿**、超過 64 槽 dropped、prio 排序）6 項
+⑨ 與 `CR.stage` 整合（`spawnTest` 打敵人 / 撿膠囊 / 撞敵死亡 / 藍膠囊清屏）6 項 ⑩ 穩定度 3 項
+`bash tools/run_all.sh --quick` = **PASS**（node --check 31 檔、9 個測試檔全過、build --check 過）。
+
+### 截圖（`shots/agent_ship/`，全部 lint 綠、`budgetOver=false`）
+
+| 檔案 | 內容 | lint |
+|---|---|---|
+| `title.png` | 標題畫面（STARDUST CRUISER / PRESS START）+ 星空 + HUD | colors 7 |
+| `shoot.png` | 遊玩中：船 + 標準彈 + 飛彈落下 | colors 10 |
+| `laser.png` | 雷射 4 段 + 2 顆 Option（同線 16 精靈 → 靠 OAM 輪替閃爍） | colors 9 |
+| `options.png` | 2 顆 Option 拉成軌跡 + 護盾弧 + DOUBLE 斜彈 | colors 9 |
+| `death.png` | 死亡：爆炸第 3 幀 + 6 塊碎片四散 | colors 9 |
+| `hud.png` | HUD：分數 0138400 / HI / 船數 ×3 / 能量表第 4 格（LASER）反白 | colors 9 |
+| `stage.png` | 捲動 120 幀後的小行星帶 + 船 | colors 9 |
+
+### 契約異動（**已依總控 2026-09-19 指示改為研究 §⑩ 的原作實測值**）
+
+| # | TASKS.md 原訂 | 改成 | 依據 |
+|---|---|---|---|
+| S1 | 船速 1..5 = 1.5 / 2.0 / 2.5 / 3.0 / 3.5 | **1.0 / 1.5 / 2.0 / 2.5 / 3.0**，無加速度、斜向不正規化 | 研究 §10-1 [源] |
+| S2 | 邊界「0..207 線、x 8..240」 | **x [8, 240]、y [16, 184]**（精靈左上；16×8 全程可見） | 研究 §10-1 [源] |
+| S3 | 自機彈 4 px/幀、同屏 ≤ 2 發 | **7 px/幀**；上限改成「**每個發射體 2 槽**」（本體 + 每顆 Option 各 2 ⇒ 滿配 6 發），另加**連射間隔 20 幀、兩槽占用時計時器凍結** | 研究 §10-2 [源] |
+| S4 | 雷射「每幀延伸」 | 段數 1→4（每幀 +1），**頭部 12 px/幀**，貫通（同一道對同一隻只算一次傷害） | 研究 §10-2 [源] |
+| S5 | 飛彈「斜下 45°，每 2 幀？」 | **空中 (+0.5, +2) → 落地爬行 (+2, 0)**，傷害 2，每個發射體 1 發 | 研究 §10-2 [源] |
+| S6 | Option 環 64 筆、延遲 16 幀 | **環 24 筆、延遲 11 / 22**，且**只有按方向鍵那一幀環才前進**（停手凍結成一排）；動畫 2 張每 8 幀自由跑；復活時環全填重生座標 | 研究 §10-3 [源] |
+| S7 | 護盾 hp 3 | **hp 5**，且**不擋地形**（`ship.hit(true)` 直接死） | 研究 §10-5 / §10-1 [源] |
+| S8 | 死亡碎片 60 幀、無敵 120 幀 | **死亡停頓 90 幀**（碎片 60）、**復活無敵 90 幀**、每 4 幀閃一次 | 研究 §10-4 / §10-7 [推論] |
+| S9 | — | 能量表**第 7 顆回捲到格 1**、**已擁有的能力按 B 不消耗膠囊**、**每第 16 顆膠囊 = 清屏**、B 改成按下瞬間（edge） | 研究 §10-5 [源] / [推論] |
+| S10 | — | 新增 **`CR.ship.rank() = (laser\|\|double) + option 數 + (shield?1:0)`（0..4）**，死亡自動歸 0；rank 只該影響「敵人怎麼打」（≥2 敵彈 ×1.25、≥3 預判射擊），**不得影響出怪表** | 研究 §10-6 [源] |
+| S11 | HUD「第 3 行剩餘船數」 | **列 26** = `1P <7 位分數>  HI <7 位紀錄>` + 右側船圖示 `x N`；**列 27** = 能量表 6 格標籤；**列 28** = 能量表 6 個格框（未選 = 灰空框、選中 = 白框填滿）。理由：可見區只有列 26..28（列 29 被裁掉），且 16×16 屬性表對不齊 5 欄一格，改用「不同磚」做反白 | 版面限制 |
+| S12 | 「若引擎 split 只支援上方固定，就把 HUD 放上方」 | **不需要**：`ppu.split(208, {x:0, y:208, nt:0})` 下方固定 HUD 實測可行（與 engine §15.5 的建議一致） | 實測 |
+
+### 跨檔需求 / 給其他 agent 的約定
+
+**給 stage**（`chr_world.js / enemies.js / boss.js / stage1.js`）——下列 1~4 **已經確認 stage1.js 目前的實作就是這樣**，列出來是為了避免之後改壞：
+
+1. **名稱表只能寫列 0..25**（`CR.PLAY_ROWS = 26`）；列 26..29 是 HUD 的地盤。`NES.SH.Scroller` 請用 `{row0: 0, rows: 26}`。
+2. **`CR.stage.solidAt(x, y)` 用螢幕座標**（x 0..255、y 0..207），main 拿它判船撞地形、飛彈拿它爬地。
+3. **記分**：main 每幀呼叫 `CR.stage.takeScore()`；只要這個函式存在，main 就**不會**再自己 `addScore(e.score)`、也**不會**再補畫爆炸（避免雙重計分 / 雙重爆炸）。沒有 `takeScore` 時 main 才會自己加 `e.score || 100` 並 `CR.Fx.boom()`；那種情況下敵人可以設 `e.fx = false` 叫 main 不要補爆炸。
+4. **膠囊**：main 撿到時若膠囊物件有 `blue` 欄位就照用，**沒有 `blue` 欄位才由 ship 自己數「每第 16 顆 = 清屏」**。目前 stage 自己給 `blue`，所以「第 16 顆」規則由 stage 負責 —— 請照研究 §10-5 [源] 實作（不要用機率）。
+5. **檢查點**：main 死亡時用 `CR.stage.checkpoint(camX)`（沒有就退回 512 px 規則 `CR.Ship.CHECKPOINT_PX`）。stage 目前是欄 0 / 128 / 256（camX 0 / 1024 / 2048）＝ 每 1024 px，研究 §10-4 [源] 是 **每 512 px（12 畫面共 6 個）**，建議 stage 改成 6 個檢查點，死亡懲罰才不會太重。
+6. **`restart()` 會一次補滿名稱表（1700+ byte）**：main 在呼叫 `CR.stage.restart()` / 進入 play 前後會自己把 `timing.budget.mute` 打開再關掉（＝真機「關閉 rendering 重建畫面」），stage 不用再自己 mute，但**也不要在 update 路徑上呼叫 restart**。
+7. **難度**：`CR.ship.rank()` 已經可用（0..4）。請照研究 §10-6：rank ≥ 2 敵彈速度 ×1.25、rank ≥ 3 預判射擊；**rank 不得影響出怪表**。
+8. **可共用的資源**：`CR.TILE` / `CR.BGTILE`（磚名 → 索引）、`CR.Fx.boom(x,y)`（16×16 四幀爆炸）、`CR.Ship.*` 常數。
+9. `CR.SPR_SHIP` 有 `S_CAP_R0/R1/S_CAP_B`（膠囊）與 `S_SHIELD0/1`；stage 目前用自己的 `W_` 膠囊磚＋精靈組 2/3，兩邊不衝突，只是我的 3 個膠囊磚沒被用到 —— 整合時二選一即可（建議留 stage 的，因為顏色跟敵人同組比較省調色盤）。
+
+**給 engine**：`NES.SH` 的 9 條契約異動已全部照做（自己設 `ppu.scroll(camX % 512, 0, 0)`、`ppu.mirroring('v')`、`ppu.flickerStep = 0`、`split(208)`、`OAM {reserve:0}`）。`NES.SH.OAM` 的 `prio` 依 TASKS 用 **0 船 / 選項、1 自機彈、2 敵彈、3 敵、4 爆炸**（ENGINE_API §15.4 的示例寫的是 0/1/2/3，兩者只差偏移，stage 與本檔已對齊 TASKS 的編號）。
+
+**給 audio**：`CR.Audio` 缺席不致命。自機側會呼叫的音效名稱：`shot`、`laser`、`missile`、`hit`（護盾擋下）、`capsule`、`powerup`、`die`、`extend`；曲目 `CR.Audio.play('title' | 'stage1' | 'clear' | 'gameover')`。`CR.Audio.tick(nes)` 由 main 的 `update()` 最後一行呼叫（沒有 `CR.Audio` 時退回 `nes.music.tick()`）。
+
+### 已知問題 / 尚未做
+
+1. **能量表標籤縮寫且 6 格相連**：可見寬度只有 32 欄，6 格 × 5 欄 = 30 欄剛好用完，所以標籤縮成 `SPEED / MISSL / DOUBL / LASER / OPTON / ?`、格與格之間沒有空欄（靠下一列的格框 `[---]` 分界）。要更好看只能改成 2 頁輪播或縮成 4 欄縮寫。
+2. **船沒有做「傾斜動畫」**（研究 §10-1 的每 8 幀鎖存傾斜圖）：目前只有噴焰 2 幀閃爍。要做需要再 4 個磚（上傾 / 下傾各 2）。
+3. **雷射 3 道同線會觸發每線 8 精靈丟棄**（`laser.png` 的 `maxSpritesLine = 16`）：這是真機行為，由 `NES.SH.OAM` 的輪替補齊（兩幀聯集），但靜態截圖看起來會少幾段。
+4. **`?` 格只做護盾**（研究裡 FC 版的 `?` 也只有護盾），沒有做「第二輪變別的」。
+5. **復活時前 30 幀沒有鎖輸入**（研究 §10-7 的建議）：實測不鎖比較順手，若 qa2 認為太寬鬆再加。
+6. 分數上限 9999999（HUD 7 位）；`hi` 存在 `localStorage['cruiser_hi']`，`?debug=1` 的測試會寫到瀏覽器 profile，`--quick` 的無頭瀏覽器每次都是新 profile，不影響重現性。
+
+---
+
+## stage（R2）
+
+擁有檔案：`games/cruiser/chr_world.js`、`enemies.js`、`boss.js`、`stage1.js`、`test_stage1.py`
+（2026-09-19，地形 / 出怪 / 敵人 / 魔王層完成；`NES.SH` 契約異動 9 條已全部照做，**沒有留任何 fallback**）
+
+### 一、對外介面表（`CR.stage`，stage1.js）
+
+| 成員 | 簽章 / 值 | 說明 |
+|---|---|---|
+| `init(ppu)` | `(ppu) → stage` | 解析磚索引、套用 stage 的調色盤組、建地形、建 4 個 `NES.SH.Pool`、建 `Scroller` / `Spawner`、`restart(0)`。**由 main 的 `init` 在 `buildBanks()` 之後呼叫** |
+| `update(g)` | `(mainState) → stage` | 推進相機 → `Scroller.update` → `Spawner.update` → 敵 / 彈 / 膠囊 / 爆炸 / 魔王 |
+| `draw(oam)` | `(NES.SH.OAM)` | 只用 `oam.add({…, prio})`：**爆炸 4 / 敵 + 魔王 3 / 敵彈 2 / 膠囊 2**（契約編號） |
+| `checkpoint(camX)` | `→ camX` | 回傳 ≤ camX 的最後一個檢查點（**每 512 px**：0/512/1024/1536/2048/2560） |
+| `restart(camX)` | `(camX) → stage` | `Pool.freeAll ×4` + `Boss.despawn` + `Scroller.reset` + `Spawner.seek`（NES.SH §15.8-5）。內部自帶 `budget.mute`，main 額外再 mute 一次也無害 |
+| `solidAt(x, y)` | **畫面座標** `(0..255, 0..207) → bool` | 與其他碰撞框同一套座標（main 直接丟船的畫面矩形四角）。世界座標版另有 `solidAtWorld(wx, y)` |
+| `clearScreen()` | `→ {bullets, enemies, score}` | 藍膠囊：清光所有敵彈 + 消滅所有**小敵**（fan / turret / zig，計分）；`tank` 與魔王部位不受影響 |
+| `spawnTest(kind, x, y)` | `fan / turret / turret_ceil / zig / tank / bullet / capsule / capsule_blue / boom / boss` | 給 `test_cruiser.py`、`test_stage1.py` 用；未知種類 throw |
+| `enemies / bullets / capsules / explosions` | `NES.SH.Pool` 24 / 40 / 6 / 12 | 每個元素都有 `{x, y, w, h, alive}`；敵人另有 `{hp, score, kind, hit(dmg), kill()}` |
+| `camX / speed / length / bossActive / cleared` | `0..2816 / 128 / 384 / bool / bool` | `speed` 是 8.8 = **0.5 px/幀**（研究 16 §10）；`length` = 欄數 |
+| `takeScore()` | `→ int` | main 每幀取走並加進分數（stage 自己記分、自己畫爆炸，main 不要重複加） |
+| 其他（除錯 / 測試） | `tileAt(c,r) / attrAt(c16,r16) / kindAt(c,r) / tileIndex(name) / ceilAt(c) / floorAt(c) / aliveEnemies() / aliveBullets() / aliveCapsules() / capsuleSeq() / scroller() / spawner() / spawnTable() / scrollX() / info() / spawnTurretAt(col, ceiling) / mkOam(ppu,opt) / K / KIND_NAMES / CHECKPOINTS` | |
+
+**除錯用網址參數**（stage1.js 自己讀 `location.search`，在第 2 次 `update` 時套用，所以 main 的 `toPlay()` 先 `restart(0)` 也不會被蓋掉）：
+`cruiser.html?debug=1&camx=1320`（跳到指定 camX）、`?boss=1|2|3`（跳到魔王並強制階段）。截圖與 QA 直接用這個，不必打 40000 幀。
+
+### 二、CHR / 調色盤（chr_world.js）
+
+| 項目 | 數量 | 契約 |
+|---|---:|---|
+| `CR.SPR_WORLD`（`W_` 前綴） | **52 磚** | ≤ 128（實測落在合併 bank 的索引 128..179） |
+| `CR.BG_WORLD`（`W_` 前綴） | **33 磚** | ≤ 192（實測索引 64..96） |
+
+- 精靈：小蜂 2 幀（8×8）、敵彈 2 幀（8×8）、砲台 2 幀、之字機 2 幀、硬殼 2 幀、魔王外殼板（完好 / 龜裂）、魔王核心（開 / 合）、雷射砲口 2 幀、膠囊 2 幀、爆炸 4 幀（皆 16×16 = 4 磚 或 8×8 = 1 磚）。
+- 背景：星空 2 種、小行星 3 種（16×16）、碎片 2 種、要塞（牆 / 鉚釘板 / 直管 / 橫管 / 壁燈 / 地板頂面 / 天花板底面 / 內部填充）、魔王區背板 + 支柱、魔王艦體 4 種、雷射（預告 / 光束）。
+- **背景磚沒有翻轉屬性**（2C02 的 nametable 沒有 flip bit），所以天花板底面與地板頂面各畫一張；精靈的 flipV 只用在「貼天花板的砲台」。
+- **名稱表列 0 永遠看不到**（顯示裁上下各 8 線），所以天花板的管線通道放在列 1。
+- 調色盤（`CR.WORLD_PAL`，`CR.CHR_WORLD.applyPalettes(ppu, withFallback)`）：
+
+| 組 | 色 | 用途 |
+|---|---|---|
+| bg1 | `$07 $17 $28` 深褐 / 橘褐 / 金 | 小行星、碎片 |
+| bg2 | `$01 $11 $21` 深藍 / 藍 / 亮藍 | 要塞牆面 / 天花板 / 地板 / 管線 / 壁燈 |
+| bg3 | `$06 $10 $30` 暗紅 / 灰 / 白 | 星空點、魔王區背板、魔王艦體、雷射 |
+| spr2 | `$0F $1A $38` 黑 / 綠 / 淡黃 | 小蜂、之字機、敵彈、**魔王核心開啟**（＝可打的視覺訊號） |
+| spr3 | `$0F $11 $30` 黑 / 藍 / 白 | 砲台（主體刻意用白）、硬殼、魔王外殼板 / 核心閉合、雷射砲口 |
+
+底色 `$0F`；bg0 / spr0 / spr1 一律不碰（ship 的 `CR.PAL`）。**爆炸借 spr1（紅黃白）、紅膠囊 spr1、藍膠囊 spr0**（依 ship 在 `CR.PAL` 註明的分配）。同屏實測 9~11 色，遠低於 25。
+
+### 三、地形（12 畫面 = 384 欄 × 26 列；列 26..29 是 HUD，欄串流永不觸碰）
+
+RLE 段表 24 段（`[欄數, 天花板列數, 地板列數]`）+ 決定性 LCG 佈點（種子 `0x5A17`，30 顆小行星 + 26 塊碎片），**沒有明碼陣列**。
+
+| 段 | 欄 | 內容 |
+|---|---|---|
+| ① 小行星帶 | 0..127 | 無天花板 / 地板；星空 2 種 + 30 顆可撞小行星（16×16）+ 碎片；欄 96 起地板 / 天花板漸生 |
+| ② 要塞入口 | 128..287 | 天花板 / 地板 3..8 列起伏（窄道 5+8 / 8+5 / 6+6）、鉚釘板每 4 欄、地板直管每 8 欄、壁燈每 12 欄、貼地 / 貼天砲台 |
+| ③ 核心室 | 288..383 | 等高通道（3/3）+ 暗紅背板 + 直立支柱；相機到 `CAM_MAX = 2816` 後捲動停止、魔王進場 |
+
+屬性表以 16×16 為單位掃 2×2 磚決定組別（有岩石 → 1、有結構 → 2、其餘 → 3）。
+`solidAt` 與名稱表磚種在測試裡做 32×26 全掃比對，0 不一致。
+
+### 四、出怪表摘要（enemies.js `buildTable`，`NES.SH.Spawner` 格式）
+
+**56 個事件**，欄位遞增；捲動 0.5 px/幀 ⇒ **1 欄 = 16 幀**、全關 ≈ 5632 幀 ≈ 94 秒。
+
+| 段 | 欄 | 事件數 | 間隔 | 內容 |
+|---|---|---:|---|---|
+| ① | 20..122 | 13 | 6~10 欄（≈ 1.6~2.7 秒） | fan 編隊 ×5、zig 單 / 雙 / 三、tank |
+| ② | 128..284 | 29 | 4~6 欄（≈ 1.1~1.6 秒） | 砲台（貼地 / 貼天交替，共 14 座）+ fan / zig 群 / tank 混編 |
+| ③ | 290..343 | 14 | 3~5 欄（≈ 0.8~1.3 秒） | zig 三 / 四連、tank 連發、fan；最後接魔王 |
+
+- 同屏（非魔王）敵人硬上限 **10**（`allocEnemy` 擋住），配合每線 8 精靈 + `NES.SH.OAM` 輪替。
+- 砲台 `spawnTurretAt(col, ceiling)` 由 stage 依該欄的 `ceilAt/floorAt` 算 y，貼天花板版用 `flipV`。
+
+四種敵人（碰撞框 / hp / 分數 / 行為）：
+
+| kind | 框 | hp | 分 | 行為 |
+|---|---|---:|---:|---|
+| `fan` 蛇行小蜂 | 8×8 | 1 | 100 | 編隊 5 隻、−1.5 px/幀 + 正弦（振幅 20 px、約 85 幀一圈）；**第 3 隻是標記個體**，全滅 → 在它的死亡位置掉膠囊；有個體逃出畫面就不算全滅 |
+| `turret` 地面砲台 | 12×12 | 2 | 200 | 釘在世界欄（`wx − camX`），每 90 幀 `NES.SH.aim` 射 1 彈；射擊前 20 幀砲管伸出（預告） |
+| `zig` 之字機 | 12×12 | 1 | 150 | −1.25 px/幀，每 **32 幀**換垂直方向（±1.0 px/幀），撞到遊戲區上下緣反彈 |
+| `tank` 直衝硬殼 | 12×12 | **3** | 400 | 生成時鎖定船的高度，−2.5 px/幀直衝；**不算小敵**（藍膠囊清屏殺不掉） |
+
+敵彈：碰撞框 4×4 / 精靈 8×8 兩幀交替、**基礎速度 2.0 px/幀**；`CR.ship.rank() >= 2` → ×1.25（2.5）、`>= 3` → 砲台改**預判射擊**（用 stage 自己量的船位移外推 20 幀）。**rank 不影響出怪表**。
+
+### 五、魔王「核心要塞」（boss.js）
+
+48×48：**艦體 6×6 用背景磚**（核心室捲動停止 ⇒ 名稱表就是畫布），只有可打 / 會動的部位用精靈
+（4 片板 ×4 顆 + 核心 4 顆 + 砲口 3 顆 = 最多 23 顆，**每條掃描線最多 4 顆**）。
+
+| 階段 | 觸發 | 內容 | 形變圖 |
+|---|---|---|---|
+| 0 進場 | `camX ≥ 2816`（或 `spawnTest('boss')`） | 從 x=256 滑到 x=176，60 幀；落位那一幀寫 36 byte 艦體 | — |
+| 1 外殼 | 進場結束 | 4 片板各 **hp 4**（半血換龜裂圖）；只有板子可被打中；每 100 幀 1 發瞄準彈 | ① 完整裝甲 |
+| 2 核心 | 4 片打光 | 核心 **hp 8**；**合 90 幀（無敵）/ 開 60 幀（可打）**，開啟瞬間放環形 8 彈 | ② 外殼脫落 |
+| 3 三連雷射 | 核心 hp ≤ **3** | 預告 30 幀 → 發射 60 幀 → 冷卻 60 幀（+ 每輪環形 8 彈）；3 條橫線用**背景磚**拼（各 22 磚 = 66 byte，狀態切換那一幀才寫） | ③ 結構崩壞 |
+| 4 死亡 | 核心打爆 | 大爆炸 90 幀（每 6 幀一朵）→ `CR.stage.cleared = true` | 清除 |
+
+**總血量 24**（4×4 + 8，依總控轉述的研究 §10 調整）。
+雷射的碰撞用 3 顆「大子彈」放進 `CR.stage.bullets`（`w = 砲口到畫面左緣、h = 6、bg = true`），
+所以 main 既有的「敵彈 × 船」判定直接生效，畫面則完全不吃精靈額度。
+除錯：`CR.Boss.force(1|2|3)`、`CR.Boss.state()`、`?boss=1|2|3`。
+
+### 六、測試與截圖
+
+`games/cruiser/test_stage1.py`：**128 項，128 通過**（`../卡比之星/.venv/bin/python games/cruiser/test_stage1.py -v`）。
+分七組：① 契約介面 / CHR 磚分配（W_ 精靈 ≥ 128、W_ 背景 ≥ 64、無 `$0D`）② 欄串流 / VBlank 預算
+（600 幀 `overFrames === 0`、單欄 ≤ 45 byte、`row0=0 rows=26`、名稱表 + 屬性表與 `tileAt/attrAt` 取樣一致）
+③ 出怪表（≥ 40 事件、遞增、三段密度漸強、`seek` 不補生）④ 四種敵人（編隊全滅掉膠囊 / 逃走不掉、
+zig 32 幀換向、tank hp 3、砲台瞄準向量朝船兩個方向 + 彈速 2.0、貼天 / 貼地 y 值、膠囊 −0.5 px/幀無壽命、
+每 16 顆藍膠囊）⑤ `clearScreen` / `solidAt`（32×26 全掃與磚種一致）/ `checkpoint` / `restart` / `spawnTest`
+⑥ 魔王三階段 hp 與開合週期（90/60 實測）、雷射預告 → 發射 → 3 顆大判定彈 + 背景磚、環形 8 彈、死亡 → cleared
+⑦ lint（400 幀色數 ≤ 25、0 壞像素、0 超支、每線精靈 ≤ 10、`flickerStep === 0`）。
+
+截圖（`shots/agent_stage/`，全部 `--lint` PASS）：
+
+| 檔 | 指令 | lint |
+|---|---|---|
+| `asteroid.png` | `--url cruiser.html --query "camx=150" --script "tap start 1; step 210"` | colors=11、maxSprLine=3 |
+| `fortress.png` | `--query "camx=1320" --script "tap start 1; step 250"` | colors=10、maxSprLine=4 |
+| `boss1.png` / `boss2.png` / `boss3.png` | `--query "boss=1\|2\|3" --script "tap start 1; step 120"` | colors=10/11/10、maxSprLine=6/6/5 |
+
+`bash tools/run_all.sh --quick`：**全 PASS**（node --check 31 檔、8 支測試、build --check）。
+
+### 七、契約異動 / 跨檔需求
+
+**已照做（總控轉述的兩批指示）**
+
+1. `NES.SH` 全面採用（`Pool / OAM / Scroller / Spawner / aim / vel / aabb / sin / cos / clamp`），**沒有保留任何 fallback**；角度 0=右 / 64=下 / 128=左 / 192=上。
+2. `Scroller` 用 `{nt:2, cols:384, row0:0, rows:26, tileAt, attrAt}`，**不碰 `ppu.scroll` / `ppu.split`**（main 自己設）；`reset()` 只在 `init` / `restart`（＝換關 / 檢查點）呼叫，且同時做 `Pool.freeAll` + `Spawner.seek`。
+3. `Spawner` 的 `fn(ctx, col, entry)` 簽章。
+4. 捲動 **0.5 px/幀**、檢查點 **每 512 px**（第 1 關共 6 個：0 / 512 / 1024 / 1536 / 2048 / 2560，研究 §10-4 [源]；回應 ship 的第 5 條）、敵彈基礎 **2.0 px/幀**、膠囊 **−0.5 px/幀無壽命**、
+   **每第 16 顆膠囊藍色（由 stage 計數 `capsuleSeq`，ship 不必再數）**、魔王總血量 **24** + **每階段換一張形變圖**、
+   `rank` 讀 `CR.ship.rank()`（≥2 彈速 ×1.25、≥3 預判射擊，不影響出怪表）。
+
+**契約澄清（已與 main.js 對齊，請總控寫進 ENGINE_API / TASKS）**
+
+5. **`solidAt(x, y)` 是畫面座標**（不是世界座標）。main.js 目前就是丟船的畫面矩形四角進來，兩邊一致；世界座標版是 `solidAtWorld(wx, y)`。
+6. **`CR.stage.boss` 不存在**：魔王的 4 片外殼板與核心是 `CR.stage.enemies` 池裡的一般成員（`kind` 為 `bplate` / `bcore`、`boss === true`），所以 main 既有的「自機彈 × 敵」「敵 × 船」迴圈**自動涵蓋魔王**，`main.js` 裡 `s2.boss` 那幾行是空轉（不影響正確性，可刪）。
+7. **記分**：stage 在 `kill()` 內累加 `pendingScore`，main 用 `takeScore()` 取走 —— 與 ship 的第 3 條約定一致，雙方都不要重複加。
+8. **`restart()` 內部已自帶 `budget.mute`**，main 外層再 mute 一次無害。
+8b. `CR.PLAY_ROWS`（ship 定的 26）在 `CR.stage.init()` 會與 stage 的遊戲區列數比對，不一致直接 throw（避免地形悄悄蓋掉 HUD）。
+9. `CR.SPR_SHIP` 的 `S_CAP_R0/R1/S_CAP_B` 目前沒被用到（stage 用自己的 `W_CAP0/1` + ship 的 spr1/spr0 調色盤畫紅 / 藍膠囊）。想省 3 磚的話整合時刪 ship 那邊即可 —— 回應 ship 的第 9 條。
+10. 爆炸磚：stage 會**優先用 ship 的 `S_EXPL0..3`**（`pick(['S_EXPL0','W_EXPL0'])`），ship 缺席才退回自帶的 `W_EXPL0..3`。目前 ship 的 bank 沒有 `S_EXPL*`（用的是 `CR.Fx`），所以實際畫的是 `W_EXPL*`，調色盤用 ship 的 spr1。
+
+**尚未做 / 已知問題**
+
+11. 小行星只有「可撞」沒有「可打碎」（研究裡 FC 版的隕石是可破壞的）。要做需要把 16×16 的岩石搬進敵人池（多 30 個 Pool 槽）或做「名稱表即時改磚」，兩者都會吃 VBlank 預算，先不做。
+12. 魔王三連雷射同時發射時，畫面上與船 / 自機彈同線會超過 8 精靈；雷射本身走背景磚不受影響，但砲口 3 顆 + 核心 4 顆在同一段掃描線帶，`NES.SH.OAM` 的輪替會讓砲口偶爾閃一幀（真機行為，靜態截圖看得到）。
+13. 出怪表沒有做「rank 影響編隊密度」（契約明文禁止），也沒有做二週目強化。
+14. `?camx=` / `?boss=` 的除錯跳關是在第 2 次 `update` 才套用；如果 main 之後改成「title 畫面也呼叫 `stage.update`」，跳關會提早到標題畫面發生（畫面仍正確，只是標題文字會被地形蓋掉）。
+
+---
+
+## star-world（R2b）
+
+2026-09-19｜《星塵勇者》W1 世界層完成：`games/star/chr_world.js`、`levels_w1.js`、`enemies.js`、`boss.js`、`test_w1.py`。
+**164 項測試全過**，`bash tools/run_all.sh --quick` 全綠，5 張 harness 截圖 + 4 張 `star.html` 實機截圖 lint PASS（色數 8~11 / 25）。
+
+### 關卡表（W1 四關，全部原創；列 0–3 是 HUD、列 4–29 是遊戲區、groundRow = 24）
+
+| 關 | 主題 / 曲 | 欄數（畫面） | 敵人（roller / bouncer / flyer） | 金幣 | 檢查點 | GOAL | 起點安全區 | 新壓力 |
+|---|---|---|---|---|---|---|---|---|
+| 1-1 | ground 草原 | 384（12） | **7**（5 / 1 / 1） | 38 | 134、256 | 旗桿 col 350 | **96 欄 = 3 畫面** | 走跳、? 磚、管子、第一個坑 |
+| 1-2 | cave 洞窟 | 320（10） | **10**（7 / 2 / 1） | 36 | 96、205 | 旗桿 col 312 | 32 欄 | 尖刺、上下兩層單向木板、狹窄天花板、隱藏金幣房（288–302） |
+| 1-3 | sky 天空 | 384（12） | **13**（0 / 4 / 9） | 63 | 194、298 | 旗桿 col 356 | 32 欄 | 沒有地面（掉下去就死）、20 座浮台、間距 4–6 欄（≤ 4 格）、飛行敵 |
+| 1-4 | castle 城堡 | 256（8） | **14**（9 / 3 / 2）**+ 魔王** | 32 | 92、190 | 魔王房 col 248 | 32 欄 | 熔岩坑（6 處）、無底坑、密集敵人、橋 + 斧頭機關 |
+
+難度曲線（研究 04 §5.1 鋸齒上升）：敵人數 7 → 10 → 13 → 14 嚴格遞增，1-4 再疊魔王。
+1-1 逐條對應研究 03/01 ⑦「四步教學」：①0–95 空地 + 金幣拱形引導到 **第一個 ? 磚（col 20）**
+②**安全跳**（col 110–115 的淺溝，掉下去不會死、有金幣獎勵）③col 124 才是第一個真坑
+④管子高度 2 → 3 → 4 格遞增（col 64 / 172 / 232）。
+
+### API（給 star-hero / star-audio / qa）
+
+| 成員 | 說明 |
+|---|---|
+| `ST.TILE` / `ST.TILE_COUNT` / `ST.TILE_KIND` | 38 個**磚語意碼**（不是 CHR 索引）；契約要求的 13 個名字全在 |
+| `ST.solidKind(t)` | `'solid' \| 'oneway' \| 'hurt' \| 'none' \| 'slopeL' \| 'slopeR'`，**O(1) 陣列查表**，越界回 `'none'` 不 throw |
+| `ST.isSolid / isBlocking / isHurt` | 便利包裝 |
+| `ST.LEVELS['1-1'..'1-4']`、`ST.LEVEL_IDS`、`ST.Levels.{get,next,rebind,ids}` | 四關 |
+| `level.tileAt(c,r)` | **語意碼**（O(1)，Uint8Array 直接索引） |
+| `level.chrAt(c,r)` | **PPU 磚索引**（餵 `NES.SH.Scroller` 的 `tileAt`；熔岩會依 `ST.World.anim` 切 2 幀） |
+| `level.attrAt(c16,r16)` | 0..3，依主題配色預先算好 |
+| `level.kindAt(x,y)` / `solidAt(x,y)` / `tileAtPx(x,y)` | 世界像素座標；左右邊界回 `'solid'`、底部回 `'none'`（讓主角掉出畫面） |
+| `level.setTile(c,r,k)` / `dirtyCols` / `onTileChange` / `clearDirty()` | 執行期改地形（? 磚頂出、橋斷），會順手重算該 16×16 區塊的屬性 |
+| `level.surfaceRow(c[,from])` / `surfaceY` / `checkpointFor(col)` / `respawn(col)` | 找地面 / 檢查點復活點（`from` 預設列 14，避開洞窟 / 城堡的天花板） |
+| `level.{id,cols,rows,theme,music,groundRow,safeCols,start,goal,checkpoints,spawns,boss,axe,coins,enemies}` | 契約欄位 |
+| `ST.BG_WORLD`（45 磚）/ `ST.SPR_WORLD`（116 磚槽） | 背景 `BG_` 前綴、精靈 `W_` 前綴（8×16 配對）；都在契約上限內（192 / 128） |
+| `ST.World.bind(bgBank, sprBank)` | **main 合併 bank 之後必須呼叫**；之後 `bgIndex(name)` / `oam16(name)` / `level.chrAt` 才有值（main.js 已經呼叫） |
+| `ST.World.applyPalettes(ppu, theme)` | 只設 backdrop + bg/spr 的第 1~3 組（第 0 組留給 star-hero 的 HUD / 主角） |
+| `ST.PAL_WORLD[theme]` | 四主題調色盤（見下） |
+| `ST.World.setAnim(n)` / `.anim` | 熔岩 2 幀動畫的幀號（main 每 16 幀推一次） |
+| `ST.Scroll.create(ppu, level[, opts])` | `NES.SH.Scroller` 的薄包裝，已填好 `{nt:2, cols, row0:4, rows:26, tileAt:level.chrAt, attrAt:level.attrAt}`（一欄 26 + 屬性 13 = **39 byte**）；`NES.SH` 缺席時自動退回等價實作 |
+| `ST.Enemies.{init,reset,seek,update,draw,spawn,spawnTest,stomp,kill,hit,starKill,overlap,each,state,count,pending,CONST}` | 見下 |
+| `ST.Boss.{init,reset,spawn,update,draw,stomp,hit,hitAxe,breakBridge,die,box,state,dead,hp,phase,axe,hammers,CONST}` | 見下 |
+| `ST.rle(str, cols)` | 地圖用的 RLE 展開器（`<次數><字元>`） |
+
+**敵人**（`ST.Enemies`，物件池 12 隻、零 GC；出「畫面右緣 +16 px」啟動、落後相機 48 px 或掉出畫面回收）
+
+| kind | 行為 | 可踩 | 常數 |
+|---|---|---|---|
+| `roller` 岩球 | 0.5 px/幀走、撞牆轉向、`edge:true` 時坑邊不掉 | ✔ 壓扁 30 幀後消失 | `SMB.enemySlow` |
+| `bouncer` 彈跳球 | 原地每 **60 幀**彈一次，`vy = −4`；上升用 SMB `gHold`、下降用 `gFall` ⇒ 跳 **64 px（4 格）**、滯空 49 幀 | ✔ 踩了**停 60 幀**再彈（不會死） | `BOUNCE_PERIOD 60 / STUN_FRAMES 60` |
+| `flyer` 飛行體 | x 向左 0.75 px/幀、y 正弦 **±24 px**（週期 128 幀） | ✘ 踩到 = 受傷 | `SMB.enemyFast / FLY_AMP 24` |
+
+被無敵星塵撞到 → `kill()` 死亡飛出（`vy −3`）→ 掉出畫面回收。`draw(oam)` 用 prio 3（壓扁 / 死亡 prio 4）。
+
+**魔王「鐵鎚王」**（`ST.Boss`，1-4 橋上，32×32 = 8 顆 8×16 精靈、碰撞框 28×30）
+
+- 循環（研究 04 §3.1）：`walk`（走近 ≤ 90 幀）→ `jump`（`vy −5`）→ `throw`（**3 顆錘子、間隔 20 幀**、拋物線 `vy −4 / g 0.25`）→ `rest`（**40 幀＝弱點窗口**）→ 回到 `walk`。
+- **踩頭 3 次**：每次擊退 16 px + **無敵 60 幀**（無敵中再踩無效、每 4 幀閃一次），第 3 次 → 墜落 → `ST.Boss.dead = true`。
+- **或**主角碰到橋尾斧頭（col 242）→ `breakBridge()` 把整排 `BRIDGE` 換成 `EMPTY` → 魔王掉進熔岩 → `dead = true`。
+- 兩條路都測過；`setTile` 可逆（測試會把橋復原）。
+
+**調色盤**（backdrop + bg1..3 / spr1..3；bg0 / spr0 留給 star-hero）
+
+| 主題 | backdrop | bg1 | bg2 | bg3 | spr1 道具 | spr2 敵 A | spr3 敵 B / 魔王 |
+|---|---|---|---|---|---|---|---|
+| ground | `$22` | `07 17 2A` 泥土 / 草 | `0F 17 28` 磚 / ? | `0F 1A 30` 雲 / 灌木 / 管 | `0F 27 30` | `0F 07 17` | `0F 11 21` |
+| cave | `$0F` | `00 10 30` 岩 / 尖刺 | `07 17 27` 木板 / 磚 | `01 11 21` 鐘乳石 | `0F 27 30` | `0F 00 10` | `0F 14 24` |
+| sky | `$21` | `00 10 30` 雲台 | `0F 17 28` 磚 / ? | `11 38 30` 星 | `0F 27 30` | `0F 16 26` | `0F 11 31` |
+| castle | `$0F` | `00 10 30` 石磚 | `06 16 27` 熔岩 | `0F 17 37` 橋 / 鏈 / 斧 / 金幣 | `0F 27 30` | `0F 06 16` | `0F 17 28` |
+
+### 測試（`games/star/test_w1.py`，**164 項**）
+
+`about:blank` + `add_script_tag`（engine 7 檔 + 自己 4 檔），HUD 字型 / 主角精靈用 64 + 128 個空白磚假造，**完全不依賴 star-hero 的 main.js**。
+① CHR 合併與契約區間（8）② 磚語意 / solidKind（8）③ 四關地圖合法性（36：`tileAt` 全域合法、`chrAt` 落在 bank 內且 ≥ 64、`attrAt` 0..3、金幣 ≥ 30、檢查點 ≥ 1、畫面數 / 主題）
+④ **可達性 BFS**（29：起點 → GOAL 有路、每個檢查點可達、坑寬 ≤ 9 欄、牆高 ≤ 8 列、起點安全區、地面敵人站在可達地形上）
+⑤ 敵人行為（25）⑥ 魔王（20）⑦ 捲動 / VBlank 預算（12：每關 400 幀 `budget.over === 0`、單幀 ≤ 45 byte、名稱表與 `chrAt` 一致）
+⑧ 跨模組整合介面（14）⑨ lint（12：四主題各 ≤ 25 色、無非 64 色像素）。
+
+截圖：`games/star/test_w1.py --shots shots/star_world`（四關各一張 + 魔王房）＋
+`tools/shot.py --url star.html --query "level=1-2"` 的實機圖，全部 `nes_lint.py` PASS。
+
+### 契約異動（總控整合用）
+
+1. **`level.tileAt(col,row)` 回的是「磚語意碼」，不是 PPU 磚索引**（契約的 `ST.solidKind(tileAt(...))` 只有這樣才成立）。
+   餵 `NES.SH.Scroller` 的是新增的 **`level.chrAt(col,row)`**；`ST.Scroll.create(ppu, level)` 已經包好，直接用就對了。
+2. **`ST.TILE` 從契約的 13 個擴到 38 個**（契約的名字一個不少）：多的是 `DIRT / BLOCK / PLAT_L / PLAT_R /
+   PIPE_TL,TR,BL,BR / GOAL_TOP / FLAG / AXE / BRIDGE / CHAIN / CLOUD_L,R / BUSH / HILL_L,M,R / TREE_T,B /
+   STAR_S,B / STAL / CAVEBG / WINDOW`。多出來的 `solidKind` 都是 `'none'` 或 `'solid'`，舊寫法不會壞。
+3. `goal` 是 **`{col, row}`**（契約只寫 `{col}`）；另外多了 `safeCols / groundRow / boss / axe / coins / enemies`。
+4. **「起點安全區（前 3 畫面無敵）」的落地解釋**：`level.safeCols` = **1-1 用 96 欄（3 畫面，教學關，研究 04 §1.2）**，
+   1-2 / 1-3 / 1-4 用 32 欄（1 畫面）。測試驗的是「`safeCols` 內無坑 / 無害磚 / 無敵人生成」。
+   1-2 起就照難度曲線儘早給壓力，不然 10 / 8 畫面的關卡只剩一半能放內容。
+5. **坑寬上限訂 9 欄（72 px）不是 10 欄**：跨 w 欄的坑，起跳格與落地格的距離是 `w + 1`，
+   要落在「跑跳 5 格 = 80 px = 10 欄」之內 ⇒ `w ≤ 9`。1-1 最寬的坑就是 9 欄。
+6. **bouncer 的「SMB 重力」**：上升用 `SMB.jump[0].gHold`、下降用 `gFall`（＝主角長按 A 的同一條弧線）
+   ⇒ `vy −4` 剛好跳 4 格 64 px、滯空 49 幀 < 週期 60 幀。全程用 `gFall` 只會跳 17 px，太矮。
+7. `ST.Enemies.update(g)` **預設不碰主角**；只有 `g` 帶了 `onStomp / onHurt / onStar` callback 才會自動判定
+   （main.js 自己有 `stepEnemyCollisions()`，所以不會雙重處理）。
+8. `NES.SH.Scroller` 的 HUD 設定：星塵勇者的 HUD 在**上方**，所以是 **`{row0: 4, rows: 26}`**
+   （ENGINE_API §15.5 的範例是巡航艦的下方 HUD `{row0: 0, rows: 26}`）。
+
+### 跨檔需求 / 給其他 agent 的約定
+
+**給 star-hero**（下列 1~3 已經在本輪順著 `main.js` 現有寫法補在我這邊，不用改 main.js）：
+
+1. `main.js` 的 `eachEnemy` 呼叫的是 **`E.each(g, visit)`**，我原本只收 `each(fn)` ⇒ 已改成兩種都吃。
+2. `main.js` 的通用碰撞是 `if (e.stomp) e.stomp(g); else if (e.hit) e.hit(1, g); else e.alive = false;`
+   ⇒ 每隻敵人都補上 **instance `stomp()` / `hit()`**（契約本來就寫 `hit()`）。沒有它們的話
+   岩球會瞬間消失（不是壓扁 30 幀）、彈跳球會被打死（應該只暈 60 幀）。
+3. **`main.js` 目前沒有魔王的碰撞**（`stepEnemyCollisions` 只走 `ST.Enemies`）⇒ `ST.Enemies.each` 現在會
+   **一併列舉魔王與錘子**（魔王 `stompable=true` + `stomp()`、錘子 `stompable=false`），這樣主角就踩得到魔王、
+   也會被錘子打到。若 star-hero 之後改成自己處理魔王，設 **`ST.Enemies.includeBoss = false`** 關掉即可。
+   另外 `ST.Boss.box()` 已按 main 的 `ST.Boss.box(g)` 期待提供（回 `{x,y,w,h}` 或 `null`）。
+4. `ST.Boss.dead === true` = 過關（斧頭與踩頭 3 次兩條路都會設）。`ST.Boss.axe.taken` 可以用來播斧頭音效。
+5. 熔岩動畫：`ST.World.setAnim(n)` 只是切 `chrAt` 回傳的磚，**要看到動畫得重寫該欄名稱表**（main 目前每 16 幀
+   推一次 anim，但只有新露出的欄會換幀；要全屏動畫得每幀補寫 1~2 欄，仍在 160 byte 預算內）。
+6. 檢查點復活時請呼叫 **`ST.Enemies.seek(camX)`**（前方敵人重新排隊）與 `ST.Boss.reset()`。
+
+**給 star-audio**：關卡的 `music` 欄位 = `'ground' | 'cave' | 'sky' | 'castle'`，1-4 進魔王房時建議切 `'boss'`
+（可用 `ST.Boss.active` 判斷）。
+
+**給 qa2**：`games/star/test_w1.py --shots <dir>` 會產四關 + 魔王房截圖；
+`ST.Enemies.state()` / `ST.Boss.state()` 是現成的快照（不需要 `?debug=1`）。
+
+### 已知問題 / 尚未做
+
+1. **斜坡沒有真的用上**：`ST.TILE.SLOPE_L/R` 與 `solidKind` 的 `'slopeL'/'slopeR'` 已經備好、磚也畫了，
+   但四關都沒放斜坡（契約寫「可選」，而且 star-hero 的 `hero.js` 目前沒有斜坡物理）。
+2. **旋轉火棒（1-4 可選）沒做**：熔岩 + 密集敵人已經夠，火棒要再一組精靈 + 旋轉狀態。
+3. **魔王實際畫出來約 24×30 px**（精靈格是 32×32），肩寬沒有吃滿；要更有壓迫感得重畫上半身。
+4. **1-2 的隱藏金幣房**（288–302，5 枚）只是「不在主線上」，沒有做「撞牆才出現」的祕密牆。
+5. **熔岩 2 幀動畫要 main 配合重寫名稱表**（見上方跨檔需求 5），目前實機看到的是靜態熔岩。
+6. **1-3 的 20 座浮台間距刻意保守（4–6 欄）**：BFS 模型允許到 10 欄，之後想加難度還有空間。
+7. `flyer` 沒有做「被踩到時把主角往上彈一點點」的緩衝，直接算受傷（研究 04 §2.1 的刺龜原型就是這樣）。
+
+---
+
+## nes-touch（R2）
+
+**2026-09-19｜完成：三個入口頁（`game.html` 測試室 / `star.html` 星塵勇者 / `cruiser.html` 星塵巡航艦）手機可玩**
+— 新增 `engine/touch.js`（NES.Touch 觸控虛擬手把）、三頁 head/CSS/啟動段改手機版面、`tools/mobile_shot.py`、
+`tools/test_touch.py`（180 項全綠）、`tools/build.py` 載入順序 +`touch.js`、`docs/ENGINE_API.md` §16。
+`bash tools/run_all.sh`（完整，非 --quick）總結 PASS。
+
+### 做了什麼
+
+| 檔案 | 內容 |
+|---|---|
+| `engine/touch.js`（新） | 純 DOM 覆蓋層：搖桿（8 方向 + ±6° 磁滯 + 死區 + 浮動底座）、A / B（右下大顆 + 左邊）、SELECT / START 小長條、全螢幕；自動顯示 / 鍵盤淡出 / 再觸控出現；設定存 `localStorage.nes_touch`。API 見 ENGINE_API §16 |
+| `game.html` / `star.html` / `cruiser.html` | 只動 `<head>`（viewport `viewport-fit=cover, user-scalable=no`、`100dvh`、`touch-action:none`、`user-select:none`、safe-area）與底部啟動 `<script>` 的 `fit()` / `place()`；**games 腳本清單一行未動**；engine 區塊加 `<script src="engine/touch.js">`（在 `nes.js` 之前） |
+| `tools/build.py` | `ENGINE_ORDER` 插入 `touch.js`（`shmup.js` 之後、`nes.js` 之前）；`--check` 三個 `--src` 都 PASS |
+| `tools/mobile_shot.py`（新） | 從 `../卡比之星/tools/mobile_shot.py` 改：`--page` 選入口頁、`__nes.step` 取代 `__kb.step`、CDP 多點觸控、`--rects` 印 `NES.Touch.rects()` + `NES_LAYOUT`、`--hint` 才保留 debug 提示列。**與任務書的一點差異**：網址用 `?debug=1&mute=1`（**不加 `scale=1`**），因為 `scale=N` 會強制整數倍、關掉手機小數倍版面 ⇒ 就看不到要驗的東西；要舊行為請自己加 `--scale 1` |
+| `tools/test_touch.py`（新） | 三頁 × iPhone 13 橫 / Pixel 5 直 × 18 項 + 桌機 1280×800 × 6 項 = **180 項** |
+
+### 版面規則（`window.NES_LAYOUT` + `nes-resize` 事件，詳表見 ENGINE_API §16.5）
+
+- 桌機（非觸控且短邊 ≥ 600）：`floor(min(vw/256, vh/224))` **整數倍置中**，行為與 R1 完全相同。
+- 手機直向：寬填滿（小數倍）、畫面貼上方（`y = safe.top`），下方整片空白帶放按鍵。
+- 手機橫向：高填滿，兩側各留 **≥ 110px**（短邊 ≥ 500 的平板 **170px**）給按鍵。
+- `nes.setScale()` 只改 backing store 且只收整數（QA R1 P2-1）⇒ 小數倍時 **backing = `ceil(scale)`（1~4 整數，實測手機都是 2）**，
+  CSS 縮到目標尺寸 + `image-rendering: pixelated`。
+- `?scale=N`（`tools/shot.py` 用）→ 強制整數倍、`mobile=false`，截圖完全可重現（R1 的所有測試 / lint 不受影響）。
+- 旋轉 / `visualViewport` resize 會**二次觸發**（iOS 工具列收合延遲）；`visibilitychange` 隱藏時 `NES.Touch.releaseAll()` + `NES.Input.inject(0,0)`。
+
+### 取捨：輸入怎麼接（**沒有改 input.js**）
+
+`engine/input.js` 沒有可以 OR 進去的第三來源（查過：只有 `replay > inject > 鍵盤|Gamepad` 三段，沒有 `setExternal`）。
+所以 touch.js 走 **inject**：
+
+1. 觸控遮罩變動且不為 0 → `NES.Input.clearInject()` + `NES.Input.inject(mask, 1e9)`（＝按住到放開）。
+2. 觸控全部放開 → `NES.Input.inject(0, 0)`（清空佇列）⇒ **鍵盤 / 手把立刻恢復**。
+3. 每 6 幀看門狗：`injectPending() < 4096` 就補注入一次（佇列被別人清掉時不會斷手）。
+
+**代價（兩條，測試有覆蓋）**
+- 觸控按著的期間鍵盤 / 手把被蓋掉（不會 OR）。手機不會同時用兩種輸入；桌機覆蓋層預設不顯示 ⇒ 實務上不衝突。
+- 觸控按著的期間，腳本注入（`__nes.press/tap`、`shot.py`）會被 `clearInject()` 清掉。工具不會同時做這兩件事。
+
+### 截圖（`shots/agent_nes_touch/`，已用 Read 逐張看過）
+
+| 檔案 | 內容 |
+|---|---|
+| `game_landscape.png` / `game_portrait.png` | 星塵測試室，iPhone 13 橫（750×342）/ Pixel 5 直（393×727），已按 START 進遊戲 + 推右 + 按 A |
+| `star_landscape.png` / `star_portrait.png` | 星塵勇者 1-1，同上（主角跳起來、搖桿旋鈕推到右、A 發亮） |
+| `cruiser_landscape.png` / `cruiser_portrait.png` | 星塵巡航艦 STAGE 1，同上 |
+
+六張都：按鍵完全不壓到畫面、不出界、畫面照 PPU 原樣（只有 CSS 小數倍縮放）。
+
+### 測試（`$PY tools/test_touch.py`，180 / 180）
+
+每組（頁 × 裝置）18 項：覆蓋層自動顯示、六顆按鍵齊全、**矩形不與畫面交集**、不出界、`overlapping=false`、
+backing 整數、`canvas.width = 256×back`、`nes.scale = back`、CSS 尺寸 = `256×scale`（±0.5）、CSS 與 `NES_LAYOUT` 一致、
+顯示倍率是小數、`mobile=true`、直向寬填滿 + 貼上方 / 橫向高填滿 + 兩側 ≥110（平板 170）、
+**觸控 START 進遊戲**、**搖桿推右 30 幀 `held(RIGHT)` 且 `__nes.state().x` 增加**（cruiser 40→70、star / demo 同樣遞增）、
+扇區 0 + `dirs.right`、放開歸零、**`pressed(A)`**、持續 `held(A)`、**右 + A 同時**、`Touch.mask()` 與 `Input.mask()` 一致、
+全放開 mask 0、**鍵盤後淡出**、再觸控出現、無 JS 例外。
+桌機 1280×800 三頁各 6 項：不顯示觸控層、**scale 整數 3**、backing 768×672、CSS 768×672 置中、`mobile=false`、無例外。
+
+### 跨檔需求（總控 / 其他 agent）
+
+1. **`tools/run_all.sh`（不是我的檔）**：③ 目前只跑 `build.py --check`（＝只驗 `game.html`）。
+   建議改成三行：`--src game.html` / `--src star.html` / `--src cruiser.html`。
+   我已手動驗過三個都 PASS，但想進 CI 得動 run_all.sh。
+2. **core agent（`engine/input.js`）**：若要讓「觸控 **OR** 鍵盤 / 手把」而不是覆蓋，
+   請加一個第三來源，例如 `NES.Input.setExternal(mask)`（在 `poll()` 裡 `m = live | padMask() | external`，
+   優先權排在 inject 之下）。加好之後 touch.js 只要把 `applyInput()` 換成 `setExternal(touchMask)` 一行，
+   上面兩條代價就都消失。
+3. **games agents**：不需要任何改動 —— 觸控只經 `NES.Input`，遊戲讀到的是一樣的八鍵。
+   若遊戲想自己畫「手機提示」，可讀 `window.NES_LAYOUT.mobile` 與 `NES.Touch.active()`。
+4. **ui / 設定頁（若之後有）**：`NES.Touch.setLayout({side, size, opacity, stick, stickFloat, mode})` 即時套用並存檔，
+   `NES.Touch.rects()` 可拿來畫預覽。
+
+### 已知問題 / 尚未做
+
+1. **`?debug=1` 的提示列 `#hint`** 會壓在畫面最下面（蓋到 HUD）。正式遊玩（無 `?debug=1`）不顯示；
+   `mobile_shot.py` 預設會先把它隱藏再截圖（`--hint` 可保留）。
+2. **backing store 只到 4 倍**：iPhone 13 DPR=3、顯示倍率 1.53 ⇒ backing 2（512×448）再由 CSS 拉到 391 CSS px
+   = 1173 device px，屬於非整數的最近鄰放大，像素大小會有 ±1 device px 的不均。要完全均勻得讓 backing 跟著 DPR 走
+   （例如 `ceil(scale × dpr)`），代價是 PPU 每幀要多畫 4 倍面積 —— 先選了效能。
+3. **沒有做「按鍵編輯 / 拖曳自訂位置」**：只有 `side` / `size` / `opacity` / `stick` / `stickFloat` 五個旋鈕。
+4. **iOS Safari 沒有 Fullscreen API** ⇒ 全螢幕鍵會整顆隱藏（`NES.Touch.fullscreenSupported === false`），
+   要全螢幕請用「加入主畫面」。目前三個入口頁都還沒有 PWA manifest / service worker。
+5. **平板橫向留白 170px** 是照總控給的數字寫死的；真的 iPad（1080×810）實測倍率 2.89、兩側各 170，剛好。
+   更窄的機種（例如 16:10 小平板）會退回「整個塞滿 + 按鍵半透明壓邊」，此時 `NES.Touch.overlapping === true`。
+
+---
+
+## star-hero（R2b）
+
+2026-09-19｜《星塵勇者》W1 主角層完成：`games/star/chr_hero.js`、`hero.js`、`main.js`、`test_star.py`、`tools/playthrough_star.py`。
+**132 項測試全過**；`tools/playthrough_star.py --all`（預設 seed=1）**四關全部 cleared**；
+`bash tools/run_all.sh --quick` 只剩 `cruiser/test_cruiser.py` 一項 FAIL（R2 ship agent 的檔，與本層無關）；
+8 張截圖 `nes_lint.py` 全 PASS（色數 9~11 / 25、非法像素 0）。
+
+### API
+
+| 成員 | 說明 |
+|---|---|
+| `ST.SPR_HERO`（29 對 = **58 磚**，`H_` 前綴）| 主角 16×24 原創美術，全部 `NES.CHR.tile16` 配對（8×16 精靈模式）。上半身 4 種（`H_BODY` 站 / 走 / 跑 / 轉身、`H_BJUMP` 跳 / 落、`H_BHURT` 受傷、`H_BDEAD` 死亡）× 左右；腳 8 種（`H_L0/L1/L2` 走 3 幀、`H_LJ` 收腿、`H_LF` 張腿、`H_LT` 煞車、`H_LH`、`H_LD`）× 左右；`H_CR` 蹲 16×16、`H_SL` 滑 16×16、`H_COIN` 金幣粒子 |
+| `ST.BG_HUD`（別名 `ST.BG_HERO`，**58 磚**）| HUD 字型：`SP`（**磚 0 = 空白**）+ 10 數字 + 26 字母 + 20 符號（複製 `NES.CHR.DEMO.FONT`，契約明文允許）+ 3 個自製圖示 `HCOIN` / `HCLOCK` / `HHEAD` |
+| `ST.BG_FALLBACK`（11 磚，`F_` 前綴）| 後備地形磚，**永遠**合併進 `st_bg`；只在「關卡沒給磚名」與內建測試關時才會被畫到 |
+| `ST.charName(ch)` / `ST.textTiles(bank, str)` / `ST.oam16(bank, name)` | 文字 → 磚名 / 磚索引；8×16 的 OAM tile 值（`index \| 1`） |
+| `ST.Hero`（hero.js）| `create()` / `reset(h,x,y,facing)` / `update(h,ctx)` / `draw(h,g,oam,tiles,camX)` / `stomp(h)` / `hurt(h,ctx,fromX)` / `kill(h,ctx)` / `addCoin(h,ctx,n)` / `setCrouch` / `boxH` / `tileNames()`；常數 `W=12 H=22 CROUCH_H=14 INV_FRAMES=120 HURT_FRAMES=12 DEATH_FRAMES=60 BOUNCE=-768 DROP_FRAMES=10 COIN_1UP=100` |
+| `ST.hero`（= `g.hero`）| 契約欄位 `x, y, w, h, vx, vy, state('idle\|walk\|run\|jump\|fall\|crouch\|slide\|hurt\|dead'), facing, onGround, inv, coins, lives, score, power` 每幀同步 |
+| `window.GAME`（main.js）| `init / update / draw / state`；`state()` 回契約的 `{mode, level, x, y, vx, vy, state, onGround, camX, lives, coins, score, time, enemies}` **加上** 30 個測試 / 機器人用欄位（`xSub/ySub/apexPx/screenX/inv/crouch/facing/checkpoint/cleared/scrNext/scrLeft/stomps/hits/bumps/deaths/oneUps/…`） |
+| `GAME.dev`（只給測試 / 機器人）| `warp(x[,y])`、`level(id)`、`setTime/setCoins/setLives/setScore`、`kill()`、`hurt(fromX)`、`tileAt/kindAt/groundYAt`、`ntTileAt(col,row)`（讀名稱表）、`bgIndexAt`、`enemyList()`、`boss()`、`layout()`、`scroller()` |
+| 網址參數 | `star.html?level=1-2`（或 `?level=test`）**直接開該關並跳過標題**；沒帶就停在標題等 START |
+
+**每幀順序**（與 `games/demo/main.js` 相同，手感才會一致）：讀輸入 → 水平加速 / 摩擦（B 跑、轉身 ×2）
+→ 起跳 `SMB.jumpStart` → 重力 `SMB.jumpGravity`（首幀半格）→ 移動 X + 磚碰撞 → 移動 Y + 磚碰撞
+→ 危險 / 互動磚掃描 → 狀態機 → 動畫 →（main）敵人 → 檢查點 → 鏡頭 → 欄串流 → 計時 → HUD → `ST.Audio.tick`。
+
+### 手感實測表（`?level=test` 內建測試關，132 項測試每項都對照下表）
+
+| 項目 | 期望（來源） | 實測 | 差 |
+|---|---:|---:|---:|
+| 靜止 → 走路上限（384 vel = 1.5 px/幀） | 41 幀（`ceil(384 ÷ 152/16)`；研究 03/01 ②「約 40 幀」） | **41** | 0 |
+| 靜止 → 跑步上限（640 vel = 2.5 px/幀） | 45 幀（`ceil(640 ÷ 228/16)`；研究 03/01 ②「約 45 幀」） | **45** | 0 |
+| 長按靜止跳（高度） | 64.00 px = 4 格（`NES.FX.SMB.jumpSim({hold:40})`，R1 fix1 定案） | **64.00** | 0 |
+| 長按全速跑跳（高度） | 80.00 px = 5 格（`jumpSim({hold:40, vx:maxRun})`） | **80.00** | 0 |
+| 點按 1 幀（高度） | 19.6875 px（`jumpSim({hold:1})`） | **19.6875** | 0 |
+| 全速跑跳水平距離 | 152.5 px（2.5 px/幀 × 61 滯空幀） | **152**（滯空 61 幀） | −0.5 px |
+| 轉身煞車（B + 反向，加速度 ×2） | 23 幀（`ceil(640 ÷ 228×2/16)`；研究 03/01 「轉向加速度 ×2」） | **23** | 0 |
+| 放開方向鍵靠摩擦停下 | 50 幀（`ceil(640 ÷ 208/16)`，FrictionData `$d0`） | **50** | 0 |
+| 受傷無敵 | 120 幀（**R2b 契約指定**；SMB 原版是 `8×21 = 168`） | **120** | 0 |
+| 蹲下碰撞框 | 12×14（契約），腳不動 ⇒ y 下移 8 | **12×14 / +8** | 0 |
+| 踩敵回彈 | −3 px/幀 = −768 vel（契約） | **−768** | 0 |
+| 空中控制門檻 | 走速起跳後按 B 不得超過 `maxWalk`（SMB：\|vx\| ≥ `$19` 才用跑步參數） | **384（= maxWalk）** | 0 |
+
+> 跳躍三個數字與 `NES.FX.SMB.jumpSim()` **逐位元相等**（測試裡直接比對），所以本層與 `tools/test_core.py`、
+> `games/demo/test_demo.py` 量到的是同一組數字 —— R1 fix1「只有一套跳躍規則」的承諾在 R2b 仍然成立。
+
+### 測試（`games/star/test_star.py`，**132 項**，Playwright 開 `star.html?debug=1&scale=1&mute=1&level=<關>`）
+
+① 手感 ±1 幀（18，含與 `jumpSim` 逐位元比對）② 狀態機 9 個狀態 + 轉移（21）③ 單向平台：下跳穿過 / 上落接住 / 蹲+A 穿下（6）
+④ 尖刺受傷 / 熔岩死亡 / 掉坑 / 時間歸零 / 死亡回檢查點 / 命盡 GAME OVER（15）⑤ 金幣 / ? 磚 → USED + 金幣 + 粒子 / BRICK 頂撞 / 100 金幣 1UP（13）
+⑥ 鏡頭雙向鎖 + **名稱表左右補欄逐格比對 `chrAt`**（9）⑦ HUD 五個欄位 + 「只寫有變的格 ≤ 4 byte」+ 屬性組 0（10）
+⑧ VBlank 預算（600 幀 `over === 0`、單幀尖峰、OAM 獨立通道）+ 150 幀 lint ≤ 25 色（7）
+⑧b PPU 設定（8×16 / 垂直鏡像 / `flickerStep=0` / split(32) / 主角占 OAM 前 4 槽 / `Lint.oam`）（6）
+⑨ 模式 title→play / GOAL→clear（時間換分）/ `?level=` 直開（含真關 1-1 煙霧測試）（12）⑩ 空中控制 / 4 磚牆 / 踩敵回彈（9）
+＋ 契約檢查（碰撞框、`SPR_HERO ≤ 128`、`BG_HUD ≤ 64`、`NES.SH` 在場、engine `missing` 為空、0 console error）（6）
+
+**大部分測試跑 main.js 的內建測試關 `?level=test`**（128 欄：淨空助跑道 45 欄 + ? 磚 / 金幣 / 4 磚牆 / 3 欄坑 /
+7 欄單向平台 / 尖刺 / 3 欄熔岩 / GOAL），所以 star-world 改關卡不會讓本檔變紅；另有一組真關卡測試，
+`ST.LEVELS['1-1']` 缺席時自動 SKIP。
+
+### 通關機器人（`tools/playthrough_star.py`）
+
+`$PY tools/playthrough_star.py --all`（另有 `--level 1-3 --seed 7 --lives 60 --max-frames 20000 -v`）。
+策略不是「看到東西就跳」，而是**用 engine 的同一套物理往前推演**：
+
+1. `window.__botSim(hold, x, y, vx[, noB])` 用 `NES.FX.SMB` + `GAME.dev.kindAt` 模擬「按住 A 幾幀」的整段跳躍
+   （含單向平台、天花板、危險磚、掉出畫面），回傳落點與是否安全。
+2. 每個「站在地上」的幀先問「完全不跳會怎樣」（往前看 75 幀）；能安全前進 ≥ 80 px 就不跳。
+3. 要跳的話**盡量晚跳**（踏空前 6~14 幀，由策略決定）——早跳會鎖在走速（SMB 空中規則）而跳不遠。
+4. 候選 `hold ∈ {10,12,15,19,24,30,40}`（外加「放開 B 的短跳」），挑**最短、而且在「早 10 px / 晚 8 px / 慢一點」
+   三種擾動下都安全、落點還有活路（兩步推演）**的那一個。
+5. 敵人：只為「可以踩、且高度相近」的敵人小跳 10 幀；飛行體從下面跑過去；無敵中直接衝。
+6. 魔王戰（1-4 沒有旗桿磚）：貼上去踩頭，`ST.Boss.dead` → 過關。
+7. 卡住（90 幀沒前進）→ 往左退（退的量逐次加大，且**不會退進後面的坑**）→ 進入「脫困窗口」；
+   死一次就換下一組策略（20 組固定表，`--seed` 決定起點 ⇒ 完全可重現）。
+
+**實跑結果（seed=1、預設 60 命）**：
+
+| 關 | cleared | frames | deaths | 備註 |
+|---|---|---:|---:|---|
+| 1-1 | ✅ | 1400 | 1 | score 4200 / time 264 |
+| 1-2 | ✅ | 1070 | 0 | score 4900 / time 249 |
+| 1-3 | ✅ | 1265 | 0 | score 11800 / time 240（天空關 20 座浮台一次過） |
+| 1-4 | ✅ | 6746 | 18 | 魔王踩頭 3 次；18 次死亡都在魔王房 |
+| test | ✅ | 407 | 0 | 內建測試關（驗證機器人本身） |
+
+### 截圖（`shots/agent_star_hero/`，`nes_lint.py` 8 張全 PASS）
+
+`a_title.png` 標題（白字、`PRESS START`）／`b_walk.png` 1-1 走路／`b_jump.png` 1-1 跳躍（收腿姿勢）／
+`b_crouch.png` 1-1 蹲下（16×16、腳不動）／`hurt.png` 受傷姿勢（閉眼、雙手張開，閃爍中的顯示幀）／
+`hud.png` HUD 特寫（`SCORE 123450`｜`@×17`｜`TIME 288`｜`WORLD 1-1`｜`^×4`）。
+
+### 已知問題
+
+1. **斜坡沒有做逐像素爬坡**：`ST.solidKind` 回 `'slopeL'/'slopeR'` 時，hero.js **一律當成整塊 solid**
+   （不會掉下去、但也不會順著斜面走）。W1 四關目前沒有用到斜坡磚，等 W2 真的要用再補。
+2. **`?magic` 之類的狀態（power）沒有內容**：契約欄位 `power` 有留、永遠是 0（W1 沒有變身道具）。
+3. **關卡切換 / 檢查點復活時整片重畫名稱表（2400 byte）**用 `timing.budget.mute = true` 跳過計帳，
+   等同真機「關掉 rendering 再重寫」。正式遊玩時那一幀畫面會直接換掉（沒有淡入淡出）。
+4. **機器人 1-4 要 18 條命**：魔王房的錘子 + 熔岩對貪婪策略很不友善（每次死亡換一組策略重試）。
+   若總控要求「3 命通關」還得再加魔王戰的閃避邏輯。
+5. **機器人 `--lives` 預設 60**（死亡數照實回報）；用 `--lives 3` 目前只有 1-1 / 1-2 / test 過得了。
+
+### 契約異動 / 跨檔需求
+
+**本層做的設計決定（與契約字面不同，已寫進測試）**
+
+| # | 契約原文 | 實作 | 理由 |
+|---|---|---|---|
+| H1 | 「受傷（無敵 120 幀閃爍、擊退）」 | 擊退只在**站在地上**時發生（0.625 px/幀 + 彈起 1.5 px/幀、硬直 12 幀）；**在空中被打完全不改變水平動量** | 空中無法再加速（SMB 規則），在坑 / 熔岩 / 天空關的空中被反推＝必死，關卡會變成運氣遊戲。改掉之後機器人 1-3 從「必掛」變成 0 死亡通關 |
+| H2 | 「斜坡上蹲 = 滑行（有斜坡才做）」 | 沒有斜坡 ⇒ 把 **`slide` 定義成「地面上按↓且 \|vx\| ≥ maxWalk」**（碰撞框同蹲 12×14） | 讓 `slide` 狀態在 W1 就能被測到；斜坡版本等 W2 |
+| H3 | 「鏡頭…往左可回捲但不越過檢查點左緣（可選）」 | 改成**不越過名稱表還留著的最左欄**（`NES.SH.Scroller` 的 64 欄環形視窗，`state().camMin`） | 越過就會看到還沒補的舊欄；比「檢查點左緣」更直接對應硬體限制 |
+| H4 | 「? 磚 / BRICK 頂撞」 | 以主角**中心所在的那一欄**判定頂到哪一格（SMB 的作法）；? 磚 → `level.setTile(USED)` + 金幣 +1 + 200 分 + 金幣粒子；BRICK 只震動 | 兩欄同時頂到時要有唯一解 |
+| H5 | 機器人「起跳長按 20 幀」 | 大跳改成**按滿整個上升段（40 幀）**，並由模擬器在 `{10,12,15,19,24,30,40}` 裡挑 | 20 幀只有約 100 px 水平距離，過不了 W1 裡 7~9 欄寬的坑 |
+
+**給 star-world（`levels_w1.js` / `boss.js`）**
+
+1. **【P1・1-4 目前只能靠踩頭過關】斧頭 `col 242` 就在橋上**（橋 = col 212..243、橋下 col 218..243 是熔岩）。
+   `ST.Boss.hitAxe()` → `breakBridge()` 會把**主角腳下那一欄一起拆掉** ⇒ 走過去碰到斧頭＝掉進熔岩必死。
+   建議二選一：①把斧頭移到橋尾右側的實地（`col ≥ 245`，那裡 row 24..29 是石地）；
+   ②`breakBridge()` 保留主角所在欄（或延遲 30 幀再拆）。目前機器人是**把斧頭當致命磚跳過去**再踩魔王頭 3 次過關。
+2. **【P2】1-4 沒有 GOAL 磚**（`goal:{col:248,row:23}` 那一格是 EMPTY）。main.js 已補上
+   「`lv.boss` 且 `ST.Boss.dead` → 60 幀後 clear」，但若之後要放旗桿，直接放 `TILE.GOAL` 即可（兩條路都通）。
+3. **【P3】`level.tileAt(col,row)` 的列 0..3 請維持 EMPTY**：那 4 列是 HUD（`split(32)` 上段）的名稱表，
+   `NES.SH.Scroller` 用 `{row0:4, rows:26}`，不會寫到，但關卡若在那裡放東西會看不到。
+4. 已對接的介面（都照 star-world 的 PROGRESS 實作）：`ST.World.bind(bgBank, sprBank)`（合併 bank 後立刻呼叫）、
+   `ST.World.applyPalettes(ppu, theme)`（bg/spr 第 0 組由本層保留給 HUD / 主角）、`ST.World.setAnim(frames >> 4)`、
+   `level.chrAt / attrAt / setTile / checkpointFor / respawn / solidAt`、
+   `ST.Enemies.init(lv, {solidAt}) / seek(camX) / update(g) / draw(oam) / each(g, fn)`、`ST.Boss.init(lv) / update(g) / draw(oam)`。
+   **主角碰撞完全交給 star-world**：`g` 上掛了 `hero / camX / level / solidAt / onStomp / onHurt / onStar / onDie / onAxe`；
+   `ST.Enemies` 缺席時本層才會用自己的 `NES.SH.aabb` 掃一遍。
+5. 本層在 `ST.LEVELS` 上**多加了一個 `'test'` 關**（只在 `!ST.LEVELS.test` 時才建），是測試 / 機器人用的內建關卡，
+   不在 `ST.LEVEL_IDS` 裡、不影響 `1-1..1-4` 的流程。
+
+**給 star-audio（`song.js`）— 本層的呼叫點**
+
+| 時機 | 呼叫 |
+|---|---|
+| `GAME.init` | `ST.Audio.init(nes)` |
+| 進關 / 復活 / 標題 / 過關 / GAME OVER | `ST.Audio.play(key)`，key = `lv.music`（`ground/cave/sky/castle`）、`'title'`、`'clear'`、`'death'`、`'gameover'` |
+| 每幀（所有模式）| `ST.Audio.tick(nes)`；`ST.Audio` 缺席時退回 `nes.music.tick()` |
+| 音效 `ST.Audio.sfx(name, nes)` | `jump`（起跳）、`stomp`（踩敵）、`coin`（金幣 / ? 磚）、`powerup`（100 金幣 1UP）、`hurt`（受傷）、`bump`（頂磚 / 碰斧頭）、`die`（死亡）、`goal`（碰 GOAL / 打倒魔王） |
+
+> 全部呼叫都包在 try/catch 裡，`ST.Audio` 缺席或丟例外都不會讓遊戲停下來；`state().lastSfx` 可查最後一次觸發的音效名。
+
+**給 engine（`NES.SH`）**
+
+- `NES.SH.Scroller.update(camX)` **只往右補欄**（`next` 單調遞增），往左回捲要自己來。
+  main.js 的 `streamColumns()` 用 `scr.writeColumn(c)` 往左補，並把「被覆蓋掉的那一欄」還給 `scr.next`
+  （寫世界第 c 欄會蓋掉 `c + 64` 欄）。若 engine 之後想把雙向補欄收進 `Scroller`，這段可以直接刪掉。
+- 目前設定：`{nt:2, cols, row0:4, rows:26, ahead:34}` ⇒ 一欄 26 + 屬性 13 = **39 byte**，600 幀實測 `budget.over === 0`。
+
+### star-world fix（R2b，2026-09-19，接 star-hero 機器人回報）
+
+star-hero 的通關機器人在 1-4 死 18 次，追下去是三個我這邊的問題，**只改 `levels_w1.js` / `boss.js` / `test_w1.py`**：
+
+| # | 問題 | 修法 |
+|---|---|---|
+| **P1** | **斧頭放在橋上（col 242）**：`hitAxe()` → `breakBridge()` 會把主角腳下那一欄一起拆掉 ⇒ **碰斧頭 = 必掉熔岩** | 兩道保險一起做：① 斧頭移到橋外的**實地** `col 246`（橋是 212–243）② `breakBridge(keepCol)` 會**留下主角那一欄與左右各一欄**；`hitAxe(hero)` 自動帶入（`update()` 也會記住最後看到的主角）。新增 `ST.Boss.keptCol` 可查 |
+| **P2** | **1-4 沒有 GOAL 磚**（`goal` 指到 EMPTY） | 魔王房外的實地補**旗桿**（`{t:'pole', c:248, r:9}`），`goal` 改成 `{col:248, row:20}`。踩頭 3 次 / 斧頭 / 碰旗桿**三條路都會 clear** |
+| **P3** | 1-4 太難（機器人 18 死，**其中 17 死集中在 col 77–78**） | 死亡點分析：`col 72 的彈跳球緊貼 76–83 的 8 欄熔岩坑` ⇒ 踩敵把助跑速度吃光、跑跳距離不夠。三件事一起改：①**最集中的兩處熔岩坑 8 欄 → 6 欄**（原 76–83 → 78–83、原 200–207 → 200–205，仍維持偶數欄對齊）②**坑前助跑距離拉到 ≥ 9 欄**，熔岩坑前 8 欄內不再放敵人（彈跳球 col 72 → 50、196 → 186）③ 四塊熔岩落腳石從列 19/20 **降到列 22**（離地只有 2 格，真的踩得到） |
+
+**機器人結果（`tools/playthrough_star.py --all --seed 1`）**
+
+```
+1-1  cleared=True frames=1400 deaths=1  score=4200 time=264
+1-2  cleared=True frames=1070 deaths=0  score=4900 time=249
+1-3  cleared=True frames=1265 deaths=0  score=11800 time=240
+1-4  cleared=True frames=1385 deaths=1  score=8100 time=245     ← 原本 deaths=18 / frames=6746
+```
+
+1-4 剩下的 1 死在 col 38（第一個熔岩坑，第一次嘗試失手，重來就過）；seed 1 / 2 / 3 都是 **deaths = 1**。
+
+**測試**：`test_w1.py` 新增第 ⑥b 組「斧頭 / 橋 / GOAL」13 項（斧頭在橋外且腳下是實地、GOAL 磚存在且在橋外、
+站在斧頭上觸發後腳下仍是實地、斧頭在橋外時整座橋照樣斷、`breakBridge(keepCol)` 只留 3 欄、測後復原）
+⇒ **共 177 項全過**。`run_all.sh --quick` 除了 `cruiser/test_cruiser.py`（fix2 agent 同時在改）以外全綠。
+四關 + 魔王房截圖重拍、`star.html` 實機 1-4 重拍，`nes_lint.py` 9 張全 PASS（10 色 / 25）。
+
+**1-4 關卡表更新**：欄數 256（8 畫面）不變、敵人 14 隻（roller 9 / bouncer 3 / flyer 2）+ 魔王、金幣 32、
+檢查點 92 / 190、熔岩坑 6 處（8 / 6 / **6** / 8 / 8 / **6** 欄）+ 無底坑 1 處（6 欄）、GOAL 旗桿 col 248。
+
+**給 star-hero / qa2**：`ST.Boss.hitAxe(hero)` 現在收一個選用的主角物件；`ST.Boss.breakBridge(keepCol)` 收選用的保留欄。
+main.js 不用改（`Boss.update(g)` 會自己從 `g.hero` 帶進去）。
+
+---
+
+## fix2-cruiser（R2）
+
+2026-09-19 ｜ fix2-cruiser agent ｜ 對象：`docs/QA_REPORT.md` 的「# R2 QA（qa2-cruiser）」P1 ×3 / P2 ×6 / P3 ×2。
+擁有並修改：`games/cruiser/{chr_ship 未動, chr_world, ship, main, enemies, boss, stage1, song 未動, test_cruiser.py, test_stage1.py}`、
+`tools/playthrough_cruiser.py`（總控指定移交）。**engine/ 與其他 tools 未動、未 git。**
+
+### 驗收總表
+
+| 項目 | 指令 | 結果 |
+|---|---|---|
+| 全測試 | `bash tools/run_all.sh`（完整） | **PASS 全綠**，17 個項目（node --check 32 檔 + 11 支測試 + 3 個 build --check + 冒煙截圖 + lint 抽查 8 張）**0 FAIL**；本輪動到的兩支：cruiser 124→**152**、stage1 128→**144** |
+| 機器人通關 | `$PY tools/playthrough_cruiser.py --max-frames 20000` | **cleared = True、死亡 0 次、剩 3 條命、6468 幀（≈ 108 秒）、score 14700**（qa2 基準：GAME OVER、camX 1201 / 3072、死 3 次） |
+| 單檔 dist | `$PY tools/build.py --src cruiser.html` | 內嵌 20 檔、缺 0 檔、414 KB；實跑 lint PASS colors=9 |
+| 截圖 lint | `shots/agent_fix2/*.png` 7 張 | 全 PASS（colors 7~12 / 25、`badPixels` 0、`overLine` 0），每張都 Read 看過圖 |
+
+---
+
+### P1（必修，3 項全修）
+
+**P1-1 按住 A 自動連射** — `games/cruiser/ship.js:454`
+`input.pressed(BTN.A)` → `input.pressed(BTN.A) || input.held(BTN.A)`。研究 §5-3 [源/反組譯]：
+「A 鍵：邊緣（`$05`）**或**計時器歸零 + 按住（`$07`）都能發」。發射閘門仍在 `fireFrom`
+（`e.timer <= 0` + 該發射體還有空槽），所以 20 幀間隔與「子彈在畫面上時 `stepTimers` 凍結計時器」都原封不動。
+- 實測：按住 200 幀 = **9 發**（qa2 實測 1 發）→ **每 22.2 幀 1 發**，間隔 **20 / 27 交替**（= 子彈壽命 + 20，研究是 21/23，機制相同、數字差在自機 x 與 `KILL_X`）。
+- 手動連打（每 2 幀）200 幀 = 9 發，與自動連射同級 ⇒ 邊緣路徑沒被吃掉。
+- 測試：`test_cruiser.py` ⑪ 新增 4 項（發射數 ≥ 8、平均節奏 21~23 幀、最小間隔 ≥ 20、手動 ≈ 自動）。
+
+**P1-2 STAGE CLEAR / GAME OVER 文字可見** — `main.js`
+原本 `writeText(ppu, col, row)` 一律寫名稱表 0，但遊戲區是 `ppu.scroll(camX % 512, 0, 0)` 的兩張名稱表。
+改成 `drawMsg()`：先算畫面左緣的全域欄 `scrollCol() = (camX % 512) >> 3`（0..63），逐字換算
+`nt = (base + col + i) >= 32 ? 1 : 0`、`欄 = (base + col + i) & 31`，**跨兩張自動分段**；
+寫過的格記在 `msgCells`，`clearMsg()` 精準清除；屬性列同時寫 nt0 與 nt1。
+- 魔王 camX 2816（`% 512 = 256`，文字 100% 在 nt1）：`GAME.state().msg` = `STAGE CLEAR|PRESS START`，截圖 `shots/agent_fix2/4_stageclear.png` 看得到。
+- GAME OVER camx=800（scroll 298）：`msg` = `GAME OVER|PRESS START`，截圖 `5_gameover.png`。
+- 新增 `GAME.state().msg`（列 11 / 15 的「可見 32 欄」反查字串）與 `CR.screenText(row)` 供 QA 驗收。
+- 測試：⑪ 新增 8 項（兩種畫面 × 模式 / scroll ≥ 256 / 列 11 文字 / 列 15 文字 / lint 綠）。
+
+**P1-3 死亡後音樂重播** — `main.js respawn()`
+末尾加 `CR.Audio.play(bossActive ? 'boss' : 'stage1')`（`restart()` 會把魔王收掉 ⇒ 一般情況播 `stage1`，
+回到 camX 2816 時再由 P2-2 的偵測換 `boss`）。
+- 實測：死後 200 幀 `CR.Audio.state()` = `{song:'stage1', playing:true}`、`mode` 已回 `play`（qa2：死後 800 幀仍 `playing:false`）。
+- 測試：⑪ 新增 3 項。
+
+### P2（6 項全做）
+
+**P2-1 HUD 能量表版面** — `ship.js GAUGE_LABEL`
+`['SPEED','MISSL','DOUBL','LASER','OPTON','  ?  ']` → `['SPD ','MSL ','DBL ','LSR ','OPT ',' ?  ']`
+（每格 5 欄的前 4 欄放 3 字 + 1 空欄，第 5 欄留白）。
+- 實測第 2 列：`SPD  MSL  DBL  LSR  OPT   ?`（原本 `SPEEDMISSLDOUBLLASEROPTON  ?`），與第 3 列的 6 個 `[---]` 逐格對齊。截圖 `2_hud_fortress.png`。
+
+**P2-2 魔王曲 / 通關曲** — `main.js update()`
+偵測 `CR.stage.bossActive` false→true 時 `CR.Audio.play('boss')`（`g.bossOn` 記錄邊緣，`toPlay/toTitle/respawn` 重置）；
+擊破後沿用既有的 `toStageClear() → play('clear')`。
+- 實測 `?boss=1`：進場 120 幀後 `{song:'boss', playing:true}`；打完 `{mode:'stageclear', song:'clear'}`。
+
+**P2-3 難度（詳見下一節）** — 通道 ≥ 18 列、砲台 15→7 座、難點段敵彈 −30%、檢查點安全區、紅色單體回血。
+
+**P2-4 敵彈改亮色** — `chr_world.js` + `stage1.js`
+`W_SHOT1` 原本用色 2（spr2 的深綠 `$1A`）⇒ 黑底星空與藍色要塞上幾乎看不見。兩幀改成**只用色 3**，
+再由 `stage1.js` 每 4 幀換調色盤組：`spr2` 色 3 = 淡黃 `$38` ⇄ `spr1` 色 3 = 白 `$30`（外框同時黑 ⇄ 紅）。
+**0 新顏色、0 新磚**（spr1 本來就在場上畫爆炸 / 紅膠囊）。截圖 `6_colors.png`：黑底上是白心紅框的閃爍菱形。
+
+**P2-5 砲台改色** — `chr_world.js W_TUR0 / W_TUR1`
+圖樣裡色 2 ⇄ 色 3 對調 ⇒ 主體變 spr3 的藍 `$11`、白 `$30` 只剩外圈高光與砲管。
+自機（白 + 深藍 + 橘噴焰）與砲台（黑輪廓 + 白圈 + 藍圓頂）一眼可分（`6_colors.png` 上下兩座砲台）。
+
+**P2-6 魔王室降刺眼** — `chr_world.js`
+兩招都上：① `W_BOSSBG` 由整片色 1 改成 **2×2 棋盤網點**（實心 50%，其餘露出底色 `$0F` 黑）；
+② `WORLD_PAL.bg3[0]` `$06` → **`$07`**。同屏色數仍 10~12（上限 25）。截圖 `3_boss_room.png` / `3b_boss_room_07.png`。
+
+### P3（2 項都做）
+
+- **P3-1 標題不掛 HUD**：`main.js` 加 `hudOn` 旗標與 `hudHide()`；`title` 模式把列 26..29 清空且 `draw` 不再 `hudSync`，
+  `toPlay()` 呼叫 `hudStatic()` 重建。實測標題 `state().hudOn === false`、`hud === ''`（截圖 `1_title.png` 乾淨星空）。
+- **P3-2 魔王死亡後空捲**：`stage1.js` 新增 `BOSS_RESPAWN = 2760`（匯出在 `CR.stage`），`main.js respawn()` 在
+  「死亡當下 `bossActive`」時改用它。**440 幀（7.4 秒）→ 112 幀（1.9 秒）**。
+- P3-3（註解裡的原作名）/ P3-4（ENGINE_API 補字）/ P3-5（精靈密度）不在本輪範圍，未動。
+
+---
+
+### P2-3 難度：實測過程與最終數字
+
+qa2 的結論是「欄 144~158 / 194~210 連滿強化都過不去」。fix2 逐項量測後發現**還有一個更根本的問題**：
+`shots/agent_qa2/bot.py` 跑 2400 幀 `CR.stage.capsuleSeq()` 恆為 **0** ——
+全關唯一的膠囊來源是「fan 編隊 5 隻全滅」，單發彈（每 22 幀 1 發）幾乎做不到 ⇒ **整局拿不到任何強化**。
+
+| # | 修法 | 依據 / 數字 |
+|---|---|---|
+| ① 通道 | `stage1.js TERRAIN`：`[5,5] [6,3] [3,6] [4,7] [7,4] [5,8] [8,5] [6,6]` → `[4,4] [5,3] [3,5] [3,5] [5,3] [3,5] [5,3] [4,4]`，**天地合計 ≤ 8 列 ⇒ 可用高度全關 ≥ 18 列（144 px）**（原本最窄 13 列） | 任務要求「最窄 ≥ 18 列」；起伏 / 天地反轉的節奏保留，只是落差變緩 |
+| ② 岩石 | 小行星 / 碎片只鋪到欄 **99**（欄 100 起天花板 / 地板已開始長出來）。rnd 仍照原順序抽 ⇒ 欄 < 100 的佈點與 R2 完全一樣 | 機器人在欄 120 被「牆 + 石頭」夾死 |
+| ③ 砲台數量 | 要塞 **15 座 → 7 座**（事件欄 152 / 166 / 182 / 216 / 232 / 248 / 280 ⇒ 世界欄 186 / 200 / 216 / 250 / 266 / 282 / 314），間隔 14~16 欄 | 「砲台間隔拉開」 |
+| ④ 檢查點安全區 | **每個檢查點（欄 128 / 192 / 256）之後 22 欄內沒有砲台**（砲台站在「事件欄 + 34」、進畫面時相機在「世界欄 − 32」⇒ 事件欄 ≥ 檢查點 + 22）＝ 復活後 ≥ 350 幀不會遇到瞄準彈；核心室前（檢查點 320）之後 6 欄內不出怪 | 逐幀追蹤證實：在檢查點 1024 復活後，機器人在欄 149 被世界欄 170 的砲台瞄準彈鎖死（速度 1 = 1 px/幀，追不開 2 px/幀 的瞄準彈） |
+| ⑤ 敵彈密度 −30% | `enemies.js`：砲台週期 `TURRET_PERIOD 90` → `EASY_PERIOD 130`，**適用世界欄 150~300**（＝整個要塞；原本只鎖定 qa2 點名的兩段，實測第三座砲台一樣鎖死機器人）。核心室前與小行星帶維持 90（研究 §10 原值） | 90 / 130 = 0.69 ≈ −30% |
+| ⑥ 核心室前減量 | 第 ③ 段 **14 事件 / 54 欄（每 3.9 欄）→ 11 事件（每 ≥ 4 欄）**，tank 由 6 隻減到 4 隻 | qa2：欄 320~343 帶滿強化也死 2 次 |
+| ⑦ **紅色單體**（新增機制） | 研究 **§3-3 [源]**「一般敵人多是灰 / 藍配色，**紅色版本必掉膠囊**」。出怪表標記 **12 隻**（9 隻 zig + 3 隻 tank），用 `{drop:1}`；畫面上改用 **spr1（紅 $16 / 橘 $28 / 白 $30）** ⇒ **0 新顏色、0 新磚**，紅色本身就是「打了有獎」的訊號。**每個復活檢查點（512 起）之後 14 欄內都有一隻** | 補上 R2 缺的膠囊管道（stage 已知問題外的漏洞）：修完後機器人 1600 幀內就能拿到 SPEED |
+| ⑧ fan 位置 | `at(108, fan(64))` → `fan(96)`：欄 100~127 通道正在收窄，貼天花板的編隊會把玩家逼進左上角 | 機器人在 camX 929~963 連續撞死 |
+
+**未改（刻意保留）**：
+- 死亡清光強化 / rank 歸 0（研究 §10-4 [源]，qa2 已驗 PASS）。qa2 建議的「復活保留 1 級 SPEED」**沒有做**，
+  因為那會把一條 [源] 契約改掉；改用⑦的紅色單體提供回血路徑，效果相同但不違反還原標準。
+- 敵彈基礎速度 2.0 / rank ≥2 ×1.25 / rank ≥3 預判（研究 §10-6）全部保留。
+- 魔王總血量 24、環形 8 彈、三連雷射全部保留（實測把環形改 6 發對結果毫無影響，已改回 8）。
+
+---
+
+### `tools/playthrough_cruiser.py`（機器人改版，總控指定）
+
+qa2 版的貪婪成本函式有 3 個結構性缺陷，逐一用逐幀追蹤定位後修掉：
+
+| # | 缺陷 | 修法 | 證據 |
+|---|---|---|---|
+| 1 | **不會垂直閃避**：威脅評估是「移動 1 幀後停著不動」，上 / 下 / 停三者成本幾乎相同 ⇒ 永遠只左右退 | 9 個候選都**模擬「持續按住這個方向」**：地形 84 幀（每 4 幀取樣）、敵彈 / 敵人 40→**56 幀**（逐幀），取最早碰撞幀算成本 | 追蹤顯示 y 值 40 幀完全不動、被 (−2, −0.8) 的瞄準彈追到左牆 |
+| 2 | **假設按到底 ⇒ 垂直永遠被罰**：一路往上一定撞天花板，所以任何垂直候選都帶著地形罰分 | 加 `HOLD = 24`：只模擬「按 24 幀後停住」，之後讓地形自己捲過來 | 魔王戰卡在 y = 94、打不到 y = 72 的裝甲板 **18000 幀** |
+| 3 | **左牆角罰分太輕**：線性 `200/px`，在 x = 8 只有 6400，永遠比撞上（wt × 42 ≈ 1.6 萬）便宜 | 改**平方**：`(48 − x)² × 32`；上下邊界同樣改 `(36 − y)² × 10` / `(y − 164)² × 10` | 全部 3 次死亡都發生在 x ≤ 36 的牆角 |
+| 4 | **抖動**：上 19 / 下 19 逐幀交替 ⇒ 兩幀淨位移 0，閃不開 | 動量項（換方向 +150、垂直反向 +1600、水平反向 +700），**只在「原地不動會被打到」時生效**（平時要留給瞄準微調：速度 1 時瞄準梯度只有 30/幀） | 魔王戰死亡逐幀表 |
+| 5 | **打不到魔王**：魔王部位的 `e.vx` 是內部殘值，線性外推變成「衝過來」；近距離懲罰又把機器人推開 | 魔王部位 `vx = vy = 0`、威脅權重 150（最低）、不套近距離懲罰；瞄準優先序 **魔王 > fan 編隊 > zig > turret > tank**（「打飛編隊優先」＝整隊打光才掉膠囊） | 卡 13000 幀 0 傷害 |
+| 6 | **三連雷射必死**：預告 30 幀是背景磚，機器人看不到；雷射變成判定彈時已經 0 距離同幀 | 直接讀 `CR.Boss.state().laser === 'warn'/'beam'` + `CR.Boss.LASER_OFF`，把 3 條列先當威脅；這組威脅**不加安全邊界**（雷射間只有 10 px 縫，加了 pad 會「哪裡都不能站」） | 死亡幀 6107：上一幀 3 條 `bg` 大判定彈同時出現在 y 81 / 97 / 113 |
+| 7 | 其他 | 按住 A（配合 P1-1 的自動連射）、**死亡復活後願望清單重置**（不然永遠不再買 SPEED，速度 1 追不開瞄準彈）、魔王戰 gauge ≥ 4 直接花掉（魔王戰不會再掉膠囊）、tank 威脅權重 560 / pad 8（鎖高度直衝） | |
+
+`--shots` 的過程圖在 `shots/play_cruiser/bot/`；`__bot.dbg = true` 可錄最近 40 幀的 9 個候選成本（除錯用，預設關）。
+
+**最終結果**：`cleared`、**死亡 0 次**、剩 3 條命、**6468 幀**、score 14700、
+通關時強化 = SPEED 3 + MISSILE + LASER（`full_end.png`：STAGE CLEAR 文字清楚可見）。
+
+---
+
+### 測試新增
+
+| 檔 | 原 | 現 | 新增內容 |
+|---|---:|---:|---|
+| `games/cruiser/test_cruiser.py` | 124 | **152** | ⑪ fix2 組 28 項：自動連射（4）、STAGE CLEAR / GAME OVER 可見性 × 2 畫面（8）、復活音樂（3）、魔王曲 / 通關曲（3）、標題無 HUD（4）、魔王復活點（3）、HUD 版面（改判定） |
+| `games/cruiser/test_stage1.py` | 128 | **144** | ⑧ fix2 組 16 項：最窄通道 ≥ 18 列、砲台 ≤ 10 座、檢查點 22 欄安全區、`turretPeriod` 分區（90 / 130）、紅色單體數量 + 檢查點覆蓋 + 調色盤 + 真的掉膠囊、敵彈兩幀只用亮色、砲台主體改藍、魔王室網點比例、`BOSS_RESPAWN` |
+
+### 給其他 agent / 總控
+
+1. **`GAME.state()` 新欄位**：`msg`（列 11 / 15 的可見文字，`'STAGE CLEAR|PRESS START'` 形式）、`hudOn`、`bossSong`。`CR.screenText(row)` 也可直接叫。
+2. **`CR.stage` 新欄位**：`BOSS_RESPAWN = 2760`。**`CR.Enemies` 新欄位**：`EASY_PERIOD`、`turretPeriod(wx)`、`PAL_DROP`。
+3. **敵彈調色盤會每 4 幀在 spr2 / spr1 之間交替**（P2-4）。之後若有人要改 spr1，請記得敵彈也吃這一組。
+4. **`{drop:1}` 的敵人一律畫成 spr1（紅色單體）**，這是「必掉膠囊」的視覺契約，不要拿 spr1 去畫別的雜魚。
+5. 給 **qa2**：`shots/agent_qa2/*.py` 我一律沒動；`bot.py` 已由總控收進 `tools/playthrough_cruiser.py` 並由 fix2 改寫，
+   重跑驗收請用 `tools/` 版（`shots/agent_qa2/segments.py` 仍 import 舊的 `bot.py`，會跑到舊策略）。
+6. 未修：P3-3（註解裡的 `Gradius` 2 筆）、P3-4（`ENGINE_API` §15.3 補 Pool 回收時機，engine 的檔）、P3-5（編隊密度，會動到出怪表節奏，與本輪「降難度」方向相反）。
+
+---
+
+## fix2-star（R2b）
+
+2026-09-19｜fix2-star agent｜**只改 `games/star/*`**（`main.js` / `hero.js` / `chr_hero.js` /
+`chr_world.js` / `levels_w1.js` / `song.js` / `test_star.py`）——`engine/` 與 `tools/` 一個字都沒動，
+`games/cruiser/*` 由 fix2-cruiser 同時處理、互不相干。**沒有做任何 git 操作。**
+輸入：`docs/QA_REPORT.md`「# R2b QA（qa2-star，2026-09-19）」的 P1 / P2 / P3 清單。
+
+### 0. 一句話結果
+
+| 項目 | 修前（qa2-star） | 修後 |
+|---|---|---|
+| `bash tools/run_all.sh`（完整） | 1399 項 / 1 FAIL（cruiser） | **17 項全 PASS、總結 PASS**（cruiser 也已被 fix2-cruiser 修好） |
+| `games/star/test_star.py` | 132 項 | **158 項全過**（+26，全是本輪新增的結束畫面 / 音樂呼叫點驗證） |
+| `games/star/test_w1.py` | 177 項 | **177 項全過**（裝飾補密後可達性 / 坑寬 / lint 完全沒變） |
+| 機器人四關 × seed 1 | 1400 / 1070 / 1265 / 1385 幀 | **完全相同**（1 / 0 / 0 / 1 死）⇒ 美術與裝飾沒有改動任何碰撞 |
+| `dist/星塵勇者.html` | 436 KB / 內嵌 20 檔 | **452 KB / 內嵌 20 檔、缺 0 檔**、lint PASS |
+| 截圖 lint | — | 本輪 23 張 NES 畫面 `nes_lint.py` **0 張違規**（色數 8~12 / 25） |
+
+### 1. P1-1 ── GAME OVER / 破關畫面（必修，已修）
+
+**問題**：`gameover` 模式完全不畫字，而且「輸光命」與「破完 W1」長得一模一樣。
+舊的 `drawTitle()` 只往**名稱表 0 的固定欄**寫字，`camX` 一大（`camX % 512 ≥ 256`、或文字跨兩張名稱表）就看不到。
+
+**修法**（`main.js`，約 90 行，取代原本的 `drawTitle` / `clearTitle`）：
+
+| 元件 | 說明 |
+|---|---|
+| `ntOfScreenCol(sc)` | **座標一律用「螢幕欄 0..31」**，寫入時才換算：世界欄 = `(camX >> 3) + sc`，落在 `wc & 63` ⇒ 名稱表 `(wc >> 5) & 1` 的第 `wc & 31` 欄。跨兩張名稱表時**自動逐字分段**，任何 `camX` 都看得到 |
+| `drawBanner(ppu, lines)` / `clearBanner` | 通用「疊字」：先把文字覆蓋到的 16×16 屬性區塊塗成調色盤 0（白字），再逐字寫磚；擦除時用 `scrTileAt(worldCol,row)` / `attrAt(worldCol>>1,r16)` 還原成關卡原本的值。模式切換是一次性動作 ⇒ 比照 `rebuildScreen()` 用 `budget.mute` 靜音計帳 |
+| `drawTitle` / `clearTitle` | 改成 `drawBanner(TITLE)` / `clearBanner(TITLE)` ⇒ 標題畫面也跟著變成「任何 camX 都正確」 |
+| `enterGameOver(won)` | 統一入口：`g.won` 決定畫哪一組字；**先把 `camX` 對齊 8 px**（`clampCam(camX & ~7)`，fine scroll ≠ 0 時文字磚會被切半格），再 `drawBanner` |
+| `GAMEOVER_LINES` | `GAME OVER`（列 12、螢幕欄 12）／`PRESS START`（列 16、欄 10） |
+| `winLines()` | `WORLD 1 CLEAR`（列 10）／`THANK YOU`（列 13）／**`SCORE 0xxxxx`**（列 16，執行期算）／`PRESS START`（列 19） |
+
+**新增除錯 / 測試鉤子**：`GAME.dev.screenText(row, screenCol, len)`（用磚索引反查表讀回**目前畫面上**的文字）、
+`GAME.dev.banner()`、`state().banner`（回報目前畫著哪幾行字）。
+
+**實測**（`test_star.py` ⑨c，**20 項**）：
+
+| 驗證 | 數字 |
+|---|---|
+| 在 1-1 的 col 300 輸光命（**`camX = 2296`、`camX % 512 = 248` ⇒ 文字跨 nt0/nt1**） | `screenText(12,12,9) = 'GAME OVER'`、`screenText(16,10,11) = 'PRESS START'` |
+| 不經 `screenText`，自己換算 nt / 欄逐格比對 `ST.textTiles('GAME OVER')` | 9 格**全等** |
+| `camX` 對齊 | `camX & 7 === 0` |
+| **`ppu.indexFrame` 逐像素**數白色（`$30`）像素 | `GAME OVER` **136 px**、`PRESS START` **154 px**（門檻 60）⇒ 真的畫在**可見區**，不是寫到看不到的名稱表 |
+| 破完 1-4（`won = true`） | `WORLD 1 CLEAR` / `THANK YOU` / `SCORE 029795`（執行期算）/ `PRESS START` 四行全部讀得回來，白色像素 **167 / 154** |
+| VBlank 預算 | 畫結束畫面的那一幀 `budgetOver = false` |
+
+截圖：`shots/agent_fix2star/g_gameover.png`（camX 2296）、`k_win.png`（camX 1792、SCORE 065700）、`g2_back_to_title.png`。
+
+### 2. P2-5 ── GAME OVER 後回標題（已修）
+
+`main.js` 的 gameover 分支改成：`START` → 重設 `lives 3 / score 0 / coins 0`、`loadLevel(startLevel)`
+（內含 `rebuildScreen()` ⇒ 字自動被整片蓋掉）→ `mode = 'title'` + `drawTitle` + `play('title')`。
+標題再按一次 `START` 才真正開始。實測：`gameover --START--> {mode:'title', lives:3, score:0, camX:0, 標題字重畫}` `--START--> {mode:'play'}`。
+
+### 3. P2-1 ── 魔王曲呼叫點（已修）
+
+`main.js` play 分支新增 `g.bossMusic` 三態機（`0 關卡曲 / 1 boss / 2 clear`）：
+
+```
+bossMusic 0 + ST.Boss.active           → play('boss')  , bossMusic = 1
+bossMusic 1 + ST.Boss.dead             → play('clear') , bossMusic = 2      ← 擊破後立刻換曲
+bossMusic 1 + 離開魔王房(!active)      → play(lv.music), bossMusic = 0
+```
+
+`loadLevel()` / `respawn()` 都會把 `bossMusic` 歸 0（**死在魔王房復活後再進房會重新切 boss 曲**，
+這是 qa 特別點名的坑）；`enterClear()` 加了 `if (g.bossMusic !== 2)` 的保護，避免 60 幀後把 `clear` 從頭再播一次。
+實測（`test_star.py` ⑨d）：魔王房外 `castle` → `ST.Boss.active` 為 true 時 `song = 'boss'` → 踩頭 3 次後 `song = 'clear'`。
+
+### 4. P2-2 ── `title` 曲 + 未知 key 警告（已修，`song.js`）
+
+- 新增第 10 首 **《星塵序曲》`title`**：C 大調、**150.0 BPM**（speed 6 × 16 row/小節）、**8 小節 loop = 768 幀 = 12.78 s**、26 個 pattern。
+  和聲 C – Am – F – G – C – Em – F – G7；p1 `lead` 號角旋律（前 4 小節四分長音讓玩家讀完標題，後 4 小節轉 8 分下行答句）／
+  p2 8 分琶音 `stab`／tri 八度跳躍低音（研究 06 §2.6）／noi 基本鼓 + 第 4、8 小節過門。**全部原創**。
+- `Audio.KEYS` 補上 `'title'`（9 → **10**）。
+- `play()` / `sfx()` 遇到不存在的 key **`console.warn` 一次**（`warnOnce`，同一訊息只印一次，不洗版）。
+- 驗證：`ST.Audio.validate()` **0 問題**；`shots/agent_star_audio/render.py --seconds 6` → 10 首曲 × 600 幀 tick **失敗 0 項**，
+  title 峰值 **0.5554 ≤ 1.0**、無 NaN；只寫 `$4000~$4017`。
+- **順手抓到一個真 bug**：這個 warn 一開就叫出 `ST.Audio.sfx(): 沒有這個音效 "die"` —— `hero.js:166` 死亡時呼叫的是
+  `sfx('die')`，但音效名是 `death`（整個 R2b 期間死亡音效**根本沒響過**，因為舊版是靜默失敗）。已改成 `g.sfx('death')`。
+
+### 5. P2-3 ── 背景裝飾補密（已修，`levels_w1.js` + `chr_world.js`）
+
+**先加一道保險**：`Level._deco(c, r, k)` —— 裝飾**只填 EMPTY 的格子**，永遠不可能蓋掉地形。
+`cloud / hill / tree / bush / stars / stal / torch / csea / vein` 全部改走它 ⇒
+**可達性 BFS、坑寬 ≤ 9 欄、牆高、起點安全區這些測試的結果完全不變**（177 項照樣全過、機器人幀數一幀不差）。
+
+新磚（`chr_world.js`，`BG_WORLD` 45 → **52 磚**，上限 192）：
+`BG_TORCH0` / `BG_TORCH1`（火把火焰 2 幀）／`BG_TORCH_B`（壁座）／`BG_CSEA_T` / `BG_CSEA_B`（雲海剪影帶）／
+`BG_STAR_T`（第三種最小星點）／`BG_VEIN`（洞窟岩層紋）。
+新語意碼 `TILE.TORCH / TORCH_B / CSEA_T / CSEA_B / STAR_T / VEIN`（`TILE_COUNT` 38 → **44**，`solidKind` 全部 `'none'`）。
+火把接上和熔岩同一套 2 幀動畫（`chrAt()` 依 `ST.World.anim` 換磚）。
+
+| 關 | 修前（qa 實測） | 修後（`ST.LEVELS[id].tileAt` 逐格重數） |
+|---|---|---|
+| **1-1** | 66 磚 / 12 畫面 = **5.5 磚/畫面**（雲 6 全擠在同一列、山 6、灌木 6、樹 6） | **104 磚 = 8.7 磚/畫面**：雲 **16 朵分兩條高度帶**（高雲列 5 × 7、中雲列 8 × 9）、山 **10**、灌木 **12**、樹 **10**（＝ qa 給的數字） |
+| **1-2** | 20 磚 = 2.0 / 畫面 | **262 磚 = 26.2 / 畫面**：頂板下整排**岩層紋 234 磚**（`_deco` 自動跳過天花板較厚的區段）+ 鐘乳石 17 + 岩紋 11 |
+| **1-3** | 42 磚 = 3.5 / 畫面（星 34、雲 2 朵） | **650 磚 = 54.2 / 畫面**：星點 **51 顆分 3 種大小**（大 18 / 小 18 / 極小 15，列偏移 0/1/2）、雲 **12 朵**、**雲海剪影帶 576 磚** |
+| **1-4** | 10 磚 = 1.2 / 畫面 | **39 磚 = 4.9 / 畫面**：窗 **16 扇**（8 組 `W.W`）、**火把 4 支**（8 畫面 ÷ 2 = 每 2 畫面一支，2 幀動畫）+ 鎖鏈 15 |
+
+**一個 qa 沒算到的坑（已避開）**：雲海剪影帶放在 qa 建議的**列 20–21 會壞掉** —— 1-3 有浮台正好在列 20 / 21，
+兩者共用 16×16 屬性區塊，而 `PLATFORM` 的優先權（3）高於裝飾（1），剪影就會被染成**純黑方塊**（我第一版實測到了，
+見下方「踩過的坑」）。改放**列 24–25**（浮台最低到列 22 ⇒ 屬性區塊 r16 12 vs 11 完全分開），
+而且正好接續前 96 欄實地的地平線高度（`groundRow = 24`），視覺上更對。
+
+驗證：`test_w1.py` **177 項全過**（含四主題 lint ≤ 25 色）；實機四關截圖色數 **8 / 8 / 10~12 / 9~10 / 25**、
+`budget.overFrames = 0`、`nes_lint.py` 全 PASS。截圖 `p11_a/b/c.png`、`p12_a.png`、`p13_a/b.png`、`p14_a/b.png`。
+
+### 6. P2-4 ── 主角造型重畫（已修，`chr_hero.js` + `hero.js`）
+
+**不加任何顏色**（精靈調色盤 0 仍是 `$0F 描邊 / $12 戰衣 / $27 亮色` 三色 + 透明），全靠**剪影**：
+
+| qa 建議 | 實作 |
+|---|---|
+| ① 頭上不對稱特徵 | **帽尾**：兜帽後腦往左後平伸再下垂的 5 px 尖角；跳 / 受傷 / 死亡幀改成**上揚**版（`tail = 1`） |
+| ② 圍巾 | 脖子往後飄的亮色（3）飄帶，站立時垂下、跳躍時上揚 |
+| ③ 臉別佔滿頭 | 膚色開口從 **10×6 縮成 6×4**，兜帽開口收窄 |
+| ④ 手臂與軀幹分離 | 軀幹 `x5..11`、後手 `x2..3`、前手 `x13..14`，**中間各留 1 px 黑縫**；走路 3 幀上半身也跟著換（`H_BODY` / `H_BW1` / `H_BW2`），手臂上下擺動 ±1 px |
+| ⑤ 胸口星徽 | `x7..8, y11..12` 的 **2×2 亮色方塊** |
+
+`hero.js` 的 `frameNames()` 改成走路時同時挑上半身（`ST.HERO_ART.bodies`），`tileNames()` 補兩組；
+**站 / 走 3 幀 / 跳 / 落 / 轉身 / 蹲 / 滑 / 受傷 / 死亡 9 種姿勢全部重畫成同一套比例**（頭 7 列 / 軀幹 9 列 / 腳 8 列）。
+`ST.SPR_HERO` 58 → **66 磚**（上限 128）。
+截圖放大看過：`z_hero_sheet.png`（11 個姿勢逐幀 7 倍並排）、`z_hero_walk/jump/crouch/dead.png`（6 倍）。
+
+### 7. P3 順手修的
+
+| # | 內容 |
+|---|---|
+| **P3-4** | **鐵鎚王手上有錘子了**：整體右移 2 px、頭盔與肩 / 軀幹左右各外擴 1 px（剪影從 24 px 吃到 **~30 px**），左手加一把**錘頭 6×6 金屬色 + 木柄**的大錘。錘子只畫在**上半 16 列** ⇒ `throw` 幀（`topOnly`、共用站立的下半身）可以把錘子舉高：站 / 跳扛在肩上（top = 4）、`throw0` 舉到最高（top = 0）、`throw1` 落到胸前（top = 7)。截圖 `z_boss_zoom.png` |
+| **P3-5** | **受傷無敵維持 120 幀**（`ST.Hero.INV_FRAMES = 120`）——**TASKS 契約優先**（總控定調）。**研究值 168 幀（SMB `8 × 21`）是可調的**：只要把 `games/star/hero.js` 的 `INV_FRAMES` 改成 168，`test_star.py` 的期望值（②b 那組）跟著改一個數字即可，其他都不用動。兩個數字的差是 48 幀 = 0.8 秒，對 1-3 / 1-4 的密集敵人區有感 |
+| P3-2 | **不動**（照總控指示）：機器人 seed 3 的 1-1 脫困迴圈（14159 幀 / 3 死）在 `tools/playthrough_star.py`，不是 `main.js` 可調的，那是 tools 的所有權。本輪重跑 seed 3 仍是 `14159 幀 / 3 死`（與 qa2 完全一致 ⇒ 本輪沒有讓它變糟） |
+| P3-1 / P3-3 / P3-6~P3-10 | 未動（設計面 / 記錄性，或屬於 R3 / R4 的排程） |
+
+### 8. 驗證指令與數字（全部在專案根目錄跑，`PY=../卡比之星/.venv/bin/python`）
+
+```
+bash tools/run_all.sh                                    # 17 項全 PASS，總結 PASS
+$PY games/star/test_star.py                              # 158 項，通過 158，失敗 0
+$PY games/star/test_w1.py                                # 177 項，通過 177，失敗 0
+$PY shots/agent_star_audio/render.py --seconds 6         # 10 首曲 + 9 音效，失敗 0 項
+$PY tools/playthrough_star.py --level 1-1 --seed 1       # cleared=True frames=1400 deaths=1
+$PY tools/playthrough_star.py --level 1-2 --seed 1       # cleared=True frames=1070 deaths=0
+$PY tools/playthrough_star.py --level 1-3 --seed 1       # cleared=True frames=1265 deaths=0
+$PY tools/playthrough_star.py --level 1-4 --seed 1       # cleared=True frames=1385 deaths=1
+$PY tools/build.py --src star.html                       # 內嵌 20 檔、缺 0 檔、452 KB
+$PY tools/shot.py --url "dist/星塵勇者.html" --query "level=1-1" --lint ...   # lint PASS colors=11
+$PY tools/nes_lint.py --palette engine/palette.js shots/agent_fix2star/*.png # 23 張 NES 畫面 0 違規
+```
+
+自寫的驗證腳本放 `shots/agent_fix2star/shots.py`（`shots/` 已 gitignore）；
+截圖 `shots/agent_fix2star/`：`a_title` / `b_11` / `b_13` / `c_boss`（魔王房，`song=boss`）/
+`g_gameover` / `g2_back_to_title` / `k_win` / `j_dist` / `p11_a~c` / `p12_a` / `p13_a,b` / `p14_a,b` /
+`z_hero_sheet`（11 姿勢並排）/ `z_hero_*` / `z_boss_zoom`。**每一張都 Read 看過圖。**
+
+### 9. 踩過的坑（給後面的人）
+
+1. **疊在關卡上的文字一定要用「螢幕欄」定位**。`camX % 512 ≥ 256` 時可見畫面落在名稱表 1，
+   只寫 nt 0 的固定欄＝寫到看不見的地方（qa2-cruiser 的 P1-2 與本作 P1-1 是同一個坑）。
+   另外**進畫面時要把 `camX` 對齊 8 px**，否則下段 split 的 fine scroll 會把文字磚切成半格。
+2. **背景裝飾會搶 16×16 屬性區塊**。`PRI` 低的裝飾碰到 `PRI` 高的地形時，**裝飾會被染成地形的調色盤**。
+   1-3 的雲海剪影帶放在列 20–21 就會跟浮台共用區塊 → 剪影變純黑方塊。擺裝飾前先看 `r16 = row >> 1` 有沒有撞到別人。
+3. **靜默失敗的音訊 API 會藏很久**。加一行 `console.warn` 就立刻抓到 `sfx('die')` 這個從 R2b 一開始就存在、
+   但沒有任何測試會紅的 bug。**寧可吵一點。**
+4. **裝飾補密要有 `_deco`（只填空格）這種保險**。否則補了 100 多磚裝飾之後，
+   沒有人敢保證可達性 / 坑寬測試還是原來那個結果；有了它，177 項測試與機器人幀數可以**一格不差**地對照。
+
+### 10. 契約異動 / 給總控
+
+1. `ST.TILE_COUNT` **38 → 44**（新增 6 個裝飾磚，`solidKind` 全部 `'none'`，舊寫法不會壞）。
+2. `ST.SPR_HERO` 58 → **66 磚**、`ST.BG_WORLD` 45 → **52 磚**（都遠低於 128 / 192 上限）。
+3. `ST.Audio.KEYS` 多了 `'title'`（9 → 10 首）；`play()` / `sfx()` 未知 key 會 `console.warn`。
+4. `GAME.state()` 多兩個欄位：`banner`（目前畫著的字串陣列 / `null`）、`bossMusic`（0 / 1 / 2）。
+   `GAME.dev` 多兩個：`screenText(row, screenCol, len)`、`banner()`。
+5. **`gameover` 之後按 START 是回標題，不是直接重開**（行為變更，`test_star.py` 已跟著改）。
+6. **P3-5 定調照 TASKS 契約的 120 幀**；研究值 168 幀在此註明為**可調**（改 `hero.js` 的 `INV_FRAMES` 一個常數 + 測試期望值一個數字）。
+
+---
+# R2 / R2b 總結（總控，2026-09-19）— 兩款遊戲 + 手機觸控 + 兩份研究
+- 使用者定調：紅白機專案不限一款遊戲，多款經典深入研究後各自實作、共用 engine/；本輪新增《星塵巡航艦》（宇宙巡航艦風格）並同步完成《星塵勇者》W1。
+- **研究**：`03_經典遊戲深度解析/16_宇宙巡航艦_沙羅曼蛇.md`（821 行、49 來源，含 byte-level 逆向手感表）、`11_橫向射擊設計與技術.md`（1233 行、78 來源）；index.html 重建（27 份）。
+- **引擎**：`engine/shmup.js` NES.SH（SIN/COS/atan2/aim/aabb/Pool/OAM/Scroller/Spawner，157 項）；`engine/touch.js` NES.Touch（搖桿 + A/B/SELECT/START/全螢幕、浮動、三入口手機縮放，180 項）；`engine/input.js` +`setExternal`（觸控與鍵盤 OR）；`engine/music.js` +slide/detune（103 項，QA R1 P2-7 結案）。
+- **《星塵巡航艦》**（cruiser.html、games/cruiser、`CR`）：船 / 能量表 / Option / 雷射 / 飛彈 / 護盾（手感全照研究 §10 原作實測值，qa2 對照 60/61）、關卡 1 三段 12 畫面 + 56 出怪事件 + 紅色單體掉膠囊、魔王「核心要塞」三階段形變、6 曲 9 音效；qa2 3 P1 / 6 P2 → fix2 全修；機器人 `tools/playthrough_cruiser.py` 0 死通關（6468 幀）；test_cruiser 152 / test_stage1 144。
+- **《星塵勇者》W1**（star.html、games/star、`ST`）：主角狀態機（手感 12 項與 SMB 常數差 0 幀）、雙向鏡頭、四關（草原 / 洞窟 / 天空 / 城堡）+ 3 敵 + 鐵鎚王（踩頭 / 斧頭 / 旗桿三路）、10 曲 9 音效；qa2-star 1 P1 / 5 P2 → fix2-star 全修（GAME OVER / WORLD CLEAR 文字跨名稱表、標題曲、魔王曲、裝飾密度、主角重畫）；機器人 `tools/playthrough_star.py` 四關 seed 1~3 全 cleared；test_star 158 / test_w1 177。
+- **run_all 完整版 17 項全 PASS**（測試合計約 1,500 項）；三入口 build：dist/星塵測試室 271 KB / 星塵勇者 452 KB / 星塵巡航艦 414 KB。
+- 已知 / 下一輪候選：cruiser 隕石不可破壞、第二輪難度未做；star 無敵星未放進關卡、受傷無敵 120（研究 168 可調）、旗桿下滑演出；playthrough_star seed 3 脫困迴圈慢；iOS 真機未測；ENGINE_API §16 由 nes-touch 寫、§10 由總控補。
+- 中斷紀錄：fix2-cruiser 與 star-world 曾因 Opus 用量上限（20:00 重置）中斷，重置後恢復完成。

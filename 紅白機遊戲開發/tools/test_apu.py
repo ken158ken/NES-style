@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-tools/test_apu.py — engine/apu.js + engine/music.js 的自動測試（apu agent 專用）
+tools/test_apu.py — engine/apu.js + engine/music.js + games/cruiser/song.js 的自動測試（audio agent 專用）
 
-不依賴其他 engine 模組：用 Playwright 開 about:blank，只 add_script_tag 載入 apu.js / music.js。
+不依賴其他人的檔案：用 Playwright 開 about:blank，只 add_script_tag 載入
+apu.js / music.js / games/cruiser/song.js（這三個都是 audio agent 自己的檔）。
 
 用法：
     ../卡比之星/.venv/bin/python tools/test_apu.py
@@ -22,12 +23,17 @@ tools/test_apu.py — engine/apu.js + engine/music.js 的自動測試（apu agen
   11 render 決定性（同輸入同輸出）
   12 music：pattern / row 推進與 speed
   13 music：sfx 搶聲道 + 結束後復原
+  14 music：slide（滑音）/ detune 效果欄（R2 新增，QA R1 P2-7 / X15）
+  15 cruiser：CR.SONGS 六首曲的 pattern 合法性（音域 / 聲道分配 / order / 長度）
+  16 cruiser：CR.SFX 優先權表 + 搶佔後音樂軌回復
+  17 cruiser：10 秒離線渲染無 NaN / 不削波
 """
 import sys, pathlib, json
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 APU = ROOT / 'engine' / 'apu.js'
 MUSIC = ROOT / 'engine' / 'music.js'
+CRUISER_SONG = ROOT / 'games' / 'cruiser' / 'song.js'
 
 VERBOSE = '-v' in sys.argv or '--verbose' in sys.argv
 
@@ -384,6 +390,278 @@ T.sfxSteal = function(){
     musicChannelsStillOn: after.channels[0].on && after.channels[2].on
   };
 };
+
+/* ===================== 14 slide（滑音）/ detune 效果欄（R2 新增）===================== */
+
+function tiny(track, arr, speed){
+  const pat = {}; pat[track] = arr;
+  return {name:'tiny', speed: speed||1, rows: arr.length, loop:0,
+          instruments:{}, patterns:[pat], order:[0]};
+}
+// 播 n 幀，收集某一軌每幀的 {period, detune, slideAcc}
+function trace(song, chIndex, n){
+  const m = M.create(mk());
+  m.play(song, {loop:true});
+  const out = [];
+  for (let i=0;i<n;i++){ m.tick(); const c = m.state().channels[chIndex];
+    out.push({p: c.period, d: c.detune, acc: c.slideAcc, on: c.on}); }
+  return out;
+}
+
+T.slideDetune = function(){
+  const P = M.PULSE_PERIOD, TR = M.TRI_PERIOD;
+  const A4 = P[M.noteToMidi('A-4')];
+
+  // 14.1 向下相容：demo 曲完全不帶 detune / slide
+  const md = M.create(mk());
+  md.play(M.DEMO.song, {loop:true});
+  let clean = true;
+  for (let i=0;i<600;i++){
+    md.tick();
+    for (const c of md.state().channels){
+      if (c.detune !== 0 || c.slide !== null || c.slideAcc !== 0) clean = false;
+    }
+  }
+
+  // 14.2 detune = 固定週期偏移
+  const det = trace(tiny('p1', [{note:'A-4', vol:15, detune:5}, null, null, null]), 0, 4)
+                .map(x => x.p);
+
+  // 14.3 detune 持續 / 歸零
+  const det2 = trace(tiny('p1', [{note:'A-4', vol:15, detune:7}, null,
+                                 {note:'A-4', vol:15}, null,
+                                 {note:'A-4', vol:15, detune:0}, null]), 0, 6).map(x => x.p);
+
+  // 14.4 slide 數字：首幀 0 偏移，之後每幀 +rate
+  const sl = trace(tiny('p1', [{note:'A-4', vol:15, slide:10}, null, null, null, null]), 0, 5)
+               .map(x => x.p);
+
+  // 14.5 slide {rate,to}：滑到目標音就停（G-4 比 A-4 低 → 週期變大）
+  const G4 = P[M.noteToMidi('G-4')];
+  const sTo = trace(tiny('p1', [{note:'A-4', vol:15, slide:{rate:9, to:'G-4'}},
+                                null,null,null,null,null,null,null,null,null,null,null]), 0, 12)
+                .map(x => x.p);
+
+  // 14.6 slide {rate,limit}：累積夾在 ±limit
+  const sLim = trace(tiny('p1', [{note:'A-4', vol:15, slide:{rate:10, limit:25}},
+                                 null,null,null,null,null]), 0, 6).map(x => x.p);
+  const sNeg = trace(tiny('p1', [{note:'A-4', vol:15, slide:{rate:-10, limit:25}},
+                                 null,null,null,null,null]), 0, 6).map(x => x.p);
+
+  // 14.7 新音 → slideAcc 歸零，但 detune 保留
+  const reset = trace(tiny('p1', [{note:'A-4', vol:15, slide:12, detune:4}, null, null,
+                                  {note:'A-4', vol:15}, null]), 0, 5);
+
+  // 14.8 三角波也吃 detune / slide
+  const A2 = TR[M.noteToMidi('A-2')];
+  const triS = trace(tiny('tri', [{note:'A-2', detune:6, slide:3}, null, null]), 2, 3).map(x => x.p);
+
+  // 14.9 雜訊軌不受 detune / slide 影響（note = 週期索引 0..15）
+  const noi = trace(tiny('noi', [{note:5, vol:10, detune:100, slide:50}, null, null]), 3, 3)
+                .map(x => x.p);
+
+  // 14.10 音效的幀也吃 slide / detune
+  const apu = mk(); const ms = M.create(apu);
+  ms.define('dive', {priority:5, channels:['p2'], data:{p2:[
+    {duty:1, vol:12, note:'A-4', slide:20}, null, null, null, {off:true}]}});
+  ms.sfx('dive');
+  const sfxT = [];
+  for (let i=0;i<4;i++){ ms.tick(); sfxT.push(apu.state().pulse2.timer); }
+  const apu2 = mk(); const ms2 = M.create(apu2);
+  ms2.define('flat', {priority:5, channels:['p2'], data:{p2:[
+    {duty:1, vol:12, note:'A-4', detune:11}, null, {off:true}]}});
+  ms2.sfx('flat'); ms2.tick();
+  const sfxDetune = apu2.state().pulse2.timer;
+
+  // 14.11 slide:0 / null 關閉
+  const off = trace(tiny('p1', [{note:'A-4', vol:15, slide:8}, null,
+                                {note:'A-4', vol:15, slide:0}, null]), 0, 4).map(x=>x.p);
+
+  return {clean, A4, G4, A2, det, det2, sl, sTo, sLim, sNeg,
+          reset: reset.map(x=>({p:x.p, d:x.d, acc:x.acc})),
+          triS, noi, sfxT, sfxDetune, off};
+};
+
+/* ============ 15/16/17 games/cruiser/song.js（CR.Audio / CR.SONGS / CR.SFX）============ */
+
+T.hasCruiser = function(){ return !!(window.CR && window.CR.SONGS && window.CR.SFX); };
+
+T.cruiserSongs = function(){
+  const S = window.CR.SONGS;
+  const keys = Object.keys(S);
+  const MEL = {p1:1, p2:1, tri:1};
+  const bad = {range:[], noise:[], vol:[], duty:[], order:[], track:[], dmc:[], tri:[]};
+  const info = {};
+  for (const k of keys){
+    const s = S[k];
+    const tracks = {};
+    let melRows = {p1:0, p2:0, tri:0, noi:0};
+    for (let pi=0; pi<s.patterns.length; pi++){
+      const pat = s.patterns[pi];
+      for (const t in pat){
+        tracks[t] = 1;
+        if (t === 'dmc') bad.dmc.push(k+' pat'+pi);
+        const arr = pat[t];
+        for (let ri=0; ri<arr.length; ri++){
+          const r = arr[ri]; if (!r) continue;
+          const at = k+' '+t+'['+pi+':'+ri+']';
+          if (r.vol !== undefined && (r.vol < 0 || r.vol > 15)) bad.vol.push(at+'='+r.vol);
+          if (r.duty !== undefined && (r.duty < 0 || r.duty > 3)) bad.duty.push(at+'='+r.duty);
+          if (r.note === undefined || r.note === null) continue;
+          melRows[t] = (melRows[t]||0) + 1;
+          if (t === 'noi'){
+            if (!(Number.isInteger(r.note) && r.note >= 0 && r.note <= 15)) bad.noise.push(at+'='+r.note);
+          } else if (MEL[t]){
+            const midi = M.noteToMidi(r.note);
+            if (midi === null || midi < 24 || midi > 107) bad.range.push(at+'='+r.note);
+            // 三角波是低音軌：不該爬到 C-5（midi 72）以上
+            if (t === 'tri' && midi !== null && midi > 72) bad.tri.push(at+'='+r.note);
+          }
+        }
+      }
+    }
+    for (const o of s.order) if (!(o >= 0 && o < s.patterns.length)) bad.order.push(k+' order '+o);
+    if (!tracks.p1 || !tracks.tri) bad.track.push(k+' 缺 p1/tri');
+    // 實際播完一輪要幾幀
+    const m = M.create(mk());
+    m.play(s, {loop:false});
+    let f=0; while (m.state().playing && f++ < 5000) m.tick();
+    info[k] = {speed:s.speed, bpm: +(3600/(s.speed*4)).toFixed(1), patterns:s.patterns.length,
+               order:s.order.length, tracks:Object.keys(tracks), frames:f,
+               sec:+(f/60.0988).toFixed(2), notes:melRows};
+  }
+  return {keys, bad, info};
+};
+
+// stage1 回音軌 = 主旋律延後 ECHO_DELAY row、音量 -2 級、detune > 0
+T.cruiserEcho = function(){
+  const s = window.CR.SONGS.stage1;
+  const D = window.CR.Audio.ECHO_DELAY;
+  const L = s.order.length, R = s.rows;
+  function noteAt(track, flatRow){
+    const pi = s.order[Math.floor(flatRow / R) % L];
+    const arr = s.patterns[pi][track];
+    const r = arr && arr[flatRow % R];
+    return r && r.note !== undefined ? r.note : null;
+  }
+  let match = 0, mismatch = [];
+  const total = L * R;
+  for (let i=0;i<total;i++){
+    const want = noteAt('p1', ((i - D) % total + total) % total);
+    const got = noteAt('p2', i);
+    if (want === got) match++; else mismatch.push(i+':'+want+'/'+got);
+  }
+  // 音量與 detune
+  let leadVol = null, echoVol = null, echoDet = null, leadDet = 0, echoDuty = null;
+  for (const p of s.patterns){
+    for (const r of (p.p1||[])) if (r && r.vol !== undefined && leadVol === null) leadVol = r.vol;
+    for (const r of (p.p1||[])) if (r && r.detune) leadDet = r.detune;
+    for (const r of (p.p2||[])) if (r && r.vol !== undefined && echoVol === null) echoVol = r.vol;
+    for (const r of (p.p2||[])) if (r && r.detune !== undefined && echoDet === null) echoDet = r.detune;
+    for (const r of (p.p2||[])) if (r && r.duty !== undefined && echoDuty === null) echoDuty = r.duty;
+  }
+  return {delay:D, total, match, mismatch: mismatch.slice(0,5), leadVol, echoVol, echoDet, leadDet, echoDuty};
+};
+
+T.cruiserSfx = function(){
+  const F = window.CR.SFX, PR = window.CR.Audio.PRIORITY;
+  const names = Object.keys(F);
+  // 聲道宣告：除了 die，不准碰 p1 / tri
+  const illegal = [];
+  const chans = {};
+  for (const n of names){
+    const c = F[n].channels || Object.keys(F[n].data);
+    chans[n] = c;
+    if (n !== 'die' && (c.indexOf('p1') >= 0 || c.indexOf('tri') >= 0)) illegal.push(n+':'+c);
+  }
+  // 優先權搶佔
+  const apu = mk(), m = M.create(apu);
+  for (const n of names) m.define(n, F[n]);
+  m.play(window.CR.SONGS.stage1, {loop:true});
+  for (let i=0;i<20;i++) m.tick();
+
+  m.sfx('shot'); m.tick();
+  const afterShot = m.state().sfx.map(s=>s.name);
+  m.sfx('explode'); m.tick();
+  const explodeWins = m.state().sfx.map(s=>s.name);
+  m.sfx('shot'); m.tick();
+  const shotLoses = m.state().sfx.map(s=>s.name);
+  m.stopSfx(); m.tick();
+
+  // 搶佔期間：p2 / noi 被佔、p1 / tri 仍由音樂寫
+  for (let i=0;i<6;i++) m.tick();
+  m.sfx('explode');
+  m.record(true);
+  // explode 的 noi 軌 19 幀 / p2 軌 14 幀，取 12 幀觀察（speed 6 → 至少跨 2 個 row，
+  // 音樂軌一定會有新的音符寫入；_emit 對「沒變的值」會省略寫入，窗口太短會量到 0）
+  for (let i=0;i<12;i++) m.tick();
+  const log = m.log.slice();
+  const musicP2  = log.filter(w=>w[0]>=0x4004 && w[0]<=0x4007 && w[2]==='music').length;
+  const musicNoi = log.filter(w=>w[0]>=0x400C && w[0]<=0x400F && w[2]==='music').length;
+  const musicP1  = log.filter(w=>w[0]>=0x4000 && w[0]<=0x4003 && w[2]==='music').length;
+  const musicTri = log.filter(w=>w[0]>=0x4008 && w[0]<=0x400B && w[2]==='music').length;
+  const st = m.state();
+  const ownedDuring = {p2: st.channels[1].owned, noi: st.channels[3].owned,
+                       p1: st.channels[0].owned, tri: st.channels[2].owned};
+
+  // 跑到音效結束 + 2 幀 → 聲道歸還、APU 回到音樂的值
+  let guard = 0;
+  while (m.state().sfx.length && guard++ < 200) m.tick();
+  m.record(true);
+  for (let i=0;i<14;i++) m.tick();      // 歸還後跨過幾個 row，讓音樂把 p2 / noi 完整重寫
+  const logBack = m.log.slice();
+  const restoreP2  = logBack.filter(w=>w[0]>=0x4004 && w[0]<=0x4007 && w[2]==='music').length;
+  const restoreNoi = logBack.filter(w=>w[0]>=0x400C && w[0]<=0x400F && w[2]==='music').length;
+  const after = m.state();
+  const apuS = apu.state();
+  const backOk = !after.channels[1].owned && !after.channels[3].owned
+              && apuS.pulse2.timer === after.channels[1].period
+              && after.channels[0].on && after.channels[2].on && after.playing;
+
+  // die：搶四軌，而且 CR.Audio.sfx('die') 會先停音樂
+  const apu2 = mk(), m2 = M.create(apu2);
+  window.CR.Audio._d = m2;
+  window.CR.Audio.init({music: m2});
+  window.CR.Audio.play('stage1');
+  for (let i=0;i<10;i++) m2.tick();
+  const playingBefore = m2.state().playing;
+  window.CR.Audio.sfx('die');
+  m2.tick();
+  const dieState = m2.state();
+  const dieChans = dieState.sfx.length ? dieState.sfx[0].channels : [];
+
+  // CR.Audio 介面
+  const api = ['init','play','stop','sfx','tick'].every(k => typeof window.CR.Audio[k] === 'function');
+
+  return {names, chans, illegal, PR, afterShot, explodeWins, shotLoses,
+          musicP2, musicNoi, musicP1, musicTri, ownedDuring,
+          restoreP2, restoreNoi, backOk,
+          playingBefore, dieChans, diePlaying: dieState.playing, api};
+};
+
+T.cruiserRender = function(key, seconds){
+  const apu = A.create({sampleRate: 44100});
+  const m = M.create(apu);
+  for (const n in window.CR.SFX) m.define(n, window.CR.SFX[n]);
+  m.play(window.CR.SONGS[key], {loop:true});
+  const frames = Math.round(seconds * A.FRAME_HZ);
+  let nan = 0, peak = 0, sum = 0, sum2 = 0, n = 0;
+  for (let f=0; f<frames; f++){
+    m.tick();
+    const b = apu.tick();
+    for (let i=0;i<b.length;i++){
+      const v = b[i];
+      if (!isFinite(v)) { nan++; continue; }
+      const av = Math.abs(v); if (av > peak) peak = av;
+      sum += v; sum2 += v*v; n++;
+    }
+  }
+  const mean = sum/n;
+  return {nan, peak, rms: Math.sqrt(sum2/n - mean*mean), samples: n, frames};
+};
+
+// ⚠ 最後一行必須是「非函式」的值：playwright 的 evaluate 如果拿到函式當完成值會直接呼叫它
+true;
 """
 
 
@@ -402,6 +680,8 @@ def main():
         page.goto('about:blank')
         page.add_script_tag(path=str(APU))
         page.add_script_tag(path=str(MUSIC))
+        if CRUISER_SONG.exists():
+            page.add_script_tag(path=str(CRUISER_SONG))
         page.evaluate(JS)
         if errs:
             print('JS 載入錯誤：', errs, file=sys.stderr)
@@ -539,6 +819,124 @@ def main():
         check('13.10 高優先權搶得走', r['highWin'] == ['jump'], r['highWin'])
         check('13.11 可指定要搶的聲道（channels 選項）', r['remapped'], r['remapped'])
         check('13.12 搶聲道期間其它音樂軌不中斷', r['musicChannelsStillOn'], r['musicChannelsStillOn'])
+
+        # 14 slide / detune
+        r = run('slideDetune')
+        A4, G4, A2 = r['A4'], r['G4'], r['A2']
+        check('14.1 向下相容：demo 曲 600 幀內 detune=0 / slide=null', r['clean'], r['clean'])
+        check('14.2 detune 固定週期偏移（每幀 base+5）', r['det'] == [A4 + 5] * 4,
+              'base=%d got=%s' % (A4, r['det']))
+        check('14.3 detune 持續到下次改寫、detune:0 取消',
+              r['det2'] == [A4 + 7, A4 + 7, A4 + 7, A4 + 7, A4, A4], 'base=%d got=%s' % (A4, r['det2']))
+        check('14.4 slide 數字：首幀 0 偏移、之後每幀 +rate',
+              r['sl'] == [A4 + 10 * i for i in range(5)], 'base=%d got=%s' % (A4, r['sl']))
+        sto = r['sTo']
+        check('14.5 slide {rate,to}：滑到目標音就停（A-4 → G-4）',
+              sto[0] == A4 and sto[-1] == G4 and max(sto) == G4
+              and all(sto[i] <= sto[i + 1] for i in range(len(sto) - 1)),
+              'A-4=%d G-4=%d got=%s' % (A4, G4, sto))
+        check('14.6 slide {rate,limit}：累積夾在 +limit',
+              r['sLim'] == [A4, A4 + 10, A4 + 20, A4 + 25, A4 + 25, A4 + 25], r['sLim'])
+        check('14.7 slide 負 rate 也夾在 -limit',
+              r['sNeg'] == [A4, A4 - 10, A4 - 20, A4 - 25, A4 - 25, A4 - 25], r['sNeg'])
+        rs = r['reset']
+        check('14.8 新音觸發 → slideAcc 歸零、detune 保留',
+              [x['acc'] for x in rs] == [12, 24, 36, 12, 24] and [x['d'] for x in rs] == [4] * 5
+              and rs[3]['p'] == A4 + 4, rs)
+        check('14.9 三角波也吃 detune / slide', r['triS'] == [A2 + 6, A2 + 9, A2 + 12],
+              'A-2=%d got=%s' % (A2, r['triS']))
+        check('14.10 雜訊軌不受 detune / slide 影響（仍是週期索引 5）', r['noi'] == [5, 5, 5], r['noi'])
+        check('14.11 音效的幀吃 slide（p2 timer 每幀 +20）',
+              r['sfxT'] == [A4, A4 + 20, A4 + 40, A4 + 60], 'base=%d got=%s' % (A4, r['sfxT']))
+        check('14.12 音效的幀吃 detune', r['sfxDetune'] == A4 + 11,
+              'base=%d got=%d' % (A4, r['sfxDetune']))
+        check('14.13 slide:0 關掉滑音', r['off'] == [A4, A4 + 8, A4, A4], r['off'])
+
+        if not page.evaluate('()=>T.hasCruiser()'):
+            check('15.0 games/cruiser/song.js 載入（CR.SONGS / CR.SFX）', False, '沒有 window.CR')
+        else:
+            print('== games/cruiser/song.js ==')
+
+            # 15 曲目資料合法性
+            r = run('cruiserSongs')
+            want_keys = ['title', 'stage1', 'boss', 'clear', 'gameover', 'extend']
+            check('15.1 六首曲齊全 %s' % want_keys, sorted(r['keys']) == sorted(want_keys), r['keys'])
+            bad = r['bad']
+            check('15.2 p1/p2/tri 的音名都解析得出且在 C1..B7（midi 24..107）',
+                  not bad['range'], bad['range'][:6])
+            check('15.3 三角波是低音軌（不超過 C-5 / midi 72）', not bad['tri'], bad['tri'][:6])
+            check('15.4 雜訊軌的 note 是 0..15 的週期索引', not bad['noise'], bad['noise'][:6])
+            check('15.5 vol 在 0..15、duty 在 0..3',
+                  not bad['vol'] and not bad['duty'], (bad['vol'][:4], bad['duty'][:4]))
+            check('15.6 order 索引都指得到 pattern', not bad['order'], bad['order'][:6])
+            check('15.7 每首曲都有 p1 主旋律與 tri 低音', not bad['track'], bad['track'])
+            check('15.8 沒有曲子用到 DMC 軌（R2 不放取樣）', not bad['dmc'], bad['dmc'][:4])
+            info = r['info']
+            for k in want_keys:
+                if k not in info:
+                    continue
+            want_len = {'title': (17.04, 8), 'stage1': (25.56, 16), 'boss': (10.65, 8),
+                        'clear': (3.99, 3), 'gameover': (3.00, 2), 'extend': (1.00, 1)}
+            bpm_ok = {'title': 112.5, 'stage1': 150.0, 'boss': 180.0,
+                      'clear': 180.0, 'gameover': 150.0, 'extend': 300.0}
+            for k, (sec, npat) in want_len.items():
+                i = info.get(k, {})
+                check('15.9.%-8s %s BPM / %d pattern / %.2f 秒' % (k, bpm_ok[k], npat, sec),
+                      i.get('bpm') == bpm_ok[k] and i.get('patterns') == npat
+                      and abs(i.get('sec', 0) - sec) < 0.05,
+                      i)
+            check('15.10 stage1 是 16 小節、四軌齊全',
+                  info['stage1']['order'] == 16 and sorted(info['stage1']['tracks']) == ['noi', 'p1', 'p2', 'tri'],
+                  info['stage1'])
+
+            # 15.11~ 回音軌
+            r = run('cruiserEcho')
+            check('15.11 stage1 回音軌 = 主旋律延後 %d row（%d/%d row 相符，loop 點接得上）'
+                  % (r['delay'], r['match'], r['total']),
+                  r['match'] == r['total'] and r['delay'] == 4, r['mismatch'])
+            check('15.12 stage1 回音軌音量比主旋律低 2 級（%s → %s）' % (r['leadVol'], r['echoVol']),
+                  r['leadVol'] - r['echoVol'] == 2, (r['leadVol'], r['echoVol']))
+            check('15.13 stage1 回音軌有 detune（+%s）、主旋律沒有' % r['echoDet'],
+                  r['echoDet'] > 0 and r['leadDet'] == 0, (r['echoDet'], r['leadDet']))
+            check('15.14 stage1 回音軌用 12.5% 占空比（duty 0）', r['echoDuty'] == 0, r['echoDuty'])
+
+            # 16 音效優先權 / 搶佔 / 回復
+            r = run('cruiserSfx')
+            want_sfx = ['shot', 'laser', 'missile', 'hit', 'explode', 'capsule', 'powerup', 'die', 'extend']
+            check('16.1 九個音效齊全 %s' % want_sfx, sorted(r['names']) == sorted(want_sfx), r['names'])
+            PR = r['PR']
+            check('16.2 優先權 die > explode > powerup ≥ laser > shot（%s）'
+                  % ' > '.join('%s%d' % (k, PR[k]) for k in ['die', 'explode', 'powerup', 'laser', 'shot']),
+                  PR['die'] > PR['explode'] > PR['powerup'] >= PR['laser'] > PR['shot'], PR)
+            check('16.3 除了 die，音效只用 p2 / noi（不搶 p1 主旋律與 tri 低音）',
+                  not r['illegal'], r['illegal'])
+            check('16.4 die 搶四軌 p1+p2+tri+noi', sorted(r['dieChans']) == ['noi', 'p1', 'p2', 'tri'],
+                  r['dieChans'])
+            check('16.5 CR.Audio.sfx(\'die\') 會先停音樂（NES 慣例）',
+                  r['playingBefore'] is True and r['diePlaying'] is False,
+                  (r['playingBefore'], r['diePlaying']))
+            check('16.6 低優先權的 shot 搶不走 explode',
+                  r['afterShot'] == ['shot'] and r['explodeWins'] == ['explode']
+                  and r['shotLoses'] == ['explode'],
+                  (r['afterShot'], r['explodeWins'], r['shotLoses']))
+            od = r['ownedDuring']
+            check('16.7 explode 期間 p2 / noi 被佔用，p1 / tri 沒有',
+                  od['p2'] and od['noi'] and not od['p1'] and not od['tri'], od)
+            check('16.8 搶佔期間音樂完全不寫 p2 / noi 暫存器',
+                  r['musicP2'] == 0 and r['musicNoi'] == 0, (r['musicP2'], r['musicNoi']))
+            check('16.9 搶佔期間音樂照常寫 p1 / tri（旋律低音不中斷）',
+                  r['musicP1'] > 0 and r['musicTri'] > 0, (r['musicP1'], r['musicTri']))
+            check('16.10 音效結束後音樂重寫 p2 / noi 把聲道拿回去',
+                  r['restoreP2'] >= 4 and r['restoreNoi'] >= 2, (r['restoreP2'], r['restoreNoi']))
+            check('16.11 回復後 APU 的 p2 = 音樂的音高、四軌都在播', r['backOk'], r['backOk'])
+            check('16.12 CR.Audio 介面 init/play/stop/sfx/tick 齊全', r['api'], r['api'])
+
+            # 17 10 秒離線渲染
+            for key in ['stage1', 'boss']:
+                r = page.evaluate('()=>T.cruiserRender(%r, 10)' % key)
+                check('17.%s 10 秒渲染無 NaN / 峰值 %.4f ≤ 1.0 / 有訊號（RMS %.4f、%d 樣本）'
+                      % (key, r['peak'], r['rms'], r['samples']),
+                      r['nan'] == 0 and 0.02 < r['peak'] <= 1.0 and r['rms'] > 0.01, r)
 
         browser.close()
 

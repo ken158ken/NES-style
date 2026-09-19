@@ -9,14 +9,27 @@ tools/apu_render.py — 用 Playwright 載入 engine/apu.js + engine/music.js，
     ../卡比之星/.venv/bin/python tools/apu_render.py --only demo,p1_a4
     ../卡比之星/.venv/bin/python tools/apu_render.py --song mySong.js:MY_SONG   # 自訂曲（全域變數名）
 
+  遊戲曲目模式（R2 audio agent）：載入 games/<game>/song.js，渲染 CR.SONGS 的曲子並做五聲道檢查
+    ../卡比之星/.venv/bin/python tools/apu_render.py --game cruiser --song stage1 --seconds 10
+    ../卡比之星/.venv/bin/python tools/apu_render.py --game cruiser --seconds 10 \
+        --out-dir shots/agent_audio            # --song 省略 = 全部曲目
+
 輸出：shots/agent_apu/*.wav（shots/ 不進 git）
 
 頻譜檢查（純 Python，不需 numpy；自帶 radix-2 FFT）：
   - 各聲道單獨開時的基頻是否正確（自相關 + 頻譜峰值雙重估計）
   - 三角波換音高時振幅不變（真機沒有音量暫存器）
   - 雜訊長模式是寬頻（頻譜平坦度高）、方波是窄帶（平坦度低）
+
+遊戲曲目模式的「只含五聲道成分」檢查：
+  a) 暫存器稽核：driver 寫出去的位址全部落在 $4000~$4017，且只碰到五個聲道區塊 + $4015/$4017
+  b) 逐聲道單獨渲染（把其它聲道的寫入濾掉、$4015 遮罩）→ 印出各軌 RMS，驗證宣告用到的軌真的有聲音
+  c) 頻譜覆蓋：全混音頻譜的前 N 個峰值，每個都要在某一軌的單獨渲染中找得到對應能量
+     （找不到 = 有第六個音源 / 非 APU 成分）→ FAIL
+  d) 波形健康度：無 NaN、峰值 ≤ 1.0、無削波
+  ※ 離線渲染一律 loop:true，所以 clear / gameover / extend 這些短曲會重複播到指定秒數。
 """
-import argparse, base64, cmath, math, pathlib, struct, sys, wave
+import argparse, base64, cmath, json, math, pathlib, struct, sys, wave
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 APU = ROOT / 'engine' / 'apu.js'
@@ -266,6 +279,65 @@ window.R = (function(){
     return out;
   }
 
+  // ---- 遊戲曲目（games/<game>/song.js 的 CR.SONGS）----
+  // keep = 5 bit 遮罩（bit0 p1 / 1 p2 / 2 tri / 3 noi / 4 dmc）；被遮掉的聲道連暫存器都不寫
+  function chanMask(a, keep){
+    return {
+      write: function(addr, val){
+        if (addr >= 0x4000 && addr <= 0x4013){
+          const ci = (addr - 0x4000) >> 2;
+          if (!(keep & (1 << ci))) return;
+        }
+        if (addr === 0x4015) val &= keep;
+        a.write(addr, val);
+      },
+      setDpcmSample: function(){ return a.setDpcmSample.apply(a, arguments); }
+    };
+  }
+
+  // 回傳 {b64, nan, peak, addrs}；keep 預設 0x1F（五聲道全開）
+  function gameSong(sr, seconds, key, keep){
+    if (keep === undefined || keep === null) keep = 0x1F;
+    const songs = (window.CR && window.CR.SONGS) || {};
+    const song = songs[key];
+    if (!song) throw new Error('沒有這首曲子：' + key);
+    const a = nes(sr);
+    const m = M.create(keep === 0x1F ? a : chanMask(a, keep));
+    const sfx = (window.CR && window.CR.SFX) || {};
+    for (const n in sfx) m.define(n, sfx[n]);
+    m.record(true);
+    m.play(song, {loop: true});
+    const frames = Math.round(seconds * A.FRAME_HZ);
+    const parts = []; let total = 0;
+    for (let f = 0; f < frames; f++){
+      m.tick();
+      const b = a.tick(); parts.push(b); total += b.length;
+    }
+    const out = new Float32Array(total);
+    let o = 0; for (const p of parts){ out.set(p, o); o += p.length; }
+    let nan = 0, peak = 0;
+    for (let i = 0; i < out.length; i++){
+      const v = out[i];
+      if (!isFinite(v)) { nan++; continue; }
+      const av = Math.abs(v); if (av > peak) peak = av;
+    }
+    const seen = {};
+    for (const w of (m.log || [])) seen[w[0]] = (seen[w[0]] || 0) + 1;
+    const addrs = Object.keys(seen).map(Number).sort((x, y) => x - y);
+    return {b64: rawb64(out), nan: nan, peak: peak, addrs: addrs, counts: seen,
+            frames: frames, samples: out.length};
+  }
+
+  function gameSongList(){ return Object.keys((window.CR && window.CR.SONGS) || {}); }
+  function gameSongInfo(key){
+    const s = (window.CR && window.CR.SONGS || {})[key];
+    if (!s) return null;
+    const tracks = {};
+    for (const p of s.patterns) for (const k in p) tracks[k] = 1;
+    return {name: s.name, speed: s.speed, patterns: s.patterns.length,
+            order: s.order.length, tracks: Object.keys(tracks)};
+  }
+
   // 原創 DPCM 取樣：1-bit 差分編碼的短打擊聲（衰減方波 → delta 編碼）
   function drumSample(nBytes){
     const bytes = new Uint8Array(nBytes);
@@ -300,6 +372,7 @@ window.R = (function(){
   }
 
   return {tone, song, sfxOnly, drumSample, b64, rawb64, triLevels,
+          gameSong, gameSongList, gameSongInfo,
           noteFreq: function(n){ return M.freqOf(M.noteToMidi(n)); },
           pulseF: function(n){ const p = M.PULSE_PERIOD[M.noteToMidi(n)]; return A.CPU_HZ/(16*(p+1)); },
           triF:   function(n){ const p = M.TRI_PERIOD[M.noteToMidi(n)];   return A.CPU_HZ/(32*(p+1)); }};
@@ -314,6 +387,153 @@ def decode(b64s):
     return [v / 32767.0 for v in ints]
 
 
+CH_NAMES = ['p1', 'p2', 'tri', 'noi', 'dmc']
+APU_BLOCKS = {0x4000: 'p1', 0x4004: 'p2', 0x4008: 'tri', 0x400C: 'noi', 0x4010: 'dmc'}
+
+
+def top_peaks(mags, n, sr, N, fmin=40.0, fmax=16000.0):
+    """回傳頻譜的前 n 個局部峰值 [(bin, 幅值)]（已避開相鄰 bin）。"""
+    k0 = max(2, int(fmin * N / sr))
+    k1 = min(len(mags) - 2, int(fmax * N / sr))
+    cand = []
+    for k in range(k0, k1):
+        if mags[k] >= mags[k - 1] and mags[k] >= mags[k + 1]:
+            cand.append((mags[k], k))
+    cand.sort(reverse=True)
+    out, used = [], []
+    for m, k in cand:
+        if any(abs(k - u) < 4 for u in used):
+            continue
+        used.append(k)
+        out.append((k, m))
+        if len(out) >= n:
+            break
+    return out
+
+
+def run_game(args):
+    """--game 模式：離線渲染 games/<game>/song.js 的曲目 + 只含五聲道成分檢查。"""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print('需要 playwright：../卡比之星/.venv/bin/python -m pip install playwright', file=sys.stderr)
+        return 2
+
+    song_js = ROOT / 'games' / args.game / 'song.js'
+    if not song_js.exists():
+        print('找不到 %s' % song_js, file=sys.stderr)
+        return 2
+    outdir = pathlib.Path(args.out_dir)
+    if args.out_dir == str(OUTDIR):                     # 沒指定就自動分到 agent_audio
+        outdir = ROOT / 'shots' / 'agent_audio'
+    sr = args.rate
+    checks = []
+
+    def ck(name, ok, detail=''):
+        checks.append((name, bool(ok), detail))
+        print('  [%s] %s%s' % ('PASS' if ok else 'FAIL', name, ('  — ' + detail) if detail else ''))
+
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page()
+        errs = []
+        page.on('pageerror', lambda e: errs.append(str(e)))
+        page.goto('about:blank')
+        page.add_script_tag(path=str(APU))
+        page.add_script_tag(path=str(MUSIC))
+        page.add_script_tag(path=str(song_js))
+        page.evaluate(JS)
+        if errs:
+            print('JS 錯誤：', errs, file=sys.stderr)
+            return 2
+
+        keys = [k.strip() for k in args.song.split(',') if k.strip()] or page.evaluate('()=>R.gameSongList()')
+        print('== %s：渲染 %s（每首 %.1f 秒 @ %d Hz）==' % (args.game, ','.join(keys), args.seconds, sr))
+
+        for key in keys:
+            info = page.evaluate('()=>R.gameSongInfo(%s)' % json.dumps(key))
+            if not info:
+                ck('曲目 %s 存在' % key, False, '不在 CR.SONGS')
+                continue
+            full = page.evaluate('()=>R.gameSong(%d,%f,%s)' % (sr, args.seconds, json.dumps(key)))
+            x = decode(full['b64'])
+            path = outdir / ('%s_%s.wav' % (args.game, key))
+            clipped = write_wav(path, x, sr)
+            bpm = 3600.0 / (info['speed'] * 4)
+            print('\n-- %s「%s」 speed=%d ≈ %.1f BPM  %d pattern / %d order  軌 %s'
+                  % (key, info['name'], info['speed'], bpm, info['patterns'], info['order'],
+                     '+'.join(info['tracks'])))
+            print('   %s  %.2fs  RMS=%.4f  峰值=%.4f%s'
+                  % (path, len(x) / sr, rms(x), full['peak'], ('  ⚠ 削波 %d' % clipped) if clipped else ''))
+
+            # d) 波形健康度
+            ck('%-9s 無 NaN / Inf' % key, full['nan'] == 0, '%d 個非有限樣本' % full['nan'])
+            ck('%-9s 峰值 %.4f ≤ 1.0 且有訊號' % (key, full['peak']), 0.02 < full['peak'] <= 1.0)
+
+            # a) 暫存器稽核
+            addrs = full['addrs']
+            bad = [a for a in addrs if a < 0x4000 or a > 0x4017]
+            ck('%-9s 暫存器寫入全在 $4000~$4017（%d 個位址）' % (key, len(addrs)), not bad,
+               '越界 %s' % [hex(a) for a in bad] if bad else
+               ' '.join('$%04X' % a for a in addrs))
+            blocks = set()
+            for a in addrs:
+                if a <= 0x4013:
+                    blocks.add(CH_NAMES[(a - 0x4000) >> 2])
+                elif a in (0x4015, 0x4017):
+                    blocks.add('ctl')
+            ck('%-9s 只碰五個聲道區塊 + $4015/$4017' % key,
+               blocks <= {'p1', 'p2', 'tri', 'noi', 'dmc', 'ctl'}, '碰到 %s' % sorted(blocks))
+
+            # b) 逐聲道單獨渲染
+            # （前 0.5 秒是 APU 高通濾波器的啟動暫態 DC，會讓「靜音軌」量到殘留，一律跳過）
+            skip = min(len(x) - 1, sr // 2)
+            solos, solo_rms = {}, {}
+            for ci, cn in enumerate(CH_NAMES):
+                r = page.evaluate('()=>R.gameSong(%d,%f,%s,%d)' % (sr, args.seconds, json.dumps(key), 1 << ci))
+                y = decode(r['b64'])
+                solos[cn] = y
+                solo_rms[cn] = rms(y[skip:])
+            used = [c for c in CH_NAMES if solo_rms[c] > 1e-4]
+            print('   單軌 RMS：' + '  '.join('%s=%.4f' % (c, solo_rms[c]) for c in CH_NAMES))
+            ck('%-9s 宣告用到的軌都有訊號（%s）' % (key, '+'.join(info['tracks'])),
+               all(t in used for t in info['tracks']), '實際有聲 %s' % used)
+            ck('%-9s 沒宣告的軌保持靜音' % key,
+               all(c in info['tracks'] for c in used), '多出 %s' % [c for c in used if c not in info['tracks']])
+
+            # c) 頻譜覆蓋：全混音的每個主要峰值，都要在某一軌裡找得到
+            off = min(len(x) // 4, sr)
+            win = 8192
+            mix = x[off:off + win]
+            mags, N = spectrum(mix)
+            pk = top_peaks(mags, args.peaks, sr, N)
+            solo_mags = {}
+            for c in used:
+                sm, _ = spectrum(solos[c][off:off + win])
+                solo_mags[c] = sm
+            uncovered = []
+            for k, m in pk:
+                best, who = 0.0, None
+                for c in used:
+                    v = max(solo_mags[c][max(1, k - 3):k + 4])
+                    if v > best:
+                        best, who = v, c
+                # 某一軌在該頻率的能量要能解釋混音的峰（-20 dB 容許：非線性混音會壓縮）
+                if best < m * 0.1:
+                    uncovered.append((k * sr / N, 20 * math.log10(max(best, 1e-12) / max(m, 1e-12))))
+            ck('%-9s 只含五聲道成分（前 %d 個頻譜峰全部可歸屬單軌）' % (key, len(pk)), not uncovered,
+               '未歸屬 %s' % ['%.0fHz %.0fdB' % (f, d) for f, d in uncovered] if uncovered else
+               '峰值 %s' % ' '.join('%.0f' % (k * sr / N) for k, _ in pk[:8]))
+
+        browser.close()
+
+    npass = sum(1 for _, ok, _ in checks if ok)
+    print('\n輸出目錄：%s' % outdir)
+    print('檢查 %d 項，通過 %d，失敗 %d' % (len(checks), npass, len(checks) - npass))
+    print('總結：%s' % ('PASS' if npass == len(checks) else 'FAIL'))
+    return 0 if npass == len(checks) else 1
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--seconds', type=float, default=10.0, help='曲子渲染秒數（預設 10）')
@@ -321,8 +541,14 @@ def main():
     ap.add_argument('--tone-seconds', type=float, default=1.0)
     ap.add_argument('--out-dir', default=str(OUTDIR))
     ap.add_argument('--only', default='', help='逗號分隔，只跑這些 clip')
-    ap.add_argument('--song', default='', help='自訂曲：<js 檔路徑>:<全域變數名>')
+    ap.add_argument('--song', default='', help='自訂曲 <js 路徑>:<全域變數名>；'
+                                                '或搭配 --game 時 = CR.SONGS 的 key（逗號分隔，省略 = 全部）')
+    ap.add_argument('--game', default='', help='遊戲曲目模式：載入 games/<game>/song.js，渲染 CR.SONGS')
+    ap.add_argument('--peaks', type=int, default=12, help='五聲道覆蓋檢查要驗幾個頻譜峰值（預設 12）')
     args = ap.parse_args()
+
+    if args.game:
+        return run_game(args)
 
     outdir = pathlib.Path(args.out_dir)
     only = set(s.strip() for s in args.only.split(',') if s.strip())

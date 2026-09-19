@@ -4,7 +4,7 @@
  * 規則（原汁原味的關鍵）：
  *   1. 一幀一取樣 —— 鍵盤 / 手把事件只更新「即時遮罩」，`held/pressed/released/mask`
  *      一律讀 poll() 當下的快照。poll() 之外不會有任何狀態變化。
- *   2. 來源優先權：replay > inject（腳本注入）> 鍵盤 | Gamepad。
+ *   2. 來源優先權：replay > inject（腳本注入）> 鍵盤 | Gamepad | external（setExternal，觸控覆蓋層）。
  *   3. pressed/released 只在邊緣為真（比較 poll 的前後兩幀快照）。
  */
 (function (root) {
@@ -39,6 +39,7 @@
   var pollCount = 0;
 
   var injectQ = [];    // [{mask, frames}]
+  var external = 0;    // R2：第三個即時來源（觸控覆蓋層等），與鍵盤 | Gamepad 做 OR（不蓋掉鍵盤）
   var replayArr = null, replayIdx = 0;
   var recording = false, recBuf = null;
 
@@ -108,7 +109,7 @@
       q.frames = (q.frames | 0) - 1;
       if (q.frames <= 0) injectQ.shift();
     } else {
-      m = (live | padMask());
+      m = (live | padMask() | external);
     }
     cur = m & 255;
     if (recording) recBuf.push(cur);
@@ -153,7 +154,7 @@
     return API;
   }
   function reset() {                  // 全清（測試之間用）
-    live = 0; cur = 0; prev = 0; pollCount = 0;
+    live = 0; cur = 0; prev = 0; pollCount = 0; external = 0;
     injectQ.length = 0; replayArr = null; replayIdx = 0;
     recording = false; recBuf = null;
     return API;
@@ -176,6 +177,7 @@
     poll: poll, held: held, pressed: pressed, released: released,
     mask: mask, prevMask: prevMask, pressedMask: pressedMask, releasedMask: releasedMask,
     inject: inject, injectSeq: injectSeq, clearInject: clearInject, injectPending: injectPending,
+    setExternal: function (m) { external = (m | 0) & 255; return API; }, external: function () { return external; },
     record: record, stopRecord: stopRecord, isRecording: isRecording,
     replay: replay, replayPending: replayPending,
     remap: remap, resetMap: resetMap, keymap: function () { return keymap; },

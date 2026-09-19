@@ -30,8 +30,17 @@
  *   vib  : {rate, depth, delay}  顫音：rate = 每幀相位增量(64 為一圈)、depth = timer 偏移量、delay = 延遲幀數
  *   duty : 0..3     占空比（方波）；noi 軌則是 0/1 的 LFSR 長短模式
  *   cut  : n        n 幀後自動切音（§4 音效 / 斷奏用）
+ *   detune: n       固定週期偏移（+ = 週期變大 = 音變低）；持續到下次改寫，`0` 取消。
+ *                   回音軌微微失諧（§2.2「FamiTracker Pxx」）、整軌移調都用它。方波 / 三角波有效，雜訊 / DMC 無效
+ *   slide: n | {rate, to, limit}
+ *                   滑音（§2.4「軟體 slide」，FamiTracker 1xx / 2xx / 3xx）。
+ *                   數字 n = 每幀週期 +n（正 = 往下滑、負 = 往上滑）；
+ *                   {rate:n, to:'C-5'} = 滑到目標音就停（portamento 3xx）；
+ *                   {rate:n, limit:m} = 累積偏移夾在 ±m。
+ *                   累積量在「觸發新音」或「重新指定 slide」時歸零；`slide:0` / `slide:null` 關掉
  *   stop : true     停止整首曲子
  * }
+ *   ★ 一幀的最終週期 = 基礎音高（note + arp + vib + 樂器 pitch 包絡）+ detune + slide 累積量
  *
  * instrument = {
  *   vol:[...], volLoop:i,      // 每幀音量包絡 0..15（與 row 的 vol 相乘後除 15）
@@ -46,6 +55,8 @@
  *   priority: 5,                       // 數字大者可搶下數字小者佔用的聲道
  *   data: { p2:[frame,...], noi:[...] } // 每個元素 = 一幀，欄位與 row 相同（絕對值、不是 pattern）
  * }                                     // frame 為 null 表示沿用上一幀；{off:true} 表示該軌結束
+ *   音效的幀也吃 `detune` 與 `slide`（數字型，每幀週期 +n；重新指定或換音時累積量歸零），
+ *   下滑 / 上滑音效不必逐幀列音名。另可直接給 `period`（絕對 timer 值）完全接管音高。
  *
  * ============================== API ==============================
  *   NES.Music.create(apu) → driver（測試用；不碰全域狀態）
@@ -112,6 +123,25 @@
     return arr[loop + ((frame - arr.length) % span)];
   }
 
+  /* ------------------------------------------------------- 滑音參數正規化 */
+
+  // slide 欄的三種寫法 → {rate, to(midi|null), limit(number|null)}；0 / null / false → null（關閉）
+  function normSlide(v) {
+    if (v === null || v === undefined || v === false) return null;
+    if (typeof v === 'number') return v === 0 ? null : { rate: v, to: null, limit: null };
+    if (typeof v !== 'object') throw new Error('slide 只能是數字或 {rate,to,limit}：' + v);
+    var rate = v.rate === undefined ? 0 : (v.rate | 0);
+    var to = null;
+    if (v.to !== undefined && v.to !== null) {
+      to = noteToMidi(v.to);
+      if (to === null) throw new Error('slide.to 無法解析音名：' + v.to);
+      if (to < 0) to = 0; else if (to > 127) to = 127;
+    }
+    var limit = (v.limit === undefined || v.limit === null) ? null : Math.abs(v.limit | 0);
+    if (!rate && to === null) return null;
+    return { rate: rate, to: to, limit: limit };
+  }
+
   /* --------------------------------------------------------------- 聲道態 */
 
   function ChannelState(i) {
@@ -128,6 +158,9 @@
     this.duty = 1;
     this.arp = null;
     this.vib = null;
+    this.detune = 0;            // 固定週期偏移（回音軌失諧 / 整軌移調）
+    this.slide = null;          // {rate, to, limit} 或 null
+    this.slideAcc = 0;          // 滑音累積偏移
     this.cut = -1;
     this.noteFrame = 0;         // 觸發後經過的幀數
     this.vibPhase = 0;
@@ -353,6 +386,8 @@
     if (r.duty !== undefined) ch.duty = r.duty;
     if (r.arp !== undefined) ch.arp = r.arp;
     if (r.vib !== undefined) { ch.vib = r.vib; ch.vibPhase = 0; }
+    if (r.detune !== undefined) ch.detune = (r.detune === null ? 0 : (r.detune | 0));
+    if (r.slide !== undefined) { ch.slide = normSlide(r.slide); ch.slideAcc = 0; }
     ch.cut = r.cut === undefined ? -1 : r.cut;
     if (r.note !== undefined && r.note !== null) {
       if (r.note === '---' || r.note === 'off') { ch.on = false; }
@@ -369,6 +404,7 @@
         ch.trigger = true;
         ch.noteFrame = 0;
         ch.vibPhase = 0;
+        ch.slideAcc = 0;          // 新音 → 滑音重新開始（detune 是「固定」偏移，不歸零）
       }
     }
   };
@@ -414,6 +450,19 @@
           }
         }
         if (inst) { var ip = envAt(inst.pitch, inst.pitchLoop, f); if (ip !== null) p += ip; }
+        p += ch.detune;                                  // 固定週期偏移（回音軌失諧）
+        if (ch.slide) {                                  // 滑音：先套用目前累積量，再往前推一格
+          var sl = ch.slide, acc = ch.slideAcc, next = acc + sl.rate;
+          if (sl.to !== null) {
+            var diff = ((i === 2) ? TRI_PERIOD[sl.to] : PULSE_PERIOD[sl.to]) - p;
+            if (sl.rate > 0 ? next > diff : (sl.rate < 0 ? next < diff : true)) next = diff;
+          } else if (sl.limit !== null) {
+            if (next > sl.limit) next = sl.limit;
+            else if (next < -sl.limit) next = -sl.limit;
+          }
+          p += acc;
+          ch.slideAcc = next;
+        }
         ch.outPeriod = p < 0 ? 0 : (p > 0x7FF ? 0x7FF : p);
       }
       ch.noteFrame++;
@@ -480,14 +529,17 @@
         var ci = sc.ci;
         var fr = sc.frames[sc.pos];
         if (sc.pos >= sc.frames.length || (fr && fr.off)) { this._restore(ci); continue; }
-        if (!sc.st) sc.st = { vol: 15, duty: 0, midi: 69, on: true, trigger: true };
+        if (!sc.st) sc.st = { vol: 15, duty: 0, midi: 69, on: true, trigger: true, detune: 0, slide: 0, slideAcc: 0 };
         var st = sc.st;
         st.trigger = (sc.pos === 0);
         if (fr) {
           if (fr.vol !== undefined) st.vol = fr.vol;
           if (fr.duty !== undefined) st.duty = fr.duty;
+          if (fr.detune !== undefined) st.detune = (fr.detune === null ? 0 : (fr.detune | 0));
+          if (fr.slide !== undefined) { st.slide = (fr.slide === null ? 0 : (fr.slide | 0)); st.slideAcc = 0; }
           if (fr.note !== undefined) {
             st.midi = (ci === 3 || ci === 4) ? fr.note : noteToMidi(fr.note);
+            st.slideAcc = 0;                       // 換音 → 滑音重新開始
             if (fr.retrigger) st.trigger = true;
           }
           if (fr.period !== undefined) st.period = fr.period; else st.period = undefined;
@@ -496,6 +548,11 @@
         if (ci === 3) period = st.midi & 15;
         else if (st.period !== undefined) period = st.period;
         else period = (ci === 2 ? TRI_PERIOD : PULSE_PERIOD)[Math.max(0, Math.min(127, st.midi))];
+        if (ci !== 3 && ci !== 4) {                // 方波 / 三角波才有 detune / slide
+          period += st.detune + st.slideAcc;
+          st.slideAcc += st.slide;
+          if (period < 0) period = 0; else if (period > 0x7FF) period = 0x7FF;
+        }
         var ch = this.ch[ci];
         this._emit(ch, true, st.vol, period, st.duty, st.trigger, st.midi);
         sc.pos++;
@@ -526,7 +583,8 @@
       channels: this.ch.map(function (c) {
         return {
           name: c.name, on: c.on, midi: c.midi, vol: c.outVol, period: c.outPeriod,
-          duty: c.outDuty, noteFrame: c.noteFrame, owned: !!self.owner(c.i),
+          duty: c.outDuty, detune: c.detune, slide: c.slide, slideAcc: c.slideAcc,
+          noteFrame: c.noteFrame, owned: !!self.owner(c.i),
           owner: self.owner(c.i) ? self.owner(c.i).name : null
         };
       })
