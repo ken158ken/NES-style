@@ -131,6 +131,11 @@
 
       if (this.mode === 'listen') {
         this.listenT++;
+        // Round 11（ui）：觸控虛擬按鍵走 setTouch，不會產生 keydown ⇒ captureKey 收不到，
+        // 手機玩家按進監聽畫面後會卡住 ⇒ 用觸控 START 取消（鍵盤的 Enter 仍會被 captureKey 綁定）。
+        if (this.listenT > 10 && IN().touchDown && IN().touchDown('start')) {
+          this.stopListen(); this.mode = 'list'; this.lockT = 12; sfx('menu_back'); return null;
+        }
         // 手把：先等所有按鈕放開，再接受下一個按下的按鈕
         const pressed = inp.gamepadPressed ? inp.gamepadPressed() : [];
         if (!this.gpReady) { if (!pressed.length) this.gpReady = true; }
@@ -179,16 +184,21 @@
       T(ctx, '按鍵設定', this.menuMode ? 8 : 76, 5, { color: C.yellow, size: 16, outline: '#101830' });
       if (inp.gamepadActive && inp.gamepadActive()) T(ctx, '手把已連線', 250, 8, { color: '#80e0a0', size: UI.MS_SMALL, align: 'right', outline: '#101830' });
 
+      // Round 11（ui）：觸控時表頭 / 列距整塊上壓（24→22、38→36、40→38、18→17），
+      // 空出最底下一行放「觸控按鍵請到設定調整」。非觸控時 tOn 恆為 false ⇒ 版面與 Round 10 完全相同。
+      const tOn = !!(UI.touchOn && UI.touchOn());
+      const rowY = tOn ? 38 : ROW_Y, rowH = tOn ? 17 : ROW_H, hdY = tOn ? 22 : 24;
+
       // 表頭
-      T(ctx, '動作', 14, 24, { color: '#8fa0bc', size: UI.MS_SMALL, outline: '#101830' });
-      T(ctx, '鍵盤（最多 3 個）', KEY_X[0], 24, { color: '#8fa0bc', size: UI.MS_SMALL, outline: '#101830' });
-      T(ctx, '手把', GP_X + GP_W / 2, 24, { color: '#8fa0bc', size: UI.MS_SMALL, align: 'center', outline: '#101830' });
-      KB.rect(ctx, 6, 38, 244, 1, '#405070');
+      T(ctx, '動作', 14, hdY, { color: '#8fa0bc', size: UI.MS_SMALL, outline: '#101830' });
+      T(ctx, '鍵盤（最多 3 個）', KEY_X[0], hdY, { color: '#8fa0bc', size: UI.MS_SMALL, outline: '#101830' });
+      T(ctx, '手把', GP_X + GP_W / 2, hdY, { color: '#8fa0bc', size: UI.MS_SMALL, align: 'center', outline: '#101830' });
+      KB.rect(ctx, 6, tOn ? 36 : 38, 244, 1, '#405070');
 
       const acts = this.actions(), NAME = inp.ACTION_NAMES || {};
       for (let i = 0; i < acts.length; i++) {
-        const a = acts[i], y = ROW_Y + i * ROW_H, sel = this.sel === i;
-        if (sel) { KB.rect(ctx, 6, y - 2, 244, ROW_H - 1, '#1e2a52'); UI.cursor(ctx, 8, y + 2, this.frame); }
+        const a = acts[i], y = rowY + i * rowH, sel = this.sel === i;
+        if (sel) { KB.rect(ctx, 6, y - 2, 244, rowH - 1, '#1e2a52'); UI.cursor(ctx, 8, y + 2, this.frame); }
         fit(ctx, SHORT_NAME[a] || NAME[a] || a, 20, y, 54, { color: sel ? C.yellow : '#fff', size: UI.MS });
         // R8-P2-06：預設「丟棄能力」綁 4 個鍵，但只畫得下 3 欄 ⇒ 第 3 欄右側補「+n」，
         // 玩家才知道還有看不到的鍵（還原預設後不會以為鍵不見了）
@@ -213,10 +223,14 @@
       }
 
       // 訊息列（衝突提示 / 綁定結果）
-      KB.rect(ctx, 6, 184, 244, 1, '#405070');
-      if (this.msgT > 0) fit(ctx, this.msg, 128, 188, 244, { color: this.msgCol, align: 'center', size: UI.MS_SMALL });
-      else fit(ctx, 'Z 設定　X 移除　SELECT 還原預設', 128, 188, 244, { color: C.grey, align: 'center', size: UI.MS_SMALL });
-      fit(ctx, this.menuMode ? 'START 返回設定' : 'START / Esc 返回', 128, 204, 244, { color: C.grey, align: 'center', size: UI.MS });
+      const divY = tOn ? 176 : 184, msgY = divY + 4, backY = tOn ? 194 : 204;
+      const H2 = k => UI.hint(k, { jump: 'Z', attack: 'X', select: 'SELECT', start: 'START' }[k]);
+      KB.rect(ctx, 6, divY, 244, 1, '#405070');
+      if (this.msgT > 0) fit(ctx, this.msg, 128, msgY, 244, { color: this.msgCol, align: 'center', size: UI.MS_SMALL });
+      else fit(ctx, H2('jump') + ' 設定　' + H2('attack') + ' 移除　' + H2('select') + ' 還原預設', 128, msgY, 244, { color: C.grey, align: 'center', size: UI.MS_SMALL });
+      fit(ctx, this.menuMode ? (H2('start') + ' 返回設定') : (tOn ? (H2('start') + ' 返回') : 'START / Esc 返回'), 128, backY, 244, { color: C.grey, align: 'center', size: UI.MS });
+      // 觸控時：虛擬按鍵本身不能在這裡重映射 ⇒ 指到設定頁
+      if (tOn) fit(ctx, '觸控按鍵請到「設定」調整', 128, 208, 244, { color: '#7c8ca8', align: 'center', size: UI.MS });
 
       if (this.mode === 'listen') this.drawListen(ctx);
       else if (this.mode === 'confirm') this.drawConfirm(ctx);
@@ -232,7 +246,8 @@
       const blink = ((this.frame >> 4) & 1) ? '#ffffff' : '#98a8c0';
       fit(ctx, '請按下要綁定的按鍵…', 128, 106, 188, { color: blink, size: UI.MS, align: 'center' });
       fit(ctx, '手把按鈕也可以', 128, 122, 188, { color: '#8fa0bc', size: UI.MS_SMALL, align: 'center' });
-      fit(ctx, 'Esc 取消', 128, 136, 188, { color: C.grey, size: UI.MS_SMALL, align: 'center' });
+      fit(ctx, (UI.touchOn && UI.touchOn()) ? (UI.hint('start', 'START') + ' 取消') : 'Esc 取消',
+        128, 136, 188, { color: C.grey, size: UI.MS_SMALL, align: 'center' });
     }
 
     drawConfirm(ctx) {

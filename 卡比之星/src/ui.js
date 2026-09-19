@@ -39,6 +39,45 @@
   UI.MS_SMALL = 12;   // 次要資訊（灰字 / 兩欄表的右欄）
   // 標題 logo 中心 y（sprite 160×48 ⇒ 佔 y 14~62）與標題選單面板可用的上 / 下界（menu.js TitleMenu 用）
   UI.TITLE_LOGO_CY = 38; UI.TITLE_MENU_TOP = 64; UI.TITLE_MENU_BOTTOM = 182;
+
+  // ---------- Round 11：觸控提示（契約 5 的消費端）----------
+  // touch.js / input.js 由 touch agent 實作；**這裡一律防禦式呼叫**，
+  // KB.TOUCH 或 KB.input.hint 不存在時 touchOn() 恆為 false、hint() 回傳 fallback
+  // ⇒ 非觸控環境的字串與 Round 10 完全相同。
+  /** 目前是否處於「觸控操作」狀態（覆蓋層顯示中，或 2 秒內有觸控輸入） */
+  UI.touchOn = function () {
+    try {
+      if (KB.TOUCH && KB.TOUCH.active && KB.TOUCH.active()) return true;
+      if (KB.input && KB.input.touchActive && KB.input.touchActive()) return true;
+    } catch (e) { }
+    return false;
+  };
+  /** 按鍵提示字：觸控時回虛擬鍵名（A / B / C / START / 方向鍵），否則回原本的鍵盤字樣 */
+  // 注意：input.js 的 hint() 以 touchActive()（最近 2 秒有觸控輸入）為準，但覆蓋層只是「顯示中」
+  // （剛開遊戲還沒按任何鍵）時 touchActive() 是 false ⇒ 會回鍵盤名。畫面上已經看得到 A / B / C 按鍵，
+  // 提示卻寫 Z / X 會對不起來 ⇒ 這種情況改用 input.js 匯出的 TOUCH_NAMES（同一份表，不另外複製）。
+  UI.hint = function (action, fallback) {
+    if (UI.touchOn()) {
+      try {
+        const inp = KB.input;
+        if (inp) {
+          if (inp.hint && inp.touchActive && inp.touchActive()) { const s = inp.hint(action); if (s) return String(s); }
+          const nm = inp.TOUCH_NAMES && inp.TOUCH_NAMES[action];
+          if (nm) return nm;
+          if (inp.hint) { const s = inp.hint(action); if (s) return String(s); }
+        }
+      } catch (e) { }
+    }
+    return fallback === undefined ? String(action || '') : fallback;
+  };
+  /** 瀏覽器是否支援全螢幕 API（iOS Safari 的 iPhone 版為 false ⇒ 選單畫灰字） */
+  UI.fullscreenOK = function () {
+    try {
+      if (typeof document === 'undefined') return false;
+      if (document.fullscreenEnabled === false) return false;
+      return !!(KB.toggleFullscreen && (document.fullscreenEnabled || document.documentElement.requestFullscreen));
+    } catch (e) { return false; }
+  };
   function zhOpts(str, o) {
     o = o || {};
     if (o.font) return o;
@@ -413,18 +452,36 @@
     ['空中 X', '空中也能出招 ↑X／↓X'],
     ['滑鏟中 跳', '滑鏟可用跳躍取消'],
     ['受傷時', '能力星噴出，可撿回'],
-    ['SELECT 丟星', '砸中帶能力的敵人可混合'],
+    [() => UI.hint('select', 'SELECT') + ' 丟星', '砸中帶能力的敵人可混合'],
     ['能力台座', '碰到即可重複取得能力'],
     ['傳送星', '碰到後自動飛往另一處'],
   ];
+  // Round 11（ui）：第 3 頁＝觸控操作（虛擬按鍵 A / B / C / START）。
+  // 版面規則同 drawHelp：左欄 ≤ 88px、右欄 ≤ 138px（12px 中文 ⇒ 右欄最多 11 個全形字），
+  // 列數 ≤ 11（gap = floor(135 / n) 要 ≥ 12 才不會上下相疊）。
+  UI.HELP3 = [
+    ['方向鍵', '移動／上飛行／下吞'],
+    ['A', '跳（空中再按＝漂浮）'],
+    ['B', '吸入／吐出／招式'],
+    ['C', '短按丟星／長按夥伴'],
+    ['上 / 下 + C', '夥伴指令／合體技'],
+    ['A + B', '覺醒（量表滿時）'],
+    ['START', '暫停選單'],
+    ['全螢幕鍵', '在畫面右下角'],
+    ['橫向遊玩', '畫面最大最好按'],
+    ['觸控按鍵', '設定裡可調整'],
+    ['', '位置／大小／透明度'],
+  ];
   UI.helpPage = 0;
-  UI.HELP_PAGES = 2;
+  UI.HELP_PAGES = 3;
   // 說明頁的左右翻頁（TitleScene / PauseMenu / TitleMenu 顯示說明時每幀呼叫）
   UI.helpUpdate = function () {
     const inp = KB.input;
-    if (inp.pressed('right') || inp.pressed('left')) { UI.helpPage = (UI.helpPage + 1) % UI.HELP_PAGES; sfx('menu'); }
+    if (inp.pressed('right')) { UI.helpPage = (UI.helpPage + 1) % UI.HELP_PAGES; sfx('menu'); }
+    else if (inp.pressed('left')) { UI.helpPage = (UI.helpPage + UI.HELP_PAGES - 1) % UI.HELP_PAGES; sfx('menu'); }
   };
-  UI.openHelp = function () { UI.helpPage = 0; };
+  // 觸控時直接翻到「觸控操作」那頁（手機玩家最需要的一頁）
+  UI.openHelp = function () { UI.helpPage = UI.touchOn() ? 2 : 0; };
   function drawHelp(ctx, opts) {
     opts = opts || {};
     KB.rect(ctx, 0, 0, W, H, 'rgba(0,0,0,0.62)');
@@ -433,7 +490,7 @@
     T(ctx, '操作說明', 128, 10, { color: C.yellow, align: 'center', size: 16, outline: '#402000' });
     KB.text(ctx, (page + 1) + '/' + UI.HELP_PAGES, 240, 16, { color: C.grey, align: 'right' });
     KB.rect(ctx, 20, 30, 216, 1, '#405070');
-    const rows = page === 1 ? UI.HELP2 : ((KB.input && KB.input.HELP) || []);
+    const rows = page === 2 ? UI.HELP3 : page === 1 ? UI.HELP2 : ((KB.input && KB.input.HELP) || []);
     const top = 35, bottom = 170, n = Math.max(1, rows.length);
     const gap = Math.max(11, Math.min(18, Math.floor((bottom - top) / n)));
     let y = top + Math.max(0, Math.floor((bottom - top - gap * n) / 2));
@@ -441,15 +498,18 @@
     // font agent：改用 12px 像素字後左欄實測最寬 86、右欄最寬 132 —— 右欄右移到 106，
     // 兩欄之間才留得出 8px 空隙（原本 x=100 時「Z / K / 空白鍵」會頂到「跳躍…」）。
     const KW = 88, DW = 138, DX = 106;
-    const allFit = (i, w, o) => rows.every(r => TW(r[i], o) <= w);
+    const cell = v => (typeof v === 'function' ? String(v() || '') : v);   // 欄位可為函式（觸控時即時換鍵名）
+    const allFit = (i, w, o) => rows.every(r => TW(cell(r[i]), o) <= w);
     const kSize = allFit(0, KW, { size: UI.MS, nomix: true }) ? UI.MS : UI.MS_SMALL;
     const dSize = allFit(1, DW, { size: UI.MS }) ? UI.MS : UI.MS_SMALL;
     for (const [k, d] of rows) {
-      fit(ctx, k, 12, y, KW, { color: C.cyan, size: kSize, nomix: true });
-      fit(ctx, d, DX, y, DW, { color: '#fff', size: dSize });
+      fit(ctx, cell(k), 12, y, KW, { color: C.cyan, size: kSize, nomix: true });
+      fit(ctx, cell(d), DX, y, DW, { color: '#fff', size: dSize });
       y += gap;
     }
-    fit(ctx, '←→ 換頁　　' + (opts.hint || 'M：靜音　　SELECT：返回'), 128, 173, 238, { color: C.grey, align: 'center', size: UI.MS });
+    // 底部提示：觸控時「M：靜音」按不到 ⇒ 只留返回鍵；換頁字樣也改成虛擬鍵名
+    const dft = UI.touchOn() ? (UI.hint('select', 'SELECT') + '：返回') : 'M：靜音　　SELECT：返回';
+    fit(ctx, UI.hint('left', '←→') + ' 換頁　　' + (opts.hint || dft), 128, 173, 238, { color: C.grey, align: 'center', size: UI.MS });
   }
   UI.drawHelp = drawHelp;
 
@@ -491,11 +551,16 @@
       const groundY = 147, bounce = Math.abs(Math.sin(t * 3.4)) * 12, kx = this.menu ? 56 : 128;
       KB.rect(ctx, kx - 7 + Math.round(bounce / 6), groundY - 1, 14 - Math.round(bounce / 3), 2, 'rgba(0,40,0,0.35)');
       drawKirby(ctx, 'ui_title_kirby', kx, groundY - Math.round(bounce), { t, squash: bounce < 1.2 });
-      if ((f % 60) < 42 && !this.help && !this.menu) KB.text(ctx, 'PRESS START', 128, 164, { color: '#fff', align: 'center', outline: '#203040', spacing: 1 });
+      const touch = UI.touchOn();
+      if ((f % 60) < 42 && !this.help && !this.menu) KB.text(ctx, touch ? 'TAP START' : 'PRESS START', 128, 164, { color: '#fff', align: 'center', outline: '#203040', spacing: 1 });
       // 底部資訊列
       KB.rect(ctx, 0, 184, W, H - 184, C.navy); KB.rect(ctx, 0, 184, W, 1, '#405070');
-      fit(ctx, '同人作品　按 M 靜音' + (KB.audio && KB.audio.muted ? '（已靜音）' : ''), 128, 186, 250, { color: '#c8d4e4', align: 'center', size: UI.MS });
-      if (!this.menu) fit(ctx, 'SELECT：操作說明　　Z / ENTER：開始', 128, 204, 250, { color: '#7c8ca8', align: 'center', size: UI.MS });
+      const muted = KB.audio && KB.audio.muted;
+      fit(ctx, (touch ? '同人作品' : '同人作品　按 M 靜音') + (muted ? '（已靜音）' : ''), 128, 186, 250, { color: '#c8d4e4', align: 'center', size: UI.MS });
+      if (!this.menu) {
+        fit(ctx, UI.hint('select', 'SELECT') + '：操作說明　　' + UI.hint('jump', 'Z') + ' / ' + UI.hint('start', 'ENTER') + '：開始',
+          128, 204, 250, { color: '#7c8ca8', align: 'center', size: UI.MS });
+      }
       if (this.menu) this.menu.draw(ctx, this);
       if (this.help) drawHelp(ctx);
       drawMuteToast(ctx); drawFade(ctx, this);
@@ -777,9 +842,8 @@
       });
       // R7-P2-06：游標停在鎖定 / 製作中的節點時，不要再寫「Z 進入」（按 Z 進不去）
       // （解鎖條件本身寫在上方資訊列，這裡只換掉會誤導的「Z 進入」，字數保持塞得下）
-      const hint = ok ? '←→ 移動　Z 進入　SELECT 回標題'
-        : !this.exists(i) ? '←→ 移動　製作中　SELECT 回標題'
-          : '←→ 移動　未解鎖　SELECT 回標題';
+      const mv = UI.hint('left', '←→'), en = UI.hint('jump', 'Z'), bk = UI.hint('select', 'SELECT');
+      const hint = mv + ' 移動　' + (ok ? en + ' 進入' : !this.exists(i) ? '製作中' : '未解鎖') + '　' + bk + ' 回標題';
       fit(ctx, hint, 128, 197, 234, { color: C.grey, align: 'center', size: UI.MS });
       drawMuteToast(ctx); drawFade(ctx, this);
     }
@@ -905,7 +969,7 @@
       if (sel) cursor(ctx, 90, y + 2, game.frame || 0);
       T(ctx, opts[i], 104, y, { color: sel ? C.yellow : '#fff', size: UI.MS });
     }
-    T(ctx, '↑↓ 選擇　Z 確認', 128, 121, { color: C.grey, align: 'center', size: 12 });
+    T(ctx, UI.hint('up', '↑↓') + ' 選擇　' + UI.hint('jump', 'Z') + ' 確認', 128, 121, { color: C.grey, align: 'center', size: 12 });
   };
 
   // ---------- 關卡開場橫幅（WORLD n + 關名）----------
@@ -1101,8 +1165,9 @@
         KB.text(ctx, pad7(Math.max(this.prevBest, this.total)), 238, 155, { color: this.newBest ? C.pink : '#c8d8f0', align: 'right' });
         if (this.newBest && ((f >> 3) & 1)) KB.text(ctx, 'NEW!', 60, 155, { color: C.yellow });
         this.drawRank(ctx);
-        if ((f % 60) < 42) fit(ctx, 'Z / ENTER：繼續', 128, 196, 240, { color: '#fff', align: 'center', size: ms });
-      } else fit(ctx, 'Z / ENTER：跳過', 128, 196, 240, { color: C.grey, align: 'center', size: ms });
+        const go = UI.hint('jump', 'Z') + ' / ' + UI.hint('start', 'ENTER');
+        if ((f % 60) < 42) fit(ctx, go + '：繼續', 128, 196, 240, { color: '#fff', align: 'center', size: ms });
+      } else fit(ctx, UI.hint('jump', 'Z') + ' / ' + UI.hint('start', 'ENTER') + '：跳過', 128, 196, 240, { color: C.grey, align: 'center', size: ms });
       drawMuteToast(ctx); drawFade(ctx, this);
     }
     // Style Rank：左邊是評分細項、右邊是砸下來的印章大字
@@ -1273,7 +1338,7 @@
         } else {
           bigText(ctx, 'THE END', 128, 108, 2, { color: '#fff', outline: '#101830', align: 'center', spacing: 1 });
         }
-        if ((f % 60) < 42) KB.text(ctx, 'PRESS START', 128, 200, { color: '#fff', align: 'center', outline: '#102018', spacing: 1 });
+        if ((f % 60) < 42) KB.text(ctx, UI.touchOn() ? 'TAP START' : 'PRESS START', 128, 200, { color: '#fff', align: 'center', outline: '#102018', spacing: 1 });
       }
       drawMuteToast(ctx); drawFade(ctx, this);
     }

@@ -2285,3 +2285,154 @@ playwright 直接開 dist 實跑（`shots/agent_qa10/dist.py`）：`scene = Game
 - **dist**：`dist_game.png`、`dist.py`
 - **效能**：`perf.json`、`perf.py`
 - **測試 log**：`tests/`（`all_tests.log` 16 支、`checks.log` boss / level / audio / font、`playthrough_nogod.log` 目前 vs HEAD 12 次、`playthrough_godmode.log` w1~w7、各測試單檔 log）
+
+---
+
+# Round 11 QA（qa11，2026-09-19）
+
+驗收對象：Round 11「手機也能玩」（touch / screen / pwa / ui 四 agent + 總控整合）。
+環境：Linux + 專案 venv + Playwright Chromium；裝置模擬 iPhone 13（直 390×664 / 橫 750×342，DPR 3）、Pixel 5（直 393×727 / 橫 802×293，DPR 2.75）、iPad Mini（直 768×1024 / 橫 1024×768，DPR 2）。
+截圖全部存 `shots/agent_qa11/`，**每一張都已用 Read 開圖看過**（36 張版面矩陣 + 觸控實戰 / 設定 / dist / http / 桌機共 78 張）。
+
+## R11-0. 總評
+
+**可以部署，但建議先修 1 個 P1。**
+
+核心功能（觸控操作、小螢幕縮放、PWA / 離線、選單觸控適配、桌機回歸）全部達標：三裝置六種方向的按鍵都不壓畫面 / HUD、畫面比例恆 256:224、觸控實戰 28/28 全過、dist 單檔與 http + service worker 離線都可玩、全套測試綠。
+
+唯一擋路的是 **R11-P1-01：設定裡把「觸控按鍵」切到「關」之後，純觸控裝置（手機）會永久鎖死**——覆蓋層 `pointer-events:none`、遊戲本身不吃畫面點擊、而且這個設定會寫進 `localStorage` 存活到下次開啟，於是玩家再也無法操作任何選單、也回不到設定把它打開。這正是「出門在外用手機開網址就能玩」情境下最致命的一種誤觸。修法很小（見下），修完即可部署。
+
+另有 1 個 P2（桌機設定頁多出 4 個觸控項、版面與 Round 10 不同）與 4 個 P3。
+
+## R11-1. 通過清單
+
+| # | 驗收項 | 結果 |
+|---|---|---|
+| 1 | 三裝置 × 直橫向 × 6 畫面 = **36 張**（標題 / 遊戲中 / 暫停選單 / 設定頁捲到觸控四項 / 說明第 3 頁 / 按鍵設定頁） | 全部 PASS，0 console error |
+| 1a | 按鍵不擋 HUD / 畫面：6 種組合 × 6 顆鍵的矩形與 `KB.layout` 交集 | **0 交集**、0 出界（數據見 `matrix.json`） |
+| 1b | 畫面比例 256:224 | 6 種組合實測 `w/h` 皆 = **1.14286** |
+| 1c | 字不溢出 / 像素清晰 | 看圖確認：暫停卡 5 列招式、設定 11 項捲動、說明 3/3 十一列、按鍵設定 8×4 表格＋觸控提示行全部不溢出、不重疊 |
+| 2 | 觸控實戰（Pixel 5 直 + iPhone 13 橫，CDP 多點真的按 DOM 覆蓋層） | **28/28 PASS**（`play.py`） |
+| 3 | 純觸控操作設定頁（D-pad 選 + 左右改值） | 左手 / 大小 / 透明度 / localStorage 全部 PASS（「關」之後的問題見 P1） |
+| 4 | 全螢幕 | `KB.TOUCH.fullscreenSupported = true`、`document.fullscreenEnabled = true`、`KB.UI.fullscreenOK() = true`；**實際點全螢幕鍵後 `document.fullscreenElement` 變 true**；暫停選單第 1 列第 4 欄「全螢幕」在 6 種方向都畫得出來且不被切 |
+| 5 | dist 單檔 `--dist` | Pixel 5 直 / iPhone 13 橫皆可觸控跳躍（state jump / fall、離地）、`__kb.missing() = []`、`KB.FONTS.ready = true`、**0 console error**、`KB.PWA.registered = false`（`supported = false`，file:// 不註冊 sw） |
+| 6 | HTTP（`http.server 8793`） | `--wait-sw --reload 1` → `navigator.serviceWorker.controller = true`、`KB.PWA {registered:true, supported:true, standalone:false, updateReady:false}`；`--offline` 離線重載後 **GameScene 正常、字型 ready、missing []、覆蓋層在**；`sw.js` VERSION `3706b3f1ae` + **ASSETS 67 檔 0 缺**（重算 sha1 與檔案現況一致 ⇒ build.py 不必重跑）；`assets/manifest.webmanifest` JSON 合法（fullscreen / landscape / start_url `../index.html` / scope `../`）；4 個 icon 檔都在且看圖 OK |
+| 7 | 桌機回歸 | 1280×800 → `scale = 3` **整數倍**、canvas 置中 `x=256 y=64 w=768 h=672`、backing store 恆 **256×224**、`image-rendering: crisp-edges`；觸控覆蓋層 **不出現**（`available=false`、opacity 0）；`hint` = **Z / X / Shift**；說明第 1 頁鍵名 Z / K / 空白鍵、X / J、Shift / L；標題文案「PRESS START」「按 M 靜音」「SELECT：操作說明　Z / ENTER：開始」與 R10 相同 |
+| 8 | 測試 | `test_touch` **56/56**、`engine_test` **167/167**、`test_saves` **67/67**（跑兩次皆綠）；另補 `playthrough w1 --godmode` cleared（5341 幀、deaths 0）、`w7 --godmode` cleared（8703 幀、deaths 0），`missing sprites: []` |
+
+### R11-1a. 版面矩陣數據（`shots/agent_qa11/matrix.json`）
+
+| 裝置 / 方向 | viewport | canvas（x,y,w,h） | scale | D-pad | A 鍵 | 壓到畫面 |
+|---|---|---|---|---|---|---|
+| iPhone 13 直 | 390×664 | 0,0,390,341.3 | 1.523 | 164 | 62 | 無 |
+| iPhone 13 橫 | 750×342 | 179.5,0,390.9,342 | 1.527 | 160 | 66 | 無 |
+| Pixel 5 直 | 393×727 | 0,0,393,343.9 | 1.535 | 165 | 63 | 無 |
+| Pixel 5 橫 | 802×293 | 233.5,0,334.9,293 | 1.308 | 141 | 57 | 無 |
+| iPad Mini 直 | 768×1024 | 0,0,768,672 | 3（整數） | 166 | 72 | 無 |
+| iPad Mini 橫 | 1024×768 | **170**,85,684,598.5 | 2.672 | **150** | 72 | 無 |
+
+- 直向都是「畫面貼上方、按鍵在下方黑帶」；橫向都是「畫面置中、D-pad 左 / A B C 右、START 右上、全螢幕左上」。
+- iPad Mini 橫向的左右留白已依 touch agent 的跨檔需求放寬到 **170px**，D-pad 從 98 → **150px**，`overlapping = false`。
+
+### R11-1b. 觸控實戰逐項（`play.py`，兩裝置各 14 項）
+
+| 測項 | Pixel 5 直 | iPhone 13 橫 |
+|---|---|---|
+| D-pad 右 60 幀 → x 增加 | 49 → 122.9 | 49 → 122.9 |
+| 按住上 40 幀起飛 | vy −1.54、onGround false、state `float` | 同左 |
+| A 跳 | vy −3.68、state `jump` | 同左 |
+| B 吸入（無能力） | state `inhale`（截圖可見吸力特效與敵人被吸） | 同左 |
+| D-pad 滑動 右→上→左 | `{right}` → `{up}` → `{left}`，舊方向都有解除 | 同左 |
+| 兩指 右 + A | x 128.3 → 147.6 且離地 | 同左 |
+| 放開全部 → `KB.input.anyDown()` | **false**、`touchDown` 清空（無殘留） | 同左 |
+| START → 暫停 → 再 START 解除 | paused true → false | 同左 |
+| C 短按丟能力（先 `--ability sword`） | `sword` → `null` | 同左 |
+| 真鍵盤輸入後覆蓋層淡出 | `KB.TOUCH.active()` true → **false** | 同左 |
+| 再觸控後覆蓋層回來 | **true** | 同左 |
+| console / page error | 0 | 0 |
+
+> 註：`--touch "key right 2"`（= `__kb.tap`）走的是 `KB.input.setVirtual`，**不會**產生真的 `keydown` 事件，所以覆蓋層不會淡出（實測 active 仍為 true）。這是除錯 API 的性質、不是 bug；要測淡出必須用真鍵盤事件（本報告用 `page.keyboard.press('ArrowRight')`，結果正確淡出）。**後續 agent 寫測試時請注意這個陷阱。**
+
+### R11-1c. 設定頁觸控操作（`settings.py` / `size.py`）
+
+- 「按鍵位置 → 左手」：iPhone 13 橫 A/B/C 中心 x = 126 / 44 / 70（畫面中線 375 以左）、D-pad 660（以右）；Pixel 5 直 A/B/C = 124 / 46 / 71、D-pad 296（中線 196.5）。**鏡像正確**，截圖 `set_*_side_left.png` 看圖確認。
+- 寫檔：`localStorage.kirbystar_global` → `settings.touch = {"mode":"auto","side":"left","size":1,"opacity":0.8}`，**reload 後完整還原**（含 size 1.2 / opacity 0.3 / side left 的組合測試）。
+- 預設 `opacity = 0.8`，與設定頁第三檔「濃」對齊（ui agent 原本回報的「預設 0.7 不在檔位上」已由總控解掉）。
+- 「按鍵大小」三檔實測：小 0.8 → D-pad 133px、中 1 → 160~166px、大 1.2 → iPhone 橫 164 / Pixel 直 165 / iPad 橫 199px。**iPhone 13 橫向調到「大」仍完全不壓到畫面**（矩形與 canvas 0 交集，看圖確認 D-pad 仍在左側黑邊內）。iPad 橫向「大」會依設計壓到畫面左緣 39px（半透明逃生口，見 P3-02）。
+- 「觸控按鍵：關」→ 覆蓋層 `opacity → 0`、`pointer-events: none`、`KB.TOUCH.active() = false`；程式上再切回「自動 / 開」可以正常恢復（`off→auto→on→off→auto` 循環測試 active 都正確）。**但在純觸控裝置上切不回去 —— 見 P1-01。**
+
+## R11-2. 問題列表
+
+### P1（會壞遊玩）
+
+#### R11-P1-01 「觸控按鍵：關」在純觸控裝置是**不可逆鎖死**（手機開了就再也玩不了）
+- **現象**：設定 → 「觸控按鍵」切到「關」後：
+  1. 覆蓋層 `pointer-events: none`，六顆虛擬鍵全部失效；
+  2. 遊戲本體只吃鍵盤 / 手把 / 虛擬鍵，**畫面（canvas）本身沒有任何點擊 / 手勢入口**；
+  3. `touch.js` 只有 `mode === 'auto'` 才會在 `pointerdown` / `touchstart` 時重新顯示（`markTouch()` / `applyAuto()`，`src/touch.js:257`、`:391`、`:434`），`'off'` 是強制隱藏、**沒有任何逃生口**；
+  4. `setLayout` 會 `store()` 進 `KB.save.settings.touch` → `localStorage.kirbystar_global`，**重載後仍是 off**（實測 reload 後 `mode=off`、`active=false`）。
+  ⇒ 手機玩家（沒有鍵盤）從此連標題選單都動不了，只能清網站資料 / 換瀏覽器。
+- **重現**：
+  ```bash
+  .venv/bin/python shots/agent_qa11/lockout2.py       # 自動重現：設 off → 點遍所有原按鍵位置與畫面各處 → reload
+  # 輸出：mode off active=False ／ 點遍後 x 49→49、anyDown=False ／ reload +2s: mode=off active=False
+  ```
+  手動重現：`.venv/bin/python tools/mobile_shot.py --device "Pixel 5" --scene title --eval "JSON.stringify(KB.TOUCH.rects())"` 取座標 → 用 `--touch` 走到設定 →「觸控按鍵」按兩下右 → 之後任何 `--touch` 都無效。
+- **截圖**：`shots/agent_qa11/lockout_off.png`（關閉後畫面上只剩遊戲，沒有任何可按的東西）、`lockout_reload.png`（重載後依然沒有）、`set_p5p_touch_off.png` / `set_i13l_touch_off.png`（設定頁按下「關」的當下）。
+- **建議修法**（擇一，都只動 touch.js / menu.js，工作量都很小）：
+  1. **最穩**：`AVAILABLE`（觸控裝置）為 true 時，`mode:'off'` 只隱藏「主按鍵」，**保留一顆小小的常駐把手**（例如右上角 28px 的半透明 ▣），按下即 `setLayout({mode:'auto'})`；
+  2. **次穩**：`mode:'off'` 不寫進存檔（只在本次工作階段有效），重載即回 `auto`；並在設定頁該項的提示行寫「關閉後需用鍵盤或重新整理才能開回來」；
+  3. **最省事**：觸控裝置上把 `cycle` 從 `['auto','on','off']` 改成 `['auto','on']`（「關」只在非觸控裝置出現）——反正沒有觸控的桌機本來就不會顯示覆蓋層。
+- **另註**：「按鍵透明度：淡（0.3）」不會鎖死（仍可按），但在亮背景關卡上很難看見；不列為問題，只是與上面同一個設定頁，修 P1 時可一併加一行提示。
+
+### P2（體驗）
+
+#### R11-P2-01 桌機（無觸控裝置）設定頁仍列出 4 個觸控項，版面與 Round 10 不同
+- **現象**：`hasTouchApi = () => !!(KB.TOUCH && KB.TOUCH.setLayout && KB.TOUCH.layout)`（`src/menu.js:478`）。但 `touch.js` 是**無條件**建立 `KB.TOUCH`（`src/touch.js:446`），所以桌機也永遠為 true ⇒ 設定頁固定 **11 項**（`音樂音量 音效音量 按鍵提示 畫面縮放 特效強度 卡比配色 觸控按鍵 按鍵位置 按鍵大小 按鍵透明度 按鍵設定`），超過 `SET_WINDOW = 7` ⇒ 桌機也出現**捲動條與上下三角**，而這 4 項在沒有觸控的機器上完全沒有作用（`KB.TOUCH.available = false`，覆蓋層永不顯示）。Round 10 是 7 項、無捲動。
+- **重現**：`.venv/bin/python shots/agent_qa11/desk.py` → 印出「桌機設定頁項目 11 [...]」；截圖 `shots/agent_qa11/d_settings_top.png`（可見右側黃色位置條）、`d_settings_bottom.png`。
+- **影響**：桌機玩家多捲一頁才找得到「按鍵設定」，且看到 4 個按了沒反應的選項。不影響遊玩，但與「桌機零回歸」的目標不符。
+- **建議**：`hasTouchApi` 改成 `() => !!(KB.TOUCH && KB.TOUCH.setLayout && KB.TOUCH.layout && (KB.TOUCH.available || (KB.input.touchActive && KB.input.touchActive())))`，這樣純桌機回到 7 項 / 無捲動，二合一筆電一碰螢幕就會長出來。（此改動會讓桌機設定頁回到 Round 10 版面，`test_progression` 是動態算項目數，不會壞。）
+
+### P3（小瑕疵）
+
+#### R11-P3-01 `KB.TOUCH.rects()` 在覆蓋層隱藏（mode off / 淡出）時仍回報 6 顆按鍵
+- `rects()` 只跳過 `style.display === 'none'` 的元素；隱藏是用 `opacity:0 + pointer-events:none`，所以 `mode:'off'` 下 `rects()` 仍回 6 筆（實測），與 API 文件「隱藏的 fs 不列」的語意不一致。
+- **影響**：只影響測試 / 未來要靠 `rects()` 判斷「現在有沒有按鍵」的程式（會誤判成有）。建議 `rects()` 在 `!visible` 時回 `{}`，或加一個 `visible` 欄位。
+- 重現：`shots/agent_qa11/lockout2.py` 的 `rects=6` 那幾行。
+
+#### R11-P3-02 iPad Mini 橫向把「按鍵大小」調到「大」時 D-pad 會壓到畫面左緣 39px
+- 實測 size 1.2 → D-pad 199px、矩形 `[10,512,199,199]`、canvas x=170 ⇒ 重疊 39px，`KB.TOUCH.overlapping = true`（半透明壓上去，是 touch agent 刻意留的逃生口）。畫面左緣通常是背景天空，實務上影響很小；只是說明.md 最好註明「平板調『大』會半透明壓到畫面邊緣」。
+- 截圖 `shots/agent_qa11/size_ipadl_big.png`。
+
+#### R11-P3-03 iPad Mini 橫向的動作鍵仍是直排（C / B / A 疊一行）
+- touch agent 原本預期「左右留白放寬到 ≥170px 後動作鍵能回到橫排叢集」，實測 170px 下仍是直排（rects：jump 937,687 / attack 936,599 / select 946,520）。可用、但拇指要上下移動，不如橫排順手。非必修。
+- 截圖 `shots/agent_qa11/ipad_l_2game.png`。
+
+#### R11-P3-04 `assets/icons/icon-512.png` 右上角星星貼著邊緣（幾乎被裁到）
+- 看圖：512 版的星星尖角壓在畫布右上角外框上；192 / 180 / maskable 都正常（maskable 有內縮）。只有在某些啟動畫面 / 大圖示情境會看出來。建議下次重產時把星星往內縮 1~2 個原始像素（`tools/make_icons.py`）。
+
+## R11-3. 已知限制（不列為問題，部署前請知悉）
+
+- **iOS Safari 真機未驗證**：`gesturestart` 封鎖、`100dvh`、`env(safe-area-inset-*)`（Playwright 一律回報 0）、AudioContext 在 `touchend` resume、無 Fullscreen API 時 fs 鍵自動隱藏 —— 這些都只在 Chromium 模擬下看過。橫向時 START（右上）與全螢幕（左上）距離螢幕上緣只有 10px，**iPhone 橫向的瀏海 / 動態島有機會蓋到**，建議實機拿到後第一個確認這兩顆。
+- Pixel 5 橫向（802×293）畫面只有 335px 寬、左右各 233px 黑邊 —— 這是 256:224 在超扁視窗下的必然結果（高度已填滿），不是 bug。
+- sw 是「網路優先」：有網路時每次開都會重抓一輪（流量略高）。
+- 部署前若再動任何 `src/*.js` / `index.html`，**一定要重跑 `tools/build.py`**（會同時更新 dist 與 sw.js 的 VERSION / ASSETS）。本次驗收時 VERSION `3706b3f1ae` 與檔案現況一致、dist（3,667,445 bytes、15:16）也比最新 src（touch.js 15:14）新，**不必重跑**。
+
+## R11-4. 截圖索引（`shots/agent_qa11/`，共 78 張 + 6 支腳本）
+
+- **版面矩陣（36 張）**：`{iphone,pixel,ipad}_{p,l}_{1title,2game,3pause,4settings,5help3,6keyconfig}.png`；數據 `matrix.json`；腳本 `matrix.py`
+- **觸控實戰（12 張）**：`{p5p,i13l}_{dpad_right,dpad_up_fly,b_inhale,two_finger,paused,c_throw,after_touch_back}.png`；腳本 `play.py`
+- **設定 / 版面調整（14 張）**：`set_{p5p,i13l}_{side_left,touch_off,touch_auto_back,size_big}.png`、`size_{i13l,p5p,ipadl}_{small,big}.png`；腳本 `settings.py`、`size.py`
+- **P1 重現（2 張）**：`lockout_off.png`、`lockout_reload.png`；腳本 `lockout.py`、`lockout2.py`
+- **dist 單檔（4 張）**：`dist_{p5p,i13l}.png`、`dist_{p5p,i13l}_jump.png`
+- **http + sw（2 張）**：`http_sw.png`（Pixel 5 直，controller=true）、`http_offline.png`（iPhone 13 橫，離線重載後 GameScene）
+- **桌機回歸（7 張）**：`d_title.png`、`d_game.png`、`d_help1.png`、`d_help2.png`、`d_settings_top.png`、`d_settings_bottom.png`、`d_win1280.png`；腳本 `desk.py`
+- **觸控說明頁（2 張）**：`touch_help1.png`（第 1 頁鍵名已變 A / B / C / START ⇒ 總控的「HELP 第 1 頁鍵名函式化」生效）、`touch_help2.png`
+
+## R11-5. 建議（給總控裁決）
+
+1. **部署前必修**：R11-P1-01（三個修法任選，建議 3「觸控裝置不提供『關』」最省事，或 1「常駐把手」最完整）。修完請重跑 `tools/test_touch.py` 與 `tools/build.py`。
+2. **建議一起修**：R11-P2-01（一行 `hasTouchApi` 條件），桌機設定頁即可回到 Round 10 的 7 項無捲動版面。
+3. P3-01（`rects()` 語意）建議修，因為後續測試會依賴它；P3-02 / P3-03 / P3-04 可留到下一輪。
+4. 說明.md 建議補兩句：①「按鍵大小調『大』在平板上會半透明壓到畫面邊緣」；②（若 P1 採修法 2）「關閉觸控按鍵後要重新整理才會回來」。
+5. 拿到 iOS 真機後優先確認：橫向瀏海是否蓋到 START / 全螢幕鍵、`100dvh` 下方按鍵是否被 Safari 工具列吃掉、加到主畫面後的全螢幕與離線。

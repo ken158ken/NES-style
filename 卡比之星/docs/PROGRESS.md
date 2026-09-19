@@ -4922,3 +4922,282 @@ const mbox = (p, x, y, w, h, o) => abox(x, y, w, h, Object.assign({ melee: !!p &
 總控修：三個註解用字（宣 / 稽 / 遍）換掉讓字集檢查回綠；spark 招式表「44px 電場」→ 88px。
 ## 已知 / 待裁決（詳 QA_REPORT Round 10）
 - 過大框 48 招（stonegiant 空中 X 192×72、giant ↑X 80×128 等）；例外清單 54 格（spark 蓄力電擊波唯一使用者點名未放大）；判定超出特效（blade X / sword X / giant ↑X）；`__kb.entities()` / HOOK_JS 缺 w0/h0/meleeScaled。
+
+---
+# Round 11：手機也能玩（2026-09-19）
+總控：骨架（index.html 標籤、touch.js / pwa.js 空殼、tools/mobile_shot.py、基準截圖 shots/ctrl/m_*_before.png）已完成；派 touch / screen / pwa / ui 四 agent 平行。各 agent 在下方自己區段回報。
+
+## screen（Round 11）
+負責檔：`src/main.js`、`index.html`（`src/gfx.js` 未動）。
+
+### `KB.layout` 定義（契約 1；每次 resize 後更新並 `window.dispatchEvent(new Event('kb-resize'))`）
+| 欄位 | 型別 | 說明 |
+|---|---|---|
+| `x` / `y` | number(CSS px) | canvas 左上角在 viewport 的位置（= `canvas.style.left/top`；手機可為 .5） |
+| `w` / `h` | number(CSS px) | canvas 顯示尺寸 = `256*scale` / `224*scale`（比例恆 256:224） |
+| `scale` | number | 實際倍率，同 `KB.scale`；手機可為小數，桌機為整數 |
+| `portrait` | bool | `innerHeight >= innerWidth` |
+| `mobile` | bool | 觸控裝置（`maxTouchPoints>0` 或 `ontouchstart`）或視窗短邊 < 600px |
+| `safe` | {top,right,bottom,left} | 額外欄位：env(safe-area-inset-*) 量測值（隱藏探針 div，不支援為 0） |
+| `vw` / `vh` | number | 額外欄位：`window.innerWidth / innerHeight`（觸控按鍵排版用） |
+
+### 縮放規則表
+| 情境 | scale | 位置 |
+|---|---|---|
+| 桌機（非 mobile） | `max(1, floor(min(ww/256, wh/224)))` 整數倍 | 置中（整數 px） |
+| 手機直向 | `ww/256`（寬度填滿；高度超出才退成 `(wh-safe.top)/224`） | x 置中、`y = safe.top`（**貼上方**，下方留給觸控按鍵） |
+| 手機橫向 | `min(wh/224, (ww-220-safe.left-safe.right)/256)`（高度填滿為主，左右各留 ≥110px）；若該值 < 完整塞滿倍率的 60%（例如 256×224 的截圖視窗）則改用完整塞滿倍率，避免畫面被壓爛 | 置中 |
+| `KB.save.settings.scale >= 2` | 固定整數倍，**但 `256*p > ww` 或 `224*p > wh` 就忽略** | 置中 |
+| `KB.DEBUG && window.__forceScale`（`__kb.setScale`） | 強制該倍率（行為與 R10 相同） | 置中（整數 px，不套直向貼上方） |
+
+canvas backing store 恆為 256×224（只改 `style.width/height`，不隨 DPR 放大）；`image-rendering: pixelated` 在小數倍仍生效。
+
+- [2026-09-19 14:50] 完成 main.js `resize()` 改寫：mobile 判定 / 直向寬度填滿貼上方 / 橫向左右留 110px / safe-area 探針 / `KB.layout` + `kb-resize` 事件 / settings.scale 放不下就忽略 / `KB.scale` 與 `__kb.setScale` 行為不變；另加 `window.resize`、`orientationchange`、`visualViewport.resize` 監聽（後兩者 `resize(); setTimeout(resize,100)` 二次觸發，iOS 旋轉尺寸延遲）。驗證：`node --check src/main.js`。
+- [2026-09-19 14:52] 完成 index.html：viewport `width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no`；加 theme-color(#f8a0c0) / apple-mobile-web-app-capable / apple-mobile-web-app-status-bar-style(black-translucent) / mobile-web-app-capable / apple-mobile-web-app-title / manifest link(assets/manifest.webmanifest) / apple-touch-icon(assets/icons/icon-180.png)；CSS 加 `height:100dvh`（fallback 100%）、`overscroll-behavior:none`、`touch-action:none`（html/body + canvas）、`user-select:none`、`-webkit-touch-callout:none`、`-webkit-tap-highlight-color:transparent`、`text-size-adjust:100%`；canvas 仍 pixelated；**script 標籤順序未動**。
+- [2026-09-19 14:54] 完成 `visibilitychange`：hidden 時 `last=0; acc=0`（回前景不快轉）→ `dispatchEvent(new Event('blur'))`（input.js 既有 blur 監聽清空 raw）→ `KB.autoPause()`。`KB.autoPause()` 新 API：只在 `KB.scene === KB.game` 且未暫停 / 未過關 / 未淡入 / 玩家未死時，比照 game.js 193~198 設 `paused=true; pauseSel=0; pauseMenu=new KB.PauseMenu(g)` + `KB.audio.duck(true)`（不放 pause 音效，頁面已隱藏），回傳是否有暫停；解除仍由玩家按 START（PauseMenu.resume 會 unduck + resumeMusic，對稱）。另加 `window.blur` 只重置 `last/acc`。
+- [2026-09-19 14:56] 效能確認：`canvas.width/height` 全程 256×224（實測 DPR 3 的 iPhone 13 仍是 256×224）；主迴圈 accumulator `while (acc >= 1000/60 && n < 4)` 在 120Hz（d≈8.33ms）每兩幀才 step 一次，不會快轉，維持原邏輯未改。
+- [2026-09-19 14:58] 驗證完成（全 PASS）：
+  - `.venv/bin/python tools/engine_test.py` → 167/167。
+  - `tools/shot.py --scene title --steps 60 --out shots/agent_screen/t.png`、`--steps 120 --out shots/agent_screen/desk.png` 正常；viewport 256×224 時 `KB.scale === 1`、canvas 256×224、`__kb.setScale(3)` 仍得 scale 3（shot.py 的 take() 本來就從 backing store 放大，畫面 3 倍整數縮放未受影響）。桌機 1280×800 → 3 倍、1920×1080 → 4 倍（整數倍未變）。
+  - mobile_shot 三裝置：iPhone 13 橫向 750×342 → `{"x":179.5,"y":0,"w":390.86,"h":342,"scale":1.5268,"portrait":false,"mobile":true}`（高度填滿、左右各 179.5px 留白）；Pixel 5 直向 393×727 → `{"x":0,"y":0,"w":393,"h":343.9,"scale":1.535,"portrait":true}`（寬度填滿、貼上方、下方 383px 空間給按鍵）；iPad Mini 橫向 1024×768 → `{"x":110,"y":32.5,"w":804,"h":703.5,"scale":3.1406}`（左右剛好各 110px）；iPhone 13 直向 390×664 → scale 1.5234。四張圖皆用 Read 看過：像素清晰、無模糊、比例 256:224 未變形。
+  - 自寫 playwright 檢查（暫存腳本，未進 repo）：旋轉 844×390 ↔ 390×844 兩向皆正確且有發出 `kb-resize`；backing store 256×224；按住 → 切背景後 `KB.input.down('right') === false` 且 `KB.game.paused === true`、`pauseMenu` 已建立；回前景維持暫停；標題場景 `KB.autoPause()` 回 false 不炸；無 pageerror。settings.scale=3 在 390×844 / 700×500 被忽略、在 1280×800 生效。
+
+### 截圖路徑
+`shots/agent_screen/l_iphone.png`（iPhone 13 橫向 game w1）、`p_pixel5.png`（Pixel 5 直向 game w1）、`l_ipad.png`（iPad Mini 橫向 title）、`p_iphone.png`（iPhone 13 直向 title）、`desk.png` / `t.png`（桌機 shot.py title，scale 3 / 1）。
+
+### 已知問題
+- `mobile` 依契約用「短邊 < 600px」，所以 shot.py 的 256×224 視窗也算 mobile；已用「橫向留白後倍率 < 完整塞滿的 60% 就不留白」的保險條款讓它仍得 scale 1、置中，畫面與 R10 相同。若之後想讓桌機小視窗嚴格走整數倍，再調這條。
+- 橫向左右保留固定 220px（每側 110px），未依 `KB.TOUCH.layout.size`（0.8/1/1.2）調整；若 touch agent 的大按鍵在 size=1.2 時壓到畫面，改成讀 `KB.TOUCH.layout.size` 乘上 220 即可（一行）。
+- iOS Safari 真機的網址列收合 / safe-area 只能靠 100dvh + env() 推測，模擬器測不到；真機若仍有下方被工具列蓋住，考慮改用 `visualViewport.height`。
+- 自動暫停不播 'pause' 音效（頁面已隱藏），且不會自動解除暫停（刻意：回來時玩家自己按 START，避免立刻被打）。
+
+### 跨檔需求
+- **touch（input.js / touch.js）**：排版請讀 `KB.layout` 的 `vw/vh/safe` 與 `x/y/w/h`：直向按鍵區 = `y + h` 以下（Pixel 5 約 383px 高）、橫向 = canvas 左右各 ≥110px 的空白帶；監聽 `kb-resize`（旋轉會連發 2 次，100ms 內，請 debounce 或做成冪等）。另 `document.visibilitychange` 時我只 dispatch window `blur`（清 raw），**觸控的 `setTouch` 狀態請 touch.js 自行在 blur / visibilitychange 清掉**，否則切回來可能殘留按住。
+- **ui（menu.js）**：新增 `KB.autoPause()`（main.js）可重用；暫停選單的全螢幕項仍呼叫既有 `KB.toggleFullscreen`（未改）。
+- **pwa**：index.html 已指向 `assets/manifest.webmanifest` 與 `assets/icons/icon-180.png`（檔案已存在）；`theme-color` 用 `#f8a0c0`，manifest 的 theme_color 請對齊。build.py 內嵌 dist 單檔時，manifest / apple-touch-icon 的 `<link>` 若無法內嵌請在 build.py 端移除或改 data URI（dist 是 file://，404 只會在 console 出現、不影響遊玩）。
+
+## pwa（Round 11）
+負責檔案：`src/pwa.js`、`sw.js`（根目錄，新）、`assets/manifest.webmanifest`（新）、`assets/icons/*`（新，pillow 產）、`tools/make_icons.py`（新）、`tools/build.py`、`tools/mobile_shot.py`（僅擴充選項）、`README.md`（母 repo 根目錄）、`說明.md`。
+
+### API：`KB.PWA`（契約 4，src/pwa.js）
+| 成員 | 說明 |
+|---|---|
+| `supported` | 這個環境會註冊 sw 嗎＝`location.protocol` 是 http/https **且** 不是 dist 單檔（`KB.FONT_DATA` 存在就視為單檔）**且** 有 `navigator.serviceWorker` |
+| `registered` | sw 註冊成功（`PWA.reg` 為 registration） |
+| `installed` | 已安裝：以 app 模式執行中，或本次工作階段收到 `appinstalled` |
+| `canInstall` | 收到過 `beforeinstallprompt`（Android Chrome / 桌機 Chromium）⇒ 可呼叫 `promptInstall()` |
+| `promptInstall()` | 回 Promise：`'accepted'` / `'dismissed'` / `'ios'`（iOS Safari 只能手動分享→加入主畫面）/ `'unavailable'` |
+| `standalone` | `display-mode: standalone/fullscreen/minimal-ui` 或 `navigator.standalone`；`visibilitychange` 與 media query change 時更新 |
+| `updateReady` | 有新版 sw 已下載（updatefound → installed 且已有 controller）；同時 `console.log` 提示 |
+| `update()` | 回 Promise：`reg.update()` → 等新 sw 進 waiting（最多 5 秒）→ `postMessage({type:'SKIP_WAITING'})` → `controllerchange` 後自動 `location.reload()`；成功回 true |
+| `iosSafari` | 額外旗標（iOS 的 Safari/WebKit，沒有安裝 API）；UI agent 要顯示「分享 → 加入主畫面」提示時可用 |
+- 全部包 try/catch，PWA 出任何狀況都不影響遊戲；註冊在 `window.load` 之後，路徑固定 `register('./sw.js')`（相對 index.html ⇒ GitHub Pages 子目錄 scope 正確）。
+
+### sw.js 策略（根目錄，scope = 遊戲資料夾）
+- 頂端兩行 `const VERSION` / `const ASSETS` **由 build.py 產生，勿手改**；快取名 `kirbystar-<VERSION>`。
+- install：`Promise.allSettled` 逐個 `cache.add(new Request(u,{cache:'reload'}))`，個別失敗只 warn，不整批失敗。
+- activate：刪掉所有 `kirbystar-` 開頭的舊版快取 + `clients.claim()`；另收 `SKIP_WAITING` 訊息（給 `KB.PWA.update()`）。
+- fetch：非 GET / 跨域 → 直接放行（不 respondWith）；同源 GET → **網路優先**，成功就順手寫回快取；失敗回 `cache.match(req,{ignoreSearch:true})`（所以 `index.html?debug=1` 也吃得到快取）；導覽請求（`mode==='navigate'`）最後退 `./index.html`。
+
+### build.py 新步驟
+- 打包完 dist 後呼叫 `build_sw(html)`：`ASSETS` = `'./'` + `index.html` + index.html 內所有 `<script src>`（照載入順序）+ `assets/fonts/{fusion12-zh_hant.woff2,unifont16-subset.woff2,unifont_chars.txt}` + `assets/manifest.webmanifest` + `assets/icons/*.png`（共 68 筆）；**缺檔檢查迴圈**逐筆印 `!! sw ASSETS 缺檔：<path>`（目前 0 缺）；`VERSION` = 所有資產內容（含路徑名）的 sha1 前 10 碼；用 regex 只換 sw.js 那兩行（找不到樣板行會 assert 失敗）。
+- dist 單檔：把 `<link rel="manifest">` 與 `<link rel="apple-touch-icon">` 從輸出移除（file:// 下必 404），index.html 本身不動；單檔因為有 `KB.FONT_DATA` ⇒ pwa.js 不註冊 sw。
+- **部署前一定要跑 `.venv/bin/python tools/build.py`**，否則 sw.js 的 VERSION / ASSETS 會是舊的（新增 src 檔也一定要重跑）。
+
+### 里程碑
+- [2026-09-19 14:53] 完成 `tools/make_icons.py` + 4 張圖示（32×32 原創手繪像素：粉紅圓臉 + 腮紅 + 大眼 + 紅腳 + 右上星星 + 夜空底 #101830），最近鄰放大：icon-192（×6）、icon-512（×16）、icon-180（×5 置中留白、不透明、apple-touch）、icon-maskable-512（×10 置中＝四邊內縮 18.75%，安全區內）。驗證：Read 看過 192 / 512 / 180 / maskable；第一版 maskable 有斜角底色接縫，已改成單色夜空底。
+- [2026-09-19 14:55] 完成 `assets/manifest.webmanifest`：name 卡比之星（同人版）/ short_name 卡比之星 / start_url `../index.html` / scope `../`（相對 manifest 位置 = 遊戲根目錄）/ display fullscreen + display_override[fullscreen,standalone,minimal-ui] / orientation landscape / background #000000 / theme #f8a0c0（與 index.html theme-color 一致）/ lang zh-Hant / icons 含 purpose maskable。
+- [2026-09-19 14:58] 完成 `sw.js` 與 `src/pwa.js`（見上表）；`tools/build.py` 加 sw 產生步驟；`tools/mobile_shot.py` 擴充 `--wait-sw`（等 serviceWorker.ready）、`--reload N`（第二次載入才有 controller）、`--offline`（`context.set_offline(True)` 後重載，驗證離線可玩），其餘行為不變。
+- [2026-09-19 15:00] 驗證（`.venv/bin/python -m http.server 8771 --bind 127.0.0.1`；8765 被別專案的舊 server 佔用，改用 8771）：
+  - Pixel 5 直向 `--wait-sw --reload 1` → `ctrl=True`、`KB.PWA {registered:true, supported:true, standalone:false, updateReady:false}`、console 無 error。
+  - Pixel 5 橫向 `--offline` → 快取 `kirbystar-16727bfea9` **68 筆**、離線重載後 `ctrl=true`、`scene=TitleScene`，畫面與中文字型完整（字型也是從快取來的）。
+  - iPhone 13 橫向 `--offline` → 離線 `fetch('assets/manifest.webmanifest')` 成功（name/display/orientation = 卡比之星（同人版）/fullscreen/landscape）、`link[rel=manifest]` 與 `apple-touch-icon=assets/icons/icon-180.png` 都在（screen agent 已加，檔名對上）。
+  - 更新流程 `shots/agent_pwa/update_test.py`（自寫 playwright）：註冊 → 重載有 controller → 偷改 sw.js VERSION → `KB.PWA.update()` 回 **true** → 只剩新版快取（舊版已清）→ 腳本自動還原 sw.js。**RESULT: PASS**。
+  - dist 單檔（file://）：`KB.PWA.supported=false`、`registered=false`、TitleScene / GameScene 正常、console 無 error ⇒ 雙擊仍可玩。
+  - `tools/engine_test.py` 167/167、`tools/build.py` 正常（dist 3373KB、sw ASSETS 67 檔 0 缺）。
+- [2026-09-19 15:02] 完成文件：母 repo `README.md` 加「📱 手機遊玩（卡比之星）」（網址、iOS/Android 加到主畫面、建議橫向、觸控配置、離線可玩）；`說明.md` 加同名章節（加到主畫面步驟表、觸控按鍵表 D-pad/A 跳/B 攻/C 丟/▶ 暫停/全螢幕、設定可調 位置 / 大小 / 透明度、離線與清快取說明、線上網址）。
+
+### 截圖路徑
+`shots/agent_pwa/sw.png`（Pixel 5 直向，sw 註冊後）、`shots/agent_pwa/offline.png`（Pixel 5 橫向，離線重載後標題）、`shots/agent_pwa/iphone_offline.png`（iPhone 13 橫向離線）、`shots/agent_pwa/dist_title.png`、`shots/agent_pwa/dist_game.png`（dist 單檔 file://，含觸控覆蓋層）；圖示本體 `assets/icons/*.png`（全部用 Read 看過）。
+
+### 已知問題
+- iOS Safari 沒有 `beforeinstallprompt`，`promptInstall()` 只會回 `'ios'`；要教使用者「分享 → 加入主畫面」（UI agent 若要做提示，可讀 `KB.PWA.iosSafari && !KB.PWA.standalone`）。
+- iOS 的 apple-touch-icon 不吃 manifest，一定要靠 index.html 的 `<link rel="apple-touch-icon" href="assets/icons/icon-180.png">`（目前已在）。
+- sw 是「網路優先」：有網路時每次開都會抓新檔（流量略高、離線才吃快取）；若之後要省流量可把 `src/*.js` 改成 cache-first + 背景更新（VERSION 變更時自然換版）。
+- `KB.PWA.installed` 只在 standalone 或本次工作階段 `appinstalled` 時為 true（瀏覽器沒有「查詢是否已安裝」API，用 `getInstalledRelatedApps` 需要 related_applications，未做）。
+- Playwright 只能驗證 Chromium；iOS Safari 的 PWA（全螢幕、狀態列、離線）未在真機驗證。
+- 圖示是 32×32 放大，maskable 的內縮比例固定 18.75%（32 的整數倍限制），若之後覺得圓形遮罩下太小，改 `save(base,512,288,...)`（×9）即可。
+
+### 跨檔需求
+- **screen（index.html）**：`<link rel="manifest" href="assets/manifest.webmanifest">` 與 `<link rel="apple-touch-icon" href="assets/icons/icon-180.png">` 已加且檔名與我的產出一致 ✅；`theme-color #f8a0c0` 也與 manifest 對齊 ✅。若之後要改路徑 / 檔名，請同步改 `tools/make_icons.py` 的輸出與 manifest（或告訴我）。
+- **screen 提的 dist 404**：已在 build.py 解決（dist 輸出移除那兩個 `<link>`），index.html 不動。
+- **總控**：① 部署前務必跑 `tools/build.py`（更新 sw.js 的 VERSION / ASSETS）；② `sw.js`、`assets/manifest.webmanifest`、`assets/icons/*.png`、`tools/make_icons.py` 是新檔要 `git add`（`.gitignore` 只忽略 shots/，這些不受影響）；③ 新增 `src/*.js` 檔時只要有進 index.html，build.py 就會自動進 sw 快取清單，不必手動維護。
+- **ui（menu.js）**：若要做「加到主畫面」選單項，用 `KB.PWA.canInstall` 顯示 / `KB.PWA.promptInstall()` 執行；iOS 用 `KB.PWA.iosSafari` 顯示文字提示；另 `KB.PWA.updateReady` 為 true 時可顯示「有新版本」與呼叫 `KB.PWA.update()`（會自動重載）。
+
+---
+
+## touch（Round 11）— 觸控虛擬按鍵覆蓋層
+擁有檔案：`src/touch.js`（整檔重寫）、`src/input.js`（加第三輸入來源）、`tools/test_touch.py`（新）。
+
+### API 表
+| API | 檔案 | 說明 |
+|---|---|---|
+| `KB.input.setTouch(name, on)` | input.js | 第三個輸入來源（與 raw / gamepad **OR**，同樣被 `virtualOnly` 遮罩）。name ∈ `left right up down jump attack select start`。按下時會設 `anyKey`、呼叫 `KB.audio.unlock()`。未知 name 回 false。 |
+| `KB.input.clearTouch()` | input.js | 清掉所有觸控鍵（覆蓋層隱藏 / blur / visibilitychange 時自動呼叫）。 |
+| `KB.input.touchActive()` | input.js | 最近 **120 幀（2 秒）** 內有觸控輸入 **且之後沒有鍵盤 / 手把輸入**（鍵盤 / 手把一有動作就立刻轉 false）。 |
+| `KB.input.touchDown(name)` | input.js | 該動作目前是否被觸控按著（除錯 / 測試）。 |
+| `KB.input.hint(action)` | input.js | 提示文字用：觸控時回 `'A'`(jump) / `'B'`(attack) / `'C'`(select) / `'START'`(start) / `'方向鍵'`(四方向)，否則回 `keyNames(action)[0]`（Z / X / Shift / Enter / ←…）。 |
+| `KB.input.TOUCH_NAMES` | input.js | 上面那張虛擬鍵標籤表（ui agent 需要時可直接讀）。 |
+| `KB.TOUCH.available` | touch.js | 裝置支援觸控（`ontouchstart` 或 `maxTouchPoints > 0`）。 |
+| `KB.TOUCH.active()` | touch.js | 覆蓋層**目前顯示中**（淡出 / mode off 時為 false）。 |
+| `KB.TOUCH.show() / hide()` | touch.js | 直接顯示 / 隱藏（不改 mode；下一次輸入事件仍會依 mode 重新判斷）。 |
+| `KB.TOUCH.layout` | touch.js | `{ mode:'auto'\|'on'\|'off', side:'right'\|'left', size:0.6~1.6, opacity:0.15~1 }`，預設 `auto / right / 1 / 0.7`。 |
+| `KB.TOUCH.setLayout(partial)` | touch.js | 即時套用 + 存到 `KB.save.settings.touch` + `KB.saveGame()`（都 try/catch）；回傳套用後的 layout。 |
+| `KB.TOUCH.buttons` | touch.js | `{ dpad, jump, attack, select, start, fs }` → DOM 元素。 |
+| `KB.TOUCH.rects()` | touch.js | 各鍵在 viewport 的 CSS px 矩形 `{x,y,w,h,cx,cy}`（版面檢查 / 測試用；隱藏的 fs 不列）。 |
+| `KB.TOUCH.dirs()` | touch.js | D-pad 目前的 8 方向狀態 `{left,right,up,down}`。 |
+| `KB.TOUCH.relayout()` | touch.js | 手動重排（平常由 `kb-resize` / resize / orientationchange / visualViewport / 每 6 幀輪詢自動觸發）。 |
+| `KB.TOUCH.fullscreenSupported` | touch.js | 有無 Fullscreen API（iOS Safari 為 false → fs 鍵自動隱藏，請改走 PWA「加到主畫面」）。 |
+| `KB.TOUCH.overlapping` | touch.js | 這次排版有沒有按鍵壓在畫面上（空間不足的半透明模式）。 |
+
+### 實作重點
+- **自足**：touch.js 自己 `appendChild` 一個 `#kb-touch` 覆蓋層 + 自注入 `<style>`，**不用改 index.html / build.py**，dist 單檔自然包含。
+- **多點**：pointer events（`setPointerCapture`，無 PointerEvent 時退 touch events），左手 D-pad + 右手 A/B 可同時；每顆鍵各自記 pointerId。
+- **D-pad**：單指滑動 8 方向（等分 45°，`|dx| > |dy|·tan22.5°` 判定）+ 死區（半徑 26%，最少 7px）；旋鈕會跟著手指位移，按到的方向箭頭高亮。
+- **排版**：先讀 `KB.layout`（screen agent）→ 沒有就退 `KB.canvas.getBoundingClientRect()` → 再退 viewport。直向放畫面下方空白帶（START / 全螢幕在主排上方），橫向放左右兩側空白（START 在動作側上方、全螢幕在方向側上方）。側邊太窄時：① 縮小 ② 動作鍵由橫排改**直排**（C / B / A 疊一行）③ 還不夠才半透明（該鍵 opacity × 0.62）壓在邊緣。safe-area 用探針元素讀 `env(safe-area-inset-*)`。
+- **自動顯示**：mode auto ＝ 觸控裝置就顯示；任何 `keydown` / 手把按鍵 → 淡出（opacity 0 + `pointer-events:none`，按鍵不再吃輸入）；`document` capture 的 `pointerdown`/`touchstart` → 再度出現（淡出時的那一下只用來喚醒，不會誤按）。mode on/off 強制。**第一次顯示不跑淡入**（截圖工具同步前進幀數，淡入沒跑完會拍到半透明）。
+- **iOS**：`touch-action:none`、`-webkit-touch-callout:none`、`-webkit-tap-highlight-color:transparent`、`user-select:none`、`contextmenu`/`dblclick`/`gesturestart`/`gesturechange`/`gestureend` 全 preventDefault、root 用 `height:100dvh`；`KB.audio.unlock()` 在 pointerdown **與** pointerup / touchend 都呼叫一次。
+- **設定懶讀**：`KB.save` 可能比 touch.js 晚建立 → 每 6 幀輪詢一次，第一次看到 `KB.save.settings` 就套用 `settings.touch` 並重排；`setLayout` 後寫回並 `KB.saveGame && KB.saveGame()`（try/catch）。既有 API 行為（`BINDINGS` 就地修改、keyconfig / test_saves）完全沒動。
+
+### 里程碑
+- [2026-09-19 14:55] 完成 input.js：`setTouch / clearTouch / touchActive / touchDown / hint / TOUCH_NAMES`；update() 內 `raw || gamepad || touch` 三者 OR，`virtualOnly` 一樣遮掉；鍵盤 / 手把輸入會把 touch 新鮮度推掉（hint 立刻換回鍵盤名）。驗證：`tools/test_touch.py` A 組 13 項。
+- [2026-09-19 15:00] 完成 touch.js 全功能（D-pad 8 方向滑動 + 死區、A/B/C/START/全螢幕、多點、自動顯示、side/size/opacity、safe-area、iOS 手勢封鎖、設定存讀）。驗證：`tools/test_touch.py` 56/56。
+- [2026-09-19 15:05] 修：平板橫向（iPad Mini 左右只有 110px）動作鍵改**直排**、邊距自適應 → 按鍵中心不再壓到畫面；預設 opacity 0.5 → **0.7**（0.5 在黑底上太暗，看圖後調整）；按下狀態加白色內環 + 外光暈（原本只有 brightness 太不明顯）。驗證：`shots/agent_touch/*.png` 四張看圖。
+- [2026-09-19 15:08] 修：第一次顯示的淡入導致截圖拍到半透明（iPhone 實測 0.83、Pixel 0.65 而非 0.7）→ mount 時暫時關掉 transition。驗證：兩裝置 A 鍵像素值都回到 `(179,140,156)` ＝ `#ffb0d0 @0.7`。
+- [2026-09-19 15:10] 加逃生口：`size ≥ 1.15` 時允許按鍵最多放大到側邊空白的 1.5 倍（半透明壓畫面邊緣），給平板使用者把 D-pad 調大用。驗證：`shots/agent_touch/l_ipadmini_big.png`。
+- [2026-09-19 15:12] 回歸測試：`tools/engine_test.py` 167/167、`tools/test_saves.py` 67/67、`tools/test_touch.py` **56/56 PASS / 0 FAIL / 0 WARN**；桌機（無觸控）標題頁不顯示覆蓋層 `shots/agent_touch/desktop_title.png`。
+
+### 測試（tools/test_touch.py，56 項）
+`python tools/test_touch.py [-v]`，非零 exit ＝ 有 FAIL。用 Playwright 裝置模擬 + CDP `Input.dispatchTouchEvent` 真的去「按」DOM 覆蓋層：
+- A. input.js 契約：setTouch / touchDown / touchActive / hint 五個標籤 / virtualOnly 遮罩 / rebind 仍就地改 BINDINGS
+- B. D-pad：死區、按右 30 幀 x 增加、滑動右→上（right 解除 up 成立）、滑到右上同時 right+up、放開全解除
+- C. A 鍵 vy<0、多點 右+A（x 增加且離地）、B 鍵、START 切換暫停
+- D. 自動顯示：mode auto 顯示 / 鍵盤後淡出（pointer-events none、按了也沒反應）/ 再觸控回來 / mode off 隱藏且觸控無效 / mode on 強制
+- E. layout：side right/left 的攻擊鍵與 D-pad 左右半邊、size 0.8<1<1.2、opacity 套用、寫進 `KB.save.settings.touch`、**reload 後還原**
+- F. 版面：iPhone 13 橫 / Pixel 5 直 / iPad Mini 橫，按鍵中心都在 viewport 內且**不落在 `KB.layout` 矩形內**（落在裡面只印 WARN 不算 FAIL）；另加 Pixel 5「D-pad 在畫面下方」、iPad Mini 多點
+> 注意：CDP 連續送 touchMove 若不跨幀會被 Chromium 合併掉（pointermove 是 vsync 對齊的），所以 `step()` 內先等兩個 rAF 再前進幀數；真人手指移動沒這問題。
+
+### 截圖路徑（全部已用 Read 看圖確認）
+- `shots/agent_touch/l_iphone.png` — iPhone 13 橫向 750×342：D-pad 在左側黑邊、A/B/C 在右側、START 右上、全螢幕左上，完全不擋畫面與 HUD。
+- `shots/agent_touch/l_iphone_press.png` — 同上，**按住 D-pad 右 + A**：右箭頭黃色高亮、旋鈕位移、A 鍵白環發光，卡比向右跳起（HUD 提示同時變成「START：暫停／說明」＝ ui agent 的 `hint()` 已生效）。
+- `shots/agent_touch/p_pixel5.png` — Pixel 5 直向 393×727：畫面貼上方、按鍵在下方黑帶（D-pad 左、A/B/C 右、START + 全螢幕一排在上）。
+- `shots/agent_touch/l_ipadmini.png` — iPad Mini 橫向 1024×768：左右只有 110px，動作鍵自動改直排 C/B/A，D-pad 98px，仍不壓畫面。
+- `shots/agent_touch/l_ipadmini_big.png` — 同上但 `size 1.2`：D-pad 147px，半透明壓在畫面左下角（逃生口示範）。
+- `shots/agent_touch/desktop_title.png` — 桌機（無觸控）：覆蓋層不出現。
+
+### 已知問題
+- **iPad Mini 橫向 D-pad 只有 98px**（左右空白 110px 的上限），偏小；使用者可在設定把「按鍵大小」調到 1.2 換成 147px（會半透明壓到畫面邊緣）。根治要 screen agent 放寬側邊留白，見下方跨檔需求。
+- 只在 Playwright / Chromium 驗證；**iOS Safari 真機未測**（`gesturestart` 封鎖、`100dvh`、AudioContext 在 touchend resume、無 Fullscreen API 時 fs 鍵隱藏，這些都是照規範寫但沒實機跑過）。
+- 覆蓋層有一個 rAF tick（每 6 幀做一次輪詢：讀 `KB.save`、比對 canvas 矩形、poll 手把），隱藏時也在跑；成本極低但不是零。
+- `KB.input.touchActive()`（120 幀時間窗）與 `KB.TOUCH.active()`（覆蓋層是否顯示）語意不同：前者給提示文字用、後者給版面用。兩者在 mode on/off 強制時會不一致（例如 mode off 但剛剛用手指點過 → `touchActive()` 仍 true）。ui agent 判斷「要不要顯示觸控提示」建議用 `KB.input.hint()` 就好（它內部只看 touchActive）。
+- 直向時畫面底部到 START 那排之間還有一段空白（Pixel 5 約 150px）；按鍵是靠下對齊（好按），不是填滿，屬刻意取捨。
+- 手把「有輸入就淡出」是靠每 6 幀 poll `gamepadPressed()`，最慢約 100ms 才淡出（鍵盤是事件即時）。
+
+### 跨檔需求
+- **screen（src/main.js）— 平板橫向請多留一點左右空白**：目前 iPad Mini 1024×768 的 `KB.layout` 是 `x=110 w=804 h=703`，左右各 110px；D-pad 最多只能做到 98px。若在「短邊 ≥ 700px 或視窗長寬比 < 1.7」時把左右留白放寬到 **≥ 170px**（canvas 改成約 724×634，仍是整個畫面的 8 成），D-pad 就能做到 150px 以上、動作鍵也能回到橫排叢集，手感差很多。手機（iPhone 13 橫 750×342、Pixel 5 直）目前的留白已經很夠，不用改。
+- **screen**：`KB.layout` 的 `{x,y,w,h,portrait}` 與 `kb-resize` 事件都已經照契約運作 ✅（我另外有每 6 幀比對矩形當保險，所以就算某個路徑忘了 dispatch 也不會壞版）。
+- **ui（ui.js / menu.js / keyconfig.js）— 可以直接用的東西**：
+  - 提示文字一律 `KB.input.hint(action)`；標籤固定為 `A`(jump) / `B`(attack) / `C`(select) / `START`(start) / `方向鍵`(left right up down)，與覆蓋層上印的字完全一致（按鍵上就是印 A、B、C、START）。整張表在 `KB.input.TOUCH_NAMES`。
+  - 設定選單：`KB.TOUCH.setLayout({mode})` mode ∈ `auto / on / off`（建議顯示「自動 / 開 / 關」）；`{side}` ∈ `right / left`（「右手 / 左手」＝ 攻擊鍵在哪邊，D-pad 自動換到另一邊）；`{size}` 建議給 `0.8 / 1 / 1.2`（**1.2 在平板上會允許按鍵半透明壓到畫面邊緣**，可在說明寫一句）；`{opacity}` 建議給 `0.3 / 0.5 / 0.7`（預設 **0.7**）。每次 setLayout 都會自動存檔，不用再呼叫 saveGame。
+  - `KB.TOUCH` 不存在時整組隱藏；暫停選單的「全螢幕」項請用 `KB.TOUCH.fullscreenSupported`（或 `document.documentElement.requestFullscreen`）判斷要不要顯示灰。
+  - 說明第 3 頁「觸控操作」的字面建議：`D-pad（可滑動切方向）/ A 跳躍・飛行 / B 吸入・招式 / C 丟能力・長按叫夥伴 / START 暫停 / 右上角方框 全螢幕`；要不要預設跳到該頁可用 `KB.input.touchActive() || (KB.TOUCH && KB.TOUCH.active())`。
+- **pwa（build.py）**：touch.js 是純 JS + 自注入 style，沒有外部資源，dist 單檔已驗證會包含（見 agent_pwa 的 `dist_game.png` 有觸控覆蓋層）；不需要為它加任何打包規則。
+- **總控**：`tools/test_touch.py` 是新檔要 `git add`；品質基準可加一行「touch 56」。
+
+## ui（Round 11）
+
+擁有檔案：`src/ui.js`、`src/menu.js`、`src/keyconfig.js`、`assets/fonts/unifont16-subset.woff2` + `assets/fonts/unifont_chars.txt`。
+角色：Round 11 契約 5 的**消費端** —— 所有觸控判斷一律防禦式（`KB.TOUCH` / `KB.input.hint` / `touchActive` 不存在時，畫面與 Round 10 完全相同）。
+
+### 新 API（其他 agent 可用）
+| API | 說明 |
+|---|---|
+| `KB.UI.touchOn()` | 目前是否為觸控操作狀態＝`KB.TOUCH.active()` \|\| `KB.input.touchActive()`（兩者都不存在時 false） |
+| `KB.UI.hint(action, fallback)` | 提示字。觸控時優先 `KB.input.hint(action)`；`touchActive()` 還沒亮（覆蓋層剛顯示、玩家還沒按）時退 `KB.input.TOUCH_NAMES[action]`；非觸控時回 `fallback`（＝Round 10 的原字串，所以桌機零變動） |
+| `KB.UI.fullscreenOK()` | `document.fullscreenEnabled !== false && KB.toggleFullscreen` ⇒ iOS Safari 為 false |
+| `KB.UI.moveKey(k)` | 能力卡 / 圖鑑招式表的「按鍵」欄字面替換（觸控時 X→B、Z／跳→A、SELECT→C） |
+| `KB.UI.HELP3` | 說明第 3 頁「觸控操作」11 列；`UI.HELP_PAGES` 由 2 → 3 |
+
+### 里程碑
+- [2026-09-19 14:20] 完成：讀 CLAUDE / TASKS Round 11 / STATUS / ui.js / menu.js / keyconfig.js / input.js / font_subset.py / shot.py / mobile_shot.py；確認契約與檔案所有權。
+- [2026-09-19 14:35] 完成：ui.js 加 `UI.touchOn / UI.hint / UI.fullscreenOK`、`UI.HELP3` + `HELP_PAGES=3`、`UI.openHelp()` 觸控時開第 3 頁、`helpUpdate` 左右分別上下頁、`drawHelp` 支援「欄位是函式」（觸控時即時換鍵名）；TitleScene `PRESS START`→`TAP START`、底部提示與「按 M 靜音」觸控版。驗證：`shots/agent_ui/help_p3.png`。
+- [2026-09-19 14:45] 完成：ui.js 其餘寫死提示改 hint（選關、結算、結局、legacy `KB.drawPause`、HELP2 的「SELECT 丟星」）。
+- [2026-09-19 14:55] 完成：menu.js SettingsMenu 加 4 個觸控項（值來源 `KB.TOUCH.layout`，改值呼叫 `setLayout`）＋ **捲動視窗**（`SET_WINDOW=7`，超過就右側位置條 + 上下小三角；≤7 項時版面與 Round 10 完全相同）。驗證：`shots/agent_ui/settings_top.png` / `settings_bottom.png`。
+- [2026-09-19 15:00] 完成：PauseMenu 加「全螢幕」。第一版排成 3 列會壓到提示行（截圖看圖發現）⇒ 改成**第 1 列 4 欄**（`COL_X4 = [20,62,128,194]`），面板高 / 列距 / 提示位置完全沿用 Round 10；導覽改成支援「各列長度不同」。不支援全螢幕時項目畫灰字、提示行寫「全螢幕：此瀏覽器不支援」。驗證：`shots/agent_ui/pause_fs.png` / `pause_nofs.png`。
+- [2026-09-19 15:05] 完成：keyconfig.js 觸控時整塊上壓（表頭 24→22、分隔線 38→36、列距 18→17）空出最底一行「觸控按鍵請到「設定」調整」；提示行改 hint；**監聽畫面加觸控 START 取消**（虛擬鍵走 setTouch 不產生 keydown，原本手機會卡住）。驗證：`shots/agent_ui/t_keyconfig.png` / `m_keyconfig.png`。
+- [2026-09-19 15:08] 完成：`font_subset.py` 重做字集（1860 字，56 KB）；`--check` OK。過程發現 **⛶（U+26F6）在 12px 縫合像素字型是豆腐框**（Unifont 有、12px 字型沒有）⇒ HELP3 改寫成「全螢幕鍵／在畫面右下角」。
+- [2026-09-19 15:12] 完成：真機模擬驗證（touch agent 的 touch.js 已就緒）。發現 `KB.input.hint()` 以 `touchActive()`（最近 2 秒有觸控輸入）為準，覆蓋層剛顯示、玩家還沒按時會回鍵盤名（手機標題出現「Shift：操作說明」）⇒ `UI.hint` 退到 `KB.input.TOUCH_NAMES`（同一份表，不另外複製）。驗證：`shots/agent_ui/m_title.png`、`m_help3.png`。
+- [2026-09-19 15:15] 完成：測試 `test_saves 67/67`、`test_progression 101/101`、`test_skins 67/67`、`engine_test 167/167` 全綠；所有截圖已 Read 看圖，無溢出 / 重疊。
+
+### 改動清單
+**src/ui.js**
+1. 新增 `UI.touchOn / UI.hint / UI.fullscreenOK`（檔頭 `UI.TITLE_*` 之後）。
+2. 新增 `UI.HELP3`（11 列觸控操作）、`UI.HELP_PAGES = 2 → 3`。
+3. `UI.openHelp()`：觸控時直接開第 3 頁（`helpPage = 2`）。
+4. `UI.helpUpdate()`：`right` 下一頁、`left` 上一頁（原本兩邊都是下一頁，3 頁後需要回上頁）。
+5. `drawHelp()`：`page===2` 取 HELP3；欄位可以是函式（`cell()`，量測與繪製都經過）；底部改 `hint('left')+' 換頁'`，觸控時預設提示去掉「M：靜音」。
+6. `UI.HELP2` 的 `'SELECT 丟星'` 改成函式 → 觸控顯示「C 丟星」。
+7. TitleScene：`PRESS START`→`TAP START`、`同人作品　按 M 靜音`→觸控時只留「同人作品」、底部 `SELECT：操作說明　　Z / ENTER：開始` 全部走 hint。
+8. StageSelectScene 底部提示（3 種狀態合併成一行組字）。
+9. ResultScene `Z / ENTER：繼續 / 跳過`、EndingScene `PRESS START`、legacy `KB.drawPause` 的 `↑↓ 選擇　Z 確認`。
+
+**src/menu.js**
+10. `moveKey()`（＋`UI.moveKey`）：能力卡與能力圖鑑的招式「按鍵」欄在觸控時 X→B / Z・跳→A / SELECT→C（`KB.ABILITIES[].moves` 是別人的檔，只在繪製時字面替換）。
+11. `PAUSE_ROWS()` / `pauseItems()`：暫停選單改成「每列自己的 x 座標」，第 1 列加「全螢幕」共 4 欄（`COL_X4`）；`choose()` 加 `fs` 分支（`UI.fullscreenOK()` 為 false 就不做事）；導覽支援各列長度不同；灰字 + 提示行說明；底部提示走 hint。
+12. `hasTouchApi / touchVal / touchIdx / touchStep`：觸控版面設定的存取（數值取最接近的一檔）。
+13. `SET_ITEMS` 加 4 項：觸控按鍵（自動/開/關）、按鍵位置（右手/左手）、按鍵大小（小/中/大）、按鍵透明度（淡/中/濃）；`need: hasTouchApi` ⇒ `KB.TOUCH` 不存在就整批隱藏。
+14. `SettingsMenu`：`update` 加 `it.touch` 分支（在 `it.cycle` 之前）；`this.top` + `clampTop()` + `SET_WINDOW = 7` 捲動；`draw` 依「可見項數」算面板高、值欄在有捲動時左移 6px、右側位置條 + 上下三角；兩行底部提示走 hint（觸控時不寫「F 全螢幕」）。
+15. 其餘提示：暫停說明頁、標題說明頁、圖鑑分頁 `SELECT`、圖鑑 / 成就底部、標題選單底部、遊戲內 toast `ENTER：暫停／說明`。
+
+**src/keyconfig.js**
+16. `draw()`：`tOn` 版面（表頭 22 / 分隔線 36 / 列起點 38 / 列距 17 / 訊息 40 / 返回 194）＋ 最底一行 12px「觸控按鍵請到「設定」調整」；提示行 `Z 設定　X 移除　SELECT 還原預設` / `START 返回` 走 hint。
+17. 監聽模式：觸控 START（`inp.touchDown('start')`，listenT > 10）可取消；`drawListen` 的「Esc 取消」觸控時改「START 取消」。
+
+**assets/fonts**
+18. `unifont16-subset.woff2`（56 KB）+ `unifont_chars.txt`（1860 字）重做，`--check` 無缺字。
+
+### 截圖路徑（全部已 Read 看圖）
+- 桌機（鍵盤，確認零回歸）：`shots/agent_ui/title.png`、`help1~3.png`、`settings_top.png`、`settings_bottom.png`、`settings_touch.png`、`keyconfig.png`、`pause.png`、`pause_fs.png`、`pause_nofs.png`、`select.png`、`ending.png`
+- 模擬觸控（`uishot.py --touch`，KB.TOUCH.active 強制 true）：同名前綴 `t_`
+- 真手機（iPhone 13 橫向，含 touch.js 覆蓋層）：`m_title.png`、`m_help3.png`、`m_settings_touch.png`、`m_pause.png`、`m_keyconfig.png` 等前綴 `m_`
+- 工具：`shots/agent_ui/uishot.py`（`--touch` / `--device "iPhone 13" --landscape`；直接組場景 + 子選單再截圖）
+
+### 已知問題
+- 說明**第 1 頁**（`KB.input.HELP`，input.js 是 touch agent 的檔）在觸控時仍寫 Z / X / Shift。第 3 頁已完整覆蓋觸控操作，但同一本說明兩種寫法並存。`drawHelp` 已支援「欄位是函式」⇒ input.js 只要把那幾列改成 `() => KB.UI.hint('jump','Z / K / 空白鍵')` 就會自動跟著換（見跨檔需求）。
+- 「按鍵透明度」三檔是 0.3 / 0.5 / 0.8，但 touch.js 預設 `opacity: 0.7` ⇒ 一開始顯示「濃」（取最接近的一檔），實際值仍是 0.7，玩家按一下才會落到檔位上。
+- `KB.TOUCH` 骨架期間（setLayout 是空函式）設定頁可以顯示但改不動值；touch.js 完成後正常。
+- 暫停選單第 1 列 4 欄後，若日後「回到地圖」之類的標籤加長（> 4 字）會擠，`COL_X4` 要一起調。
+- 設定頁捲動視窗固定 7 項；`SET_WINDOW` 再調大會超出 224 高。
+- 觸控時「畫面縮放」「按鍵提示」等桌機向的設定仍然列著（不影響，但手機上「畫面縮放」實際被 main.js 忽略）。
+
+### 跨檔需求
+1. **touch / input.js（建議）**：`KB.input.hint()` 目前只看 `touchActive()`（最近 2 秒有觸控輸入）。覆蓋層顯示中（`KB.TOUCH.active()`）就代表玩家正在用觸控 ⇒ 建議 `hint()` 改成 `if ((KB.TOUCH && KB.TOUCH.active && KB.TOUCH.active()) || KB.input.touchActive())` 回虛擬鍵名。改了之後我在 `UI.hint` 裡的 `TOUCH_NAMES` 退路就可以拿掉（留著也無害）。
+2. **touch / input.js（建議）**：`KB.input.HELP` 的 `'Z / K / 空白鍵'`、`'X / J'`、`'Shift / L'`、`'Enter / Esc'`、`'手把'` 這幾列在觸控時應換成 A / B / C / START。`ui.js` 的 `drawHelp` 已支援欄位是**函式**（量測與繪製都會先呼叫），例如 `[() => KB.UI.hint('jump', 'Z / K / 空白鍵'), '跳躍（空中再按＝飛行）']`。右欄 12px 上限仍是 138px。
+3. **touch / touch.js（建議）**：`layout.opacity` 預設 0.7 不在設定頁的三檔（0.3 / 0.5 / 0.8）內，建議改預設 0.5（或告訴我要用 0.3 / 0.5 / 0.7，我把第三檔改成 0.7）。
+4. **總控**：`assets/fonts/unifont16-subset.woff2` 與 `unifont_chars.txt` 我在 15:08 重做過（含當時 touch / pwa / screen 的新字）。**其他 agent 之後若再加中文字串，收工前要再跑一次 `tools/font_subset.py`**（我跑完後 src 又長出過 `寧拇攤` 三個字，已一併收進去）。
+5. **qa11**：設定頁現在有 11 項（桌機）/ 11 項（手機），一頁只顯示 7 項要捲動 —— 測「設定頁畫得出來」的自動測試若寫死項目數要跟著改（`test_progression.py` 目前是動態計算，已 101/101 PASS）。
+6. **pwa（menu.js 那條建議）**：`KB.PWA.canInstall` / `promptInstall()` / `iosSafari` / `updateReady` 的「加到主畫面 / 有新版本」選單項**本輪沒做**（TASKS 沒列、設定頁已經要捲動）。要做的話我可以在標題選單或設定頁加一項，請總控裁決。
+
+---
+# Round 11 總結（總控，2026-09-19）— 手機也能玩
+- 使用者需求：卡比之星做成手機可玩版本並直接部署到 GitHub Pages，出門用手機開網址就能玩。
+- 四 agent 平行（touch / screen / pwa / ui）+ qa11 驗收 + 總控整合，成果：
+  - **touch.js**：DOM 觸控覆蓋層（D-pad 滑動 8 方向、A 跳 / B 攻 / C 丟 / START / 全螢幕、多點、像素風、直向在下方 / 橫向兩側、三階降級），`KB.input.setTouch / touchActive / hint`；設定存 `settings.touch`。
+  - **main.js**：`KB.layout` + `kb-resize`；手機小數倍縮放（直向寬填滿貼上、橫向高填滿兩側留 110px / 平板 170px）、safe-area、旋轉二次 resize、背景自動暫停；桌機整數倍不變。
+  - **pwa.js / sw.js / manifest / icons**：http(s) 才註冊、網路優先失敗回快取、build.py 自動產 ASSETS（67 檔）與 VERSION；dist 單檔仍可離線雙擊。
+  - **ui / menu / keyconfig**：所有提示走 `KB.UI.hint`（觸控顯示 A / B / C / START）、說明第 3 頁「觸控操作」、設定頁 4 項（捲動視窗）、暫停「全螢幕」、按鍵設定頁觸控可取消。
+  - 工具：`tools/mobile_shot.py`（裝置模擬 + CDP 多點觸控）、`tools/test_touch.py` 56 項。
+- 總控整合：input.js `hint()` 看 `KB.TOUCH.active()`；HELP 第 1 頁鍵名函式化（engine_test 斷言更新）；觸控預設透明度 0.8（對齊設定「濃」）；平板橫向留白 170px。
+- qa11：36 張版面矩陣 0 交集 0 出界、觸控實戰 28/28、dist / HTTP / 離線 / 桌機回歸皆過。**P1**「觸控按鍵：關」在純觸控裝置鎖死 → 修：設定拿掉「關」+ touch.js 逃生口（off 時再觸控切回 auto、載入時 off 退回 auto）；**P2** 桌機設定頁多 4 項 → `hasTouchApi` 加 `available` 條件，桌機回 7 項。P3（rects 隱藏時仍回報、iPad「大」壓左緣 39px、iPad 動作鍵直排、icon-512 星星貼邊）留待下輪。
+- 測試：engine 167 / enemy 393+79 / weapons 417 / magic 248 / forms 315 / charge 140 / mix 701 / mix2 801 / helper 131 / elements 96 / progression 101 / awaken 270 / extra 53 / challenge 93 / saves 67 / skins 67 / touch 56；font_subset OK；level_check 0 error；audio_check 全過；playthrough w1 / w4 / w7 cleared；dist 3377KB。
+- 已知：只在 Chromium 模擬驗證，iOS Safari 真機待使用者回饋。

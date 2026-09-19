@@ -3,10 +3,29 @@
 <head>
 <meta charset="utf-8">
 <title>卡比之星（同人版）</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#f8a0c0">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="卡比之星">
+<link rel="manifest" href="assets/manifest.webmanifest">
+<link rel="apple-touch-icon" href="assets/icons/icon-180.png">
 <style>
-  html, body { margin: 0; padding: 0; background: #000; height: 100%; overflow: hidden; }
-  canvas#game { position: absolute; image-rendering: pixelated; image-rendering: crisp-edges; background: #000; }
+  html, body {
+    margin: 0; padding: 0; background: #000; overflow: hidden;
+    height: 100%; height: 100dvh;                 /* 手機瀏覽器工具列收合時仍填滿 */
+    overscroll-behavior: none;                    /* 禁下拉重整 / 邊緣彈跳 */
+    touch-action: none;                           /* 禁雙擊縮放 / 捲動 */
+    -webkit-user-select: none; user-select: none;
+    -webkit-touch-callout: none;                  /* 禁長按選單 */
+    -webkit-tap-highlight-color: transparent;
+    -webkit-text-size-adjust: 100%; text-size-adjust: 100%;
+  }
+  canvas#game {
+    position: absolute; background: #000; touch-action: none;
+    image-rendering: pixelated; image-rendering: crisp-edges;   /* 小數倍縮放也維持像素 */
+  }
 </style>
 </head>
 <body>
@@ -67,6 +86,8 @@
 <script src="src/menu.js"></script>
 <script src="src/arena.js"></script>
 <script src="src/challenge.js"></script>
+<script src="src/touch.js"></script>
+<script src="src/pwa.js"></script>
 <script src="src/main.js"></script>
 </body>
 </html>

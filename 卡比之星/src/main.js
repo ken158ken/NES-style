@@ -7,20 +7,75 @@
   KB.canvas = canvas; KB.ctx = ctx;
   KB.scene = null; KB.frameCount = 0;
 
+  // ---------- 版面 / 縮放（Round 11：手機小數倍 + safe-area；契約 KB.layout） ----------
+  const SIDE_RESERVE = 220;      // 橫向手機：左右各留 110px 給觸控按鍵
+  let saProbe = null;
+  function safeArea() {          // 讀 env(safe-area-inset-*)（用隱藏探針量測，不支援就全 0）
+    const z = { top: 0, right: 0, bottom: 0, left: 0 };
+    try {
+      if (!saProbe) {
+        if (!document.body) return z;
+        saProbe = document.createElement('div');
+        saProbe.id = 'kb-safe-probe';
+        saProbe.style.cssText = 'position:fixed;left:0;top:0;width:0;height:0;visibility:hidden;pointer-events:none;' +
+          'padding-top:env(safe-area-inset-top,0px);padding-right:env(safe-area-inset-right,0px);' +
+          'padding-bottom:env(safe-area-inset-bottom,0px);padding-left:env(safe-area-inset-left,0px);';
+        document.body.appendChild(saProbe);
+      }
+      const cs = getComputedStyle(saProbe);
+      z.top = parseFloat(cs.paddingTop) || 0; z.right = parseFloat(cs.paddingRight) || 0;
+      z.bottom = parseFloat(cs.paddingBottom) || 0; z.left = parseFloat(cs.paddingLeft) || 0;
+    } catch (e) { }
+    return z;
+  }
+  function isTouchDevice() {
+    try { return (navigator.maxTouchPoints || 0) > 0 || ('ontouchstart' in window); } catch (e) { return false; }
+  }
+
   function resize() {
     const ww = window.innerWidth, wh = window.innerHeight;
-    let s = Math.max(1, Math.floor(Math.min(ww / KB.W, wh / KB.H)));
-    // 設定頁「畫面縮放」：KB.save.settings.scale（0 / undefined = 自動，2 / 3 / 4 = 固定整數倍）
+    const sa = safeArea();
+    const mobile = isTouchDevice() || Math.min(ww, wh) < 600;
+    const portrait = wh >= ww;
+    const fit = Math.min(ww / KB.W, wh / KB.H);        // 完整塞進視窗的最大倍率
+    let s;
+    if (mobile) {
+      if (portrait) {
+        s = ww / KB.W;                                  // 直向：寬度填滿（小數倍）
+        const maxH = Math.max(1, wh - sa.top);
+        if (KB.H * s > maxH) s = maxH / KB.H;           // 極端比例才會縮
+      } else {
+        // 橫向：高度填滿為主，左右各留 110px 給觸控按鍵；留不出來（例如截圖用小視窗）就整個塞滿
+        // 總控（touch 跨檔需求）：平板等高視窗（wh ≥ 500）兩側各留 170px，D-pad 才夠大
+        const reserve = wh >= 500 ? 340 : SIDE_RESERVE;
+        const side = Math.min(wh / KB.H, (ww - reserve - sa.left - sa.right) / KB.W);
+        s = (side > 0 && side >= fit * 0.6) ? side : fit;
+      }
+    } else {
+      s = Math.max(1, Math.floor(fit));                 // 桌機：維持整數倍
+    }
+    // 設定頁「畫面縮放」：KB.save.settings.scale（0 / undefined = 自動，2 / 3 / 4 = 固定整數倍；放不下就忽略）
     try {
       const pref = (KB.save && KB.save.settings && KB.save.settings.scale) | 0;
-      if (pref >= 2) s = pref;
+      if (pref >= 2 && KB.W * pref <= ww && KB.H * pref <= wh) s = pref;
     } catch (e) { }
-    if (KB.DEBUG && window.__forceScale) s = window.__forceScale;
-    canvas.style.width = (KB.W * s) + 'px'; canvas.style.height = (KB.H * s) + 'px';
-    canvas.style.left = Math.floor((ww - KB.W * s) / 2) + 'px'; canvas.style.top = Math.floor((wh - KB.H * s) / 2) + 'px';
+    let forced = false;
+    if (KB.DEBUG && window.__forceScale) { s = window.__forceScale; forced = true; }
+    const cw = KB.W * s, ch = KB.H * s;
+    let x = (ww - cw) / 2, y = (wh - ch) / 2;
+    if (mobile && portrait && !forced) y = sa.top;      // 直向貼上方，下方留給觸控按鍵
+    if (mobile && !forced) { x = Math.round(x * 2) / 2; y = Math.round(y * 2) / 2; }
+    else { x = Math.floor(x); y = Math.floor(y); }
+    canvas.style.width = cw + 'px'; canvas.style.height = ch + 'px';
+    canvas.style.left = x + 'px'; canvas.style.top = y + 'px';
     KB.scale = s;
+    KB.layout = { x, y, w: cw, h: ch, scale: s, portrait, mobile, safe: sa, vw: ww, vh: wh };
+    try { window.dispatchEvent(new Event('kb-resize')); } catch (e) { }
   }
+  function resizeSoon() { resize(); setTimeout(resize, 100); }   // iOS 旋轉 / 工具列收合後尺寸會延遲，二次觸發
   window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', resizeSoon);
+  if (window.visualViewport && window.visualViewport.addEventListener) window.visualViewport.addEventListener('resize', resizeSoon);
   KB.resizeCanvas = resize;      // 設定頁改縮放後立即套用
 
   // F 鍵：全螢幕切換（不佔用遊戲按鍵；瀏覽器拒絕時安靜失敗）
@@ -68,6 +123,25 @@
     render();
     fpsN++; fpsT += d; if (fpsT >= 1000) { KB.fps = fpsN * 1000 / fpsT; fpsN = 0; fpsT = 0; }
   }
+
+  // ---------- 切到背景（手機接電話 / 切 app）：清輸入、重置計時、自動暫停 ----------
+  KB.autoPause = function () {
+    const g = KB.game;
+    if (!g || KB.scene !== g) return false;                       // 只在遊玩中的 GameScene 有效
+    if (g.paused || g.clearT >= 0 || g.fadeDir > 0) return false;
+    if (!g.player || g.player.state === 'dead') return false;
+    g.paused = true; g.pauseSel = 0;                              // 等同按 START（game.js 193~198）
+    g.pauseMenu = KB.PauseMenu ? new KB.PauseMenu(g) : null;
+    try { if (KB.audio && KB.audio.duck) KB.audio.duck(true); } catch (e) { }
+    return true;
+  };
+  document.addEventListener('visibilitychange', () => {
+    last = 0; acc = 0;                                            // 回到前景不要一次補跑好幾幀
+    if (!document.hidden) return;
+    try { window.dispatchEvent(new Event('blur')); } catch (e) { }  // input.js 的 blur 監聽會清空按鍵
+    KB.autoPause();
+  });
+  window.addEventListener('blur', () => { last = 0; acc = 0; });
 
   // ---------- 精靈總表場景（除錯用） ----------
   class SheetScene {

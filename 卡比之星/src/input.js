@@ -1,4 +1,5 @@
-// 鍵盤 / 手把 / 虛擬輸入
+// 鍵盤 / 手把 / 觸控 / 虛擬輸入
+// 輸入來源：raw（鍵盤）、gamepad、touch（KB.TOUCH 虛擬按鍵，Round 11）三者 OR；virt（除錯 / 截圖）另計。
 (function () {
   const NAMES = ['left', 'right', 'up', 'down', 'jump', 'attack', 'select', 'start'];
 
@@ -56,18 +57,30 @@
   }
   rebuildMap();
 
-  const cur = {}, prev = {}, raw = {}, virt = {};
+  const cur = {}, prev = {}, raw = {}, virt = {}, touch = {};
   let anyKey = false, virtualOnly = false, gpActive = false;
-  NAMES.forEach(n => { cur[n] = false; prev[n] = false; raw[n] = false; });
+  NAMES.forEach(n => { cur[n] = false; prev[n] = false; raw[n] = false; touch[n] = false; });
+
+  // ---------- 觸控來源（Round 11，touch.js 呼叫 setTouch）----------
+  // frames 由 update() 累加（norun 截圖模式也只在 __kb.step 前進），touchFrame 記錄最後一次觸控輸入；
+  // 鍵盤 / 手把有輸入時把 touchFrame 推遠 → touchActive() 立刻變 false（提示文字馬上換回鍵盤名）。
+  const TOUCH_WINDOW = 120;          // 最近 120 幀（2 秒）內有觸控 = 觸控模式
+  let frames = 0, touchFrame = -1e9;
+  function markOther() { if (touchFrame > -1e9) touchFrame = -1e9; }
+  // 虛擬鍵標籤（觸控時的提示文字）
+  const TOUCH_NAMES = {
+    jump: 'A', attack: 'B', select: 'C', start: 'START',
+    left: '方向鍵', right: '方向鍵', up: '方向鍵', down: '方向鍵',
+  };
 
   window.addEventListener('keydown', e => {
     const n = MAP[e.code]; if (!n) return;
-    if (!raw[n]) anyKey = true;
+    if (!raw[n]) { anyKey = true; markOther(); }
     raw[n] = true; e.preventDefault();
     if (KB.audio && KB.audio.unlock) KB.audio.unlock();
   });
   window.addEventListener('keyup', e => { const n = MAP[e.code]; if (n) { raw[n] = false; e.preventDefault(); } });
-  window.addEventListener('blur', () => NAMES.forEach(n => raw[n] = false));
+  window.addEventListener('blur', () => NAMES.forEach(n => { raw[n] = false; touch[n] = false; }));
 
   function pollGamepad() {
     const gps = navigator.getGamepads ? navigator.getGamepads() : [];
@@ -93,14 +106,18 @@
     update() {
       const gp = pollGamepad();
       gpActive = !!gp;
+      frames++;
+      let touching = false;
       for (const n of NAMES) {
         prev[n] = cur[n];
-        let v = raw[n] || (gp && gp[n]) || false;
-        if (virtualOnly) v = false;
+        let v = raw[n] || (gp && gp[n]) || touch[n] || false;
+        if (touch[n]) touching = true;
+        if (virtualOnly) v = false;     // 觸控與 raw / gamepad 同層，一樣被 virtualOnly 遮掉
         if (virt[n]) v = true;
         cur[n] = !!v;
       }
-      if (gp && Object.values(gp).some(Boolean) && KB.audio && KB.audio.unlock) KB.audio.unlock();
+      if (touching) touchFrame = frames;            // 按住期間持續更新，放開後才開始倒數
+      if (gp && Object.values(gp).some(Boolean)) { markOther(); if (KB.audio && KB.audio.unlock) KB.audio.unlock(); }
       const a = anyKey; anyKey = false; return a;
     },
     down(n) { return cur[n]; },
@@ -111,6 +128,39 @@
     // 虛擬輸入（除錯 / 截圖）
     setVirtual(obj, exclusive) { NAMES.forEach(n => virt[n] = !!(obj && obj[n])); virtualOnly = !!exclusive; },
     clearVirtual() { NAMES.forEach(n => virt[n] = false); virtualOnly = false; },
+
+    // ---------- 觸控輸入（Round 11，契約 2）----------
+    /** 第三個輸入來源：touch.js 的虛擬按鍵按下 / 放開；name ∈ ACTIONS */
+    setTouch(name, on) {
+      if (!Object.prototype.hasOwnProperty.call(touch, name)) return false;
+      on = !!on;
+      if (touch[name] === on) return true;
+      touch[name] = on;
+      if (on) {
+        anyKey = true; touchFrame = frames;
+        if (KB.audio && KB.audio.unlock) KB.audio.unlock();     // iOS：手勢中 resume AudioContext
+      }
+      return true;
+    },
+    /** 清掉所有觸控按鍵（覆蓋層隱藏 / 失焦時呼叫） */
+    clearTouch() { NAMES.forEach(n => touch[n] = false); },
+    /** 最近 TOUCH_WINDOW 幀（2 秒）內有觸控輸入，且之後沒有鍵盤 / 手把輸入 */
+    touchActive() { return (frames - touchFrame) <= TOUCH_WINDOW; },
+    /** 目前觸控按著的動作（除錯 / 測試用） */
+    touchDown(n) { return !!touch[n]; },
+    /**
+     * 提示文字用的按鍵名：觸控時回虛擬鍵標籤（A / B / C / START / 方向鍵），
+     * 否則回鍵盤綁定的第一個顯示名（keyNames(action)[0]）。
+     */
+    hint(action) {
+      // 總控（Round 11 ui 跨檔需求）：覆蓋層顯示中（玩家還沒按）也回虛擬鍵名
+      const overlay = !!(KB.TOUCH && KB.TOUCH.active && KB.TOUCH.active());
+      if ((overlay || KB.input.touchActive()) && TOUCH_NAMES[action]) return TOUCH_NAMES[action];
+      const list = KB.input.keyNames(action);
+      return list.length ? list[0] : (TOUCH_NAMES[action] || '');
+    },
+    /** 虛擬鍵標籤表（ui agent 需要時可讀） */
+    TOUCH_NAMES,
 
     // ---------- 按鍵重映射（供設定頁） ----------
     ACTIONS: NAMES.slice(),
@@ -232,16 +282,16 @@
 
     // 供 UI 顯示的按鍵說明
     HELP: [
-      ['方向鍵 / WASD', '移動、蹲下、進門、爬梯'],
+      [() => KB.UI && KB.UI.hint ? KB.UI.hint('left', '方向鍵 / WASD') : '方向鍵 / WASD', '移動、蹲下、進門、爬梯'],
       // Round 9：右欄 12px 最寬 138px（ui.js drawHelp），超過會被截斷 → 拆成兩列寫飛行
-      ['Z / K / 空白鍵', '跳躍（空中再按＝飛行）'],
+      [() => KB.UI && KB.UI.hint ? KB.UI.hint('jump', 'Z / K / 空白鍵') : 'Z / K / 空白鍵', '跳躍（空中再按＝飛行）'],
       ['按住 ↑', '持續飛行（可一直上升）'],
-      ['X / J', '吸入 / 吐出 / 使用能力'],
-      ['↑X / ↓X', '空中也能出招'],
+      [() => KB.UI && KB.UI.hint ? KB.UI.hint('attack', 'X / J') : 'X / J', '吸入 / 吐出 / 使用能力'],
+      [() => KB.UI && KB.UI.hint ? '↑' + KB.UI.hint('attack', 'X') + ' / ↓' + KB.UI.hint('attack', 'X') : '↑X / ↓X', '空中也能出招'],
       ['↓', '吞下（獲得能力）'],
       ['↓ + 跳', '滑鏟／平台上穿下'],
-      ['Shift / L', '丟棄能力'],
-      ['Enter / Esc', '暫停 / 確認'],
+      [() => KB.UI && KB.UI.hint ? KB.UI.hint('select', 'Shift / L') : 'Shift / L', '丟棄能力'],
+      [() => KB.UI && KB.UI.hint ? KB.UI.hint('start', 'Enter / Esc') : 'Enter / Esc', '暫停 / 確認'],
       ['手把', 'A·B 跳　X·Y 攻擊'],
     ],
     // Round 9（player-input）：說明第 2 頁（UI.HELP2，ui.js）要補的兩列；

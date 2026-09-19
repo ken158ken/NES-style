@@ -1,4 +1,4 @@
-# 卡比之星（同人版）— 開發 Context（所有 agent 必讀，2026-09-17 更新）
+# 卡比之星（同人版）— 開發 Context（所有 agent 必讀，2026-09-19 更新）
 
 > 零相依 HTML5 Canvas 平台遊戲，雙擊 `index.html` 或 `dist/卡比之星.html` 即可玩。
 > 現況總覽看 `docs/STATUS.md`（先讀這份）；規格 `docs/SPEC.md`；歷史進度 `docs/PROGRESS.md`（各輪各 agent 區段 + 每輪「總結」）；任務板 `docs/TASKS.md`；QA `docs/QA_REPORT.md`。
@@ -19,7 +19,9 @@ $PY tools/playthrough.py --level w1 --ability sword --godmode [--extra] [--chall
 node tools/level_check.js [--extra]     # 關卡靜態檢查（改 levels*.js 後必跑）
 node tools/audio_check.js               # 音效 / 音樂名單與節流檢查
 $PY tools/font_subset.py [--check]      # 新增中文字串後重做 16px 字集（Unifont 子集）
-$PY tools/build.py                      # 打包 dist（內嵌 JS + 字型 base64）
+$PY tools/build.py                      # 打包 dist（內嵌 JS + 字型 base64）+ 重產 sw.js ASSETS / VERSION（部署前必跑）
+$PY tools/mobile_shot.py --device "iPhone 13" --landscape --scene game --level w1 --touch "tap 649 189 3; step 20" --out shots/agent_x/m.png   # 手機模擬截圖（含觸控覆蓋層；--touch 座標 CSS px，先 --eval "JSON.stringify(KB.TOUCH.rects())" 查按鍵中心；--dist / --url / --offline）
+$PY tools/test_touch.py                 # 觸控 56 項（改 touch.js / input.js / main.js resize 後必跑）
 ```
 - `--script` 指令：`press <k,k> <frames> | tap <k> <frames> | step <n> | release | shot <name>`；key：`left right up down jump attack select start`。需要 evaluate 的情境自己寫 playwright 小腳本（參考 shots/agent_qa5/mshot.py、shots/agent_qa7/kb.py）。
 - **截圖後一定要用 Read 打開 PNG 看圖**；每個 agent 存到自己的 `shots/agent_<名稱>/`（shots/ 整個已 gitignore）。
@@ -27,8 +29,9 @@ $PY tools/build.py                      # 打包 dist（內嵌 JS + 字型 base6
 - debug 模式下 `KB.UI.unlockAll` 為 true（全關 / 全能力 / 全配色顯示），測「鎖定」畫面要先設 false。
 
 ## 架構重點
-- 全域 `KB`，classic script，`index.html` 依序載入 55 個檔（新增檔案要加進 index.html；build.py 自動內嵌）。載入順序：const → gfx → input → audio → tilemap → entity → vfx → elements → art/* → skins → player → abilities*（8 基本 / weapons / magic / forms / mix / mix2）→ helper → items → enemies* → bosses*（bosses / w6 / w7）→ levels*（levels / w7 / extra）→ game → progression → awaken → records → saves → keyconfig → ui → menu → arena → challenge → main。
+- 全域 `KB`，classic script，`index.html` 依序載入 55 個檔（新增檔案要加進 index.html；build.py 自動內嵌）。載入順序（Round 11 起 57 檔）：const → gfx → input → audio → tilemap → entity → vfx → elements → art/* → skins → player → abilities*（8 基本 / weapons / magic / forms / mix / mix2）→ helper → items → enemies* → bosses*（bosses / w6 / w7）→ levels*（levels / w7 / extra）→ game → progression → awaken → records → saves → keyconfig → ui → menu → arena → challenge → touch → pwa → main。
 - **判定框（Round 10）**：`KB.hitbox` 對 owner 'player'、follow 卡比本體、≤48×48、非 stone 的框自動乘 `KB.PHYS.meleeScale`（2）；絕對座標貼身招要傳 `melee:true`，全畫面 / 光環 / 本體傳 `melee:false`；招式中逐幀改 w/h/ox/oy 要經 `fitBox`（abilities.js / abilities_forms.js）否則會洗掉放大；mix 用 `mbox()`。投射物（KB.Projectile / KB.shoot）不受影響。
+- **手機（Round 11）**：`KB.layout`（main.js，canvas CSS 位置 / 小數倍率 / portrait / mobile / safe，resize 後發 `kb-resize`）；`KB.TOUCH`（touch.js，DOM 覆蓋層，`layout / setLayout / active / rects`）；`KB.input.setTouch / touchActive / hint(action)`（觸控時回 A / B / C / START）；UI 提示一律走 `KB.UI.hint(action, fallback)`；`KB.PWA`（pwa.js，只在 http(s) 註冊 sw.js）。新增中文字仍要跑 font_subset。
 - 內部解析度 256×224，遊戲區 256×192，HUD y 192~224；固定 60fps，`dt` 視為 1 幀；速度單位 px/frame。
 - **文字**：ASCII 走 8×8 點陣字（art/font.js）；中文用像素字型（assets/fonts：縫合像素 12px、Unifont 16px 子集）由 gfx.js `KB.loadPixelFonts` 載入、原生尺寸繪製 + 二值化，16px 假粗體；缺字整串退 12px；載入失敗退系統黑體超取樣。**字級只用 12 與 16，不要 14**。中文一律經 `KB.UI.text`（ui.js）呼叫。
 - 場景：`KB.setScene(s)`，s 有 `update / draw / enter / exit`。GameScene（game.js）、Title / Select / Result / GameOver / Ending（ui.js）、選單類（menu.js）、Arena、Challenge、Records、SaveSelect、KeyConfig。

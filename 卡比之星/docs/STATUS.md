@@ -1,9 +1,9 @@
-# 卡比之星 — 現況總覽（STATUS，2026-09-17）
+# 卡比之星 — 現況總覽（STATUS，2026-09-19）
 
 > 新對話 / 新 agent 先讀這份。細節：規格 `SPEC.md`、每輪總結在 `PROGRESS.md`（搜尋「總結」）、任務板 `TASKS.md`、QA `QA_REPORT.md`。
 
 ## 一句話
-10 輪多 agent 開發後的完整作品：7 世界 44 能力（20 基本 + 24 混合）、覺醒、夥伴、元素反應、Extra、挑戰模式、成就 / 等級 / 配色 / 存檔槽 / 按鍵設定；約 41,000 行原創程式、21 套自動測試、像素中文字型。git 約 85 commits。
+11 輪多 agent 開發後的完整作品（**手機 / 平板可玩**：觸控虛擬按鍵、自動縮放、PWA 加到主畫面離線玩）：7 世界 44 能力（20 基本 + 24 混合）、覺醒、夥伴、元素反應、Extra、挑戰模式、成就 / 等級 / 配色 / 存檔槽 / 按鍵設定；約 43,000 行原創程式、22 套自動測試、像素中文字型。git 約 85 commits。
 
 ## 內容規模
 | 項目 | 數量 |
@@ -17,9 +17,10 @@
 
 ## 操作
 方向鍵 / WASD 移動；Z 跳（空中再按漂浮）；**按住 ↑ 飛行**（地面 4 幀起飛、門前不飛、空中持續上升、水中上浮；房間頂封頂）；X 吸入 / 吐 / 招式；↓ 吞；↓+跳 滑鏟（平台上穿下）；Shift 短按丟能力星（砸帶能力敵人可混合）、長按 45 幀叫夥伴 / 吸回；↑+Shift 夥伴指令；↓+Shift 合體技；Lv4 量表滿時 跳+攻 覺醒；Enter 暫停（能力說明卡）；M 靜音；F 全螢幕。
+**觸控（Round 11）**：D-pad（單指滑動切方向）＋ A 跳 / B 攻擊 / C 丟能力 / START 暫停 / 全螢幕鍵；直向按鍵在畫面下方、橫向在左右兩側；鍵盤 / 手把輸入後覆蓋層淡出；設定頁可調 觸控按鍵 自動/開（「關」會鎖死已拿掉）、左右手、大小、透明度（存 `settings.touch`）。線上：https://ken158ken.github.io/NES-style/卡比之星/ （sw.js 快取、加到主畫面可離線）。
 
 ## 品質基準（收工前全部要綠）
-engine 167 / enemy 393（--extra 79）/ boss ALL PASS / weapons 417 / magic 248 / forms 315 / charge 140 / mix 701 / mix2 801 / helper 131 / elements 96 / progression 101 / awaken 240 / extra 53 / challenge 93 / saves 67 / skins 67；font_subset --check 無缺字；level_check（含 --extra）0 error；audio_check 全過；playthrough w1~w7 --godmode 全 cleared；build 後 dist 約 3.2MB。
+engine 167 / enemy 393（--extra 79）/ boss ALL PASS / weapons 417 / magic 248 / forms 315 / charge 140 / mix 701 / mix2 801 / helper 131 / elements 96 / progression 101 / awaken 240 / extra 53 / challenge 93 / saves 67 / skins 67 / **touch 56**；font_subset --check 無缺字；level_check（含 --extra）0 error；audio_check 全過；playthrough w1~w7 --godmode 全 cleared；build 後 dist 約 3.3MB 且 sw.js VERSION 已更新（**部署前必跑 build.py**）。
 
 ## 各輪摘要
 1. Round 1：中文可讀、暫停 / 標題選單、操控手感、8 能力 26 招、大星星 / 秘密房 / 魔王二階段、音量 API。
@@ -33,7 +34,10 @@ engine 167 / enemy 393（--extra 79）/ boss ALL PASS / weapons 417 / magic 248 
 9. Round 9（2026-09-15）：操作重構——按住 ↑ 飛行、漂浮中 X 出招、空中可出招且下墜、44 能力五招齊全（新增約 70 招）、水中 ↑ 上浮、房頂封頂。
 10. Round 10（2026-09-17）：貼身招判定加倍——`KB.PHYS.meleeScale = 2` + entity.js Hitbox 自動規則（`melee:true/false` 可強制）；44 能力 459 個貼身框 w/h 皆 ×2、395 個投射物零改動；非無敵實戰 sword/spark/blade 6/6 通關（R9 為 1/6）。
 
+11. Round 11（2026-09-19）：手機也能玩——touch.js 觸控覆蓋層（DOM 自注入、多點、D-pad 滑動）+ input.js 第三輸入來源 / `hint()`；main.js `KB.layout` 小數倍縮放（直向貼上、橫向兩側留 110 / 平板 170px）+ safe-area + 背景自動暫停；pwa.js + sw.js + manifest + icons（build.py 自動產 ASSETS / VERSION）；ui / menu / keyconfig 觸控提示、說明第 3 頁、設定 4 項（捲動視窗）、暫停「全螢幕」。工具 `tools/mobile_shot.py`（裝置模擬 + CDP 多點觸控）、`tools/test_touch.py`。
+
 ## 已知問題 / 下一步候選
+- Round 11：只在 Chromium 模擬驗證，iOS Safari 真機（音訊解鎖、100dvh、全螢幕不支援改加到主畫面）待使用者回饋；iPad D-pad 尺寸受兩側留白限制；「加到主畫面 / 有新版本」選單項未做（KB.PWA API 已有）。
 - Round 10 待使用者裁決：① 過大框 48 招（最大 stonegiant 空中 X 192×72、giant ↑X 80×128），嫌誇張就把該行 `melee:true` / `mbox` 改回；② 例外清單（spark 蓄力電擊波 96×80 未放大；time / gravity / clone / ghost 共 9 招維持原尺寸）見 QA_REPORT R10-2；③ 判定超出特效（blade X、sword X、giant ↑X）需美術跟進；④ `__kb.entities()` / enemy_test HOOK_JS 可加 w0/h0/meleeScaled。
 - 永恆時停覺醒招對魔王僅 25%；炎劍對威斯比 40%（部位各吃上限）。
 - kracko 戰鬥機器人 2/3（策略問題非平衡）。

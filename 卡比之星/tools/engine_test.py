@@ -490,8 +490,9 @@ def main():
         check('手把死區 0.35', abs(pg.evaluate("()=>KB.input.deadzone") - 0.35) < 1e-6)
         gp = pg.evaluate("()=>KB.input.GAMEPAD")
         check('手把 D-pad + X/Y/B 對應', gp['left'] == [14] and gp['jump'] == [0, 1] and gp['attack'] == [2, 3], gp)
-        check('HELP 格式不變（[鍵, 說明] 字串對）',
-              pg.evaluate("()=>KB.input.HELP.every(r=>Array.isArray(r)&&r.length===2&&typeof r[0]==='string'&&typeof r[1]==='string')") is True)
+        # Round 11：鍵名欄可為函式（觸控時回 A / B / C / START），桌機呼叫結果仍是字串
+        check('HELP 格式不變（[鍵, 說明]，鍵可為函式）',
+              pg.evaluate("()=>KB.input.HELP.every(r=>Array.isArray(r)&&r.length===2&&(typeof r[0]==='string'||(typeof r[0]==='function'&&typeof r[0]()==='string'))&&typeof r[1]==='string')") is True)
 
         # ================= Round 2 / player2 =================
         def clear_parts(): pg.evaluate("()=>{KB.game.parts.length=0}")
