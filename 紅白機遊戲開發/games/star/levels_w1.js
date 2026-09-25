@@ -76,9 +76,22 @@
     CSEA_T: 40,       // 天空關「雲海 / 遠山剪影帶」上緣
     CSEA_B: 41,       // 雲海剪影帶內部
     STAR_T: 42,       // 第三種（最小）星點
-    VEIN: 43          // 洞窟頂板下的岩層紋
+    VEIN: 43,         // 洞窟頂板下的岩層紋
+    // ── R3 star-w2《熔岩礦坑》新增（44..55）；語意與 W1 共用同一張表 ──────────
+    CRUMBLE: 44,      // 崩塌礦石磚（踩上去 CRUMBLE_HOLD 幀後碎掉，一段時間後復原）
+    SPRING: 45,       // 蒸氣彈簧（站上去被彈飛；solid）
+    ORE: 46,          // 礦脈硬塊（solid，不可破壞）
+    VENT: 47,         // 噴氣孔座（none；間歇泉從這裡噴出來）
+    CRYSTAL: 48,      // 礦坑結晶（none，裝飾）
+    LAMP: 49,         // 礦燈（none，裝飾）
+    BEAM_T: 50,       // 坑道支撐梁（上）
+    BEAM_B: 51,       // 坑道支撐梁（下）
+    MBG: 52,          // 岩漿層背景紋（none）
+    RAIL: 53,         // 礦車軌道（none，裝飾）
+    GEAR: 54,         // 熔爐齒輪（none，裝飾）
+    FWIN: 55          // 熔爐觀火窗（none，裝飾）
   };
-  var TILE_COUNT = 44;
+  var TILE_COUNT = 56;
   ST.TILE = TILE;
   ST.TILE_COUNT = TILE_COUNT;
 
@@ -88,7 +101,8 @@
     var i;
     for (i = 0; i < TILE_COUNT; i++) KIND[i] = 'none';
     var solid = [TILE.GROUND, TILE.DIRT, TILE.BRICK, TILE.QBLOCK, TILE.USED, TILE.BLOCK,
-      TILE.PIPE_TL, TILE.PIPE_TR, TILE.PIPE_BL, TILE.PIPE_BR, TILE.BRIDGE];
+      TILE.PIPE_TL, TILE.PIPE_TR, TILE.PIPE_BL, TILE.PIPE_BR, TILE.BRIDGE,
+      TILE.CRUMBLE, TILE.SPRING, TILE.ORE];
     var oneway = [TILE.PLATFORM, TILE.PLAT_L, TILE.PLAT_R];
     var hurt = [TILE.SPIKE, TILE.LAVA];
     for (i = 0; i < solid.length; i++) KIND[solid[i]] = 'solid';
@@ -132,6 +146,11 @@
     m[TILE.CSEA_T] = 'BG_CSEA_T'; m[TILE.CSEA_B] = 'BG_CSEA_B';
     m[TILE.STAR_T] = 'BG_STAR_T'; m[TILE.VEIN] = 'BG_VEIN';
     m[TILE.SLOPE_L] = 'BG_SLOPE_L'; m[TILE.SLOPE_R] = 'BG_SLOPE_R';
+    // R3 star-w2
+    m[TILE.CRUMBLE] = 'BG_CRUMB0'; m[TILE.SPRING] = 'BG_SPRING0'; m[TILE.ORE] = 'BG_ORE';
+    m[TILE.VENT] = 'BG_VENT'; m[TILE.CRYSTAL] = 'BG_CRYSTAL'; m[TILE.LAMP] = 'BG_LAMP';
+    m[TILE.BEAM_T] = 'BG_BEAM_T'; m[TILE.BEAM_B] = 'BG_BEAM_B'; m[TILE.MBG] = 'BG_MBG';
+    m[TILE.RAIL] = 'BG_RAIL'; m[TILE.GEAR] = 'BG_GEAR'; m[TILE.FWIN] = 'BG_FWIN';
     var i;
     for (i = 0; i < TILE_COUNT; i++) BASE_NAME[i] = m[i] || 'BG_EMPTY';
   })();
@@ -160,6 +179,27 @@
   function themeName(theme, code) {
     var ov = THEME_OVERRIDE[theme];
     return (ov && ov[code]) || BASE_NAME[code];
+  }
+
+  /* R3 star-w2：新主題可在別的檔（levels_w2.js）註冊，不必改本檔的表。
+   *   addTheme('mine', { from: 'cave', override: {<磚碼>: '<磚名>'}, pref: {<磚碼>: 0..3} })
+   *   from  = 先整份複製哪個既有主題的「磚名覆寫」與「調色盤偏好」
+   *   注意：PREF / THEME_OVERRIDE 都是 Level 建構時才讀 ⇒ 一定要在 new Level() 之前呼叫。 */
+  function addTheme(name, opts) {
+    opts = opts || {};
+    var from = opts.from || 'cave';
+    var base = PREF[from] || PREF.ground;
+    var arr = new Uint8Array(TILE_COUNT), i, k;
+    for (i = 0; i < TILE_COUNT; i++) arr[i] = base[i];
+    var pf = opts.pref || {};
+    for (k in pf) if (Object.prototype.hasOwnProperty.call(pf, k)) arr[k | 0] = pf[k] & 3;
+    PREF[name] = arr;
+    var ov = {}, src = THEME_OVERRIDE[from] || {};
+    if (opts.inherit !== false) for (k in src) if (Object.prototype.hasOwnProperty.call(src, k)) ov[k] = src[k];
+    var o = opts.override || {};
+    for (k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ov[k] = o[k];
+    THEME_OVERRIDE[name] = ov;
+    return name;
   }
 
   // ---- 屬性（16×16 調色盤組）：優先權 + 各主題偏好 -------------------------
@@ -193,6 +233,12 @@
     PREF.castle[TILE.COIN] = 3;
     PREF.castle[TILE.QBLOCK] = 3;
     PREF.castle[TILE.USED] = 3;
+    // R3 star-w2：崩塌磚 / 彈簧 / 礦脈與裝飾（主題覆寫在 addTheme 時再調）
+    set([TILE.CRYSTAL, TILE.LAMP, TILE.BEAM_T, TILE.BEAM_B, TILE.MBG, TILE.RAIL,
+      TILE.GEAR, TILE.FWIN, TILE.VENT], 1, 3, 3, 3, 3);
+    set([TILE.ORE], 2, 2, 1, 1, 1);
+    set([TILE.CRUMBLE], 3, 2, 2, 2, 2);
+    set([TILE.SPRING], 4, 3, 3, 3, 3);
   })();
 
   // ============================================================ ③ RLE / 物件表
@@ -225,7 +271,11 @@
     '.': -1, '~': TILE.EMPTY, 'B': TILE.BRICK, '?': TILE.QBLOCK, 'U': TILE.USED,
     '#': TILE.BLOCK, 'o': TILE.COIN, '=': TILE.PLATFORM, 's': TILE.SPIKE, 'C': TILE.CHAIN,
     'W': TILE.WINDOW, 'G': TILE.GROUND, 'D': TILE.DIRT, 'L': TILE.LAVA, 'v': TILE.CAVEBG,
-    'F': TILE.TORCH, 'f': TILE.TORCH_B, 'x': TILE.VEIN, '^': TILE.CSEA_T, '_': TILE.CSEA_B
+    'F': TILE.TORCH, 'f': TILE.TORCH_B, 'x': TILE.VEIN, '^': TILE.CSEA_T, '_': TILE.CSEA_B,
+    // R3 star-w2
+    'c': TILE.CRUMBLE, 'S': TILE.SPRING, 'O': TILE.ORE, 'V': TILE.VENT, '*': TILE.CRYSTAL,
+    'l': TILE.LAMP, 'T': TILE.BEAM_T, 't': TILE.BEAM_B, 'm': TILE.MBG, 'r': TILE.RAIL,
+    'g': TILE.GEAR, 'w': TILE.FWIN
   };
 
   // ============================================================ ④ Level
@@ -307,13 +357,14 @@
 
     // ---- 美術索引（需要 ST.World.bind 之後才有值）------------------------
     var lut = new Uint16Array(TILE_COUNT);
-    var lavaAlt = 0, coinIdx = 0, torchAlt = 0;
+    var lavaAlt = 0, coinIdx = 0, torchAlt = 0, springAlt = 0;
     this.rebind = function () {
       var W = ST.World, i;
       if (!W || !W.bound) { for (i = 0; i < TILE_COUNT; i++) lut[i] = 0; return false; }
       for (i = 0; i < TILE_COUNT; i++) lut[i] = W.bgIndex(themeName(self.theme, i));
       lavaAlt = W.bgIndex('BG_LAVA1');
       torchAlt = W.bgIndex('BG_TORCH1');
+      springAlt = W.bgIndex('BG_SPRING1');
       coinIdx = lut[TILE.COIN];
       return true;
     };
@@ -323,6 +374,7 @@
       if (ST.World && ST.World.anim) {
         if (t === TILE.LAVA) return lavaAlt;
         if (t === TILE.TORCH) return torchAlt;
+        if (t === TILE.SPRING && springAlt) return springAlt;
       }
       return lut[t];
     };
@@ -340,6 +392,13 @@
     });
     this.boss = def.boss || null;
     this.axe = def.axe || null;
+    // ---- R3 star-w2：關卡資料裡的「機關物件」（不是硬編碼；ST.Objects 讀這些）----
+    this.movers = (def.movers || []).map(function (m) { return copyOf(m); });
+    this.geysers = (def.geysers || []).map(function (m) { return copyOf(m); });
+    this.items = (def.items || []).map(function (m) { return copyOf(m); });
+    this.bossKind = def.bossKind || (def.boss ? 'hammer' : null);
+    if (def.time !== undefined) this.time = def.time | 0;
+    this.world = def.world || (String(def.id).charAt(0) | 0) || 1;
     if (this.boss && this.boss.x === undefined) { this.boss.x = this.boss.col * 8; }
     if (this.axe && this.axe.x === undefined) { this.axe.x = this.axe.col * 8; this.axe.y = this.axe.row * 8; }
     this.coins = count(map, TILE.COIN);
@@ -367,6 +426,12 @@
     if (cp < 0) return { x: this.start.x, y: this.start.y, col: this.start.x >> 3 };
     return { x: cp * 8, y: this.surfaceY(cp) - 24, col: cp };
   };
+
+  function copyOf(o) {
+    var out = {}, k;
+    for (k in o) if (Object.prototype.hasOwnProperty.call(o, k)) out[k] = o[k];
+    return out;
+  }
 
   function count(map, k) {
     var n = 0, i;
@@ -489,6 +554,26 @@
           break;
         case 'tile':
           L._set(o.c, o.r, o.k);
+          break;
+        // ---- R3 star-w2 -----------------------------------------------------
+        case 'deco':                                   // 同 'row'，但**只填空格**（不可能蓋掉地形）
+          for (x = 0; x < o.s.length; x++) {
+            var kd = ROW_CHAR[o.s.charAt(x)];
+            if (kd === undefined) throw new Error('levels: deco 未知字元 "' + o.s.charAt(x) + '"');
+            if (kd >= 0) L._deco(o.c + x, o.r, kd);
+          }
+          break;
+        case 'dline':                                  // 一整條裝飾（只填空格）
+          for (x = 0; x < o.w; x++) L._deco(o.c + x, o.r, o.k);
+          break;
+        case 'crumble':                                // 崩塌礦石磚（一排）
+          for (x = 0; x < (o.w || 1); x++) L._set(o.c + x, o.r, TILE.CRUMBLE);
+          break;
+        case 'spring':                                 // 蒸氣彈簧
+          L._set(o.c, o.r, TILE.SPRING);
+          break;
+        case 'beam':                                   // 坑道支撐梁（上 + 下）
+          L._deco(o.c, o.r, TILE.BEAM_T); L._deco(o.c, o.r + 1, TILE.BEAM_B);
           break;
         default:
           throw new Error('levels_w1: 未知物件 "' + o.t + '"');
@@ -795,7 +880,27 @@
       return ok;
     },
     themeName: themeName,
-    ROWS: ROWS, TOP_ROW: TOP_ROW, SPLIT_LINE: TOP_ROW * 8
+    ROWS: ROWS, TOP_ROW: TOP_ROW, SPLIT_LINE: TOP_ROW * 8,
+    // R3 star-w2：讓別的關卡檔（levels_w2.js）掛新關進來
+    register: function (def) {
+      if (LEVELS[def.id]) throw new Error('levels: 關卡 ' + def.id + ' 已存在');
+      var L = new Level(def);
+      LEVELS[def.id] = L;
+      if (IDS.indexOf(def.id) < 0) IDS.push(def.id);
+      return L;
+    }
+  };
+
+  /* R3 star-w2：關卡工具組（Level 類別 / RLE / 主題註冊 / 磚語意常數），
+   * 讓 `games/star/levels_w2.js` 不必複製本檔的建圖程式。 */
+  ST.LevelKit = {
+    Level: Level,
+    rle: rle,
+    addTheme: addTheme,
+    themeName: themeName,
+    ROWS: ROWS, TOP_ROW: TOP_ROW,
+    FLOOR_DY: FLOOR_DY, CEIL_H: CEIL_H, ROW_CHAR: ROW_CHAR,
+    PREF: PREF, PRI: PRI, THEME_OVERRIDE: THEME_OVERRIDE, BASE_NAME: BASE_NAME
   };
 
   // ============================================================ ⑥ 捲動串流

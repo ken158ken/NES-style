@@ -94,6 +94,12 @@
   var pool = makePool(POOL_SIZE, newEnemy);
   var level = null, sorted = [], ptr = 0, tiles = null, camXCache = 0;
 
+  /* R3 star-w2：敵人種類登記表。
+   * W1 的三種（roller / bouncer / flyer）維持原本的硬寫分支不動；新世界的敵人用
+   *   ST.Enemies.register('bat', { w, h, stompable, score, setup, step, art|draw })
+   * 掛進來（見 games/star/enemies_w2.js），本檔不必再長。 */
+  var EXT = {};
+
   // ---- 磚索引快取（ST.World.bind 之後才有值）------------------------------
   function ensureTiles() {
     if (tiles) return tiles;
@@ -130,6 +136,7 @@
   function configure(e, kind, x, y, opt) {
     opt = opt || {};
     e.kind = kind;
+    e.fragile = false;
     FX.vsetPx(e.px, x); FX.vsetPx(e.py, y);
     e.x = x | 0; e.y = y | 0;
     FX.aset(e.vx, 0); FX.aset(e.vy, 0);
@@ -141,6 +148,16 @@
     e.amp = opt.amp === undefined ? FLY_AMP : opt.amp;
     e.phase = opt.phase || 0;
     e.baseY = y | 0;
+    var ex = EXT[kind];
+    if (ex) {
+      e.w = ex.w || 14; e.h = ex.h || 14;
+      e.stompable = ex.stompable !== false;
+      e.score = ex.score || 100;
+      e.fragile = !!ex.fragile;
+      e.awake = false; e.t2 = 0; e.targetY = 0;
+      if (ex.setup) ex.setup(e, opt, API);
+      return e;
+    }
     if (kind === 'roller') {
       e.w = 14; e.h = 14; e.stompable = true; e.score = 100;
       FX.aset(e.vx, e.dir * SPD_ROLL);
@@ -273,8 +290,25 @@
   }
 
   // ============================================================ 對外
+  // 登記的敵人可以用的共用工具（不必自己重寫重力 / 地形查詢）
+  var API = {
+    FX: FX, SMB: SMB, sin8: sin8,
+    fall: fall, blocked: blocked, kindAtPx: kindAtPx, floorAt: floorAt,
+    spawn: function (kind, x, y, opt) { return spawn(kind, x, y, opt); },
+    level: function () { return level; },
+    camX: function () { return camXCache; },
+    GRAV: GRAV, MAXFALL: MAXFALL, SPD_ROLL: SPD_ROLL, SPD_FLY: SPD_FLY
+  };
+
   var Enemies = {
     KINDS: ['roller', 'bouncer', 'flyer'],
+    EXT: EXT,
+    API: API,
+    register: function (kind, def) {
+      EXT[kind] = def;
+      if (Enemies.KINDS.indexOf(kind) < 0) Enemies.KINDS.push(kind);
+      return def;
+    },
     pool: pool,
     level: null,
     frame: 0,
@@ -323,8 +357,9 @@
       if (typeof fn !== 'function') return 0;
       var n = 0;
       pool.each(function (e) { fn(e); n++; });
-      if (Enemies.includeBoss && ST.Boss && ST.Boss.active && ST.Boss.alive) { fn(ST.Boss); n++; }
-      if (Enemies.includeBoss && ST.Boss && ST.Boss.hammers) ST.Boss.hammers.each(function (h) { fn(h); n++; });
+      var B = ST.ActiveBoss || ST.Boss;
+      if (Enemies.includeBoss && B && B.active && B.alive) { fn(B); n++; }
+      if (Enemies.includeBoss && B && B.hammers) B.hammers.each(function (h) { fn(h); n++; });
       return n;
     },
     pending: function () { return sorted.length - ptr; },
@@ -357,7 +392,9 @@
           fall(e);
           return;
         }
-        if (e.kind === 'roller') stepRoller(e);
+        var ex2 = EXT[e.kind];
+        if (ex2) ex2.step(e, g, API);
+        else if (e.kind === 'roller') stepRoller(e);
         else if (e.kind === 'bouncer') stepBouncer(e);
         else stepFlyer(e);
 
@@ -376,10 +413,22 @@
       var n = 0, cam = camXCache;
       pool.each(function (e) {
         var prio = (e.squash > 0 || e.dying) ? 4 : 3;
+        var ex = EXT[e.kind];
+        if (ex && e.squash <= 0) {                     // R3 star-w2 的敵人自己畫
+          if (typeof ex.draw === 'function') { n += ex.draw(e, oam, cam, prio); return; }
+          var p2 = ex.art(e);
+          var pal2 = (ex.pal === undefined) ? 3 : ex.pal;
+          // 16×16 水平翻轉 = 兩塊**各自翻 + 左右對調**（只翻不調會把左右半邊接反）
+          var fl = !!p2[2];
+          oam.add({ x: e.x - 1 - cam, y: e.y - 2, tile: fl ? p2[1] : p2[0], pal: pal2, prio: prio, flipH: fl });
+          oam.add({ x: e.x + 7 - cam, y: e.y - 2, tile: fl ? p2[0] : p2[1], pal: pal2, prio: prio, flipH: fl });
+          n += 2;
+          return;
+        }
         var pal = (e.kind === 'flyer') ? 3 : 2;
         var sx = e.x - 1 - cam, sy = e.y - 2, pair;
         if (e.squash > 0) pair = T.squash;
-        else pair = T[e.kind][(e.t >> 3) & 1];
+        else pair = (T[e.kind] || T.roller)[(e.t >> 3) & 1];
         oam.add({ x: sx, y: sy, tile: pair[0], pal: pal, prio: prio });
         oam.add({ x: sx + 8, y: sy, tile: pair[1], pal: pal, prio: prio });
         n += 2;
@@ -420,8 +469,9 @@
       if (falling && footIn && e.stompable) {
         stomp(e);
         if (g.onStomp) g.onStomp(e);
-      } else if (!(h.inv > 0)) {
+      } else if (!(h.inv > 0) && !(h.star > 0)) {
         if (g.onHurt) g.onHurt(e);
+        if (e.fragile) e.alive = false;
       }
     });
   }

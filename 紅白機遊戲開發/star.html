@@ -48,16 +48,25 @@
 <script src="engine/nes.js?v=4bed9ffa"></script>
 
 <!-- ===== 遊戲：games/star「星塵勇者」（R2b 平台動作 W1）=====
-     載入順序：chr_hero（star-hero 精靈磚 0..127 + HUD 字型）→ chr_world（star-world 敵人 / 魔王磚 128..255 + 地形）
-     → song（star-audio）→ hero → enemies / boss / levels_w1（star-world）→ main（star-hero，最後一檔設 window.GAME）。 -->
+     載入順序：chr_hero（主角精靈 + HUD 字型）→ chr_world（W1 地形 / 敵人 / 魔王磚）→ chr_w2（W2 追加磚）
+     → song / song_w2（曲目；song_w2 用 song.js 的 BUILD 工具註冊 mine / magma / forge / boss2）
+     → hero → enemies → enemies_w2（登記 bat / armor / spitter / fire）→ boss → boss_w2（熔心巨像）
+     → objects_w2（升降板 / 崩塌磚 / 彈簧 / 間歇泉 / 道具）→ levels_w1（磚語意 + Level + W1）
+     → levels_w2（W2 三主題 + 四關）→ main（最後一檔設 window.GAME）。 -->
 <script src="games/star/chr_hero.js?v=caecd2f8"></script>
-<script src="games/star/chr_world.js?v=4fd19254"></script>
-<script src="games/star/song.js?v=3a1f7fd9"></script>
-<script src="games/star/hero.js?v=f526d69a"></script>
-<script src="games/star/enemies.js?v=5d9d850f"></script>
+<script src="games/star/chr_world.js?v=a5950401"></script>
+<script src="games/star/chr_w2.js?v=f776effc"></script>
+<script src="games/star/song.js?v=0ab53577"></script>
+<script src="games/star/song_w2.js?v=53918d4f"></script>
+<script src="games/star/hero.js?v=7880f857"></script>
+<script src="games/star/enemies.js?v=14ab5f46"></script>
+<script src="games/star/enemies_w2.js?v=cae57dd6"></script>
 <script src="games/star/boss.js?v=dc46f708"></script>
-<script src="games/star/levels_w1.js?v=ac392842"></script>
-<script src="games/star/main.js?v=4100b8f4"></script>
+<script src="games/star/boss_w2.js?v=7845b92e"></script>
+<script src="games/star/objects_w2.js?v=47c45a64"></script>
+<script src="games/star/levels_w1.js?v=b07adba4"></script>
+<script src="games/star/levels_w2.js?v=cd70277e"></script>
+<script src="games/star/main.js?v=13f0b6d9"></script>
 
 <script>
 // ---- 啟動：桌機整數放大置中 / 手機小數倍貼齊、鍵盤焦點、F 全螢幕、觸控覆蓋層版面 ----

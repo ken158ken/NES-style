@@ -455,13 +455,16 @@
     return World;
   }
 
+  // R3 star-w2：磚名不在 bank 裡就回 0（空白磚），**不要丟例外**。
+  // 世界 2 的磚放在 ST.BG_W2 / ST.SPR_W2（main.js 才合併），只載 W1 的測試
+  // （games/star/test_w1.py）在 rebind 時會查到那些名字 ⇒ 舊版的 index() 會整個炸掉。
   function bgIndex(name) {
-    if (!bgBank) return 0;
+    if (!bgBank || !bgBank.has || !bgBank.has(name)) return 0;
     var i = bgBank.index(name);
     return (i === undefined || i < 0) ? 0 : i;
   }
   function oam16(name) {
-    if (!sprBank) return 0;
+    if (!sprBank || !sprBank.has || !sprBank.has(name)) return 0;
     var i = sprBank.index(name);
     return (i === undefined || i < 0) ? 0 : (i | 1);
   }

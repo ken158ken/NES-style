@@ -887,13 +887,14 @@ JS_BANNER_BACK = r"""
 """
 
 JS_WIN = r"""
-() => {
+(opt) => {
   const S = () => window.GAME.state();
   const d = GAME.dev;
+  const B = (window.ST && ST.BossW2 && S().level === '2-4') ? ST.BossW2 : ST.Boss;
   d.setScore(12345);
-  d.warp(240 * 8); __nes.step(4);
+  d.warp(opt.col * 8); __nes.step(4);
   let n = 0;
-  while (!ST.Boss.dead && n++ < 20) { ST.Boss.stomp(); __nes.step(70); }
+  while (!B.dead && n++ < 30) { B.stomp(); __nes.step(70); }
   n = 0; while (S().mode !== 'gameover' && n++ < 900) __nes.step(1);
   const s = S();
   __nes.render();
@@ -940,15 +941,18 @@ def test_banner(page):
     ok('標題文字重新畫出來', B['title'] == 'STARDUST HERO', B['title'])
     ok('標題再按 START → 重新開始遊戲', B['mode2'] == 'play', B['mode2'])
 
-    # ---- 破完 1-4：WORLD 1 CLEAR ----
+    # ---- 破完最後一關：WORLD n CLEAR（R3：W2 上線後最後一關是 2-4）----
     if not page.evaluate("() => !!(window.ST && ST.LEVELS && ST.LEVELS['1-4'] && ST.Boss)"):
         ok('star-world 的 1-4 / 魔王尚未就緒（SKIP 破關畫面）', True, 'skipped')
         return
-    fresh(page, '1-4')
-    W = page.evaluate(JS_WIN)
-    ok('打倒魔王 → 結算 → won = true 的 gameover', W['mode'] == 'gameover' and W['won'] is True,
-       'mode=%s won=%s' % (W['mode'], W['won']))
-    ok('破關畫面寫 WORLD 1 CLEAR（與 GAME OVER 不同）', W['l1'] == 'WORLD 1 CLEAR', W['l1'])
+    hasW2 = page.evaluate("() => !!(window.ST && ST.LEVELS && ST.LEVELS['2-4'] && ST.BossW2)")
+    last, lastCol, lastWorld = ('2-4', 215, 2) if hasW2 else ('1-4', 240, 1)
+    fresh(page, last)
+    W = page.evaluate(JS_WIN, {'col': lastCol})
+    ok('打倒最後一關（%s）的魔王 → 結算 → won = true 的 gameover' % last,
+       W['mode'] == 'gameover' and W['won'] is True, 'mode=%s won=%s' % (W['mode'], W['won']))
+    ok('破關畫面寫 WORLD %d CLEAR（與 GAME OVER 不同）' % lastWorld,
+       W['l1'] == 'WORLD %d CLEAR' % lastWorld, W['l1'])
     ok('破關畫面寫 THANK YOU', W['l2'] == 'THANK YOU', W['l2'])
     ok('破關畫面寫最終分數', W['l3'] == 'SCORE ' + str(W['score']).rjust(6, '0'),
        '%s / score=%s' % (W['l3'], W['score']))
@@ -1450,6 +1454,144 @@ def test_fix5(page):
        k1['banner'] == ['PAUSE', 'C OR $ = SECRET', 'SECRET!'], k1['banner'])
 
 
+
+# =====================================================================  ⑪ R3 star-w2
+# 旗桿下滑演出（W1 留下的待辦）/ 無敵星旗標 / 一鍵密技擋熔岩・掉坑 / 標題世界選擇 /
+# W1 通關自動接 W2。這些是 star-hero 這一層的行為（W2 關卡本身由 test_w2.py 驗）。
+def test_r3(page):
+    print('[⑪ R3 star-w2：旗桿演出 / 無敵星 / 世界選擇 / W1→W2]')
+    has11 = page.evaluate("() => !!(window.ST && ST.LEVELS && ST.LEVELS['1-1'])")
+    if not has11:
+        ok('star-world 的 1-1 尚未就緒（SKIP R3 組）', True, 'skipped')
+        return
+
+    # ---- ① 旗桿下滑演出（1-1 的旗桿在 col 350）----
+    fresh(page, '1-1')
+    P = page.evaluate(r"""() => {
+      const S = () => window.GAME.state(), d = GAME.dev;
+      const col = ST.LEVELS['1-1'].goal.col;
+      // 從半空中碰到桿子（跳上去抓桿）⇒ 才看得到下滑段；貼地碰到的話本來就沒得滑
+      d.warp(col * 8 - 8, 96); __nes.step(2);
+      let n = 0;
+      while (S().mode === 'play' && n++ < 120) __nes.step(1);
+      const hit = S();
+      const ys = [hit.y];
+      let slide = 0, walk = 0, m = 0;
+      while (S().pole && m++ < 400) {
+        const p = S();
+        if (p.pole === 'slide') slide++; else walk++;
+        ys.push(p.y);
+        __nes.step(1);
+      }
+      const after = S();
+      n = 0; while (S().mode === 'clear' && n++ < 600) __nes.step(1);
+      return { hitMode: hit.mode, slide: slide, walk: walk,
+               y0: ys[0], y1: ys[ys.length - 1], x0: hit.x, x1: after.x,
+               pole: after.pole, next: S().level, mode: S().mode };
+    }""")
+    ok('碰到旗桿 → mode 立刻是 clear（機器人 / 既有測試看到的不變）', P['hitMode'] == 'clear', P['hitMode'])
+    ok('旗桿演出有「下滑」段（≥ 8 幀）', P['slide'] >= 8, P['slide'])
+    ok('旗桿演出有「進城」段（≥ 8 幀）', P['walk'] >= 8, P['walk'])
+    ok('下滑真的往下移動（y 變大）', P['y1'] > P['y0'], (P['y0'], P['y1']))
+    ok('進城段往右走（x 變大）', P['x1'] > P['x0'], (P['x0'], P['x1']))
+    ok('演出結束後 pole 清空、接著結算 → 下一關 1-2', P['pole'] is None and P['next'] == '1-2',
+       (P['pole'], P['next']))
+
+    # ---- ② 無敵星旗標：熔岩不死、尖刺不痛 ----
+    fresh(page, 'test')
+    Lv = page.evaluate(r"""() => {
+      const S = () => window.GAME.state(), d = GAME.dev, L = d.layout();
+      const out = {};
+      // 熔岩：沒有無敵星 → 死
+      d.warp(L.LAVA[0] * 8 + 4, (L.GROUND_ROW - 3) * 8); __nes.step(8);
+      out.lavaNoStar = S().state;
+      // 有無敵星 → 不死
+      d.warp(L.LAVA[0] * 8 + 4, (L.GROUND_ROW - 3) * 8);
+      d.hero().star = 600; __nes.step(20);
+      out.lavaStar = S().state;
+      out.starLeft = S().star;
+      // 尖刺：有無敵星 → hits 不變
+      const h0 = S().hits;
+      d.warp(L.SPIKE * 8, (L.SPIKE_ROW - 3) * 8);
+      d.hero().star = 600; __nes.step(12);
+      out.spikeHits = S().hits - h0;
+      return out;
+    }""")
+    ok('沒有無敵星時熔岩仍然一碰就死（行為不變）', Lv['lavaNoStar'] == 'dead', Lv['lavaNoStar'])
+    ok('有 hero.star 時熔岩不致命', Lv['lavaStar'] != 'dead', Lv['lavaStar'])
+    ok('hero.star 每幀倒數', 0 < Lv['starLeft'] < 600, Lv['starLeft'])
+    ok('有 hero.star 時尖刺不受傷', Lv['spikeHits'] == 0, Lv['spikeHits'])
+
+    # ---- ③ 一鍵密技（C）同時給 star ⇒ 熔岩 / 掉坑都擋得住（收 fix5 留給後續）----
+    fresh(page, 'test')
+    # dev.warp() 會 Hero.reset（star 歸零）⇒ 一定要「先 warp、後按 C」
+    page.evaluate("() => { const L = GAME.dev.layout(); GAME.dev.warp(L.PIT[0] * 8 + 4, 100); __nes.step(1); }")
+    page.keyboard.press('KeyC')
+    page.evaluate('()=>__nes.step(2)')
+    K2 = page.evaluate('()=>window.GAME.state()')
+    ok('按 C 之後 hero.star > 0（不只是 inv）', K2['star'] > 0, K2['star'])
+    Pit = page.evaluate(r"""() => {
+      const S = () => window.GAME.state();
+      const deaths0 = S().deaths, lives0 = S().lives;
+      let n = 0; while (S().pitSaves === 0 && S().state !== 'dead' && n++ < 300) __nes.step(1);
+      __nes.step(4);
+      const s = S();
+      return { deaths: s.deaths - deaths0, lives: s.lives - lives0, pitSaves: s.pitSaves,
+               mode: s.mode, y: s.y, state: s.state };
+    }""")
+    ok('無敵時掉坑 → 被拉回檢查點（不扣命、不算死）',
+       Pit['deaths'] == 0 and Pit['lives'] == 0 and Pit['pitSaves'] >= 1,
+       (Pit['deaths'], Pit['lives'], Pit['pitSaves']))
+    ok('拉回後還在 play、不是死亡狀態', Pit['mode'] == 'play' and Pit['state'] != 'dead',
+       (Pit['mode'], Pit['state']))
+    # 先把一鍵密技的 30 幀冷卻走完（此時主角已被拉回檢查點，是安全的），
+    # 再 warp 到熔岩「上方」且**不推進任何一幀**（warp 會把 star 歸零），按 C 之後才開始掉。
+    page.evaluate("() => { __nes.step(40); const L = GAME.dev.layout(); GAME.dev.warp(L.LAVA[0] * 8 + 4, (L.GROUND_ROW - 8) * 8); }")
+    page.keyboard.press('KeyC')
+    LavaC = page.evaluate("() => { __nes.step(1); const st = window.GAME.state().star; __nes.step(30); return { state: window.GAME.state().state, star: st }; }")
+    ok('按 C 後 star 生效（掉進熔岩前）', LavaC['star'] > 0, LavaC['star'])
+    ok('一鍵密技期間熔岩也擋得住（fix5 留給後續第 3 條）', LavaC['state'] != 'dead', LavaC)
+
+    # ---- ④ 標題的世界選擇 ----
+    hasW2 = page.evaluate("() => !!(window.ST && ST.LEVELS && ST.LEVELS['2-1'])")
+    if not hasW2:
+        ok('W2 尚未就緒（SKIP 世界選擇 / W1→W2）', True, 'skipped')
+        return
+    page.goto(BASE)
+    page.wait_for_function('() => !!window.__nes && !!window.GAME && !!window.GAME.dev')
+    page.evaluate('() => __nes.step(2)')
+    t0 = page.evaluate("() => ({ world: window.GAME.state().titleWorld, txt: GAME.dev.screenText(11, 11, 7), mode: window.GAME.state().mode })")
+    ok('標題預設 WORLD 1', t0['mode'] == 'title' and t0['world'] == 1 and t0['txt'] == 'WORLD 1', t0)
+    ok('標題有「SELECT = WORLD」提示行',
+       page.evaluate("() => GAME.dev.screenText(12, 7, 16)") == '$ SELECT = WORLD',
+       page.evaluate("() => GAME.dev.screenText(12, 7, 16)"))
+    t1 = page.evaluate(JS_TAPS, ['SELECT'])
+    ok('標題按 SELECT → WORLD 2', t1['titleWorld'] == 2, t1['titleWorld'])
+    ok('WORLD 2 的字真的畫出來',
+       page.evaluate("() => GAME.dev.screenText(11, 11, 7)") == 'WORLD 2',
+       page.evaluate("() => GAME.dev.screenText(11, 11, 7)"))
+    t2 = page.evaluate(JS_TAPS, ['START'])
+    ok('WORLD 2 按 START → 直接開 2-1', t2['mode'] == 'play' and t2['level'] == '2-1',
+       (t2['mode'], t2['level']))
+    lt = page.evaluate("() => { __nes.render(); return __nes.lint(); }")
+    ok('2-1 開場 lint 綠（≤ 25 色）', lt['ok'] and lt['colors'] <= 25, (lt['ok'], lt['colors']))
+
+    # ---- ⑤ 破完 1-4 自動接 2-1 ----
+    fresh(page, '1-4')
+    N = page.evaluate(r"""() => {
+      const S = () => window.GAME.state();
+      const d = GAME.dev;
+      d.warp(240 * 8); __nes.step(4);
+      let n = 0;
+      while (!ST.Boss.dead && n++ < 30) { ST.Boss.stomp(); __nes.step(70); }
+      n = 0; while (S().level === '1-4' && n++ < 900) __nes.step(1);
+      const s = S();
+      return { level: s.level, mode: s.mode, world: s.world, lives: s.lives };
+    }""")
+    ok('打倒鐵鎚王 → 自動接 2-1（W1 通關後接 W2）', N['level'] == '2-1', N['level'])
+    ok('接關後 world = 2、命數保留', N['world'] == 2 and N['lives'] >= 1, (N['world'], N['lives']))
+
+
 # =====================================================================  主程式
 def main():
     if not (ROOT / 'star.html').exists():
@@ -1496,6 +1638,7 @@ def main():
         test_air_control(page)
         test_wall(page)
         test_stomp(page)
+        test_r3(page)
 
         ok('整場測試 0 個 JS 例外 / console error', not errors, errors[:3])
         browser.close()

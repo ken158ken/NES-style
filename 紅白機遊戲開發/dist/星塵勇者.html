@@ -5471,8 +5471,11 @@
 </script>
 
 <!-- ===== 遊戲：games/star「星塵勇者」（R2b 平台動作 W1）=====
-     載入順序：chr_hero（star-hero 精靈磚 0..127 + HUD 字型）→ chr_world（star-world 敵人 / 魔王磚 128..255 + 地形）
-     → song（star-audio）→ hero → enemies / boss / levels_w1（star-world）→ main（star-hero，最後一檔設 window.GAME）。 -->
+     載入順序：chr_hero（主角精靈 + HUD 字型）→ chr_world（W1 地形 / 敵人 / 魔王磚）→ chr_w2（W2 追加磚）
+     → song / song_w2（曲目；song_w2 用 song.js 的 BUILD 工具註冊 mine / magma / forge / boss2）
+     → hero → enemies → enemies_w2（登記 bat / armor / spitter / fire）→ boss → boss_w2（熔心巨像）
+     → objects_w2（升降板 / 崩塌磚 / 彈簧 / 間歇泉 / 道具）→ levels_w1（磚語意 + Level + W1）
+     → levels_w2（W2 三主題 + 四關）→ main（最後一檔設 window.GAME）。 -->
 <script>/* games/star/chr_hero.js */
 /*
  * games/star/chr_hero.js — 《星塵勇者》主角 CHR（精靈表 0..127）+ HUD 字型（背景表 0..63）
@@ -6343,13 +6346,16 @@
     return World;
   }
 
+  // R3 star-w2：磚名不在 bank 裡就回 0（空白磚），**不要丟例外**。
+  // 世界 2 的磚放在 ST.BG_W2 / ST.SPR_W2（main.js 才合併），只載 W1 的測試
+  // （games/star/test_w1.py）在 rebind 時會查到那些名字 ⇒ 舊版的 index() 會整個炸掉。
   function bgIndex(name) {
-    if (!bgBank) return 0;
+    if (!bgBank || !bgBank.has || !bgBank.has(name)) return 0;
     var i = bgBank.index(name);
     return (i === undefined || i < 0) ? 0 : i;
   }
   function oam16(name) {
-    if (!sprBank) return 0;
+    if (!sprBank || !sprBank.has || !sprBank.has(name)) return 0;
     var i = sprBank.index(name);
     return (i === undefined || i < 0) ? 0 : (i | 1);
   }
@@ -6391,6 +6397,352 @@
     World.bgTiles = Object.keys(BG).length;
     if (n > 128) throw new Error('ST.SPR_WORLD 佔 ' + n + ' 磚 > 128（契約：精靈表 128..255）');
     if (World.bgTiles > 192) throw new Error('ST.BG_WORLD 佔 ' + World.bgTiles + ' 磚 > 192（契約：背景表 64..255）');
+  })();
+})();
+
+</script>
+<script>/* games/star/chr_w2.js */
+/*
+ * games/star/chr_w2.js — 《星塵勇者》世界 2「熔岩礦坑」的 CHR（背景磚 + 精靈）
+ * ---------------------------------------------------------------------------
+ * 擁有者：star-w2 agent ｜ 依賴：engine/chr.js、games/star/chr_world.js（ST.PAL_WORLD / ST.World）
+ * 契約：docs/TASKS.md「R3 star W2」
+ *
+ *   ST.BG_W2    背景圖樣表 0 的追加磚（`BG_` 前綴；main.js 合併進 st_bg）
+ *   ST.SPR_W2   精靈圖樣表 1 的追加磚（`W2_` 前綴，8×16 配對；main.js 合併進 st_spr）
+ *   ST.PAL_WORLD.{mine,magma,forge}  三個新主題的調色盤（bg/spr 的第 1..3 組）
+ *
+ * **刻意不併進 ST.BG_WORLD / ST.SPR_WORLD**：那兩個物件的容量上限（bg ≤ 192 / spr ≤ 128）
+ * 是 R2b 的契約，test_w1.py 會驗。W2 的磚改用 bank 總量（≤ 256 磚）為限，見 test_w2.py ①。
+ *
+ * 色號約定（每個主題 3 色 + 共用底色）：
+ *   mine  bg1 礦岩 [$07 深褐 / $17 褐 / $27 橘褐]｜bg2 木板・崩塌磚 [$00 / $10 / $30 灰白]
+ *         bg3 結晶・礦燈・彈簧 [$01 藍 / $21 亮藍 / $30 白]
+ *   magma bg1 黑岩 [$00 / $0F… 見 PAL]｜bg2 熔岩 [$06 / $16 / $27]｜bg3 機關 [$01 / $11 / $30]
+ *   forge bg1 鐵石 [$00 / $10 / $30]｜bg2 爐火 [$06 / $16 / $27]｜bg3 齒輪黃銅 [$08 / $18 / $28]
+ */
+(function () {
+  'use strict';
+  var NES = window.NES = window.NES || {};
+  var ST = window.ST = window.ST || {};
+  var CHR = NES.CHR;
+  if (!CHR) throw new Error('games/star/chr_w2.js 需要 engine/chr.js');
+
+  /* ---------------------------------------------------------- 繪圖小工具（同 chr_world.js） */
+  function dots(n) { return n > 0 ? new Array(n + 1).join('.') : ''; }
+  function W(width, rows, height) {
+    var out = [], i, s, h = height || width;
+    if (rows.length > h) throw new Error('chr_w2: 列數 ' + rows.length + ' > ' + h);
+    for (i = 0; i < h; i++) {
+      s = (i < rows.length) ? rows[i] : '';
+      if (s === null || s === undefined) s = '';
+      else if (typeof s !== 'string') s = dots(s[0]) + s[1];
+      if (s.length > width) throw new Error('chr_w2: 第 ' + i + ' 列超過 ' + width + ' 字元（' + s.length + '）');
+      out.push(s + dots(width - s.length));
+    }
+    return out;
+  }
+  function mir(rows) {
+    var out = [], i;
+    for (i = 0; i < rows.length; i++) out.push(rows[i].split('').reverse().join(''));
+    return out;
+  }
+  var BLANK8 = ['........', '........', '........', '........', '........', '........', '........', '........'];
+  function pair16(art, name, o) {
+    var t = CHR.slice(art);
+    o[name + '_L'] = CHR.tile16(t[0], t[2]);
+    o[name + '_R'] = CHR.tile16(t[1], t[3]);
+    return o;
+  }
+  function tall8(top, bottom, name, o) {
+    o[name] = CHR.tile16(W(8, top), bottom ? W(8, bottom) : BLANK8);
+    return o;
+  }
+  function quad32(art, name, o, topOnly, shareBottomFrom) {
+    var t = CHR.slice(art), c;
+    for (c = 0; c < 4; c++) {
+      o[name + '_C' + c + 'T'] = CHR.tile16(t[c], t[4 + c]);
+      if (topOnly) o[name + '_C' + c + 'B'] = o[shareBottomFrom + '_C' + c + 'B'];
+      else o[name + '_C' + c + 'B'] = CHR.tile16(t[8 + c], t[12 + c]);
+    }
+    return o;
+  }
+
+  /* ============================================================ ① 背景地形磚 */
+  var BG = {};
+
+  // ---- mine 礦坑（bg1 礦岩）------------------------------------------------
+  BG.BG_MTOP = ['33233323', '23222232', '12212221', '11211121', '11121112', '11211121', '12111211', '11112111'];
+  BG.BG_MROCK = ['11211121', '11111211', '11311111', '12111121', '11111311', '11211111', '11121112', '11111211'];
+  BG.BG_MBRICK = ['22222222', '21112111', '21112111', '22222222', '11211121', '11211121', '22222222', '12111211'];
+  // 礦脈硬塊（ORE）：外框 + 三顆結晶（色 3）
+  BG.BG_ORE = ['11111111', '13211231', '12221221', '11213211', '12312221', '12221231', '13212221', '11111111'];
+  // 崩塌礦石磚（CRUMBLE）：裂紋明顯，跟一般磚一眼可分
+  BG.BG_CRUMB0 = ['33333333', '32213223', '31.1.223', '322.1.13', '3.121.23', '32.12.13', '321.2223', '33333333'];
+  // 蒸氣彈簧（SPRING）兩幀：壓縮 / 伸展
+  BG.BG_SPRING0 = W(8, ['', '', '', '..3333..', '.322223.', '.322223.', '.333333.', '11111111']);
+  BG.BG_SPRING1 = W(8, ['', '..3333..', '.322223.', '.3....3.', '.322223.', '.3....3.', '.333333.', '11111111']);
+  // 噴氣孔座（VENT）
+  BG.BG_VENT = ['11111111', '13333331', '13222231', '13.22.31', '13222231', '13333331', '11111111', '11111111'];
+  // 礦坑結晶 / 礦燈 / 支撐梁 / 軌道（裝飾）
+  BG.BG_CRYSTAL = W(8, ['', '...3....', '..333...', '..323...', '.33233..', '.32233..', '.333333.', '..1111..']);
+  BG.BG_LAMP = W(8, ['...11...', '..1111..', '.333333.', '.322223.', '.333333.', '..3333..', '...33...', '']);
+  BG.BG_BEAM_T = ['11111111', '12222221', '11111111', '...11...', '...22...', '...11...', '...22...', '...11...'];
+  BG.BG_BEAM_B = ['...11...', '...22...', '...11...', '...22...', '...11...', '...22...', '11111111', '12222221'];
+  BG.BG_RAIL = W(8, ['', '', '', '', '', '11111111', '.2....2.', '.2....2.']);
+  // 岩漿層背景紋（MBG）
+  BG.BG_MBG = W(8, ['', '..11....', '.1..1...', '', '.....11.', '....1..1', '', '..1.....']);
+
+  // ---- magma 熔岩層（bg1 黑岩）--------------------------------------------
+  BG.BG_XTOP = ['32323232', '22222222', '21222122', '12212221', '22122212', '12221222', '21222122', '12212221'];
+  BG.BG_XROCK = ['21222122', '12221221', '22122212', '12212221', '21222122', '12221222', '22122212', '12221221'];
+
+  // ---- forge 熔爐要塞（bg1 鐵石）------------------------------------------
+  BG.BG_FTOP = ['33333333', '21122112', '11211211', '22222222', '11221122', '12112112', '22222222', '11211211'];
+  BG.BG_FSTONE = ['22222222', '11211121', '11211121', '22222222', '12111211', '12111211', '22222222', '11121111'];
+  BG.BG_GEAR = W(8, ['..3..3..', '.333333.', '.322223.', '33.22.33', '33.22.33', '.322223.', '.333333.', '..3..3..']);
+  BG.BG_FWIN = ['11111111', '13333331', '13222231', '13232321', '13222231', '13233231', '13333331', '11111111'];
+
+  ST.BG_W2 = BG;
+
+  /* ============================================================ ② 精靈（W2_） */
+  var SP = {};
+
+  // ---- ① bat 礦坑蝙蝠 16×16（翅膀開 / 收）--------------------------------
+  var BAT0 = W(16, [
+    null,
+    '..33........33..',
+    '.3223......3223.',
+    '.32223....32223.',
+    '.322223..322223.',
+    '.32222333322223.',
+    '..322233332223..',
+    '...3223333223...',
+    '....32222223....',
+    '....32122123....',
+    '.....322223.....',
+    '......3223......',
+    '.......33.......',
+    null, null, null
+  ]);
+  var BAT1 = W(16, [
+    null, null,
+    '....33....33....',
+    '...3223..3223...',
+    '..322223322223..',
+    '..322222222223..',
+    '...3222222223...',
+    '....32222223....',
+    '....32122123....',
+    '.....322223.....',
+    '......3223......',
+    '.......33.......',
+    null, null, null, null
+  ]);
+  pair16(BAT0, 'W2_BAT0', SP);
+  pair16(BAT1, 'W2_BAT1', SP);
+
+  // ---- ② armor 護甲礦兵 16×16（頭上有尖刺 ⇒ 不可踩）----------------------
+  var ARM0 = W(16, [
+    null,
+    '...3..3..3..3...',
+    '...3..3..3..3...',
+    '..111111111111..',
+    '..122222222221..',
+    '.12211111111221.',
+    '.12133333333121.',
+    '.12133222233121.',
+    '.12133222233121.',
+    '.12133333333121.',
+    '.12211111111221.',
+    '..122222222221..',
+    '..111111111111..',
+    '...11......11...',
+    '...22......22...',
+    '..111......111..'
+  ]);
+  var ARM1 = W(16, [
+    null,
+    '...3..3..3..3...',
+    '...3..3..3..3...',
+    '..111111111111..',
+    '..122222222221..',
+    '.12211111111221.',
+    '.12133333333121.',
+    '.12132222332121.',
+    '.12132222332121.',
+    '.12133333333121.',
+    '.12211111111221.',
+    '..122222222221..',
+    '..111111111111..',
+    '....11....11....',
+    '....22....22....',
+    '...111....111...'
+  ]);
+  pair16(ARM0, 'W2_ARM0', SP);
+  pair16(ARM1, 'W2_ARM1', SP);
+
+  // ---- ③ spitter 岩漿噴吐者 16×16（蹲伏 / 張口）--------------------------
+  var SPIT0 = W(16, [
+    null, null,
+    '.....111111.....',
+    '...1122222211...',
+    '..112333333211..',
+    '.11233222233211.',
+    '.12332222223321.',
+    '.12322111122321.',
+    '.12322133122321.',
+    '.11233222233211.',
+    '..112333333211..',
+    '...11222222 1...'.replace(' ', '1'),
+    '....11111111....',
+    '...11..11..11...',
+    '..111..11..111..',
+    null
+  ]);
+  var SPIT1 = W(16, [
+    null,
+    '.....111111.....',
+    '...1122222211...',
+    '..112333333211..',
+    '.11233222233211.',
+    '.12332222223321.',
+    '.12322111122321.',
+    '.12321333312321.',
+    '.12321333312321.',
+    '.11232333323211.',
+    '..112333333211..',
+    '...1122222211...',
+    '....11111111....',
+    '...11..11..11...',
+    '..111..11..111..',
+    null
+  ]);
+  pair16(SPIT0, 'W2_SPIT0', SP);
+  pair16(SPIT1, 'W2_SPIT1', SP);
+
+  // ---- 火球 8×16 兩幀（上半 8×8 是火球本體）------------------------------
+  tall8(['..3333..', '.332233.', '32222223', '32211223', '32211223', '32222223', '.332233.', '..3333..'], null, 'W2_FIRE0', SP);
+  tall8(['...33...', '..3223..', '.322223.', '33211233', '33211233', '.322223.', '..3223..', '...33...'], null, 'W2_FIRE1', SP);
+
+  // ---- 移動平台「礦車升降板」8×16（左 / 中 / 右；只用上半 8 列）----------
+  tall8(['33333333', '32222223', '31111113', '31111113', '33333333', '..1..1..', '........', '........'], null, 'W2_LIFT_M', SP);
+
+  // ---- 間歇泉火柱 8×16 兩幀（一節 8×16，可疊 2~3 節）---------------------
+  SP.W2_FLAME0 = CHR.tile16(
+    W(8, ['..3..3..', '.32.32..', '.322322.', '32222223', '32211223', '32211223', '32222223', '.322223.']),
+    W(8, ['.322223.', '32222223', '32211223', '32222223', '.322223.', '..3333..', '...33...', '...33...']));
+  SP.W2_FLAME1 = CHR.tile16(
+    W(8, ['...3....', '..3.3...', '.3.32...', '.322223.', '32211223', '32222223', '32222223', '.322223.']),
+    W(8, ['32222223', '32211223', '32222223', '.322223.', '..3223..', '..3333..', '...33...', '....3...']));
+
+  /* ============================================================ ③ 魔王「熔心巨像」32×32 */
+  // 核心（胸口色 3）＝弱點；站立 / 跳躍 / 砸地三組。
+  var COL_STAND = W(32, [
+    '..........3.....3...............'.slice(0, 32),
+    '.......1111111111111............',
+    '......112222222222211...........',
+    '.....11233333333332211..........',
+    '.....12331111111133221..........',
+    '.....12313333333313221..........',
+    '....1123133222233313221.........',
+    '....1123133233323313221.........',
+    '....1123133233323313221.........',
+    '....1123133222233313221.........',
+    '....11231333333333132211........',
+    '....112231111111113322 1........'.replace(' ', '1'),
+    '....11122222222222221111........',
+    '....11111111111111111111........',
+    '....1122111111111122111.........',
+    '....1122111111111122111.........',
+    '....1122111111111122111.........',
+    '.....122111111111122111.........',
+    '.....12211111111112211..........',
+    '.....1221111111111221...........',
+    '.....1221111111111221...........',
+    '.....122111....111221...........',
+    '.....1221.......11221...........',
+    '.....1221.......11221...........',
+    '....11221.......11221...........',
+    '...112211.......112211..........',
+    '...122211.......112221..........',
+    '...122111.......111221..........',
+    '..1122111.......1112211.........',
+    '..1221111.......1111221.........',
+    '..1111111.......1111111.........',
+    null
+  ]);
+  var COL_JUMP = W(32, [
+    null,
+    '.......1111111111111............',
+    '......112222222222211...........',
+    '.....11233333333332211..........',
+    '.....12331111111133221..........',
+    '.....12313333333313221..........',
+    '....1123133222233313221.........',
+    '....1123133233323313221.........',
+    '....1123133233323313221.........',
+    '....1123133222233313221.........',
+    '....11231333333333132211........',
+    '....11223111111111332211........',
+    '....11122222222222221111........',
+    '....11111111111111111111........',
+    '...1122111111111111221111.......',
+    '...1221111111111111122111.......',
+    '..11221111111111111112211.......',
+    '..1221111111111111111221........',
+    '..1221111111111111111221........',
+    '..11221111111111111221..........',
+    '...112211111111112211...........',
+    '....11221111111122111...........',
+    '....112211111112211.............',
+    '.....11221111122111.............',
+    '.....1122111122211..............',
+    '......112111122111..............',
+    '......11111111111...............',
+    null, null, null, null, null
+  ]);
+  // 兩組姿勢（各 16 磚）：ST 站立 / 走 / 吐火，JP 跳躍 / 砸地 / 墜落。
+  quad32(COL_STAND, 'W2_COL_ST', SP, false);
+  quad32(COL_JUMP, 'W2_COL_JP', SP, false);
+
+  // ---- 砸地衝擊波 8×16 兩幀 ----------------------------------------------
+  tall8(['........', '...33...', '..3223..', '.322223.', '.322223.', '..3223..', '...33...', '........'],
+    null, 'W2_WAVE0', SP);
+  tall8(['..3..3..', '.3.32.3.', '3.3223.3', '.322223.', '.322223.', '3.3223.3', '.3.32.3.', '..3..3..'],
+    null, 'W2_WAVE1', SP);
+
+  ST.SPR_W2 = SP;
+
+  /* ============================================================ ④ 主題調色盤 */
+  var PAL = ST.PAL_WORLD || (ST.PAL_WORLD = {});
+  PAL.mine = {
+    backdrop: 0x0F,
+    bg: [[0x07, 0x17, 0x27], [0x00, 0x10, 0x30], [0x01, 0x21, 0x30]],
+    spr: [[0x0F, 0x27, 0x30], [0x0F, 0x16, 0x27], [0x0F, 0x10, 0x30]]
+  };
+  PAL.magma = {
+    backdrop: 0x0F,
+    // bg3 是「金幣 / 機關 / 單向平台」共用的那一組：色 3 一定要是金色，
+    // 不然金幣會變成白色、鐵平台會變成亮藍色（看起來像水）。
+    bg: [[0x00, 0x07, 0x17], [0x06, 0x16, 0x27], [0x0F, 0x10, 0x28]],
+    spr: [[0x0F, 0x27, 0x30], [0x0F, 0x16, 0x27], [0x0F, 0x10, 0x30]]
+  };
+  PAL.forge = {
+    backdrop: 0x0F,
+    bg: [[0x00, 0x10, 0x30], [0x06, 0x16, 0x27], [0x08, 0x18, 0x28]],
+    spr: [[0x0F, 0x27, 0x30], [0x0F, 0x16, 0x27], [0x0F, 0x10, 0x30]]
+  };
+
+  /* ============================================================ ⑤ 自我檢查 */
+  (function () {
+    var n = 0, k;
+    for (k in SP) if (Object.prototype.hasOwnProperty.call(SP, k)) n += (SP[k] && SP[k].tall) ? 2 : 1;
+    ST.W2_SPR_TILES = n;
+    ST.W2_BG_TILES = Object.keys(BG).length;
+    // 合併後的 bank 總量上限見 test_w2.py ①（精靈 / 背景各 ≤ 256 磚）
+    if (n > 80) throw new Error('ST.SPR_W2 佔 ' + n + ' 磚 > 80（精靈 bank 會超過 256）');
+    if (ST.W2_BG_TILES > 96) throw new Error('ST.BG_W2 佔 ' + ST.W2_BG_TILES + ' 磚 > 96');
   })();
 })();
 
@@ -7263,9 +7615,232 @@
     }
   };
 
+  /* ============================================ R3 star-w2：曲目可外掛
+   * `games/star/song_w2.js` 用同一套工具寫世界 2 的曲，再 register 進來。
+   * play(key) 的行為不變（未知 key 仍然 warn + 回 false）；main.js 會在切曲前先
+   * 用 `ST.Audio.has(key)` 判斷，缺鍵就退回既有曲目（契約同 cruiser）。 */
+  Audio.BUILD = {
+    Builder: Builder, mel: mel, drm: drm, echoOf: echoOf, stab: stab, hold: hold,
+    INST: INST, MIN: MIN, MAJ: MAJ, DOM7: DOM7, DIM: DIM
+  };
+  Audio.has = function (key) { return !!SONGS[key]; };
+  Audio.register = function (key, song, info) {
+    var HZ = 60.0988, rows = 0, i;
+    SONGS[key] = song;
+    if (Audio.KEYS.indexOf(key) < 0) Audio.KEYS.push(key);
+    for (i = 0; i < song.order.length; i++) rows += song.rows;
+    var sp = song.groove ? (song.groove.reduce(function (a, v) { return a + v; }, 0) / song.groove.length) : song.speed;
+    INFO[key] = info || {};
+    INFO[key].speed = song.speed;
+    INFO[key].groove = song.groove;
+    INFO[key].rows = song.rows;
+    INFO[key].order = song.order.length;
+    INFO[key].patterns = song.patterns.length;
+    INFO[key].frames = Math.round(rows * sp);
+    INFO[key].seconds = Math.round(rows * sp / HZ * 100) / 100;
+    INFO[key].loop = song.playLoop;
+    return song;
+  };
+
   ST.Audio = Audio;
 
 })(typeof window !== 'undefined' ? window : this);
+
+</script>
+<script>/* games/star/song_w2.js */
+/*
+ * games/star/song_w2.js — 《星塵勇者》世界 2 的四首原創曲（mine / magma / forge / boss2）
+ * ---------------------------------------------------------------------------
+ * 擁有者：star-w2 agent ｜ 依賴：games/star/song.js（ST.Audio.BUILD / register）
+ * 契約：docs/TASKS.md「R3 star W2」；`ST.Audio.play(key)` 缺鍵時 main.js 自動退回既有曲。
+ *
+ * | key    | 曲名           | 調 / BPM        | 小節 | 情緒 | 聲道配置 |
+ * |--------|----------------|-----------------|------|------|----------|
+ * | mine   | 深坑的鎬聲     | D 小調 / 120    | 16   | 沉穩、一步一步往下走 | p1 旋律 / p2 五度墊音 / tri 行走低音 / noi 鎬子敲擊（金屬 hat） |
+ * | magma  | 熔岩的心跳     | E 小調 / 150    | 16   | 壓迫、脈動 | p1 半音推進 / p2 回音 / tri 8 分踏板 / noi 心跳大鼓 |
+ * | forge  | 熔爐進行曲     | C 小調 / 108    | 16   | 沉重進行曲 | p1 號角動機 / p2 減和弦長音 / tri 附點低音 / noi 鐵砧 |
+ * | boss2  | 熔心巨像       | D 小調 / 200    | 16   | 快速、壓迫 | p1 16 分下行 / p2 延遲回音 / tri 踏板 / noi 疾走 |
+ *
+ * 全部用 song.js 的同一組樂器包絡（INST），只走 2A03 五聲道。
+ */
+(function () {
+  'use strict';
+  var ST = window.ST = window.ST || {};
+  var A = ST.Audio;
+  if (!A || !A.BUILD || !A.register) throw new Error('games/star/song_w2.js 需要 games/star/song.js（R3 版）');
+  var B = A.BUILD;
+  var Builder = B.Builder, mel = B.mel, drm = B.drm, echoOf = B.echoOf, stab = B.stab, hold = B.hold;
+  var INST = B.INST, MIN = B.MIN, MAJ = B.MAJ, DOM7 = B.DOM7, DIM = B.DIM;
+
+  /* ============================================================ 1. mine */
+  function buildMine() {
+    var b = new Builder('深坑的鎬聲（mine）', 7, 16, null);
+    var LINE = [
+      'D-4 -   -   -   F-4 -   A-4 -   D-5 -   -   -   A-4 -   F-4 -  ',   // Dm
+      'A-3 -   -   -   C-4 -   E-4 -   A-4 -   -   -   G-4 -   E-4 -  ',   // Am
+      'A#3 -   -   -   D-4 -   F-4 -   A#4 -   -   -   A-4 -   F-4 -  ',   // B♭
+      'C-4 -   -   -   E-4 -   G-4 -   C-5 -   -   -   A#4 -   G-4 -  ',   // C
+      'D-5 -   C-5 -   A#4 -   A-4 -   G-4 -   F-4 -   E-4 -   D-4 -  ',   // Dm（下行）
+      'F-4 -   -   -   A-4 -   C-5 -   F-5 -   -   -   C-5 -   A-4 -  ',   // F
+      'G-4 -   -   -   A#4 -   D-5 -   G-5 -   F-5 -   D-5 -   A#4 -  ',   // Gm
+      'A-4 -   -   -   C-5 -   E-5 -   A-5 -   -   -   -   -   -   -  '    // A
+    ];
+    var p1 = [], i;
+    for (i = 0; i < LINE.length; i++) p1.push(b.add('p1', 'm' + i, mel(LINE[i], 'lead', 14, 2)));
+
+    var CH = {
+      Dm: { p2: b.add('p2', 'Dm', stab('D-4', MIN, 16, 4, 'pad', 9, 0)), tri: b.add('tri', 'Dm', mel('D-2 -   -   -   A-2 -   -   -   D-2 -   -   -   F-2 -   A-2 -  ', 'bass', 15, 0)) },
+      Am: { p2: b.add('p2', 'Am', stab('A-3', MIN, 16, 4, 'pad', 9, 0)), tri: b.add('tri', 'Am', mel('A-1 -   -   -   E-2 -   -   -   A-1 -   -   -   C-2 -   E-2 -  ', 'bass', 15, 0)) },
+      Bb: { p2: b.add('p2', 'Bb', stab('A#3', MAJ, 16, 4, 'pad', 9, 0)), tri: b.add('tri', 'Bb', mel('A#1 -   -   -   F-2 -   -   -   A#1 -   -   -   D-2 -   F-2 -  ', 'bass', 15, 0)) },
+      C: { p2: b.add('p2', 'C', stab('C-4', MAJ, 16, 4, 'pad', 9, 0)), tri: b.add('tri', 'C', mel('C-2 -   -   -   G-2 -   -   -   C-2 -   -   -   E-2 -   G-2 -  ', 'bass', 15, 0)) },
+      F: { p2: b.add('p2', 'F', stab('F-3', MAJ, 16, 4, 'pad', 9, 0)), tri: b.add('tri', 'F', mel('F-1 -   -   -   C-2 -   -   -   F-1 -   -   -   A-1 -   C-2 -  ', 'bass', 15, 0)) },
+      Gm: { p2: b.add('p2', 'Gm', stab('G-3', MIN, 16, 4, 'pad', 9, 0)), tri: b.add('tri', 'Gm', mel('G-1 -   -   -   D-2 -   -   -   G-1 -   -   -   A#1 -   D-2 -  ', 'bass', 15, 0)) },
+      A: { p2: b.add('p2', 'A', stab('A-3', MAJ, 16, 4, 'pad', 9, 0)), tri: b.add('tri', 'A', mel('A-1 -   -   -   E-2 -   -   -   A-1 -   -   -   C#2 -   E-2 -  ', 'bass', 15, 0)) }
+    };
+    // 鎬子敲擊：金屬 hat（LFSR 短模式）打在反拍，大鼓穩住每一拍
+    var dA = b.add('noi', 'A', drm('k -   -   H   s -   -   H   k -   -   H   s -   H -  '));
+    var dB = b.add('noi', 'B', drm('k -   -   H   s -   -   H   k -   k -   s -   s:9 s:12'));
+    var order = ['Dm', 'Am', 'Bb', 'C', 'Dm', 'F', 'Gm', 'A'];
+    for (i = 0; i < 16; i++) {
+      var k = i % 8;
+      b.bar(p1[k], CH[order[k]].p2, CH[order[k]].tri, (k === 7) ? dB : dA);
+    }
+    return b.done(INST, 0, true);
+  }
+
+  /* ============================================================ 2. magma */
+  function buildMagma() {
+    var b = new Builder('熔岩的心跳（magma）', 6, 16, null);
+    var LINE = [
+      'E-4 -   F-4 -   E-4 -   D#4 -   E-4 -   G-4 -   B-4 -   -   -  ',
+      'E-4 -   F-4 -   E-4 -   D#4 -   E-4 -   B-4 -   E-5 -   -   -  ',
+      'A-4 -   A#4 -   A-4 -   G#4 -   A-4 -   C-5 -   E-5 -   -   -  ',
+      'B-4 -   C-5 -   B-4 -   A#4 -   B-4 -   D-5 -   F#5 -   -   -  ',
+      'E-5 -   D-5 -   C-5 -   B-4 -   A-4 -   G-4 -   F#4 -   E-4 -  ',
+      'C-5 -   B-4 -   A-4 -   G-4 -   F#4 -   E-4 -   D-4 -   C-4 -  ',
+      'G-4 -   G#4 -   A-4 -   A#4 -   B-4 -   C-5 -   C#5 -   D-5 -  ',
+      'E-5 -   -   -   B-4 -   -   -   G-4 -   -   -   E-4 -   -   -  '
+    ];
+    var p1 = [], p2 = [], i;
+    for (i = 0; i < LINE.length; i++) {
+      var line = mel(LINE[i], 'lead', 14, 1);
+      p1.push(b.add('p1', 'g' + i, line));
+      p2.push(b.add('p2', 'e' + i, echoOf(line, 2, { inst: 'echo', vol: 7, duty: 0 })));
+    }
+    var BASS = [
+      'E-2 -   E-2 -   E-2 -   E-2 -   E-2 -   E-2 -   E-2 -   E-2 -  ',
+      'E-2 -   E-2 -   E-2 -   E-2 -   E-2 -   E-2 -   D-2 -   C-2 -  ',
+      'A-1 -   A-1 -   A-1 -   A-1 -   A-1 -   A-1 -   A-1 -   A-1 -  ',
+      'B-1 -   B-1 -   B-1 -   B-1 -   B-1 -   B-1 -   F#2 -   D-2 -  ',
+      'E-2 -   E-2 -   D-2 -   D-2 -   C-2 -   C-2 -   B-1 -   B-1 -  ',
+      'C-2 -   C-2 -   B-1 -   B-1 -   A-1 -   A-1 -   G-1 -   G-1 -  ',
+      'G-1 -   G-1 -   A-1 -   A-1 -   B-1 -   B-1 -   D-2 -   D-2 -  ',
+      'E-2 -   -   -   E-2 -   -   -   E-2 -   E-2 -   E-2 -   E-2 -  '
+    ];
+    var tri = [];
+    for (i = 0; i < BASS.length; i++) tri.push(b.add('tri', 'b' + i, mel(BASS[i], 'bass', 15, 0)));
+    // 心跳：咚—咚…（兩下一組），間奏補小鼓
+    var dA = b.add('noi', 'A', drm('K -   K:10 -   -   -   -   -   K -   K:10 -   -   -   -   -  '));
+    var dB = b.add('noi', 'B', drm('K -   K:10 -   -   -   s -   K -   K:10 -   s -   s:9 s:12'));
+    for (i = 0; i < 16; i++) {
+      var k = i % 8;
+      b.bar(p1[k], p2[k], tri[k], (k === 3 || k === 7) ? dB : dA);
+    }
+    return b.done(INST, 0, true);
+  }
+
+  /* ============================================================ 3. forge */
+  function buildForge() {
+    var b = new Builder('熔爐進行曲（forge）', 8, 16, null);
+    var LINE = [
+      'C-4 -   -   -   C-4 -   D#4 -   G-4 -   -   -   D#4 -   C-4 -  ',
+      'G-3 -   -   -   G-3 -   A#3 -   D-4 -   -   -   C-4 -   A#3 -  ',
+      'G#3 -   -   -   G#3 -   C-4 -   D#4 -   -   -   C-4 -   G#3 -  ',
+      'A#3 -   -   -   A#3 -   D-4 -   F-4 -   -   -   D#4 -   D-4 -  ',
+      'C-5 -   -   -   G-4 -   D#4 -   C-4 -   -   -   G-3 -   C-4 -  ',
+      'D#4 -   -   -   G-4 -   A#4 -   D#5 -   -   -   A#4 -   G-4 -  ',
+      'D-4 -   D#4 -   F-4 -   F#4 -   G-4 -   -   -   F#4 -   F-4 -  ',
+      'C-4 -   -   -   -   -   -   -   G-3 -   -   -   C-4 -   -   -  '
+    ];
+    var p1 = [], i;
+    for (i = 0; i < LINE.length; i++) p1.push(b.add('p1', 'f' + i, mel(LINE[i], 'organ', 14, 2)));
+    var CH = {
+      Cm: { p2: b.add('p2', 'Cm', hold('C-4', MIN, 16, 'pad', 9, 0)), tri: b.add('tri', 'Cm', mel('C-2 -   -   C-2 -   -   G-1 -   C-2 -   -   C-2 -   D#2 -   G-2', 'bass', 15, 0)) },
+      Gm: { p2: b.add('p2', 'Gm', hold('G-3', MIN, 16, 'pad', 9, 0)), tri: b.add('tri', 'Gm', mel('G-1 -   -   G-1 -   -   D-2 -   G-1 -   -   G-1 -   A#1 -   D-2', 'bass', 15, 0)) },
+      Ab: { p2: b.add('p2', 'Ab', hold('G#3', MAJ, 16, 'pad', 9, 0)), tri: b.add('tri', 'Ab', mel('G#1 -   -   G#1 -   -   D#2 -   G#1 -   -   G#1 -   C-2 -   D#2', 'bass', 15, 0)) },
+      Bb: { p2: b.add('p2', 'Bb', hold('A#3', MAJ, 16, 'pad', 9, 0)), tri: b.add('tri', 'Bb', mel('A#1 -   -   A#1 -   -   F-2 -   A#1 -   -   A#1 -   D-2 -   F-2', 'bass', 15, 0)) },
+      Ddim: { p2: b.add('p2', 'Ddim', hold('D-4', DIM, 16, 'pad', 9, 0)), tri: b.add('tri', 'Ddim', mel('D-2 -   -   D-2 -   -   G#1 -   D-2 -   -   D-2 -   F-2 -   G#2', 'bass', 15, 0)) }
+    };
+    // 鐵砧：大鼓 + 金屬 hat 打在正拍（進行曲）
+    var dA = b.add('noi', 'A', drm('K -   -   -   H -   -   -   K -   -   -   H -   -   -  '));
+    var dB = b.add('noi', 'B', drm('K -   -   -   H -   -   -   K -   K -   t -   t:11 t:13'));
+    var order = ['Cm', 'Gm', 'Ab', 'Bb', 'Cm', 'Ab', 'Ddim', 'Gm'];
+    for (i = 0; i < 16; i++) {
+      var k = i % 8;
+      b.bar(p1[k], CH[order[k]].p2, CH[order[k]].tri, (k === 7) ? dB : dA);
+    }
+    return b.done(INST, 0, true);
+  }
+
+  /* ============================================================ 4. boss2 */
+  function buildBoss2() {
+    var b = new Builder('熔心巨像（boss2）', 4, 16, null);
+    var LINE = [
+      'D-5 C-5 A#4 A-4 G-4 F-4 E-4 D-4 D-5 C-5 A#4 A-4 G-4 F-4 E-4 D-4',
+      'F-5 E-5 D-5 C-5 A#4 A-4 G-4 F-4 F-5 E-5 D-5 C-5 A#4 A-4 G-4 F-4',
+      'A#4 C-5 D-5 F-5 A#5 A-5 G-5 F-5 D-5 C-5 A#4 A-4 G-4 F-4 D-4 C-4',
+      'A-4 A#4 C-5 D-5 E-5 F-5 G-5 A-5 A#5 A-5 G-5 F-5 E-5 D-5 C-5 A#4',
+      'D-5 -   D-5 -   C-5 -   C-5 -   A#4 -   A#4 -   A-4 -   A-4 -  ',
+      'G-4 -   G-4 -   F-4 -   F-4 -   E-4 -   E-4 -   D-4 -   D-4 -  ',
+      'D-5 D-5 D-5 -   F-5 F-5 F-5 -   A-5 A-5 A-5 -   D-6 -   -   -  ',
+      'C-6 A#5 A-5 G-5 F-5 E-5 D-5 C-5 A#4 A-4 G-4 F-4 E-4 D-4 C-4 A#3'
+    ];
+    var p1 = [], p2 = [], i;
+    for (i = 0; i < LINE.length; i++) {
+      var line = mel(LINE[i], 'run', 14, 1);
+      p1.push(b.add('p1', 'r' + i, line));
+      p2.push(b.add('p2', 'e' + i, echoOf(line, 2, { inst: 'echo', vol: 6, duty: 0 })));
+    }
+    var BASS = [
+      'D-2 -   D-2 -   D-2 -   D-2 -   D-2 -   D-2 -   D-2 -   D-2 -  ',
+      'F-2 -   F-2 -   F-2 -   F-2 -   F-2 -   F-2 -   F-2 -   F-2 -  ',
+      'A#1 -   A#1 -   A#1 -   A#1 -   A-1 -   A-1 -   A-1 -   A-1 -  ',
+      'A-1 -   A-1 -   A-1 -   A-1 -   A-1 -   A-1 -   A-1 -   A-1 -  ',
+      'D-2 -   D-2 -   C-2 -   C-2 -   A#1 -   A#1 -   A-1 -   A-1 -  ',
+      'G-1 -   G-1 -   F-1 -   F-1 -   E-1 -   E-1 -   D-1 -   D-1 -  ',
+      'D-2 D-2 D-2 -   F-2 F-2 F-2 -   A-2 A-2 A-2 -   D-2 -   -   -  ',
+      'A-1 -   A-1 -   A-1 -   A-1 -   A-1 -   A-1 -   A-1 -   A-1 -  '
+    ];
+    var tri = [];
+    for (i = 0; i < BASS.length; i++) tri.push(b.add('tri', 'b' + i, mel(BASS[i], 'bass', 15, 0)));
+    var dA = b.add('noi', 'A', drm('k h   s h   k h   s h   k h   s h   k h   s h  '));
+    var dB = b.add('noi', 'B', drm('k h   s h   k h   s h   k k   s s   t:12 t:13 t:14 t:15'));
+    for (i = 0; i < 16; i++) {
+      var k = i % 8;
+      b.bar(p1[k], p2[k], tri[k], (k === 5 || k === 7) ? dB : dA);
+    }
+    return b.done(INST, 0, true);
+  }
+
+  A.register('mine', buildMine(), {
+    bpm: 128.6, rowsPerBeat: 4, bars: 16, mood: '沉穩、一步一步往下走',
+    ch: 'p1 旋律 / p2 五度墊音 / tri 行走低音 / noi 鎬子金屬敲擊'
+  });
+  A.register('magma', buildMagma(), {
+    bpm: 150.0, rowsPerBeat: 4, bars: 16, mood: '壓迫、脈動',
+    ch: 'p1 半音推進 / p2 延遲回音 / tri 8 分踏板 / noi 心跳大鼓'
+  });
+  A.register('forge', buildForge(), {
+    bpm: 112.5, rowsPerBeat: 4, bars: 16, mood: '沉重進行曲',
+    ch: 'p1 風琴號角 / p2 減和弦長音 / tri 附點低音 / noi 鐵砧'
+  });
+  A.register('boss2', buildBoss2(), {
+    bpm: 225.0, rowsPerBeat: 4, bars: 16, mood: '快速、壓迫（魔王）',
+    ch: 'p1 16 分下行 / p2 延遲回音 / tri 踏板 / noi 疾走 16 分'
+  });
+
+  ST.W2_SONGS = ['mine', 'magma', 'forge', 'boss2'];
+})();
 
 </script>
 <script>/* games/star/hero.js */
@@ -7322,6 +7897,8 @@
       x: 0, y: 0, w: W, h: H, vx: 0, vy: 0,
       state: 'idle', facing: 1, onGround: true,
       inv: 0, coins: 0, lives: 3, score: 0, power: 0,
+      // R3 star-w2：無敵星（熔岩 / 尖刺 / 火柱 / 坑都不致命，撞到敵人直接打倒）
+      star: 0, stars: 0, onMover: null, pitSaves: 0,
       // --- 內部（定點數）---
       px: FX.Vec(0), py: FX.Vec(0), vxA: FX.Acc(0), vyA: FX.Acc(0),
       jumpS: null,
@@ -7344,6 +7921,7 @@
     h.crouch = false; h.sliding = false; h.turning = false;
     h.anim = 0; h.animTimer = 0;
     h.inv = 0; h.hurtTimer = 0; h.deadTimer = 0; h.deadDone = false; h.dropThru = 0;
+    h.star = 0; h.onMover = null;
     h.prevFeet = (y | 0) + H;
     h.jumpApexSub = h.py.sub; h.jumpStartSub = h.py.sub;
     sync(h);
@@ -7403,8 +7981,29 @@
     return true;
   }
 
+  /* R3 star-w2：被機關彈飛（蒸氣彈簧）。
+   * 先用 `jumpStart` 依當下水平速度選好 SMB 的那一段重力（不然會沿用上一次跳躍的段，
+   * 高度會隨「上一次怎麼跳的」而變 ⇒ 不可重現），再把初速覆寫成機關給的值。
+   * 按住 A ⇒ gHold（彈更高）、放開 ⇒ gFall，手感與一般跳躍一致。 */
+  // 機關彈飛專用的跳躍段：上升 / 下降都用 SMB 的「按住 A」小重力（0.125 px/幀²）
+  //   ⇒ 高度 = v²/2g，只跟機關給的初速有關（−5 px/幀 = 100 px ≈ 12 格），
+  //     不會因為玩家有沒有按住 A 而變，機器人也推得準。
+  var LAUNCH_SEG = { belowSpeed: Infinity, vy0: 0, gHold: SMB.jump[0].gHold, gFall: SMB.jump[0].gHold, h: 0 };
+  function launch(h, vel) {
+    h.jumpS.seg = LAUNCH_SEG;
+    FX.aset(h.vyA, vel | 0);
+    h.jumpS.fastFall = false;
+    h.jumpS.first = true;
+    h.jumpS.startSub = h.py.sub;
+    h.onGround = false;
+    h.crouch = false;
+    h.jumpStartSub = h.py.sub;
+    h.jumpApexSub = h.py.sub;
+    return h;
+  }
+
   function hurt(h, g, fromX) {
-    if (h.inv > 0 || h.state === 'dead') return false;
+    if (h.inv > 0 || h.star > 0 || h.state === 'dead') return false;
     h.inv = INV_FRAMES;
     h.hurtTimer = HURT_FRAMES;
     h.hits++;
@@ -7567,10 +8166,16 @@
     sync(h);
     scanTiles(h, g);
     if (h.state === 'dead') return h;
-    if (h.y > 240) { kill(h, g); return h; }       // 掉出畫面（坑）
+    if (h.y > 240) {                               // 掉出畫面（坑）
+      // R3 star-w2：無敵星（含一鍵密技的無敵）時交給 main 的 onPitSave 拉回來，不扣命。
+      // 收掉 R2c fix5「留給後續」的「一鍵無敵擋不住熔岩 / 掉坑」。
+      if (h.star > 0 && g.onPitSave && g.onPitSave(h)) { h.pitSaves++; sync(h); return h; }
+      kill(h, g); return h;
+    }
 
     // ---- ⑧ 狀態機 ----
     if (h.inv > 0) h.inv--;
+    if (h.star > 0 && --h.star === 0 && g.onStarEnd) g.onStarEnd(h);
     var absv = FX.abs(h.vxA.v);
     if (h.hurtTimer > 0) {
       h.state = 'hurt';
@@ -7630,6 +8235,7 @@
         if (g.onTouch) g.onTouch(col, row, t);
       }
     }
+    if (h.star > 0) return;                    // R3 star-w2：無敵星無視熔岩 / 尖刺
     if (lava) { kill(h, g); return; }
     if (spike) hurt(h, g, null);
   }
@@ -7644,6 +8250,7 @@
     var bodies = (A && A.bodies) || ['H_BODY', 'H_BW1', 'H_BW2'];
     switch (h.state) {
       case 'dead': return { body: 'H_BDEAD', leg: 'H_LD' };
+      case 'pole': return { body: 'H_BJUMP', leg: 'H_LJ' };   // R3：抓旗桿下滑
       case 'hurt': return { body: 'H_BHURT', leg: 'H_LH' };
       case 'crouch': return { single: 'H_CR' };
       case 'slide': return { single: 'H_SL' };
@@ -7667,10 +8274,12 @@
     var sx = h.x + OFF_X - camX;
     var sy = h.y + OFF_Y;
     var n = 0;
+    // R3 star-w2：無敵星期間調色盤輪替（SMB 的閃色做法；不增加同屏色數）
+    var pal = (h.star > 0) ? ((h.frames >> 2) & 3) : 0;
     function put(name, dx, dy) {
       var t = tiles[name];
       if (t === undefined) return;
-      oam.add({ x: sx + dx, y: sy + dy, tile: t, pal: 0, flipH: flip, prio: 0 });
+      oam.add({ x: sx + dx, y: sy + dy, tile: t, pal: pal, flipH: flip, prio: 0 });
       n++;
     }
     if (f.single) {
@@ -7700,13 +8309,13 @@
 
   ST.Hero = {
     W: W, H: H, CROUCH_H: CROUCH_H, SPR_W: SPR_W, SPR_H: SPR_H,
-    OFF_X: OFF_X, OFF_Y: OFF_Y,
+    OFF_X: OFF_X, OFF_Y: OFF_Y, LAUNCH_SEG: LAUNCH_SEG,
     MAX_FALL: MAX_FALL, BOUNCE: BOUNCE,
     INV_FRAMES: INV_FRAMES, HURT_FRAMES: HURT_FRAMES, DEATH_FRAMES: DEATH_FRAMES,
     DROP_FRAMES: DROP_FRAMES, COIN_1UP: COIN_1UP,
     ROWS: ROWS, TOP_ROW: TOP_ROW,
     create: create, reset: reset, update: update, draw: draw,
-    stomp: stomp, hurt: hurt, kill: kill, addCoin: addCoin,
+    stomp: stomp, hurt: hurt, kill: kill, addCoin: addCoin, launch: launch,
     setCrouch: setCrouch, boxH: boxH, sync: sync,
     frameNames: frameNames, tileNames: tileNames
   };
@@ -7810,6 +8419,12 @@
   var pool = makePool(POOL_SIZE, newEnemy);
   var level = null, sorted = [], ptr = 0, tiles = null, camXCache = 0;
 
+  /* R3 star-w2：敵人種類登記表。
+   * W1 的三種（roller / bouncer / flyer）維持原本的硬寫分支不動；新世界的敵人用
+   *   ST.Enemies.register('bat', { w, h, stompable, score, setup, step, art|draw })
+   * 掛進來（見 games/star/enemies_w2.js），本檔不必再長。 */
+  var EXT = {};
+
   // ---- 磚索引快取（ST.World.bind 之後才有值）------------------------------
   function ensureTiles() {
     if (tiles) return tiles;
@@ -7846,6 +8461,7 @@
   function configure(e, kind, x, y, opt) {
     opt = opt || {};
     e.kind = kind;
+    e.fragile = false;
     FX.vsetPx(e.px, x); FX.vsetPx(e.py, y);
     e.x = x | 0; e.y = y | 0;
     FX.aset(e.vx, 0); FX.aset(e.vy, 0);
@@ -7857,6 +8473,16 @@
     e.amp = opt.amp === undefined ? FLY_AMP : opt.amp;
     e.phase = opt.phase || 0;
     e.baseY = y | 0;
+    var ex = EXT[kind];
+    if (ex) {
+      e.w = ex.w || 14; e.h = ex.h || 14;
+      e.stompable = ex.stompable !== false;
+      e.score = ex.score || 100;
+      e.fragile = !!ex.fragile;
+      e.awake = false; e.t2 = 0; e.targetY = 0;
+      if (ex.setup) ex.setup(e, opt, API);
+      return e;
+    }
     if (kind === 'roller') {
       e.w = 14; e.h = 14; e.stompable = true; e.score = 100;
       FX.aset(e.vx, e.dir * SPD_ROLL);
@@ -7989,8 +8615,25 @@
   }
 
   // ============================================================ 對外
+  // 登記的敵人可以用的共用工具（不必自己重寫重力 / 地形查詢）
+  var API = {
+    FX: FX, SMB: SMB, sin8: sin8,
+    fall: fall, blocked: blocked, kindAtPx: kindAtPx, floorAt: floorAt,
+    spawn: function (kind, x, y, opt) { return spawn(kind, x, y, opt); },
+    level: function () { return level; },
+    camX: function () { return camXCache; },
+    GRAV: GRAV, MAXFALL: MAXFALL, SPD_ROLL: SPD_ROLL, SPD_FLY: SPD_FLY
+  };
+
   var Enemies = {
     KINDS: ['roller', 'bouncer', 'flyer'],
+    EXT: EXT,
+    API: API,
+    register: function (kind, def) {
+      EXT[kind] = def;
+      if (Enemies.KINDS.indexOf(kind) < 0) Enemies.KINDS.push(kind);
+      return def;
+    },
     pool: pool,
     level: null,
     frame: 0,
@@ -8039,8 +8682,9 @@
       if (typeof fn !== 'function') return 0;
       var n = 0;
       pool.each(function (e) { fn(e); n++; });
-      if (Enemies.includeBoss && ST.Boss && ST.Boss.active && ST.Boss.alive) { fn(ST.Boss); n++; }
-      if (Enemies.includeBoss && ST.Boss && ST.Boss.hammers) ST.Boss.hammers.each(function (h) { fn(h); n++; });
+      var B = ST.ActiveBoss || ST.Boss;
+      if (Enemies.includeBoss && B && B.active && B.alive) { fn(B); n++; }
+      if (Enemies.includeBoss && B && B.hammers) B.hammers.each(function (h) { fn(h); n++; });
       return n;
     },
     pending: function () { return sorted.length - ptr; },
@@ -8073,7 +8717,9 @@
           fall(e);
           return;
         }
-        if (e.kind === 'roller') stepRoller(e);
+        var ex2 = EXT[e.kind];
+        if (ex2) ex2.step(e, g, API);
+        else if (e.kind === 'roller') stepRoller(e);
         else if (e.kind === 'bouncer') stepBouncer(e);
         else stepFlyer(e);
 
@@ -8092,10 +8738,22 @@
       var n = 0, cam = camXCache;
       pool.each(function (e) {
         var prio = (e.squash > 0 || e.dying) ? 4 : 3;
+        var ex = EXT[e.kind];
+        if (ex && e.squash <= 0) {                     // R3 star-w2 的敵人自己畫
+          if (typeof ex.draw === 'function') { n += ex.draw(e, oam, cam, prio); return; }
+          var p2 = ex.art(e);
+          var pal2 = (ex.pal === undefined) ? 3 : ex.pal;
+          // 16×16 水平翻轉 = 兩塊**各自翻 + 左右對調**（只翻不調會把左右半邊接反）
+          var fl = !!p2[2];
+          oam.add({ x: e.x - 1 - cam, y: e.y - 2, tile: fl ? p2[1] : p2[0], pal: pal2, prio: prio, flipH: fl });
+          oam.add({ x: e.x + 7 - cam, y: e.y - 2, tile: fl ? p2[0] : p2[1], pal: pal2, prio: prio, flipH: fl });
+          n += 2;
+          return;
+        }
         var pal = (e.kind === 'flyer') ? 3 : 2;
         var sx = e.x - 1 - cam, sy = e.y - 2, pair;
         if (e.squash > 0) pair = T.squash;
-        else pair = T[e.kind][(e.t >> 3) & 1];
+        else pair = (T[e.kind] || T.roller)[(e.t >> 3) & 1];
         oam.add({ x: sx, y: sy, tile: pair[0], pal: pal, prio: prio });
         oam.add({ x: sx + 8, y: sy, tile: pair[1], pal: pal, prio: prio });
         n += 2;
@@ -8136,13 +8794,198 @@
       if (falling && footIn && e.stompable) {
         stomp(e);
         if (g.onStomp) g.onStomp(e);
-      } else if (!(h.inv > 0)) {
+      } else if (!(h.inv > 0) && !(h.star > 0)) {
         if (g.onHurt) g.onHurt(e);
+        if (e.fragile) e.alive = false;
       }
     });
   }
 
   ST.Enemies = Enemies;
+})();
+
+</script>
+<script>/* games/star/enemies_w2.js */
+/*
+ * games/star/enemies_w2.js — 《星塵勇者》世界 2「熔岩礦坑」的三種新敵 + 火球
+ * ---------------------------------------------------------------------------
+ * 擁有者：star-w2 agent ｜ 依賴：games/star/enemies.js（ST.Enemies.register / API）、chr_w2.js
+ * 契約：docs/TASKS.md「R3 star W2」
+ *
+ *   ④ bat     礦坑蝙蝠   倒掛天花板，主角進入 72 px 內才醒 → 俯衝到主角高度後平飛。**可踩**
+ *              （研究 03/04 惡魔城「蝙蝠」：靜止 → 觸發 → 一次性軌跡，可讀、可預判）
+ *   ⑤ armor   護甲礦兵   走路 0.5 px/幀、坑邊會轉向；頭上整排尖刺 ⇒ **不可踩**
+ *              （研究 04 §2「必須用別的手段處理的敵人」：逼玩家繞路或吃無敵星）
+ *   ⑥ spitter 岩漿噴吐者 固定不動，每 100 幀朝主角吐一顆拋物線火球。**可踩**
+ *   ⑦ fire    火球       一次性投射物（碰到就消失），重力 0.25 px/幀²
+ *
+ * 全部走 `ST.Enemies.register()`，W1 的三種敵人一行都沒動。
+ */
+(function () {
+  'use strict';
+  var ST = window.ST = window.ST || {};
+  var NES = window.NES = window.NES || {};
+  var E = ST.Enemies;
+  if (!E || !E.register) throw new Error('games/star/enemies_w2.js 需要 games/star/enemies.js（R3 版，有 register）');
+  var FX = NES.FX, SMB = FX.SMB;
+
+  var BAT_WAKE = 72;                       // 主角進入 72 px 才醒（預警距離）
+  var BAT_VX = SMB.enemyFast;              // 0.75 px/幀
+  var BAT_VY = FX.v88(0, 192);             // 0.75 px/幀 俯衝
+  var BAT_FLUT = 6;                        // 平飛後上下拍翅 ±6 px
+  var ARM_VX = SMB.enemySlow;              // 0.5 px/幀
+  var SPIT_PERIOD = 100;                   // 每 100 幀吐一顆
+  var SPIT_RANGE = 152;                    // 主角在 152 px 內才吐
+  var FIRE_VX = FX.v88(1, 64);             // 1.25 px/幀
+  var FIRE_VY = -FX.v88(3, 0);             // 起飛 −3 px/幀
+  // 重力是 **acc 單位**（1/16 vel/幀；SMB 的 gHold = 0x20 * 16 = 512 = 0.125 px/幀²）——
+  // 不是 v88。用 v88(0,64) 會變成 0.0156 px/幀²（幾乎不落地）。
+  var FIRE_G = FX.SMB.jump[0].gHold;       // 0.125 px/幀² ⇒ 拋物線約 48 幀 / 60 px
+
+  var tiles = null;
+  function T() {
+    if (tiles) return tiles;
+    var W = ST.World;
+    if (!W || !W.bound) return null;
+    tiles = {
+      bat: [[W.oam16('W2_BAT0_L'), W.oam16('W2_BAT0_R')], [W.oam16('W2_BAT1_L'), W.oam16('W2_BAT1_R')]],
+      arm: [[W.oam16('W2_ARM0_L'), W.oam16('W2_ARM0_R')], [W.oam16('W2_ARM1_L'), W.oam16('W2_ARM1_R')]],
+      spit: [[W.oam16('W2_SPIT0_L'), W.oam16('W2_SPIT0_R')], [W.oam16('W2_SPIT1_L'), W.oam16('W2_SPIT1_R')]],
+      fire: [W.oam16('W2_FIRE0'), W.oam16('W2_FIRE1')]
+    };
+    return tiles;
+  }
+
+  /* ------------------------------------------------------------------ bat */
+  E.register('bat', {
+    w: 14, h: 12, stompable: true, score: 200, pal: 3,
+    setup: function (e, opt) {
+      e.baseY = e.y;
+      e.awake = false;
+      e.dir = opt.dir === undefined ? -1 : (opt.dir < 0 ? -1 : 1);
+      e.phase = opt.phase || 0;
+      FX.aset(e.vx, 0); FX.aset(e.vy, 0);
+    },
+    step: function (e, g, api) {
+      e.t++;
+      var h = g && g.hero;
+      if (!e.awake) {
+        if (h && Math.abs((h.x + 6) - (e.x + 7)) <= BAT_WAKE) {
+          e.awake = true;
+          e.dir = (h.x < e.x) ? -1 : 1;
+          e.targetY = h.y + 2;
+          FX.aset(e.vx, e.dir * BAT_VX);
+          FX.aset(e.vy, BAT_VY);
+        }
+        return;
+      }
+      FX.vadd(e.px, e.vx.v);
+      e.x = FX.vpx(e.px);
+      if (e.y < e.targetY) {
+        FX.vadd(e.py, e.vy.v);
+        e.y = FX.vpx(e.py);
+      } else {
+        e.phase = (e.phase + 4) & 255;
+        e.y = e.targetY + ((api.sin8(e.phase) * BAT_FLUT) >> 8);
+        FX.vsetPx(e.py, e.y);
+      }
+    },
+    art: function (e) {
+      var A = T(); if (!A) return [0, 0];
+      var f = e.awake ? ((e.t >> 2) & 1) : 0;
+      return [A.bat[f][0], A.bat[f][1], e.dir > 0];
+    }
+  });
+
+  /* ---------------------------------------------------------------- armor */
+  E.register('armor', {
+    w: 14, h: 15, stompable: false, score: 300, pal: 3,
+    setup: function (e, opt) {
+      e.dir = opt.dir === undefined ? -1 : (opt.dir < 0 ? -1 : 1);
+      e.edge = opt.edge === undefined ? true : !!opt.edge;   // 預設坑邊不掉（不會自己走進熔岩）
+      FX.aset(e.vx, e.dir * ARM_VX);
+    },
+    step: function (e, g, api) {
+      e.t++;
+      FX.aset(e.vx, e.dir * ARM_VX);
+      FX.vadd(e.px, e.vx.v);
+      e.x = FX.vpx(e.px);
+      var lead = (e.dir > 0) ? (e.x + e.w) : (e.x - 1);
+      if (api.blocked(lead, e.y + 2) || api.blocked(lead, e.y + e.h - 2)) {
+        e.dir = -e.dir;
+        FX.vsetPx(e.px, e.x - e.dir);
+        e.x = FX.vpx(e.px);
+      } else if (e.edge && e.onGround) {
+        var foot = (e.dir > 0) ? (e.x + e.w) : (e.x - 1);
+        if (!api.floorAt(foot, e.y + e.h + 1, e.y + e.h)) e.dir = -e.dir;
+      }
+      api.fall(e);
+    },
+    art: function (e) {
+      var A = T(); if (!A) return [0, 0];
+      var f = (e.t >> 3) & 1;
+      return [A.arm[f][0], A.arm[f][1], e.dir > 0];
+    }
+  });
+
+  /* -------------------------------------------------------------- spitter */
+  E.register('spitter', {
+    w: 14, h: 14, stompable: true, score: 200, pal: 2,
+    setup: function (e, opt) {
+      e.dir = opt.dir === undefined ? -1 : (opt.dir < 0 ? -1 : 1);
+      e.t2 = opt.phase | 0;
+      FX.aset(e.vx, 0);
+    },
+    step: function (e, g, api) {
+      e.t++; e.t2++;
+      api.fall(e);
+      var h = g && g.hero;
+      if (!h) return;
+      var dx = (h.x + 6) - (e.x + 7);
+      e.dir = dx < 0 ? -1 : 1;
+      if ((e.t2 % SPIT_PERIOD) !== 0) return;
+      if (Math.abs(dx) > SPIT_RANGE) return;
+      var f = api.spawn('fire', e.x + 3, e.y - 6, { dir: e.dir });
+      if (f && g && g.sfx) g.sfx('bump');
+    },
+    art: function (e) {
+      var A = T(); if (!A) return [0, 0];
+      var f = ((e.t2 % SPIT_PERIOD) > SPIT_PERIOD - 20) ? 1 : 0;   // 吐之前 20 幀張口（預警）
+      return [A.spit[f][0], A.spit[f][1], e.dir > 0];
+    }
+  });
+
+  /* ----------------------------------------------------------------- fire */
+  E.register('fire', {
+    w: 8, h: 8, stompable: false, score: 0, fragile: true, pal: 2,
+    setup: function (e, opt) {
+      e.dir = opt.dir === undefined ? -1 : (opt.dir < 0 ? -1 : 1);
+      FX.aset(e.vx, e.dir * FIRE_VX);
+      FX.aset(e.vy, FIRE_VY);
+    },
+    step: function (e, g, api) {
+      e.t++;
+      FX.aadd(e.vy, FIRE_G);
+      FX.vadd(e.px, e.vx.v);
+      FX.vadd(e.py, e.vy.v);
+      e.x = FX.vpx(e.px); e.y = FX.vpx(e.py);
+      if (api.blocked(e.x + 4, e.y + 7) || api.blocked(e.x + 4, e.y)) e.alive = false;
+    },
+    draw: function (e, oam, cam, prio) {
+      var A = T(); if (!A) return 0;
+      oam.add({ x: e.x - cam, y: e.y - 4, tile: A.fire[(e.t >> 2) & 1], pal: 2, prio: prio });
+      return 1;
+    }
+  });
+
+  ST.EnemiesW2 = {
+    KINDS: ['bat', 'armor', 'spitter', 'fire'],
+    CONST: {
+      BAT_WAKE: BAT_WAKE, BAT_VX: BAT_VX, BAT_VY: BAT_VY, BAT_FLUT: BAT_FLUT,
+      ARM_VX: ARM_VX, SPIT_PERIOD: SPIT_PERIOD, SPIT_RANGE: SPIT_RANGE,
+      FIRE_VX: FIRE_VX, FIRE_VY: FIRE_VY, FIRE_G: FIRE_G
+    }
+  };
 })();
 
 </script>
@@ -8563,6 +9406,798 @@
 })();
 
 </script>
+<script>/* games/star/boss_w2.js */
+/*
+ * games/star/boss_w2.js — 《星塵勇者》世界 2 魔王「熔心巨像」（2-4 熔爐要塞盡頭）
+ * ---------------------------------------------------------------------------
+ * 擁有者：star-w2 agent ｜ 依賴：engine/fixed.js、chr_w2.js、levels_w1.js（ST.TILE / Level）
+ * 契約：docs/TASKS.md「R3 star W2」＋ 研究 04 §3（模式循環 / 預警幀 / 弱點窗口 / 階段升級）
+ *
+ * 32×32、五格血、**三階段**（研究 04 §3.2「階段式魔王：同一套招，節奏與招數逐段加碼」）：
+ *   phase 1（HP 5–4）：walk → jump → slam（落地兩道衝擊波）→ rest(60，弱點窗口)
+ *   phase 2（HP 3–2）：walk 變快 → jump → slam → **spit**（3 顆火球）→ rest(42)
+ *   phase 3（HP 1）  ：walk 最快 → jump → slam（衝擊波 ×2 速度）→ spit(4 顆) → rest(30)
+ * 打法：踩頭 5 次（每次擊退 + 無敵 50 幀 + 階段重新開始）。
+ * 死亡 → `ST.BossW2.dead = true`（main 進 clear）。
+ *
+ * ── main.js 的用法（與 ST.Boss 同介面）────────────────────────────────────
+ *   ST.BossW2.init(level); ST.BossW2.update(g); ST.BossW2.draw(oam); ST.BossW2.dead
+ */
+(function () {
+  'use strict';
+  var ST = window.ST = window.ST || {};
+  var NES = window.NES = window.NES || {};
+  var FX = NES.FX;
+  if (!FX) throw new Error('games/star/boss_w2.js 需要 engine/fixed.js');
+  var SMB = FX.SMB;
+
+  var W = 28, H = 30;
+  var MAX_HP = 5;
+  var INV_FRAMES = 50;
+  var KNOCKBACK = 14;
+  var JUMP_VY = -FX.v88(5, 0);
+  var GRAV = SMB.jump[0].gFall;
+  var MAXFALL = FX.v88(4, 0);
+  var WORLD_BOTTOM = 30 * 8 + 64;
+  var ACTIVATE_AHEAD = 48;
+
+  // 依階段（1..3）的參數表 —— 研究 04 §3.2：同一套招、節奏加碼
+  var PHASE = [
+    null,
+    { walk: SMB.enemySlow, walkFrames: 84, rest: 60, spit: 0, waveVx: FX.v88(1, 128), slam: 30 },
+    { walk: SMB.enemyFast, walkFrames: 70, rest: 42, spit: 3, waveVx: FX.v88(2, 0), slam: 26 },
+    { walk: FX.v88(1, 0), walkFrames: 56, rest: 30, spit: 4, waveVx: FX.v88(2, 128), slam: 22 }
+  ];
+  var SPIT_GAP = 20;
+  var SHOT_N = 8;
+  var SHOT_VY = -FX.v88(3, 0);
+  var SHOT_G = SMB.jump[0].gHold;          // acc 單位（0.125 px/幀²），不是 v88
+
+  function newShot() {
+    var s = {
+      alive: false, kind: 'fire', stompable: false, wave: false,
+      x: 0, y: 0, w: 8, h: 10,
+      px: FX.Vec(0), py: FX.Vec(0), vx: FX.Acc(0), vy: FX.Acc(0), t: 0
+    };
+    s.hit = function () { s.alive = false; return true; };
+    return s;
+  }
+  function makePool(n, f) {
+    if (NES.SH && NES.SH.Pool) return NES.SH.Pool(n, f);
+    var items = [], i;
+    for (i = 0; i < n; i++) { items.push(f(i)); items[i].alive = false; }
+    return {
+      items: items, size: n, count: 0,
+      alloc: function () { for (var j = 0; j < n; j++) if (!items[j].alive) { items[j].alive = true; this.count++; return items[j]; } return null; },
+      free: function (o) { if (o && o.alive) { o.alive = false; this.count--; return true; } return false; },
+      each: function (fn) { for (var j = 0; j < n; j++) if (items[j].alive) { fn(items[j], j); if (!items[j].alive) this.count--; } },
+      freeAll: function () { for (var j = 0; j < n; j++) items[j].alive = false; this.count = 0; }
+    };
+  }
+
+  var shots = makePool(SHOT_N, newShot);
+  var level = null, tiles = null, camXCache = 0;
+  var px = FX.Vec(0), py = FX.Vec(0), vx = FX.Acc(0), vy = FX.Acc(0);
+
+  function ensureTiles() {
+    if (tiles) return tiles;
+    var Wd = ST.World;
+    if (!Wd || !Wd.bound) return null;
+    function quad(p) {
+      return [
+        [Wd.oam16(p + '_C0T'), Wd.oam16(p + '_C1T'), Wd.oam16(p + '_C2T'), Wd.oam16(p + '_C3T')],
+        [Wd.oam16(p + '_C0B'), Wd.oam16(p + '_C1B'), Wd.oam16(p + '_C2B'), Wd.oam16(p + '_C3B')]
+      ];
+    }
+    tiles = {
+      stand: quad('W2_COL_ST'), jump: quad('W2_COL_JP'),
+      wave: [Wd.oam16('W2_WAVE0'), Wd.oam16('W2_WAVE1')],
+      fire: [Wd.oam16('W2_FIRE0'), Wd.oam16('W2_FIRE1')]
+    };
+    return tiles;
+  }
+
+  function kindAt(x, y) { return level ? level.kindAt(x, y) : 'none'; }
+  function solid(x, y) { return kindAt(x, y) === 'solid'; }
+  function aabb(a, b) {
+    return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+  }
+  function phaseOf() {
+    if (Boss.hp <= 1) return 3;
+    if (Boss.hp <= 3) return 2;
+    return 1;
+  }
+
+  var Boss = {
+    active: false, dead: false, alive: false, stompable: true, kind: 'boss',
+    hp: MAX_HP, x: 0, y: 0, w: W, h: H,
+    phase: 'idle', stage: 1,
+    facing: -1, inv: 0, t: 0, shots: 0, frame: 0,
+    hammers: shots,                       // 名字沿用 ST.Boss 的契約（main / enemies 列舉投射物用）
+    MAX_HP: MAX_HP, spawnX: -1, spawnY: 0,
+
+    init: function (lv) {
+      level = lv || null;
+      Boss.reset();
+      if (!level || !level.boss) { Boss.spawnX = -1; return Boss; }
+      Boss.spawnX = level.boss.x;
+      Boss.spawnY = level.boss.y;
+      return Boss;
+    },
+
+    reset: function () {
+      shots.freeAll();
+      Boss.active = false; Boss.dead = false; Boss.alive = false;
+      Boss.hp = MAX_HP; Boss.phase = 'idle'; Boss.stage = 1; Boss.facing = -1;
+      Boss.inv = 0; Boss.t = 0; Boss.shots = 0; Boss.frame = 0;
+      FX.aset(vx, 0); FX.aset(vy, 0);
+      return Boss;
+    },
+
+    box: function () { return Boss.active && Boss.alive ? { x: Boss.x, y: Boss.y, w: W, h: H } : null; },
+    hit: function () { return Boss.stomp(); },
+
+    spawn: function (x, y) {
+      FX.vsetPx(px, x); FX.vsetPx(py, y);
+      Boss.x = x | 0; Boss.y = y | 0;
+      Boss.active = true; Boss.alive = true; Boss.dead = false;
+      Boss.hp = MAX_HP; Boss.phase = 'walk'; Boss.stage = 1;
+      Boss.t = 0; Boss.shots = 0; Boss.inv = 0;
+      FX.aset(vx, 0); FX.aset(vy, 0);
+      return Boss;
+    },
+
+    stomp: function () {
+      if (!Boss.active || Boss.dead || Boss.inv > 0 || Boss.phase === 'falling') return false;
+      Boss.hp--;
+      Boss.inv = INV_FRAMES;
+      FX.vsetPx(px, Boss.x + Boss.facing * -KNOCKBACK);
+      Boss.x = FX.vpx(px);
+      if (Boss.hp <= 0) { Boss.die(); return true; }
+      Boss.stage = phaseOf();
+      Boss.phase = 'rest'; Boss.t = 0;
+      shots.freeAll();                    // 被踩 ⇒ 場面清乾淨（弱點窗口要看得清楚）
+      return true;
+    },
+
+    die: function () {
+      if (Boss.dead || Boss.phase === 'falling') return false;
+      Boss.hp = 0;
+      Boss.phase = 'falling';
+      Boss.t = 0;
+      Boss.inv = 0;
+      shots.freeAll();
+      FX.aset(vy, -FX.v88(2, 0));
+      FX.aset(vx, 0);
+      Boss.alive = false;
+      return true;
+    },
+
+    shoot: function (targetX, kind) {
+      var s = shots.alloc();
+      if (!s) return null;
+      var sx, sy;
+      if (kind === 'wave') {
+        sx = Boss.x + (Boss.facing < 0 ? -6 : Boss.w + 2);
+        sy = Boss.y + Boss.h - 10;
+        s.wave = true;
+        FX.aset(s.vx, (kind === 'wave' ? 1 : 1) * 0);
+      } else {
+        sx = Boss.x + (Boss.facing < 0 ? -4 : Boss.w - 4);
+        sy = Boss.y + 4;
+        s.wave = false;
+      }
+      FX.vsetPx(s.px, sx); FX.vsetPx(s.py, sy);
+      s.x = sx; s.y = sy; s.t = 0;
+      if (s.wave) {
+        s.w = 8; s.h = 10;
+        FX.aset(s.vy, 0);
+      } else {
+        s.w = 8; s.h = 8;
+        var dir = (targetX === undefined) ? Boss.facing : (targetX < Boss.x ? -1 : 1);
+        FX.aset(s.vx, dir * FX.v88(1, 128));
+        FX.aset(s.vy, SHOT_VY);
+      }
+      return s;
+    },
+
+    slamWaves: function () {
+      var P = PHASE[Boss.stage], i, dirs = [-1, 1], s;
+      for (i = 0; i < 2; i++) {
+        s = shots.alloc();
+        if (!s) continue;
+        var sx = Boss.x + (dirs[i] < 0 ? -8 : Boss.w);
+        var sy = Boss.y + Boss.h - 10;
+        FX.vsetPx(s.px, sx); FX.vsetPx(s.py, sy);
+        s.x = sx; s.y = sy; s.t = 0; s.wave = true; s.w = 8; s.h = 10;
+        FX.aset(s.vx, dirs[i] * P.waveVx);
+        FX.aset(s.vy, 0);
+      }
+      return true;
+    },
+
+    update: function (g) {
+      g = g || {};
+      Boss.frame++;
+      var camX = (g.camX === undefined) ? camXCache : g.camX;
+      camXCache = camX;
+      if (g.level && g.level !== level) level = g.level;
+      var hero = g.hero || null;
+
+      if (!Boss.active && !Boss.dead && Boss.phase === 'idle' && Boss.spawnX >= 0
+          && camX + 256 + ACTIVATE_AHEAD >= Boss.spawnX) {
+        Boss.spawn(Boss.spawnX, Boss.spawnY);
+      }
+      if (!Boss.active) return Boss.phase;
+
+      if (Boss.inv > 0) Boss.inv--;
+      Boss.t++;
+      var P = PHASE[Boss.stage] || PHASE[1];
+
+      if (Boss.phase === 'falling') {
+        FX.aadd(vy, GRAV);
+        FX.vadd(py, vy.v);
+        Boss.y = FX.vpx(py);
+        if (Boss.y > WORLD_BOTTOM) {
+          Boss.active = false; Boss.alive = false; Boss.dead = true; Boss.phase = 'dead';
+          if (g.onDie) g.onDie('fall');
+        }
+        stepShots(g);
+        return Boss.phase;
+      }
+
+      if (hero) Boss.facing = (hero.x < Boss.x) ? -1 : 1;
+
+      switch (Boss.phase) {
+        case 'walk':
+          FX.aset(vx, Boss.facing * P.walk);
+          FX.vadd(px, vx.v);
+          Boss.x = FX.vpx(px);
+          if (solid(Boss.facing < 0 ? Boss.x - 1 : Boss.x + Boss.w, Boss.y + 8)) {
+            FX.vsetPx(px, Boss.x - Boss.facing);
+            Boss.x = FX.vpx(px);
+          }
+          landed();
+          if (Boss.t >= P.walkFrames) { Boss.phase = 'jump'; Boss.t = 0; FX.aset(vy, JUMP_VY); }
+          break;
+        case 'jump':
+          FX.aset(vx, Boss.facing * (P.walk >> 1));
+          FX.vadd(px, vx.v);
+          Boss.x = FX.vpx(px);
+          if (landed()) {
+            Boss.phase = 'slam'; Boss.t = 0;
+            Boss.slamWaves();
+            if (g.onSlam) g.onSlam();
+            if (g.sfx) g.sfx('bump');
+          }
+          break;
+        case 'slam':
+          FX.aset(vx, 0);
+          landed();
+          if (Boss.t >= P.slam) {
+            if (P.spit > 0) { Boss.phase = 'spit'; Boss.t = 0; Boss.shots = 0; }
+            else { Boss.phase = 'rest'; Boss.t = 0; }
+          }
+          break;
+        case 'spit':
+          FX.aset(vx, 0);
+          landed();
+          if (Boss.shots < P.spit && (Boss.t - 1) % SPIT_GAP === 0) {
+            Boss.shoot(hero ? hero.x : undefined, 'fire');
+            Boss.shots++;
+          }
+          if (Boss.shots >= P.spit && Boss.t >= P.spit * SPIT_GAP) { Boss.phase = 'rest'; Boss.t = 0; }
+          break;
+        case 'rest':
+          FX.aset(vx, 0);
+          landed();
+          if (Boss.t >= P.rest) { Boss.phase = 'walk'; Boss.t = 0; }
+          break;
+        default:
+          break;
+      }
+
+      stepShots(g);
+
+      if (hero && (g.onStomp || g.onHurt)) {
+        var hb = { x: hero.x, y: hero.y, w: hero.w || 12, h: hero.h || 22 };
+        if (aabb(hb, Boss)) {
+          var falling = (hero.vy === undefined) ? true : (hero.vy > 0);
+          var footIn = (hb.y + hb.h) - Boss.y <= 12;
+          if (falling && footIn) {
+            if (Boss.inv <= 0) { Boss.stomp(); if (g.onStomp) g.onStomp(Boss); }
+          } else if (!(hero.inv > 0)) {
+            if (hero.star) { /* 無敵星撞不死魔王，只是不受傷 */ }
+            else if (g.onHurt) g.onHurt(Boss);
+          }
+        }
+        shots.each(function (s) {
+          if (!aabb(hb, s)) return;
+          if (hero.star) { s.alive = false; return; }
+          s.alive = false;
+          if (!(hero.inv > 0) && g.onHurt) g.onHurt(s);
+        });
+      }
+      return Boss.phase;
+    },
+
+    draw: function (oam) {
+      if (!oam || !oam.add) return 0;
+      var T = ensureTiles();
+      if (!T) return 0;
+      var n = 0, cam = camXCache, i;
+      if (Boss.active) {
+        if (!(Boss.inv > 0 && (Boss.frame & 4))) {
+          var art = (Boss.phase === 'jump' || Boss.phase === 'falling' || Boss.phase === 'slam') ? T.jump : T.stand;
+          var bx = Boss.x - 2 - cam, by = Boss.y - 2;
+          var flip = Boss.facing > 0;
+          for (i = 0; i < 4; i++) {
+            var col = flip ? (3 - i) : i;
+            oam.add({ x: bx + i * 8, y: by, tile: art[0][col], pal: 2, prio: 3, flipH: flip });
+            oam.add({ x: bx + i * 8, y: by + 16, tile: art[1][col], pal: 2, prio: 3, flipH: flip });
+            n += 2;
+          }
+        }
+      }
+      shots.each(function (s) {
+        var t = s.wave ? T.wave[(s.t >> 2) & 1] : T.fire[(s.t >> 2) & 1];
+        oam.add({ x: s.x - cam, y: s.y, tile: t, pal: 2, prio: 2 });
+        n++;
+      });
+      return n;
+    },
+
+    state: function () {
+      var list = [];
+      shots.each(function (s) { list.push({ x: s.x, y: s.y, wave: s.wave, vx: s.vx.v, vy: s.vy.v }); });
+      return {
+        active: Boss.active, dead: Boss.dead, hp: Boss.hp, phase: Boss.phase, stage: Boss.stage,
+        x: Boss.x, y: Boss.y, inv: Boss.inv, t: Boss.t, facing: Boss.facing, shots: list
+      };
+    },
+
+    CONST: {
+      W: W, H: H, MAX_HP: MAX_HP, INV_FRAMES: INV_FRAMES, KNOCKBACK: KNOCKBACK,
+      JUMP_VY: JUMP_VY, PHASE: PHASE, SPIT_GAP: SPIT_GAP, SHOT_N: SHOT_N
+    }
+  };
+
+  function landed() {
+    FX.aadd(vy, GRAV);
+    if (vy.v > MAXFALL) FX.aset(vy, MAXFALL);
+    var prevBottom = Boss.y + Boss.h;
+    FX.vadd(py, vy.v);
+    var ny = FX.vpx(py), foot = ny + Boss.h, on = false;
+    if (vy.v >= 0) {
+      var k1 = kindAt(Boss.x + 4, foot), k2 = kindAt(Boss.x + Boss.w - 4, foot);
+      var hit1 = k1 === 'solid' || (k1 === 'oneway' && prevBottom <= ((foot >> 3) << 3));
+      var hit2 = k2 === 'solid' || (k2 === 'oneway' && prevBottom <= ((foot >> 3) << 3));
+      if (hit1 || hit2) {
+        ny = ((foot >> 3) << 3) - Boss.h;
+        FX.vsetPx(py, ny); FX.aset(vy, 0); on = true;
+      }
+    }
+    Boss.y = ny;
+    if (!on && Boss.y > 30 * 8 - Boss.h - 8 && Boss.phase !== 'falling') Boss.die();
+    return on;
+  }
+
+  function stepShots(g) {
+    shots.each(function (s) {
+      s.t++;
+      if (s.wave) {
+        FX.vadd(s.px, s.vx.v);
+        s.x = FX.vpx(s.px);
+        // 衝擊波貼著地面走：腳下沒地板 / 前方有牆就消失
+        var below = kindAt(s.x + 4, s.y + s.h + 2);
+        if (below !== 'solid' && below !== 'oneway') s.alive = false;
+        else if (solid(s.vx.v < 0 ? s.x - 1 : s.x + s.w, s.y + 4)) s.alive = false;
+      } else {
+        FX.aadd(s.vy, SHOT_G);
+        FX.vadd(s.px, s.vx.v);
+        FX.vadd(s.py, s.vy.v);
+        s.x = FX.vpx(s.px); s.y = FX.vpx(s.py);
+        if (solid(s.x + 4, s.y + s.h)) s.alive = false;
+      }
+      if (s.y > WORLD_BOTTOM || s.x < camXCache - 40 || s.x > camXCache + 296) s.alive = false;
+    });
+  }
+
+  ST.BossW2 = Boss;
+})();
+
+</script>
+<script>/* games/star/objects_w2.js */
+/*
+ * games/star/objects_w2.js — 《星塵勇者》世界 2 的「關卡機關」（ST.Objects）
+ * ---------------------------------------------------------------------------
+ * 擁有者：star-w2 agent ｜ 依賴：engine/fixed.js（NES.FX）、chr_w2.js、levels_w1.js（ST.TILE）
+ * 契約：docs/TASKS.md「R3 star W2」
+ *
+ * 四種機關**全部寫在關卡資料裡**（`ST.LEVELS['2-x'].movers / geysers / items` 與磚語意
+ * `TILE.CRUMBLE` / `TILE.SPRING`），本檔只負責推進與碰撞，沒有任何一關的座標被硬編碼。
+ *
+ *   ① mover   礦車升降板  `{c, r, w, axis:'x'|'y', range, period, phase}`
+ *              位置是**時間的純函式**（三角波）⇒ 可預測、可重現，通關機器人能往前推演。
+ *              單向平台語意：只從上方擋，下方可穿過；站上去會被水平帶著走。
+ *   ② crumble 崩塌礦石磚  磚語意 `TILE.CRUMBLE`：踩住 HOLD 幀後碎掉，BACK 幀後復原。
+ *   ③ spring  蒸氣彈簧    磚語意 `TILE.SPRING`：站上去立刻彈飛（按住 A 彈更高）。
+ *   ④ geyser  熔岩間歇泉  `{c, r, h, period, on, phase}`：週期性噴火柱，也是時間的純函式。
+ *   ⑤ item    星塵（無敵星）`{c, r, kind:'star'}`：吃到 → `hero.star` 旗標（熔岩 / 尖刺 / 坑
+ *              都不再致命，撞到敵人直接打倒），順便收掉 R2c fix5「一鍵無敵擋不住熔岩」。
+ *
+ * ── main.js 的用法 ────────────────────────────────────────────────────────
+ *   ST.Objects.init(level, { setTile: fn });    // 換關
+ *   ST.Objects.seek(camX);                      // 檢查點復活
+ *   ST.Objects.update(g);                       // 每幀（Hero.update 之後）
+ *   ST.Objects.draw(oam, g);
+ *
+ * ── 給通關機器人的純函式（tools/playthrough_star.py）────────────────────
+ *   ST.Objects.now()            目前絕對幀
+ *   ST.Objects.moverTops(t)     第 t 幀所有升降板的 {x0, x1, top}
+ *   ST.Objects.hazardHit(x, y, w, h, t)   第 t 幀 (x,y,w,h) 是否碰到火柱
+ */
+(function () {
+  'use strict';
+  var ST = window.ST = window.ST || {};
+  var NES = window.NES = window.NES || {};
+  var FX = NES.FX;
+  if (!FX) throw new Error('games/star/objects_w2.js 需要 engine/fixed.js');
+  var SMB = FX.SMB;
+
+  var CRUMBLE_HOLD = 36;       // 踩住 36 幀（0.6 s）才碎 —— 跑過去（2.5 px/幀）完全來得及
+  var CRUMBLE_SHAKE = 12;      // 最後 12 幀開始抖（視覺預警，研究 04 §2 的「預警幀」）
+  var CRUMBLE_BACK = 240;      // 碎掉 4 秒後復原
+  // 彈簧初速 −5 px/幀 ＋ Hero.LAUNCH_SEG 的 0.125 px/幀² ⇒ 彈高 100 px（12.5 格），
+  // 比全速跑跳（80 px）高一截，一眼看得出「這是機關不是跳躍」。
+  var SPRING_VY = -FX.v88(5, 0);
+  var STAR_FRAMES = 480;       // 無敵星 8 秒（與 song.js 的 invincible 約 8 s 對齊）
+  var ITEM_BOB = 32;           // 道具上下浮動週期
+  var GEYSER_WARN = 24;        // 噴發前 24 幀的預警（只畫，不傷人）
+
+  var level = null, setTileFn = null;
+  var movers = [], geysers = [], items = [];
+  var crumbles = {};           // key = col*32+row → {c, r, t, broken, back}
+  var broken = [];             // 待復原清單
+  var tiles = null, camXCache = 0;
+
+  function T() { return ST.TILE; }
+
+  /* ------------------------------------------------ 三角波（時間 → 位移，純函式） */
+  function tri(t, period) {
+    var half = period >> 1;
+    var u = ((t % period) + period) % period;
+    return u < half ? u : (period - u);
+  }
+  function moverPos(m, t) {
+    var half = m.period >> 1;
+    var d = ((tri(t + m.phase, m.period) * m.range) / half) | 0;
+    if (m.axis === 'y') return { x: m.x0, y: m.y0 + d };
+    return { x: m.x0 + d, y: m.y0 };
+  }
+  function moverBox(m, t) {
+    var p = moverPos(m, t);
+    return { x: p.x, y: p.y, w: m.w * 8, h: 8 };
+  }
+  function geyserOn(gy, t) {
+    var u = (((t + gy.phase) % gy.period) + gy.period) % gy.period;
+    return u < gy.on;
+  }
+  function geyserWarm(gy, t) {
+    var u = (((t + gy.phase) % gy.period) + gy.period) % gy.period;
+    return u >= gy.period - GEYSER_WARN;
+  }
+  function geyserBox(gy) {
+    return { x: gy.c * 8, y: (gy.r - gy.h + 1) * 8, w: 8, h: gy.h * 8 };
+  }
+
+  function aabb(a, b) {
+    return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+  }
+
+  /* ------------------------------------------------------------------ CHR */
+  function ensureTiles() {
+    if (tiles) return tiles;
+    var W = ST.World;
+    if (!W || !W.bound) return null;
+    tiles = {
+      lift: W.oam16('W2_LIFT_M'),
+      flame: [W.oam16('W2_FLAME0'), W.oam16('W2_FLAME1')],
+      star: [[W.oam16('W_STAR0_L'), W.oam16('W_STAR0_R')], [W.oam16('W_STAR1_L'), W.oam16('W_STAR1_R')]]
+    };
+    return tiles;
+  }
+
+  /* ------------------------------------------------------------------ init */
+  function init(lv, opts) {
+    opts = opts || {};
+    level = lv || null;
+    setTileFn = opts.setTile || null;
+    tiles = null;
+    Objects.frame = 0;
+    movers = []; geysers = []; items = [];
+    crumbles = {}; broken = [];
+    if (!level) return Objects;
+    var i, m, src;
+    src = level.movers || [];
+    for (i = 0; i < src.length; i++) {
+      m = src[i];
+      movers.push({
+        x0: (m.x === undefined ? m.c * 8 : m.x) | 0,
+        y0: (m.y === undefined ? m.r * 8 : m.y) | 0,
+        w: m.w || 4, axis: m.axis === 'y' ? 'y' : 'x',
+        range: m.range | 0, period: (m.period | 0) || 128, phase: m.phase | 0,
+        c: m.c, r: m.r
+      });
+    }
+    src = level.geysers || [];
+    for (i = 0; i < src.length; i++) {
+      m = src[i];
+      geysers.push({
+        c: m.c | 0, r: m.r | 0, h: (m.h | 0) || 3,
+        period: (m.period | 0) || 150, on: (m.on | 0) || 60, phase: m.phase | 0
+      });
+    }
+    src = level.items || [];
+    for (i = 0; i < src.length; i++) {
+      m = src[i];
+      items.push({ c: m.c | 0, r: m.r | 0, kind: m.kind || 'star', taken: false, x: m.c * 8, y: m.r * 8 });
+    }
+    return Objects;
+  }
+
+  function reset() {
+    var i;
+    restoreAll();
+    crumbles = {}; broken = [];
+    for (i = 0; i < items.length; i++) items[i].taken = false;
+    Objects.frame = 0;
+    return Objects;
+  }
+  function seek(camX) {
+    restoreAll();
+    crumbles = {}; broken = [];
+    var i;
+    for (i = 0; i < items.length; i++) if (items[i].x >= camX) items[i].taken = false;
+    return Objects;
+  }
+  function restoreAll() {
+    var i, b;
+    for (i = 0; i < broken.length; i++) {
+      b = broken[i];
+      if (setTileFn) setTileFn(b.c, b.r, T().CRUMBLE);
+    }
+    broken.length = 0;
+  }
+
+  /* ---------------------------------------------------------------- update */
+  function update(g) {
+    g = g || {};
+    Objects.frame++;
+    var t = Objects.frame;
+    var h = g.hero || null;
+    if (g.camX !== undefined) camXCache = g.camX;
+    if (g.level && g.level !== level) level = g.level;
+
+    stepBroken(t);
+    if (!h || h.state === 'dead') return Objects;
+
+    var hh = (h.h === undefined) ? 22 : h.h;
+    var hb = { x: h.x, y: h.y, w: h.w || 12, h: hh };
+
+    ride(h, hb, hh, t, g);
+    stepCrumble(h, hh, t, g);
+    stepSpring(h, hh, g);
+    stepGeyser(h, hb, t, g);
+    stepItems(h, hb, t, g);
+    return Objects;
+  }
+
+  // ---- ① 升降板：只從上方擋，站上去被帶著走 -----------------------------
+  function ride(h, hb, hh, t, g) {
+    var i, m, now, prev, feet = h.y + hh, top, ptop;
+    h.onMover = null;
+    for (i = 0; i < movers.length; i++) {
+      m = movers[i];
+      now = moverBox(m, t);
+      prev = moverBox(m, t - 1);
+      top = now.y; ptop = prev.y;
+      if (h.x + hb.w <= now.x || h.x >= now.x + now.w) continue;      // 水平沒重疊
+      if (h.vy < 0) continue;                                          // 上升中一律穿過
+      if (h.prevFeet > ptop + 3) continue;                             // 上一幀腳已經在板子下面
+      if (feet < top - 1 || feet > top + 10) continue;                 // 不在落腳範圍
+      FX.vsetPx(h.py, top - hh);
+      FX.aset(h.vyA, 0);
+      h.onGround = true;
+      h.onMover = m;
+      // 水平帶動（垂直板 dx = 0）
+      var dx = now.x - prev.x;
+      if (dx) {
+        FX.vadd(h.px, dx * 256);
+        h.x = FX.floorPx(h.px.sub);
+        if (h.x < 0) { h.x = 0; FX.vsetPx(h.px, 0); }
+      }
+      h.y = FX.floorPx(h.py.sub);
+      h.prevFeet = h.y + hh;
+      if (g && g.onRide) g.onRide(m);
+      return true;
+    }
+    return false;
+  }
+
+  // ---- ② 崩塌礦石磚 -----------------------------------------------------
+  function stepCrumble(h, hh, t, g) {
+    var frow = (h.y + hh) >> 3, c, key, st;
+    var c0 = h.x >> 3, c1 = (h.x + (h.w || 12) - 1) >> 3;
+    var touched = {};
+    if (h.onGround && !h.onMover) {
+      for (c = c0; c <= c1; c++) {
+        if (!level || level.tileAt(c, frow) !== T().CRUMBLE) continue;
+        key = c * 32 + frow;
+        touched[key] = 1;
+        st = crumbles[key];
+        if (!st) st = crumbles[key] = { c: c, r: frow, t: 0 };
+        st.t++;
+        if (st.t >= CRUMBLE_HOLD) {
+          if (setTileFn) setTileFn(c, frow, T().EMPTY);
+          broken.push({ c: c, r: frow, at: t + CRUMBLE_BACK });
+          delete crumbles[key];
+          if (g && g.sfx) g.sfx('bump');
+        }
+      }
+    }
+    for (key in crumbles) {                      // 離開的磚慢慢回復（不是瞬間歸零）
+      if (touched[key]) continue;
+      st = crumbles[key];
+      st.t -= 2;
+      if (st.t <= 0) delete crumbles[key];
+    }
+  }
+  function stepBroken(t) {
+    var i, b;
+    for (i = broken.length - 1; i >= 0; i--) {
+      b = broken[i];
+      if (t < b.at) continue;
+      if (setTileFn) setTileFn(b.c, b.r, T().CRUMBLE);
+      broken.splice(i, 1);
+    }
+  }
+
+  // ---- ③ 蒸氣彈簧 -------------------------------------------------------
+  function stepSpring(h, hh, g) {
+    if (!h.onGround || h.onMover || !level) return false;
+    var frow = (h.y + hh) >> 3;
+    var c0 = h.x >> 3, c1 = (h.x + (h.w || 12) - 1) >> 3, c;
+    for (c = c0; c <= c1; c++) {
+      if (level.tileAt(c, frow) !== T().SPRING) continue;
+      if (ST.Hero && ST.Hero.launch) ST.Hero.launch(h, SPRING_VY);
+      else { SMB.jumpStart(h.jumpS, FX.abs(h.vxA.v), h.py.sub); FX.aset(h.vyA, SPRING_VY); }
+      h.onGround = false;
+      Objects.springs++;
+      if (g && g.sfx) g.sfx('jump');
+      return true;
+    }
+    return false;
+  }
+
+  // ---- ④ 熔岩間歇泉 -----------------------------------------------------
+  function stepGeyser(h, hb, t, g) {
+    var i, gy, box;
+    for (i = 0; i < geysers.length; i++) {
+      gy = geysers[i];
+      if (!geyserOn(gy, t)) continue;
+      box = geyserBox(gy);
+      if (!aabb(hb, box)) continue;
+      if (h.star > 0) return false;                 // 無敵星：火柱無效
+      if (ST.Hero && ST.Hero.hurt) ST.Hero.hurt(h, g, box.x);
+      return true;
+    }
+    return false;
+  }
+
+  // ---- ⑤ 道具（星塵） ---------------------------------------------------
+  function stepItems(h, hb, t, g) {
+    var i, it, box;
+    for (i = 0; i < items.length; i++) {
+      it = items[i];
+      if (it.taken) continue;
+      box = { x: it.x, y: it.y + bob(t), w: 16, h: 16 };
+      if (!aabb(hb, box)) continue;
+      it.taken = true;
+      Objects.picked++;
+      if (g && g.onItem) g.onItem(it);
+      return true;
+    }
+    return false;
+  }
+  function bob(t) { return ((tri(t, ITEM_BOB) * 4) / (ITEM_BOB >> 1)) | 0; }
+
+  /* ------------------------------------------------------------------ draw */
+  function draw(oam, g) {
+    if (!oam || !oam.add) return 0;
+    var A = ensureTiles();
+    if (!A) return 0;
+    var t = Objects.frame, cam = (g && g.camX !== undefined) ? g.camX : camXCache;
+    var n = 0, i, j, m, box, gy, it;
+    for (i = 0; i < movers.length; i++) {
+      m = movers[i];
+      box = moverBox(m, t);
+      if (box.x + box.w < cam - 16 || box.x > cam + 272) continue;
+      for (j = 0; j < m.w; j++) {
+        oam.add({ x: box.x + j * 8 - cam, y: box.y, tile: A.lift, pal: 3, prio: 2 });
+        n++;
+      }
+    }
+    for (i = 0; i < geysers.length; i++) {
+      gy = geysers[i];
+      var on = geyserOn(gy, t), warm = geyserWarm(gy, t);
+      if (!on && !warm) continue;
+      var x = gy.c * 8;
+      if (x + 8 < cam - 16 || x > cam + 272) continue;
+      var rows = on ? gy.h : 1;                       // 預警只冒一小節
+      var art = A.flame[(t >> 2) & 1];
+      for (j = 0; j < rows; j += 2) {
+        oam.add({ x: x - cam, y: (gy.r - j) * 8 - 8, tile: art, pal: 2, prio: 2 });
+        n++;
+      }
+    }
+    for (i = 0; i < items.length; i++) {
+      it = items[i];
+      if (it.taken) continue;
+      if (it.x + 16 < cam - 16 || it.x > cam + 272) continue;
+      var pair = A.star[(t >> 3) & 1], y = it.y + bob(t);
+      oam.add({ x: it.x - cam, y: y, tile: pair[0], pal: 1, prio: 2 });
+      oam.add({ x: it.x + 8 - cam, y: y, tile: pair[1], pal: 1, prio: 2 });
+      n += 2;
+    }
+    return n;
+  }
+
+  /* ------------------------------------------- 給機器人 / 測試的純函式 API */
+  function moverTops(t) {
+    var out = [], i, b;
+    for (i = 0; i < movers.length; i++) {
+      b = moverBox(movers[i], t);
+      out.push({ x0: b.x, x1: b.x + b.w, top: b.y, axis: movers[i].axis });
+    }
+    return out;
+  }
+  function hazardHit(x, y, w, h, t) {
+    var i, gy, box, a = { x: x, y: y, w: w, h: h };
+    for (i = 0; i < geysers.length; i++) {
+      gy = geysers[i];
+      if (!geyserOn(gy, t)) continue;
+      box = geyserBox(gy);
+      if (aabb(a, box)) return true;
+    }
+    return false;
+  }
+
+  var Objects = {
+    frame: 0, springs: 0, picked: 0,
+    CRUMBLE_HOLD: CRUMBLE_HOLD, CRUMBLE_SHAKE: CRUMBLE_SHAKE, CRUMBLE_BACK: CRUMBLE_BACK,
+    SPRING_VY: SPRING_VY, STAR_FRAMES: STAR_FRAMES, GEYSER_WARN: GEYSER_WARN,
+    init: init, reset: reset, seek: seek, update: update, draw: draw,
+    now: function () { return Objects.frame; },
+    moverTops: moverTops, hazardHit: hazardHit,
+    moverBox: moverBox, geyserOn: geyserOn, geyserBox: geyserBox,
+    count: function () { return { movers: movers.length, geysers: geysers.length, items: items.length }; },
+    state: function () {
+      var t = Objects.frame, i, out = { frame: t, movers: [], geysers: [], items: [], broken: broken.length, crumbling: 0 };
+      for (i = 0; i < movers.length; i++) out.movers.push(moverBox(movers[i], t));
+      for (i = 0; i < geysers.length; i++) out.geysers.push({ c: geysers[i].c, on: geyserOn(geysers[i], t) });
+      for (i = 0; i < items.length; i++) out.items.push({ c: items[i].c, r: items[i].r, kind: items[i].kind, taken: items[i].taken });
+      for (i in crumbles) out.crumbling++;
+      return out;
+    },
+    // 崩塌磚的視覺抖動（main.js 的 draw 不需要，留給測試 / 之後的粒子）
+    crumbleTimer: function (c, r) { var s = crumbles[c * 32 + r]; return s ? s.t : 0; }
+  };
+
+  ST.Objects = Objects;
+})();
+
+</script>
 <script>/* games/star/levels_w1.js */
 /*
  * games/star/levels_w1.js — 《星塵勇者》世界 1 的四關地圖 + 磚語意
@@ -8642,9 +10277,22 @@
     CSEA_T: 40,       // 天空關「雲海 / 遠山剪影帶」上緣
     CSEA_B: 41,       // 雲海剪影帶內部
     STAR_T: 42,       // 第三種（最小）星點
-    VEIN: 43          // 洞窟頂板下的岩層紋
+    VEIN: 43,         // 洞窟頂板下的岩層紋
+    // ── R3 star-w2《熔岩礦坑》新增（44..55）；語意與 W1 共用同一張表 ──────────
+    CRUMBLE: 44,      // 崩塌礦石磚（踩上去 CRUMBLE_HOLD 幀後碎掉，一段時間後復原）
+    SPRING: 45,       // 蒸氣彈簧（站上去被彈飛；solid）
+    ORE: 46,          // 礦脈硬塊（solid，不可破壞）
+    VENT: 47,         // 噴氣孔座（none；間歇泉從這裡噴出來）
+    CRYSTAL: 48,      // 礦坑結晶（none，裝飾）
+    LAMP: 49,         // 礦燈（none，裝飾）
+    BEAM_T: 50,       // 坑道支撐梁（上）
+    BEAM_B: 51,       // 坑道支撐梁（下）
+    MBG: 52,          // 岩漿層背景紋（none）
+    RAIL: 53,         // 礦車軌道（none，裝飾）
+    GEAR: 54,         // 熔爐齒輪（none，裝飾）
+    FWIN: 55          // 熔爐觀火窗（none，裝飾）
   };
-  var TILE_COUNT = 44;
+  var TILE_COUNT = 56;
   ST.TILE = TILE;
   ST.TILE_COUNT = TILE_COUNT;
 
@@ -8654,7 +10302,8 @@
     var i;
     for (i = 0; i < TILE_COUNT; i++) KIND[i] = 'none';
     var solid = [TILE.GROUND, TILE.DIRT, TILE.BRICK, TILE.QBLOCK, TILE.USED, TILE.BLOCK,
-      TILE.PIPE_TL, TILE.PIPE_TR, TILE.PIPE_BL, TILE.PIPE_BR, TILE.BRIDGE];
+      TILE.PIPE_TL, TILE.PIPE_TR, TILE.PIPE_BL, TILE.PIPE_BR, TILE.BRIDGE,
+      TILE.CRUMBLE, TILE.SPRING, TILE.ORE];
     var oneway = [TILE.PLATFORM, TILE.PLAT_L, TILE.PLAT_R];
     var hurt = [TILE.SPIKE, TILE.LAVA];
     for (i = 0; i < solid.length; i++) KIND[solid[i]] = 'solid';
@@ -8698,6 +10347,11 @@
     m[TILE.CSEA_T] = 'BG_CSEA_T'; m[TILE.CSEA_B] = 'BG_CSEA_B';
     m[TILE.STAR_T] = 'BG_STAR_T'; m[TILE.VEIN] = 'BG_VEIN';
     m[TILE.SLOPE_L] = 'BG_SLOPE_L'; m[TILE.SLOPE_R] = 'BG_SLOPE_R';
+    // R3 star-w2
+    m[TILE.CRUMBLE] = 'BG_CRUMB0'; m[TILE.SPRING] = 'BG_SPRING0'; m[TILE.ORE] = 'BG_ORE';
+    m[TILE.VENT] = 'BG_VENT'; m[TILE.CRYSTAL] = 'BG_CRYSTAL'; m[TILE.LAMP] = 'BG_LAMP';
+    m[TILE.BEAM_T] = 'BG_BEAM_T'; m[TILE.BEAM_B] = 'BG_BEAM_B'; m[TILE.MBG] = 'BG_MBG';
+    m[TILE.RAIL] = 'BG_RAIL'; m[TILE.GEAR] = 'BG_GEAR'; m[TILE.FWIN] = 'BG_FWIN';
     var i;
     for (i = 0; i < TILE_COUNT; i++) BASE_NAME[i] = m[i] || 'BG_EMPTY';
   })();
@@ -8726,6 +10380,27 @@
   function themeName(theme, code) {
     var ov = THEME_OVERRIDE[theme];
     return (ov && ov[code]) || BASE_NAME[code];
+  }
+
+  /* R3 star-w2：新主題可在別的檔（levels_w2.js）註冊，不必改本檔的表。
+   *   addTheme('mine', { from: 'cave', override: {<磚碼>: '<磚名>'}, pref: {<磚碼>: 0..3} })
+   *   from  = 先整份複製哪個既有主題的「磚名覆寫」與「調色盤偏好」
+   *   注意：PREF / THEME_OVERRIDE 都是 Level 建構時才讀 ⇒ 一定要在 new Level() 之前呼叫。 */
+  function addTheme(name, opts) {
+    opts = opts || {};
+    var from = opts.from || 'cave';
+    var base = PREF[from] || PREF.ground;
+    var arr = new Uint8Array(TILE_COUNT), i, k;
+    for (i = 0; i < TILE_COUNT; i++) arr[i] = base[i];
+    var pf = opts.pref || {};
+    for (k in pf) if (Object.prototype.hasOwnProperty.call(pf, k)) arr[k | 0] = pf[k] & 3;
+    PREF[name] = arr;
+    var ov = {}, src = THEME_OVERRIDE[from] || {};
+    if (opts.inherit !== false) for (k in src) if (Object.prototype.hasOwnProperty.call(src, k)) ov[k] = src[k];
+    var o = opts.override || {};
+    for (k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ov[k] = o[k];
+    THEME_OVERRIDE[name] = ov;
+    return name;
   }
 
   // ---- 屬性（16×16 調色盤組）：優先權 + 各主題偏好 -------------------------
@@ -8759,6 +10434,12 @@
     PREF.castle[TILE.COIN] = 3;
     PREF.castle[TILE.QBLOCK] = 3;
     PREF.castle[TILE.USED] = 3;
+    // R3 star-w2：崩塌磚 / 彈簧 / 礦脈與裝飾（主題覆寫在 addTheme 時再調）
+    set([TILE.CRYSTAL, TILE.LAMP, TILE.BEAM_T, TILE.BEAM_B, TILE.MBG, TILE.RAIL,
+      TILE.GEAR, TILE.FWIN, TILE.VENT], 1, 3, 3, 3, 3);
+    set([TILE.ORE], 2, 2, 1, 1, 1);
+    set([TILE.CRUMBLE], 3, 2, 2, 2, 2);
+    set([TILE.SPRING], 4, 3, 3, 3, 3);
   })();
 
   // ============================================================ ③ RLE / 物件表
@@ -8791,7 +10472,11 @@
     '.': -1, '~': TILE.EMPTY, 'B': TILE.BRICK, '?': TILE.QBLOCK, 'U': TILE.USED,
     '#': TILE.BLOCK, 'o': TILE.COIN, '=': TILE.PLATFORM, 's': TILE.SPIKE, 'C': TILE.CHAIN,
     'W': TILE.WINDOW, 'G': TILE.GROUND, 'D': TILE.DIRT, 'L': TILE.LAVA, 'v': TILE.CAVEBG,
-    'F': TILE.TORCH, 'f': TILE.TORCH_B, 'x': TILE.VEIN, '^': TILE.CSEA_T, '_': TILE.CSEA_B
+    'F': TILE.TORCH, 'f': TILE.TORCH_B, 'x': TILE.VEIN, '^': TILE.CSEA_T, '_': TILE.CSEA_B,
+    // R3 star-w2
+    'c': TILE.CRUMBLE, 'S': TILE.SPRING, 'O': TILE.ORE, 'V': TILE.VENT, '*': TILE.CRYSTAL,
+    'l': TILE.LAMP, 'T': TILE.BEAM_T, 't': TILE.BEAM_B, 'm': TILE.MBG, 'r': TILE.RAIL,
+    'g': TILE.GEAR, 'w': TILE.FWIN
   };
 
   // ============================================================ ④ Level
@@ -8873,13 +10558,14 @@
 
     // ---- 美術索引（需要 ST.World.bind 之後才有值）------------------------
     var lut = new Uint16Array(TILE_COUNT);
-    var lavaAlt = 0, coinIdx = 0, torchAlt = 0;
+    var lavaAlt = 0, coinIdx = 0, torchAlt = 0, springAlt = 0;
     this.rebind = function () {
       var W = ST.World, i;
       if (!W || !W.bound) { for (i = 0; i < TILE_COUNT; i++) lut[i] = 0; return false; }
       for (i = 0; i < TILE_COUNT; i++) lut[i] = W.bgIndex(themeName(self.theme, i));
       lavaAlt = W.bgIndex('BG_LAVA1');
       torchAlt = W.bgIndex('BG_TORCH1');
+      springAlt = W.bgIndex('BG_SPRING1');
       coinIdx = lut[TILE.COIN];
       return true;
     };
@@ -8889,6 +10575,7 @@
       if (ST.World && ST.World.anim) {
         if (t === TILE.LAVA) return lavaAlt;
         if (t === TILE.TORCH) return torchAlt;
+        if (t === TILE.SPRING && springAlt) return springAlt;
       }
       return lut[t];
     };
@@ -8906,6 +10593,13 @@
     });
     this.boss = def.boss || null;
     this.axe = def.axe || null;
+    // ---- R3 star-w2：關卡資料裡的「機關物件」（不是硬編碼；ST.Objects 讀這些）----
+    this.movers = (def.movers || []).map(function (m) { return copyOf(m); });
+    this.geysers = (def.geysers || []).map(function (m) { return copyOf(m); });
+    this.items = (def.items || []).map(function (m) { return copyOf(m); });
+    this.bossKind = def.bossKind || (def.boss ? 'hammer' : null);
+    if (def.time !== undefined) this.time = def.time | 0;
+    this.world = def.world || (String(def.id).charAt(0) | 0) || 1;
     if (this.boss && this.boss.x === undefined) { this.boss.x = this.boss.col * 8; }
     if (this.axe && this.axe.x === undefined) { this.axe.x = this.axe.col * 8; this.axe.y = this.axe.row * 8; }
     this.coins = count(map, TILE.COIN);
@@ -8933,6 +10627,12 @@
     if (cp < 0) return { x: this.start.x, y: this.start.y, col: this.start.x >> 3 };
     return { x: cp * 8, y: this.surfaceY(cp) - 24, col: cp };
   };
+
+  function copyOf(o) {
+    var out = {}, k;
+    for (k in o) if (Object.prototype.hasOwnProperty.call(o, k)) out[k] = o[k];
+    return out;
+  }
 
   function count(map, k) {
     var n = 0, i;
@@ -9055,6 +10755,26 @@
           break;
         case 'tile':
           L._set(o.c, o.r, o.k);
+          break;
+        // ---- R3 star-w2 -----------------------------------------------------
+        case 'deco':                                   // 同 'row'，但**只填空格**（不可能蓋掉地形）
+          for (x = 0; x < o.s.length; x++) {
+            var kd = ROW_CHAR[o.s.charAt(x)];
+            if (kd === undefined) throw new Error('levels: deco 未知字元 "' + o.s.charAt(x) + '"');
+            if (kd >= 0) L._deco(o.c + x, o.r, kd);
+          }
+          break;
+        case 'dline':                                  // 一整條裝飾（只填空格）
+          for (x = 0; x < o.w; x++) L._deco(o.c + x, o.r, o.k);
+          break;
+        case 'crumble':                                // 崩塌礦石磚（一排）
+          for (x = 0; x < (o.w || 1); x++) L._set(o.c + x, o.r, TILE.CRUMBLE);
+          break;
+        case 'spring':                                 // 蒸氣彈簧
+          L._set(o.c, o.r, TILE.SPRING);
+          break;
+        case 'beam':                                   // 坑道支撐梁（上 + 下）
+          L._deco(o.c, o.r, TILE.BEAM_T); L._deco(o.c, o.r + 1, TILE.BEAM_B);
           break;
         default:
           throw new Error('levels_w1: 未知物件 "' + o.t + '"');
@@ -9361,7 +11081,27 @@
       return ok;
     },
     themeName: themeName,
-    ROWS: ROWS, TOP_ROW: TOP_ROW, SPLIT_LINE: TOP_ROW * 8
+    ROWS: ROWS, TOP_ROW: TOP_ROW, SPLIT_LINE: TOP_ROW * 8,
+    // R3 star-w2：讓別的關卡檔（levels_w2.js）掛新關進來
+    register: function (def) {
+      if (LEVELS[def.id]) throw new Error('levels: 關卡 ' + def.id + ' 已存在');
+      var L = new Level(def);
+      LEVELS[def.id] = L;
+      if (IDS.indexOf(def.id) < 0) IDS.push(def.id);
+      return L;
+    }
+  };
+
+  /* R3 star-w2：關卡工具組（Level 類別 / RLE / 主題註冊 / 磚語意常數），
+   * 讓 `games/star/levels_w2.js` 不必複製本檔的建圖程式。 */
+  ST.LevelKit = {
+    Level: Level,
+    rle: rle,
+    addTheme: addTheme,
+    themeName: themeName,
+    ROWS: ROWS, TOP_ROW: TOP_ROW,
+    FLOOR_DY: FLOOR_DY, CEIL_H: CEIL_H, ROW_CHAR: ROW_CHAR,
+    PREF: PREF, PRI: PRI, THEME_OVERRIDE: THEME_OVERRIDE, BASE_NAME: BASE_NAME
   };
 
   // ============================================================ ⑥ 捲動串流
@@ -9415,6 +11155,481 @@
 })();
 
 </script>
+<script>/* games/star/levels_w2.js */
+/*
+ * games/star/levels_w2.js — 《星塵勇者》世界 2「熔岩礦坑」四關（2-1 ~ 2-4）
+ * ---------------------------------------------------------------------------
+ * 擁有者：star-w2 agent ｜ 依賴：games/star/levels_w1.js（ST.LevelKit / ST.TILE / ST.Levels.register）
+ * 契約：docs/TASKS.md「R3 star W2」、docs/PLAN.md §4 R3 內容 A
+ *
+ * 主題（與 W1 草原 / 洞窟 / 天空 / 城堡對比）：礦坑 → 熔岩層 → 熔爐要塞。
+ *   2-1 mine   礦坑入口   教學：崩塌礦石磚 → 蒸氣彈簧 → 礦車升降板
+ *   2-2 mine   崩落礦道   節奏關：崩塌磚連段 + 彈簧接力 + 蝙蝠
+ *   2-3 magma  熔岩豎坑   機關關：垂直升降板 + 間歇泉 + 熔岩坑
+ *   2-4 forge  熔爐要塞   魔王前哨（護甲礦兵密集）+ 魔王「熔心巨像」
+ *
+ * ── 節奏與難度（研究 04 §1.6 鋸齒曲線、§5.1 難度曲線）───────────────────
+ *   每關「安全區 → 單一新機制 → 機制 + 舊壓力 → 綜合」四段；每關 2 個檢查點。
+ *   **每一個機關（升降板 / 崩塌磚 / 彈簧 / 間歇泉）都有一條純地形的備援路線**——
+ *   坑寬一律 ≤ 8 欄（全速跑跳 80 px = 10 欄），熔岩坑同理，牆高 ≤ 3 列。
+ *   ⇒ 不靠機關也走得完（友善版），機關是「比較輕鬆 / 拿得到金幣」的那條路。
+ */
+(function () {
+  'use strict';
+  var ST = window.ST = window.ST || {};
+  var K = ST.LevelKit;
+  if (!K || !ST.Levels || !ST.Levels.register) {
+    throw new Error('games/star/levels_w2.js 需要 games/star/levels_w1.js（R3 版，有 ST.LevelKit）');
+  }
+  var T = ST.TILE;
+
+  /* ============================================================ ① 三個新主題 */
+  // mine：礦坑（從洞窟繼承；地表 / 內部 / 硬塊換成礦岩，單向平台沿用木板）
+  K.addTheme('mine', {
+    from: 'cave',
+    override: (function () {
+      var o = {};
+      o[T.GROUND] = 'BG_MTOP'; o[T.DIRT] = 'BG_MROCK'; o[T.BLOCK] = 'BG_ORE';
+      o[T.BRICK] = 'BG_MBRICK'; o[T.CAVEBG] = 'BG_MBG';
+      return o;
+    })(),
+    pref: (function () {
+      var o = {};
+      o[T.CRUMBLE] = 2; o[T.SPRING] = 3; o[T.ORE] = 1;
+      o[T.CRYSTAL] = 3; o[T.LAMP] = 3; o[T.BEAM_T] = 2; o[T.BEAM_B] = 2;
+      o[T.RAIL] = 2; o[T.VENT] = 2; o[T.MBG] = 3;
+      o[T.COIN] = 3; o[T.QBLOCK] = 3; o[T.USED] = 3;
+      return o;
+    })()
+  });
+  // magma：熔岩層（從城堡繼承；熔岩用 bg2、金幣 / 機關用 bg3）
+  K.addTheme('magma', {
+    from: 'castle',
+    override: (function () {
+      var o = {};
+      o[T.GROUND] = 'BG_XTOP'; o[T.DIRT] = 'BG_XROCK';
+      o[T.BLOCK] = 'BG_XROCK'; o[T.BRICK] = 'BG_XROCK'; o[T.CAVEBG] = 'BG_MBG';
+      return o;
+    })(),
+    pref: (function () {
+      var o = {};
+      o[T.CRUMBLE] = 3; o[T.SPRING] = 3; o[T.ORE] = 1;
+      o[T.CRYSTAL] = 3; o[T.LAMP] = 3; o[T.BEAM_T] = 1; o[T.BEAM_B] = 1;
+      o[T.VENT] = 2; o[T.MBG] = 1; o[T.RAIL] = 1;
+      return o;
+    })()
+  });
+  // forge：熔爐要塞（從城堡繼承；齒輪 / 爐窗用 bg3）
+  K.addTheme('forge', {
+    from: 'castle',
+    override: (function () {
+      var o = {};
+      o[T.GROUND] = 'BG_FTOP'; o[T.DIRT] = 'BG_FSTONE';
+      o[T.BLOCK] = 'BG_FSTONE'; o[T.BRICK] = 'BG_FSTONE';
+      return o;
+    })(),
+    pref: (function () {
+      var o = {};
+      o[T.CRUMBLE] = 3; o[T.SPRING] = 3; o[T.ORE] = 1;
+      o[T.GEAR] = 3; o[T.FWIN] = 3; o[T.BEAM_T] = 1; o[T.BEAM_B] = 1;
+      o[T.VENT] = 2; o[T.LAMP] = 3;
+      return o;
+    })()
+  });
+
+  /* ============================================================ ② 2-1 礦坑入口 */
+  // 10 畫面 / 320 欄。坑：64–69 / 94–101 / 148–153 / 182–189 / 220–225 / 252–259
+  var L21 = {
+    id: '2-1', world: 2, theme: 'mine', music: 'mine', cols: 320, groundRow: 24, safeCols: 64,
+    floor: '64# 6. 24# 8. 26# 6A 6B 8# 6. 28# 8. 30# 6. 26# 8. 28# 32#',
+    ceil: '320#',
+    objs: [
+      // ---- 背景裝飾（全部走 _deco，只填空格 ⇒ 不影響可達性）----------------
+      { t: 'dline', c: 0, r: 8, w: 320, k: T.VEIN },
+      { t: 'dline', c: 0, r: 23, w: 320, k: T.RAIL },
+      { t: 'deco', c: 14, r: 12, s: 'l' }, { t: 'deco', c: 46, r: 12, s: 'l' },
+      { t: 'deco', c: 88, r: 12, s: 'l' }, { t: 'deco', c: 126, r: 11, s: 'l' },
+      { t: 'deco', c: 168, r: 12, s: 'l' }, { t: 'deco', c: 214, r: 12, s: 'l' },
+      { t: 'deco', c: 262, r: 12, s: 'l' }, { t: 'deco', c: 302, r: 12, s: 'l' },
+      { t: 'beam', c: 26, r: 10 }, { t: 'beam', c: 72, r: 10 }, { t: 'beam', c: 118, r: 10 },
+      { t: 'beam', c: 176, r: 10 }, { t: 'beam', c: 236, r: 10 }, { t: 'beam', c: 288, r: 10 },
+      { t: 'deco', c: 34, r: 22, s: '*' }, { t: 'deco', c: 80, r: 22, s: '*' },
+      { t: 'deco', c: 158, r: 22, s: '*' }, { t: 'deco', c: 204, r: 22, s: '*' },
+      { t: 'deco', c: 246, r: 22, s: '*' }, { t: 'deco', c: 296, r: 22, s: '*' },
+      { t: 'stal', c: 20, r: 9, w: 2 }, { t: 'stal', c: 100, r: 9, w: 2 },
+      { t: 'stal', c: 190, r: 9, w: 2 }, { t: 'stal', c: 270, r: 9, w: 2 },
+
+      // ---- ① 安全教學區（0–63）：金幣 → ? 磚 → 礦脈硬塊 -------------------
+      { t: 'coins', c: 10, r: 20, n: 4 },
+      { t: 'row', c: 20, r: 20, s: '?' },
+      { t: 'coins', c: 26, r: 18, n: 4 },
+      { t: 'row', c: 34, r: 20, s: 'B?B' },
+      { t: 'rect', c: 48, r: 22, w: 2, h: 2, k: T.ORE },
+      { t: 'coins', c: 52, r: 20, n: 3 },
+
+      // ---- ② 崩塌礦石磚教學（40–63）：踩在**地面上方**，碎了只是掉回地面 --
+      { t: 'crumble', c: 40, r: 20, w: 4 },
+      { t: 'coins', c: 40, r: 18, n: 4 },
+      { t: 'crumble', c: 58, r: 20, w: 4 },
+      { t: 'coins', c: 58, r: 18, n: 4 },
+
+      // ---- ③ 第一個坑（64–69，6 欄）+ 坑上崩塌橋（走得快就過得去）--------
+      { t: 'crumble', c: 64, r: 23, w: 6 },
+      { t: 'coins', c: 64, r: 21, n: 3 },
+      { t: 'row', c: 78, r: 20, s: '?BB?' },
+
+      // ---- ④ 升降板教學（94–101，8 欄坑；不搭板子也跳得過）---------------
+      { t: 'plat', c: 88, r: 20, w: 4 },
+      { t: 'coins', c: 96, r: 17, n: 3 },
+      { t: 'row', c: 110, r: 20, s: 'B?B' },
+      { t: 'rect', c: 120, r: 22, w: 2, h: 2, k: T.ORE },
+
+      // ---- ⑤ 蒸氣彈簧教學（128–147 的兩階台地）----------------------------
+      { t: 'spring', c: 130, r: 22 },
+      { t: 'plat', c: 136, r: 15, w: 8 },
+      { t: 'coins', c: 137, r: 13, n: 4 },
+      { t: 'row', c: 142, r: 19, s: '?' },
+
+      // ---- ⑥ 綜合段 --------------------------------------------------------
+      { t: 'crumble', c: 148, r: 23, w: 6 },
+      { t: 'plat', c: 160, r: 19, w: 6 }, { t: 'coins', c: 161, r: 17, n: 3 },
+      { t: 'row', c: 172, r: 20, s: 'B?B' },
+      { t: 'plat', c: 196, r: 18, w: 6 }, { t: 'coins', c: 197, r: 16, n: 3 },
+      { t: 'rect', c: 206, r: 22, w: 2, h: 2, k: T.ORE },
+
+      // ---- ⑦ 彈簧 → 高台上的無敵星 ---------------------------------------
+      { t: 'spring', c: 212, r: 23 },
+      { t: 'plat', c: 208, r: 14, w: 10 },
+      { t: 'coins', c: 209, r: 12, n: 4 },
+
+      { t: 'crumble', c: 220, r: 23, w: 6 },
+      { t: 'row', c: 234, r: 20, s: '?BB?' },
+      { t: 'plat', c: 244, r: 19, w: 6 }, { t: 'coins', c: 245, r: 17, n: 3 },
+      { t: 'crumble', c: 252, r: 23, w: 8 },
+      { t: 'coins', c: 264, r: 20, n: 4 },
+      { t: 'deco', c: 270, r: 23, s: 'V' },
+
+      // ---- ⑧ 旗桿 ---------------------------------------------------------
+      { t: 'pole', c: 300, r: 9 }
+    ],
+    start: { x: 32, y: 168 },
+    goal: { col: 300, row: 20 },
+    checkpoints: [102, 190],
+    // 礦車升降板：水平 1 塊（跨 182–189 的坑）、垂直 1 塊（送到 240 的高台）
+    movers: [
+      { c: 180, r: 22, w: 4, axis: 'x', range: 72, period: 240, phase: 0 },
+      { c: 240, r: 14, w: 4, axis: 'y', range: 56, period: 200, phase: 0 }
+    ],
+    geysers: [
+      { c: 270, r: 23, h: 3, period: 180, on: 54, phase: 0 }
+    ],
+    items: [
+      { c: 212, r: 12, kind: 'star' }
+    ],
+    spawns: [
+      { col: 44, kind: 'roller', dir: -1 },
+      { col: 76, kind: 'roller', dir: -1, edge: true },
+      { col: 106, kind: 'bat', y: 80 },
+      { col: 118, kind: 'roller', dir: -1 },
+      { col: 144, kind: 'bouncer' },
+      { col: 164, kind: 'bat', y: 88 },
+      { col: 176, kind: 'roller', dir: -1, edge: true },
+      { col: 200, kind: 'spitter' },
+      { col: 216, kind: 'roller', dir: -1 },
+      { col: 238, kind: 'bat', y: 80 },
+      { col: 248, kind: 'roller', dir: -1, edge: true },
+      { col: 266, kind: 'bouncer' },
+      { col: 284, kind: 'roller', dir: -1 }
+    ]
+  };
+
+  /* ============================================================ ③ 2-2 崩落礦道 */
+  // 10 畫面 / 320 欄；坑：32–37 / 60–67 / 92–99 / 148–155 / 182–189 / 214–219 / 246–253
+  var L22 = {
+    id: '2-2', world: 2, theme: 'mine', music: 'mine', cols: 320, groundRow: 24, safeCols: 32,
+    floor: '32# 6. 22# 8. 24# 8. 20# 6A 6C 8A 8# 8. 26# 8. 24# 6. 26# 8. 30# 36#',
+    ceil: '40# 8C 24# 10D 30# 12C 40# 10E 30# 8C 40# 12D 36# 20#',
+    objs: [
+      { t: 'dline', c: 0, r: 9, w: 320, k: T.VEIN },
+      { t: 'dline', c: 0, r: 23, w: 320, k: T.RAIL },
+      { t: 'deco', c: 18, r: 13, s: 'l' }, { t: 'deco', c: 56, r: 13, s: 'l' },
+      { t: 'deco', c: 104, r: 13, s: 'l' }, { t: 'deco', c: 152, r: 13, s: 'l' },
+      { t: 'deco', c: 198, r: 13, s: 'l' }, { t: 'deco', c: 248, r: 13, s: 'l' },
+      { t: 'deco', c: 292, r: 13, s: 'l' },
+      { t: 'beam', c: 30, r: 11 }, { t: 'beam', c: 84, r: 11 }, { t: 'beam', c: 140, r: 11 },
+      { t: 'beam', c: 196, r: 11 }, { t: 'beam', c: 260, r: 11 }, { t: 'beam', c: 306, r: 11 },
+      { t: 'deco', c: 24, r: 22, s: '*' }, { t: 'deco', c: 74, r: 22, s: '*' },
+      { t: 'deco', c: 128, r: 20, s: '*' }, { t: 'deco', c: 178, r: 22, s: '*' },
+      { t: 'deco', c: 230, r: 22, s: '*' }, { t: 'deco', c: 288, r: 22, s: '*' },
+      { t: 'stal', c: 44, r: 10, w: 2 }, { t: 'stal', c: 116, r: 13, w: 2 },
+      { t: 'stal', c: 210, r: 10, w: 2 }, { t: 'stal', c: 276, r: 10, w: 2 },
+
+      // ---- ① 起跑 + 第一組崩塌橋 ------------------------------------------
+      { t: 'coins', c: 12, r: 20, n: 4 },
+      { t: 'row', c: 22, r: 20, s: 'B?B' },
+      { t: 'crumble', c: 32, r: 23, w: 6 },
+      { t: 'coins', c: 32, r: 21, n: 3 },
+
+      // ---- ② 崩塌磚連段（節奏：跑 → 跳 → 跑）------------------------------
+      { t: 'crumble', c: 60, r: 23, w: 8 },
+      { t: 'coins', c: 60, r: 21, n: 4 },
+      { t: 'plat', c: 46, r: 19, w: 6 }, { t: 'coins', c: 47, r: 17, n: 3 },
+      { t: 'crumble', c: 92, r: 23, w: 8 },
+      { t: 'coins', c: 92, r: 21, n: 4 },
+      { t: 'row', c: 76, r: 20, s: '?BB?' },
+
+      // ---- ③ 彈簧接力（120–139 的階梯台地）--------------------------------
+      { t: 'spring', c: 122, r: 22 },
+      { t: 'plat', c: 126, r: 14, w: 8 }, { t: 'coins', c: 127, r: 12, n: 4 },
+      { t: 'spring', c: 134, r: 20 },
+      { t: 'plat', c: 140, r: 16, w: 6 }, { t: 'coins', c: 141, r: 14, n: 3 },
+
+      // ---- ④ 升降板 + 崩塌橋交錯 ------------------------------------------
+      { t: 'crumble', c: 148, r: 23, w: 8 },
+      { t: 'plat', c: 162, r: 19, w: 6 }, { t: 'coins', c: 163, r: 17, n: 3 },
+      { t: 'row', c: 172, r: 20, s: 'B?B' },
+      { t: 'crumble', c: 182, r: 23, w: 8 },
+      { t: 'plat', c: 196, r: 18, w: 8 }, { t: 'coins', c: 197, r: 16, n: 4 },
+      { t: 'rect', c: 206, r: 22, w: 2, h: 2, k: T.ORE },
+
+      // ---- ⑤ 綜合段 --------------------------------------------------------
+      { t: 'crumble', c: 214, r: 23, w: 6 },
+      { t: 'row', c: 226, r: 20, s: '?BB?' },
+      { t: 'spring', c: 238, r: 23 },
+      { t: 'plat', c: 234, r: 14, w: 10 }, { t: 'coins', c: 235, r: 12, n: 5 },
+      { t: 'crumble', c: 246, r: 23, w: 8 },
+      { t: 'plat', c: 262, r: 19, w: 6 }, { t: 'coins', c: 263, r: 17, n: 3 },
+      { t: 'row', c: 276, r: 20, s: 'B?B' },
+      { t: 'deco', c: 290, r: 23, s: 'V' },
+      { t: 'pole', c: 302, r: 9 }
+    ],
+    start: { x: 32, y: 168 },
+    goal: { col: 302, row: 20 },
+    checkpoints: [100, 196],
+    movers: [
+      { c: 156, r: 21, w: 4, axis: 'x', range: 64, period: 224, phase: 0 },
+      { c: 190, r: 21, w: 4, axis: 'x', range: 64, period: 224, phase: 112 },
+      { c: 268, r: 14, w: 4, axis: 'y', range: 48, period: 180, phase: 0 }
+    ],
+    geysers: [
+      { c: 108, r: 23, h: 3, period: 160, on: 48, phase: 0 },
+      { c: 290, r: 23, h: 3, period: 160, on: 48, phase: 80 }
+    ],
+    items: [
+      { c: 236, r: 12, kind: 'star' }
+    ],
+    spawns: [
+      { col: 24, kind: 'roller', dir: -1 },
+      { col: 44, kind: 'bat', y: 96 },
+      { col: 52, kind: 'roller', dir: -1, edge: true },
+      { col: 72, kind: 'bouncer' },
+      { col: 86, kind: 'bat', y: 104 },
+      { col: 104, kind: 'roller', dir: -1 },
+      { col: 118, kind: 'spitter' },
+      { col: 142, kind: 'bat', y: 88 },
+      { col: 160, kind: 'roller', dir: -1, edge: true },
+      { col: 176, kind: 'bouncer' },
+      { col: 200, kind: 'bat', y: 96 },
+      { col: 210, kind: 'roller', dir: -1 },
+      { col: 228, kind: 'spitter' },
+      { col: 244, kind: 'roller', dir: -1, edge: true },
+      { col: 264, kind: 'bat', y: 88 },
+      { col: 280, kind: 'roller', dir: -1 }
+    ]
+  };
+
+  /* ============================================================ ④ 2-3 熔岩豎坑 */
+  // 9 畫面 / 288 欄；熔岩坑 32–37 / 58–65 / 88–93 / 150–155 / 182–189，無底坑 118–125 / 214–219
+  var L23 = {
+    id: '2-3', world: 2, theme: 'magma', music: 'magma', cols: 288, groundRow: 24, safeCols: 32,
+    floor: '32# 6L 20# 8L 22# 6L 24# 8. 24# 6L 26# 8L 24# 6. 28# 40#',
+    ceil: '288#',
+    objs: [
+      // 岩漿層背景紋：**不要整列鋪滿**（會被誤認成一條可以站的線），改成散落的短段
+      { t: 'deco', c: 8, r: 11, s: 'mm..m' }, { t: 'deco', c: 52, r: 10, s: 'm.mm' },
+      { t: 'deco', c: 96, r: 13, s: 'mm.m' }, { t: 'deco', c: 140, r: 10, s: 'm..mm' },
+      { t: 'deco', c: 186, r: 12, s: 'mm.m' }, { t: 'deco', c: 224, r: 10, s: 'm.mm' },
+      { t: 'deco', c: 262, r: 13, s: 'mm..m' },
+      { t: 'deco', c: 12, r: 12, s: 'l' }, { t: 'deco', c: 70, r: 12, s: 'l' },
+      { t: 'deco', c: 134, r: 12, s: 'l' }, { t: 'deco', c: 200, r: 12, s: 'l' },
+      { t: 'deco', c: 258, r: 12, s: 'l' },
+      { t: 'beam', c: 44, r: 11 }, { t: 'beam', c: 108, r: 11 },
+      { t: 'beam', c: 170, r: 11 }, { t: 'beam', c: 240, r: 11 },
+      { t: 'deco', c: 20, r: 22, s: '*' }, { t: 'deco', c: 100, r: 22, s: '*' },
+      { t: 'deco', c: 166, r: 22, s: '*' }, { t: 'deco', c: 250, r: 22, s: '*' },
+
+      // ---- ① 安全區 + 熔岩坑（都是 6~8 欄，跑跳跨得過）--------------------
+      { t: 'coins', c: 10, r: 20, n: 4 },
+      { t: 'row', c: 20, r: 20, s: 'B?B' },
+      { t: 'plat', c: 32, r: 21, w: 6 },                 // 熔岩上的落腳板（備援路線）
+      { t: 'coins', c: 33, r: 19, n: 3 },
+      { t: 'deco', c: 40, r: 23, s: 'V' },
+
+      // ---- ② 間歇泉（噴發時不能站在噴口上）-------------------------------
+      { t: 'deco', c: 48, r: 23, s: 'V' },
+      { t: 'plat', c: 58, r: 21, w: 8 }, { t: 'coins', c: 59, r: 19, n: 4 },
+      { t: 'row', c: 70, r: 20, s: '?BB?' },
+      { t: 'deco', c: 80, r: 23, s: 'V' },
+      { t: 'plat', c: 88, r: 21, w: 6 },
+
+      // ---- ③ 垂直升降板塔（94–125）：板子送上去，也能走下面的平台爬 ------
+      { t: 'plat', c: 96, r: 20, w: 6 }, { t: 'coins', c: 97, r: 18, n: 3 },
+      { t: 'plat', c: 104, r: 16, w: 6 }, { t: 'coins', c: 105, r: 14, n: 3 },
+      { t: 'plat', c: 112, r: 20, w: 6 },
+      { t: 'plat', c: 118, r: 17, w: 8 }, { t: 'coins', c: 119, r: 15, n: 4 },
+      { t: 'spring', c: 128, r: 23 },
+      { t: 'plat', c: 126, r: 13, w: 8 }, { t: 'coins', c: 127, r: 11, n: 4 },
+
+      // ---- ④ 熔岩 + 崩塌磚 -------------------------------------------------
+      { t: 'crumble', c: 150, r: 23, w: 6 },
+      { t: 'plat', c: 140, r: 19, w: 6 }, { t: 'coins', c: 141, r: 17, n: 3 },
+      { t: 'deco', c: 160, r: 23, s: 'V' },
+      { t: 'row', c: 168, r: 20, s: 'B?B' },
+      { t: 'plat', c: 182, r: 21, w: 8 }, { t: 'coins', c: 183, r: 19, n: 4 },
+      { t: 'rect', c: 196, r: 22, w: 2, h: 2, k: T.ORE },
+
+      // ---- ⑤ 綜合段 + 無敵星 ----------------------------------------------
+      { t: 'spring', c: 204, r: 23 },
+      { t: 'plat', c: 200, r: 14, w: 10 }, { t: 'coins', c: 201, r: 12, n: 4 },
+      { t: 'crumble', c: 214, r: 23, w: 6 },
+      { t: 'plat', c: 226, r: 19, w: 6 }, { t: 'coins', c: 227, r: 17, n: 3 },
+      { t: 'deco', c: 236, r: 23, s: 'V' },
+      { t: 'row', c: 244, r: 20, s: '?BB?' },
+      { t: 'coins', c: 256, r: 20, n: 4 },
+      { t: 'pole', c: 272, r: 9 }
+    ],
+    start: { x: 32, y: 168 },
+    goal: { col: 272, row: 20 },
+    checkpoints: [94, 190],
+    movers: [
+      { c: 100, r: 13, w: 4, axis: 'y', range: 64, period: 200, phase: 0 },
+      { c: 118, r: 12, w: 4, axis: 'y', range: 72, period: 240, phase: 60 },
+      { c: 176, r: 20, w: 4, axis: 'x', range: 64, period: 224, phase: 0 },
+      { c: 248, r: 13, w: 4, axis: 'y', range: 56, period: 180, phase: 90 }
+    ],
+    geysers: [
+      { c: 40, r: 23, h: 3, period: 150, on: 48, phase: 0 },
+      { c: 48, r: 23, h: 3, period: 150, on: 48, phase: 75 },
+      { c: 80, r: 23, h: 4, period: 170, on: 54, phase: 30 },
+      { c: 160, r: 23, h: 4, period: 150, on: 54, phase: 0 },
+      { c: 236, r: 23, h: 4, period: 160, on: 54, phase: 60 }
+    ],
+    items: [
+      { c: 202, r: 12, kind: 'star' }
+    ],
+    spawns: [
+      { col: 22, kind: 'roller', dir: -1 },
+      { col: 44, kind: 'spitter' },
+      { col: 52, kind: 'bat', y: 88 },
+      { col: 70, kind: 'roller', dir: -1, edge: true },
+      { col: 96, kind: 'bat', y: 80 },
+      { col: 110, kind: 'flyer', y: 128, amp: 24 },
+      { col: 134, kind: 'armor', dir: -1 },
+      { col: 146, kind: 'bat', y: 96 },
+      { col: 166, kind: 'spitter' },
+      { col: 178, kind: 'flyer', y: 120, amp: 24 },
+      { col: 192, kind: 'armor', dir: -1 },
+      { col: 212, kind: 'bat', y: 88 },
+      { col: 230, kind: 'roller', dir: -1, edge: true },
+      { col: 244, kind: 'spitter' },
+      { col: 258, kind: 'bat', y: 96 }
+    ]
+  };
+
+  /* ============================================================ ⑤ 2-4 熔爐要塞 */
+  // 8 畫面 / 256 欄；熔岩坑 32–39 / 62–67 / 92–99 / 160–167，無底坑 126–131
+  // 198–255 是魔王場（實地、無熔岩：被打退也不會直接掉進熔岩）
+  var L24 = {
+    id: '2-4', world: 2, theme: 'forge', music: 'forge', cols: 256, groundRow: 24, safeCols: 32,
+    floor: '32# 8L 22# 6L 24# 8L 26# 6. 28# 8L 30# 58#',
+    ceil: '256#',
+    objs: [
+      { t: 'row', c: 12, r: 9, s: 'w.w' }, { t: 'row', c: 46, r: 9, s: 'w.w' },
+      { t: 'row', c: 76, r: 9, s: 'w.w' }, { t: 'row', c: 110, r: 9, s: 'w.w' },
+      { t: 'row', c: 146, r: 9, s: 'w.w' }, { t: 'row', c: 182, r: 9, s: 'w.w' },
+      { t: 'row', c: 214, r: 9, s: 'w.w' },
+      { t: 'deco', c: 26, r: 12, s: 'g' }, { t: 'deco', c: 68, r: 12, s: 'g' },
+      { t: 'deco', c: 122, r: 12, s: 'g' }, { t: 'deco', c: 170, r: 12, s: 'g' },
+      { t: 'deco', c: 226, r: 12, s: 'g' },
+      { t: 'torch', c: 40, r: 12 }, { t: 'torch', c: 96, r: 12 },
+      { t: 'torch', c: 150, r: 12 }, { t: 'torch', c: 206, r: 12 },
+      { t: 'beam', c: 58, r: 11 }, { t: 'beam', c: 134, r: 11 }, { t: 'beam', c: 194, r: 11 },
+
+      // ---- ① 起跑 + 熔岩坑（都有落腳板）----------------------------------
+      { t: 'coins', c: 10, r: 20, n: 4 },
+      { t: 'row', c: 20, r: 20, s: 'B?B' },
+      { t: 'plat', c: 32, r: 21, w: 8 }, { t: 'coins', c: 33, r: 19, n: 4 },
+      { t: 'deco', c: 44, r: 23, s: 'V' },
+      { t: 'plat', c: 62, r: 21, w: 6 }, { t: 'coins', c: 63, r: 19, n: 3 },
+      { t: 'row', c: 74, r: 20, s: '?BB?' },
+      { t: 'plat', c: 92, r: 21, w: 8 }, { t: 'coins', c: 93, r: 19, n: 4 },
+
+      // ---- ② 護甲礦兵走廊（100–160）：不可踩，只能繞 / 跳過 / 吃無敵星 ----
+      { t: 'rect', c: 106, r: 22, w: 2, h: 2, k: T.ORE },
+      { t: 'plat', c: 112, r: 19, w: 8 }, { t: 'coins', c: 113, r: 17, n: 4 },
+      { t: 'spring', c: 122, r: 23 },
+      { t: 'plat', c: 118, r: 14, w: 10 }, { t: 'coins', c: 119, r: 12, n: 5 },
+      { t: 'crumble', c: 126, r: 23, w: 6 },
+      { t: 'rect', c: 138, r: 22, w: 2, h: 2, k: T.ORE },
+      { t: 'plat', c: 144, r: 19, w: 8 }, { t: 'coins', c: 145, r: 17, n: 4 },
+      { t: 'deco', c: 156, r: 23, s: 'V' },
+      { t: 'plat', c: 160, r: 21, w: 8 }, { t: 'coins', c: 161, r: 19, n: 4 },
+
+      // ---- ③ 魔王前哨（168–196）------------------------------------------
+      { t: 'row', c: 172, r: 20, s: 'B?B' },
+      { t: 'rect', c: 184, r: 20, w: 2, h: 4, k: T.ORE },
+      { t: 'deco', c: 192, r: 23, s: 'V' },
+      { t: 'coins', c: 176, r: 20, n: 4 },
+
+      // ---- ④ 魔王場（198–255）：兩側石塊當牆，中間淨空 --------------------
+      { t: 'rect', c: 198, r: 20, w: 2, h: 4, k: T.ORE },
+      { t: 'coins', c: 206, r: 20, n: 4 },
+      { t: 'pole', c: 246, r: 9 }
+    ],
+    start: { x: 32, y: 168 },
+    goal: { col: 246, row: 20 },
+    checkpoints: [100, 172],
+    bossKind: 'colossus',
+    boss: { col: 226, x: 226 * 8, y: 160 },
+    movers: [
+      { c: 148, r: 21, w: 4, axis: 'x', range: 56, period: 200, phase: 0 },
+      { c: 210, r: 14, w: 4, axis: 'y', range: 48, period: 180, phase: 0 }
+    ],
+    geysers: [
+      { c: 44, r: 23, h: 3, period: 150, on: 48, phase: 0 },
+      { c: 156, r: 23, h: 4, period: 150, on: 54, phase: 40 },
+      { c: 192, r: 23, h: 4, period: 160, on: 48, phase: 80 }
+    ],
+    items: [
+      { c: 120, r: 12, kind: 'star' }
+    ],
+    spawns: [
+      { col: 22, kind: 'roller', dir: -1 },
+      { col: 46, kind: 'spitter' },
+      { col: 56, kind: 'bat', y: 88 },
+      { col: 74, kind: 'roller', dir: -1, edge: true },
+      { col: 86, kind: 'bat', y: 96 },
+      { col: 104, kind: 'armor', dir: -1 },
+      { col: 116, kind: 'spitter' },
+      { col: 134, kind: 'armor', dir: -1 },
+      { col: 142, kind: 'bat', y: 88 },
+      { col: 152, kind: 'roller', dir: -1, edge: true },
+      { col: 170, kind: 'armor', dir: -1 },
+      { col: 178, kind: 'bat', y: 96 },
+      { col: 188, kind: 'spitter' }
+    ]
+  };
+
+  /* ============================================================ ⑥ 註冊 */
+  var IDS2 = ['2-1', '2-2', '2-3', '2-4'];
+  var DEFS = { '2-1': L21, '2-2': L22, '2-3': L23, '2-4': L24 };
+  var i;
+  for (i = 0; i < IDS2.length; i++) ST.Levels.register(DEFS[IDS2[i]]);
+  ST.W2_IDS = IDS2;
+  ST.W2_DEFS = DEFS;
+})();
+
+</script>
 <script>/* games/star/main.js */
 /*
  * games/star/main.js — 《星塵勇者》主程式（window.GAME）
@@ -9455,7 +11670,11 @@
   var CAM_L = 64;                             // 畫面 25% → 往左回捲觸發
   var NT_WINDOW = 64;                         // 兩張名稱表 = 64 欄的環形視窗
   var SCROLL_AHEAD = 34;
-  var LEVEL_ORDER = ['1-1', '1-2', '1-3', '1-4'];
+  var LEVEL_ORDER = ['1-1', '1-2', '1-3', '1-4', '2-1', '2-2', '2-3', '2-4'];
+  var WORLD_FIRST = { 1: '1-1', 2: '2-1' };   // 標題畫面的世界選擇（R3 star-w2）
+  var POLE_VY = 3;                            // 旗桿下滑 3 px/幀（R3：補上 W1 留下的演出）
+  var POLE_WALK = 24;                         // 下滑到底後往右走 24 幀進城
+  var STAR_SCORE = 1000;                      // 撿到無敵星的分數
   var TIME_START = 300;
   var SCORE_STOMP = 100, SCORE_COIN = 200, SCORE_GOAL = 1000, SCORE_PER_TIME = 50;
   var CLEAR_HOLD = 40;                        // 結算完停幾幀再進下一關
@@ -9581,7 +11800,11 @@
     ground: { backdrop: 0x22, bg: [[0x0F, 0x10, 0x30], [0x07, 0x17, 0x27], [0x0F, 0x17, 0x28], [0x09, 0x1A, 0x2A]] },
     cave: { backdrop: 0x0F, bg: [[0x0F, 0x10, 0x30], [0x01, 0x11, 0x21], [0x0F, 0x17, 0x28], [0x00, 0x10, 0x20]] },
     sky: { backdrop: 0x21, bg: [[0x0F, 0x10, 0x30], [0x02, 0x12, 0x22], [0x0F, 0x17, 0x28], [0x10, 0x20, 0x30]] },
-    castle: { backdrop: 0x0F, bg: [[0x0F, 0x10, 0x30], [0x06, 0x16, 0x26], [0x0F, 0x17, 0x28], [0x00, 0x10, 0x20]] }
+    castle: { backdrop: 0x0F, bg: [[0x0F, 0x10, 0x30], [0x06, 0x16, 0x26], [0x0F, 0x17, 0x28], [0x00, 0x10, 0x20]] },
+    // R3 star-w2（ST.World.applyPalettes 缺席時的後備）
+    mine: { backdrop: 0x0F, bg: [[0x0F, 0x10, 0x30], [0x07, 0x17, 0x27], [0x00, 0x10, 0x30], [0x01, 0x21, 0x30]] },
+    magma: { backdrop: 0x0F, bg: [[0x0F, 0x10, 0x30], [0x00, 0x07, 0x17], [0x06, 0x16, 0x27], [0x01, 0x11, 0x30]] },
+    forge: { backdrop: 0x0F, bg: [[0x0F, 0x10, 0x30], [0x00, 0x10, 0x30], [0x06, 0x16, 0x27], [0x08, 0x18, 0x28]] }
   };
   var SPR_PAL = [
     [0x0F, 0x12, 0x27],   // 0 主角（黑描邊 / 藍戰衣 / 膚色）
@@ -9614,6 +11837,8 @@
       // fix5：真·一鍵密技（鍵盤 C / 觸控 ★密技 / nes-cheat 事件），不必先暫停
       cheatReq: false, cheatCool: 0, cheats: 0, cheatContinues: 0, lastCheat: '',
       floatBanner: null, floatCam: 0,
+      // R3 star-w2
+      bossMod: null, pole: null, titleWorld: 1, starMusic: false, objInit: false,
       lastSfx: null, colWrites: 0
     };
   }
@@ -9631,7 +11856,11 @@
   function setTileCode(col, row, t) {
     var lv = g.lv;
     if (lv && typeof lv.setTile === 'function') {
+      // R3 star-w2：lv.onTileChange 由本檔掛給 ST.Objects（崩塌磚）用，這條路自己會寫名稱表
+      var keep = lv.onTileChange;
+      lv.onTileChange = null;
       try { lv.setTile(col, row, t); if (lv.clearDirty) lv.clearDirty(); } catch (e) { g.over[col * 32 + row] = t; }
+      lv.onTileChange = keep;
     } else {
       g.over[col * 32 + row] = t;
     }
@@ -9734,6 +11963,10 @@
     g.bossMusic = 0;
     g.cheatInv = false;
     g.paused = false;
+    g.pole = null;
+    g.starMusic = false;
+    g.bossMod = (lv.bossKind === 'colossus' && ST.BossW2) ? ST.BossW2 : ST.Boss;
+    ST.ActiveBoss = g.bossMod;               // enemies.js 的 each() 要知道現在是哪一隻魔王
     g.floatBanner = null; g.secretMsg = 0;   // fix5：換關整片重畫 ⇒ 浮動疊字記錄作廢
     g.pops.length = 0;
     g.bump = null;
@@ -9753,12 +11986,41 @@
     rebuildScreen();
     // 敵人 / 魔王：交給 star-world 自己初始化（出怪表、橋 / 斧頭機關）
     if (ST.Enemies && typeof ST.Enemies.init === 'function') { try { ST.Enemies.init(lv, { solidAt: g.solidAt }); } catch (e) { } }
-    if (ST.Boss && typeof ST.Boss.init === 'function') { try { ST.Boss.init(lv); } catch (e) { } }
+    if (ST.Boss && typeof ST.Boss.reset === 'function' && g.bossMod !== ST.Boss) { try { ST.Boss.reset(); } catch (e) { } }
+    if (ST.BossW2 && typeof ST.BossW2.reset === 'function' && g.bossMod !== ST.BossW2) { try { ST.BossW2.reset(); } catch (e) { } }
+    if (g.bossMod && typeof g.bossMod.init === 'function') { try { g.bossMod.init(lv); } catch (e) { } }
+    // R3 star-w2：關卡機關（升降板 / 崩塌磚 / 彈簧 / 間歇泉 / 道具）
+    if (typeof lv.setTile === 'function') lv.onTileChange = onLevelTileChange;
+    if (ST.Objects && typeof ST.Objects.init === 'function') {
+      try { ST.Objects.init(lv, { setTile: objSetTile }); g.objInit = true; } catch (e) { g.objInit = false; }
+    }
     g.hudDirty = true;
-    audio('play', lv.music || themeOf(lv));
+    audio('play', levelSong(lv));
+  }
+
+  // 關卡自己改了一格地形（ST.Objects 的崩塌磚）⇒ 只重寫那一格名稱表（1 byte）
+  function onLevelTileChange(col, row) { if (ppu0) writeOneTile(col, row); }
+  function objSetTile(col, row, code) {
+    if (!g.lv || typeof g.lv.setTile !== 'function') return false;
+    g.lv.setTile(col, row, code);      // onTileChange 會把那一格寫進名稱表
+    return true;
   }
 
   function themeOf(lv) { return (lv && lv.theme) || 'ground'; }
+  function worldOf(lv) { return (lv && lv.world) || (parseInt(String(lv && lv.id).charAt(0), 10) || 1); }
+
+  /* R3 star-w2：W1 用 ST.Boss（鐵鎚王）、W2 用 ST.BossW2（熔心巨像）。
+   * 兩者介面相同（init / reset / update / draw / dead / active / box / state）。 */
+  function bossMod() { return (g && g.bossMod) ? g.bossMod : ST.Boss; }
+
+  /* 曲目：缺鍵就退回既有曲（契約同 cruiser 的 song.js） */
+  function songKey(k, fb) {
+    if (!k) return fb;
+    if (ST.Audio && typeof ST.Audio.has === 'function') return ST.Audio.has(k) ? k : fb;
+    return k;
+  }
+  function levelSong(lv) { return songKey(lv && (lv.music || themeOf(lv)), 'ground'); }
+  function bossSong(lv) { return songKey(worldOf(lv) === 2 ? 'boss2' : 'boss', 'boss'); }
 
   function applyPalettes(ppu, lv) {
     var th = THEMES[themeOf(lv)] || THEMES.ground;
@@ -9885,13 +12147,18 @@
   // 文字跨兩張名稱表）都會被自動分段寫到「目前看得見的那一張」。
   // （qa2-star P1-1：舊版只寫 nt 0 的固定欄，camX 一大就看不到字。）
 
-  var TITLE = [
-    { row: 9, col: 9, text: 'STARDUST HERO' },
-    { row: 11, col: 11, text: 'WORLD 1' },
-    { row: 14, col: 10, text: 'PRESS START' },
-    { row: 17, col: 8, text: '$ 2026 ORIGINAL' },
-    { row: 19, col: 5, text: 'SECRET: C KEY OR $ BTN' }      // fix5：標題也寫出一鍵密技
-  ];
+  // R3 star-w2：標題有了「世界選擇」（SELECT 切 WORLD 1 / 2 ＝ PLAN §4 的世界地圖簡版）
+  function titleLines(world) {
+    return [
+      { row: 9, col: 9, text: 'STARDUST HERO' },
+      { row: 11, col: 11, text: 'WORLD ' + (world || 1) },
+      { row: 12, col: 7, text: '$ SELECT = WORLD' },
+      { row: 14, col: 10, text: 'PRESS START' },
+      { row: 17, col: 8, text: '$ 2026 ORIGINAL' },
+      { row: 19, col: 5, text: 'SECRET: C KEY OR $ BTN' }      // fix5：標題也寫出一鍵密技
+    ];
+  }
+  var TITLE = titleLines(1);
   var GAMEOVER_LINES = [
     { row: 12, col: 12, text: 'GAME OVER' },
     { row: 16, col: 10, text: 'PRESS START' },
@@ -9914,7 +12181,7 @@
   // 破完 1-4：多一行分數（進入畫面時才算得出來，所以用函式產生）
   function winLines() {
     return [
-      { row: 10, col: 9, text: 'WORLD 1 CLEAR' },
+      { row: 10, col: 9, text: 'WORLD ' + worldOf(g.lv) + ' CLEAR' },
       { row: 13, col: 11, text: 'THANK YOU' },
       { row: 16, col: 10, text: 'SCORE ' + pad(g.hero.score, 6) },
       { row: 19, col: 10, text: 'PRESS START' }
@@ -9986,8 +12253,24 @@
     if (bud) bud.mute = muted;
   }
 
-  function drawTitle(ppu) { drawBanner(ppu, TITLE); }
+  function drawTitle(ppu) { TITLE = titleLines(g.titleWorld); drawBanner(ppu, TITLE); }
   function clearTitle(ppu) { clearBanner(ppu, TITLE); }
+  // SELECT：切換世界（只重畫「WORLD n」那一行）
+  function toggleTitleWorld(ppu) {
+    var list = levelList(), i, worlds = [];
+    for (i = 0; i < list.length; i++) {
+      var w = parseInt(String(list[i]).charAt(0), 10) || 1;
+      if (worlds.indexOf(w) < 0) worlds.push(w);
+    }
+    if (worlds.length < 2) return false;
+    var at = worlds.indexOf(g.titleWorld);
+    g.titleWorld = worlds[(at + 1) % worlds.length];
+    clearBanner(ppu, TITLE);
+    TITLE = titleLines(g.titleWorld);
+    drawBanner(ppu, TITLE);
+    sfx('coin');
+    return true;
+  }
 
   /* ------------------ fix4：暫停 / 一鍵密技 / 一鍵續關 ------------------
    * 使用者回饋：「多個一鍵密技好了，當然也保留舊密技，不然死到一半就玩不下去了。」
@@ -10044,6 +12327,10 @@
     var h = g.hero;
     h.lives = SECRET_LIVES;
     h.inv = SECRET_INV;                   // 走現有的受傷無敵（閃爍 + hurt() 直接 return false）
+    // R3 star-w2：一鍵密技也帶「無敵星」旗標 ⇒ 熔岩 / 尖刺 / 火柱 / 掉坑都擋得住
+    // （收掉 R2c fix5「留給後續」第 3 條）
+    h.star = SECRET_INV;
+    g.starMusic = true;
     g.cheatInv = true;
     g.hudDirty = true;
     if (g.paused) setBanner(PAUSE_SECRET_LINES);   // 暫停版：PAUSE 兩行 + SECRET!
@@ -10159,7 +12446,7 @@
       g.hudDirty = true;
       sfx('coin');
     } else if (t === T.GOAL && g.mode === 'play') {
-      enterClear();
+      startPole(col);                      // R3：旗桿下滑演出（W1 留下的待辦）
     }
   }
 
@@ -10184,6 +12471,52 @@
     } else {
       sfx('bump');
     }
+  }
+
+  /* --------------------- R3 star-w2：旗桿下滑演出 ---------------------
+   * W1（R2b）碰到旗桿是「瞬間 clear」，這裡補上 SMB 式的三拍：
+   *   ① 抓住桿子往下滑 3 px/幀（姿勢 'pole'）② 落地 ③ 往右走 24 幀進城 → 開始結算。
+   * 演出期間 `mode` 已經是 'clear'（機器人與既有測試看到的仍是 clear），
+   * 只是結算（時間換分）延到演出結束才跑。
+   */
+  function startPole(col) {
+    var h = g.hero;
+    var px2 = col * 8 - 6;
+    if (px2 < 0) px2 = 0;
+    g.pole = { col: col, phase: 'slide', t: 0, frames: 0, endY: groundYAt(col) };
+    if (h.crouch) Hero.setCrouch(h, ctx, false);
+    FX.aset(h.vxA, 0); FX.aset(h.vyA, 0);
+    FX.vsetPx(h.px, px2);
+    h.x = px2;
+    h.inv = 0; h.star = 0; h.onMover = null;
+    if (h.y > g.pole.endY) { FX.vsetPx(h.py, g.pole.endY); h.y = g.pole.endY; }
+    enterClear();
+  }
+
+  function stepPole() {
+    var p = g.pole, h = g.hero, y, x;
+    if (!p) return false;
+    p.frames++;
+    h.inv = 0;
+    if (p.phase === 'slide') {
+      h.state = 'pole';
+      h.facing = 1;
+      y = FX.floorPx(h.py.sub) + POLE_VY;
+      if (y >= p.endY) { y = p.endY; p.phase = 'walk'; p.t = 0; sfx('bump'); }
+      FX.vsetPx(h.py, y);
+      h.y = y;
+    } else {
+      h.state = 'walk';
+      h.facing = 1;
+      if (++h.animTimer >= 4) { h.animTimer = 0; h.anim = (h.anim + 1) & 3; }
+      x = FX.floorPx(h.px.sub) + 1;
+      FX.vsetPx(h.px, x);
+      h.x = x;
+      if (++p.t >= POLE_WALK) { g.pole = null; h.state = 'idle'; }
+    }
+    stepCamera();
+    streamColumns();
+    return true;
   }
 
   /* ------------------------------- 鏡頭 ------------------------------- */
@@ -10280,7 +12613,11 @@
     // 檢查點復活：相機左邊的敵人視為已出過，右邊的重新排隊（契約 ENGINE_API §15.8-5）
     if (ST.Enemies && typeof ST.Enemies.seek === 'function') { try { ST.Enemies.seek(g.camX); } catch (e) { } }
     else if (ST.Enemies && typeof ST.Enemies.reset === 'function') { try { ST.Enemies.reset(); } catch (e) { } }
-    if (ST.Boss && typeof ST.Boss.reset === 'function') { try { ST.Boss.reset(); } catch (e) { } }
+    var BM = bossMod();
+    if (BM && typeof BM.reset === 'function') { try { BM.reset(); } catch (e) { } }
+    if (ST.Objects && typeof ST.Objects.seek === 'function') { try { ST.Objects.seek(g.camX); } catch (e) { } }
+    g.pole = null;
+    g.starMusic = false;
     g.bossMusic = 0;                          // 魔王房復活：重新進房時再切一次 boss 曲
     g.cheatInv = false;
     g.paused = false;
@@ -10288,7 +12625,7 @@
     g.mode = 'play';
     g.modeFrames = 0;
     g.hudDirty = true;
-    audio('play', lv.music || themeOf(lv));
+    audio('play', levelSong(lv));
   }
 
   function nextLevel() {
@@ -10334,6 +12671,44 @@
     g.hero.score += SCORE_STOMP;
     g.hudDirty = true;
   }
+  // R3 star-w2：撿到無敵星
+  function onItem(it) {
+    var h = g.hero;
+    if (!it || it.kind !== 'star') return false;
+    h.star = (ST.Objects && ST.Objects.STAR_FRAMES) || 480;
+    h.stars++;
+    h.score += STAR_SCORE;
+    g.hudDirty = true;
+    g.starMusic = true;
+    sfx('powerup');
+    audio('play', songKey('invincible', levelSong(g.lv)));
+    return true;
+  }
+  // 無敵（星塵 / 一鍵密技）時掉出畫面：拉回最近的檢查點，**不扣命**
+  function onPitSave(h) {
+    var lv = g.lv, rp = null;
+    if (typeof lv.respawn === 'function') { try { rp = lv.respawn(g.checkpoint >= 0 ? g.checkpoint : -1); } catch (e) { rp = null; } }
+    if (!rp) {
+      var col = (g.checkpoint > 0) ? g.checkpoint : ((lv.start && lv.start.x) | 0) >> 3;
+      rp = { x: col * 8, y: groundYAt(col) };
+    }
+    FX.vsetPx(h.px, rp.x | 0);
+    FX.vsetPx(h.py, rp.y | 0);
+    FX.aset(h.vxA, 0); FX.aset(h.vyA, 0);
+    h.onGround = false; h.onMover = null;
+    g.camX = clampCam((rp.x | 0) - CAM_R);
+    rebuildScreen();
+    sfx('powerup');
+    return true;
+  }
+  // 無敵星結束 → 換回關卡曲（魔王房則回魔王曲）
+  function onStarEnd() {
+    if (!g.starMusic) return;
+    g.starMusic = false;
+    if (g.bossMusic === 2) return;
+    audio('play', g.bossMusic === 1 ? bossSong(g.lv) : levelSong(g.lv));
+  }
+
   function onBossDie(how) {
     g.hero.score += 2000;
     g.hudDirty = true;
@@ -10376,7 +12751,9 @@
   var ctx = {
     input: null, cols: 0,
     tileAt: tileAt, kindAt: kindAt, isLava: isLava,
-    onTouch: onTouch, onBump: onBump, sfx: sfx
+    onTouch: onTouch, onBump: onBump, sfx: sfx,
+    // R3 star-w2
+    onPitSave: onPitSave, onStarEnd: onStarEnd
   };
 
   /* ============================== GAME ============================== */
@@ -10398,6 +12775,9 @@
       g.onStar = onStar;
       g.onDie = onBossDie;
       g.onAxe = function () { sfx('bump'); };
+      // R3 star-w2：機關 / 魔王 / 敵人要用的共用 callback
+      g.onItem = onItem;
+      g.sfx = sfx;
 
       // ---- CHR：精靈表 1 = 主角(0..127) + 世界(128..255)；背景表 0 = HUD(0..63) + 地形 ----
       var sprObj = {}, bgObj = {}, k;
@@ -10409,6 +12789,13 @@
       for (k in ST.BG_FALLBACK) if (Object.prototype.hasOwnProperty.call(ST.BG_FALLBACK, k)) bgObj[k] = ST.BG_FALLBACK[k];
       if (ST.BG_WORLD) {
         for (k in ST.BG_WORLD) if (Object.prototype.hasOwnProperty.call(ST.BG_WORLD, k)) bgObj[k] = ST.BG_WORLD[k];
+      }
+      // R3 star-w2：世界 2 的追加磚（背景 20 磚 / 精靈 70 磚），合併後 bank 仍 ≤ 256
+      if (ST.BG_W2) {
+        for (k in ST.BG_W2) if (Object.prototype.hasOwnProperty.call(ST.BG_W2, k)) bgObj[k] = ST.BG_W2[k];
+      }
+      if (ST.SPR_W2) {
+        for (k in ST.SPR_W2) if (Object.prototype.hasOwnProperty.call(ST.SPR_W2, k)) sprObj[k] = ST.SPR_W2[k];
       }
       sprBank = NES.CHR.bank('st_spr', sprObj);
       bgBank = NES.CHR.bank('st_bg', bgObj);
@@ -10440,6 +12827,7 @@
       if (!first) first = list.length ? list[0] : 'test';
       g.startLevel = first;
       g.skipTitle = !!want;
+      g.titleWorld = parseInt(String(first).charAt(0), 10) || 1;
 
       audio('init', nes);
       loadLevel(first, false);
@@ -10469,11 +12857,16 @@
       if (!g.paused && g.secretMsg > 0 && --g.secretMsg === 0) endFloat(true);
 
       if (g.mode === 'title') {
-        if (input.pressed(BTN.START) || input.pressed(BTN.A)) {
+        // R3 star-w2：SELECT 切世界（WORLD 1 / 2），START 從該世界的第一關開始
+        if (input.pressed(BTN.SELECT)) {
+          toggleTitleWorld(nes.ppu);
+        } else if (input.pressed(BTN.START) || input.pressed(BTN.A)) {
+          var want = WORLD_FIRST[g.titleWorld] || g.startLevel;
           clearTitle(nes.ppu);
+          if (ST.LEVELS[want] && want !== g.levelId) loadLevel(want, false);
           g.mode = 'play';
           g.modeFrames = 0;
-          audio('play', g.lv.music || themeOf(g.lv));
+          audio('play', levelSong(g.lv));
         }
       } else if (g.mode === 'play' && g.paused) {
         // fix4：暫停中遊戲完全凍結，只收 SELECT（一鍵密技）與 START（解除）
@@ -10484,9 +12877,12 @@
         pauseGame();
       } else if (g.mode === 'play') {
         Hero.update(h, ctx);
+        // R3 star-w2：機關（升降板 / 崩塌磚 / 彈簧 / 間歇泉 / 道具）在主角移動之後結算
+        if (ST.Objects && typeof ST.Objects.update === 'function') { try { ST.Objects.update(g); } catch (e) { } }
         var worldDidCollide = false;
+        var BM = bossMod();
         if (ST.Enemies && typeof ST.Enemies.update === 'function') { try { ST.Enemies.update(g); worldDidCollide = true; } catch (e) { } }
-        if (ST.Boss && typeof ST.Boss.update === 'function') { try { ST.Boss.update(g); worldDidCollide = true; } catch (e) { } }
+        if (BM && typeof BM.update === 'function') { try { BM.update(g); worldDidCollide = true; } catch (e) { } }
         if (!worldDidCollide) stepEnemyCollisionsFallback();
         stepPops();
         if (ST.World && typeof ST.World.setAnim === 'function') ST.World.setAnim(g.frames >> 4);
@@ -10501,16 +12897,17 @@
         // fix4：一鍵密技的 20 秒無敵結束 → 換回關卡曲（魔王房則回魔王曲）
         if (g.cheatInv && h.inv <= 0) {
           g.cheatInv = false;
-          if (g.bossMusic !== 2) audio('play', g.bossMusic === 1 ? 'boss' : (g.lv.music || themeOf(g.lv)));
+          g.starMusic = false;
+          if (g.bossMusic !== 2) audio('play', g.bossMusic === 1 ? bossSong(g.lv) : levelSong(g.lv));
         }
         // 魔王曲（qa2-star P2-1）：進魔王房 → boss、擊破 → clear、離開魔王房 → 回關卡曲
-        if (g.lv.boss && ST.Boss) {
-          if (g.bossMusic === 1 && ST.Boss.dead) { g.bossMusic = 2; audio('play', 'clear'); }
-          else if (g.bossMusic === 0 && ST.Boss.active && !ST.Boss.dead) { g.bossMusic = 1; audio('play', 'boss'); }
-          else if (g.bossMusic === 1 && !ST.Boss.active) { g.bossMusic = 0; audio('play', g.lv.music || themeOf(g.lv)); }
+        if (g.lv.boss && BM) {
+          if (g.bossMusic === 1 && BM.dead) { g.bossMusic = 2; audio('play', 'clear'); }
+          else if (g.bossMusic === 0 && BM.active && !BM.dead) { g.bossMusic = 1; audio('play', bossSong(g.lv)); }
+          else if (g.bossMusic === 1 && !BM.active) { g.bossMusic = 0; audio('play', levelSong(g.lv)); }
         }
-        // 魔王關（1-4）沒有旗桿磚：打倒魔王 = 過關（star-world 的 ST.Boss.dead）
-        if (g.mode === 'play' && g.lv.boss && ST.Boss && ST.Boss.dead && !g.cleared) {
+        // 魔王關（1-4 / 2-4）：打倒魔王 = 過關（旗桿是第二條路）
+        if (g.mode === 'play' && g.lv.boss && BM && BM.dead && !g.cleared) {
           if (++g.bossClear >= 60) enterClear();
         }
         if (h.state === 'dead') enterDead();
@@ -10524,8 +12921,9 @@
           else respawn();
         }
       } else if (g.mode === 'clear') {
-        // 結算：剩餘時間換分（每單位 50 分，每幀最多 10 單位 ⇒ 300 秒約 30 幀）
-        if (g.time > 0) {
+        // R3：旗桿演出（下滑 → 落地 → 走進城）跑完才開始結算
+        if (g.pole) { stepPole(); }
+        else if (g.time > 0) {
           var d = g.time > 10 ? 10 : g.time;
           g.time -= d;
           h.score += d * SCORE_PER_TIME;
@@ -10574,8 +12972,10 @@
       }
       // fix4：GAME OVER 畫面不畫敵人（主角本來就不畫）—— 三行字才不會被路過的敵人精靈蓋掉
       if (g.mode !== 'gameover') {
+        if (ST.Objects && typeof ST.Objects.draw === 'function') { try { ST.Objects.draw(oam, g); } catch (e) { } }
         if (ST.Enemies && typeof ST.Enemies.draw === 'function') { try { ST.Enemies.draw(oam, g); } catch (e) { } }
-        if (ST.Boss && typeof ST.Boss.draw === 'function') { try { ST.Boss.draw(oam, g); } catch (e) { } }
+        var BD = bossMod();
+        if (BD && typeof BD.draw === 'function') { try { BD.draw(oam, g); } catch (e) { } }
       }
       oam.end();
     },
@@ -10609,6 +13009,13 @@
         // fix5：一鍵密技
         cheats: g.cheats | 0, cheatContinues: g.cheatContinues | 0,
         cheatCool: g.cheatCool | 0, lastCheat: g.lastCheat || '',
+        // R3 star-w2
+        world: worldOf(g.lv), theme: themeOf(g.lv),
+        star: h.star | 0, stars: h.stars | 0, pitSaves: h.pitSaves | 0,
+        onMover: !!h.onMover, pole: g.pole ? g.pole.phase : null,
+        titleWorld: g.titleWorld | 0,
+        springs: (ST.Objects && ST.Objects.springs) | 0,
+        picked: (ST.Objects && ST.Objects.picked) | 0,
         floatBanner: g.floatBanner ? g.floatBanner.map(function (t) { return t.text; }) : null
       };
     },
@@ -10656,16 +13063,29 @@
       // 通關機器人 / 測試用：目前活著的敵人（含魔王）矩形
       enemyList: function () {
         var out = [];
-        eachEnemy(function (e) { out.push({ x: e.x | 0, y: e.y | 0, w: e.w | 0, h: e.h | 0, kind: e.kind || '', stompable: (e.stompable === undefined) ? true : !!e.stompable }); });
-        if (!(ST.Enemies && ST.Enemies.includeBoss) && ST.Boss && ST.Boss.box) {
-          try { var bb = ST.Boss.box(g); if (bb) out.push({ x: bb.x | 0, y: bb.y | 0, w: bb.w | 0, h: bb.h | 0, kind: 'boss' }); } catch (e2) { }
+        eachEnemy(function (e) {
+          out.push({
+            x: e.x | 0, y: e.y | 0, w: e.w | 0, h: e.h | 0, kind: e.kind || '',
+            stompable: (e.stompable === undefined) ? true : !!e.stompable,
+            ground: !!e.onGround            // R3 star-w2：地面巡邏（armor）vs 飛行（flyer）
+          });
+        });
+        var BB = bossMod();
+        if (!(ST.Enemies && ST.Enemies.includeBoss) && BB && BB.box) {
+          try { var bb = BB.box(g); if (bb) out.push({ x: bb.x | 0, y: bb.y | 0, w: bb.w | 0, h: bb.h | 0, kind: 'boss' }); } catch (e2) { }
         }
         return out;
       },
       boss: function () {
-        if (!ST.Boss) return null;
-        return { x: ST.Boss.x | 0, y: ST.Boss.y | 0, w: 32, h: 32, alive: !!ST.Boss.alive, active: !!ST.Boss.active, dead: !!ST.Boss.dead, hp: ST.Boss.hp | 0, phase: ST.Boss.phase };
+        var B2 = bossMod();
+        if (!B2) return null;
+        return { x: B2.x | 0, y: B2.y | 0, w: 32, h: 32, alive: !!B2.alive, active: !!B2.active, dead: !!B2.dead, hp: B2.hp | 0, phase: B2.phase, stage: B2.stage | 0 };
       },
+      // R3 star-w2：機關（給通關機器人與測試）
+      objects: function () { return (ST.Objects && ST.Objects.state) ? ST.Objects.state() : null; },
+      moverTops: function (t) { return (ST.Objects && ST.Objects.moverTops) ? ST.Objects.moverTops(t) : []; },
+      objNow: function () { return (ST.Objects && ST.Objects.now) ? ST.Objects.now() : 0; },
+      hazardAt: function (x, y, w, h2, t) { return !!(ST.Objects && ST.Objects.hazardHit && ST.Objects.hazardHit(x, y, w, h2, t)); },
       tiles: function () { return heroTiles; },
       scroller: function () { return g.scr; }
     }

@@ -865,6 +865,33 @@
     }
   };
 
+  /* ============================================ R3 star-w2：曲目可外掛
+   * `games/star/song_w2.js` 用同一套工具寫世界 2 的曲，再 register 進來。
+   * play(key) 的行為不變（未知 key 仍然 warn + 回 false）；main.js 會在切曲前先
+   * 用 `ST.Audio.has(key)` 判斷，缺鍵就退回既有曲目（契約同 cruiser）。 */
+  Audio.BUILD = {
+    Builder: Builder, mel: mel, drm: drm, echoOf: echoOf, stab: stab, hold: hold,
+    INST: INST, MIN: MIN, MAJ: MAJ, DOM7: DOM7, DIM: DIM
+  };
+  Audio.has = function (key) { return !!SONGS[key]; };
+  Audio.register = function (key, song, info) {
+    var HZ = 60.0988, rows = 0, i;
+    SONGS[key] = song;
+    if (Audio.KEYS.indexOf(key) < 0) Audio.KEYS.push(key);
+    for (i = 0; i < song.order.length; i++) rows += song.rows;
+    var sp = song.groove ? (song.groove.reduce(function (a, v) { return a + v; }, 0) / song.groove.length) : song.speed;
+    INFO[key] = info || {};
+    INFO[key].speed = song.speed;
+    INFO[key].groove = song.groove;
+    INFO[key].rows = song.rows;
+    INFO[key].order = song.order.length;
+    INFO[key].patterns = song.patterns.length;
+    INFO[key].frames = Math.round(rows * sp);
+    INFO[key].seconds = Math.round(rows * sp / HZ * 100) / 100;
+    INFO[key].loop = song.playLoop;
+    return song;
+  };
+
   ST.Audio = Audio;
 
 })(typeof window !== 'undefined' ? window : this);

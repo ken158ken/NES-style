@@ -153,3 +153,61 @@ R2 只有關卡 1（空戰段 → 小行星帶 → 星際要塞 → 核心要塞
 |---|---|---|
 | cruiser-stages | games/cruiser/{stages,stage_runtime,bosses,boss,enemies,chr_world,main}.js、test_cruiser.py、test_stages.py、cruiser.html、tools/playthrough_cruiser.py | 見上（**不動 song.js**：那是 cruiser-song agent 的） |
 | cruiser-song | games/cruiser/song.js | `stage2`~`stage6`、`boss_final`、`ending` 七首新曲 |
+
+---
+
+# R3 star W2 —《星塵勇者》世界 2「熔岩礦坑」（2026-09-25）
+
+依 `docs/PLAN.md` §4「R3 內容 A」的 W2 部分：四關 + 世界 2 魔王 + 新敵 + 新道具 + 世界選擇，
+並把 R2b / R2c 留下的三個待辦收掉（無敵星未放進關卡、旗桿下滑演出、一鍵無敵擋不住熔岩 / 掉坑）。
+
+## 主題與節奏
+| 關 | 主題 | 欄（畫面） | 檢查點 | 新機制 / 壓力 |
+|---|---|---|---|---|
+| 2-1 | mine 礦坑入口 | 320（10） | 102、190 | **教學關**：崩塌礦石磚 → 蒸氣彈簧 → 礦車升降板，依序各給一次安全示範 |
+| 2-2 | mine 崩落礦道 | 320（10） | 100、196 | **節奏關**：崩塌磚連段 + 彈簧接力 + 蝙蝠；天花板高低起伏 |
+| 2-3 | magma 熔岩豎坑 | 288（9） | 94、190 | **機關關**：垂直升降板塔 + 間歇泉 + 熔岩坑 |
+| 2-4 | forge 熔爐要塞 | 256（8） | 100、172 | **魔王前哨**（護甲礦兵密集）+ 魔王「熔心巨像」 |
+
+- 長度 / 檢查點數 / 時限（300）/ 起點安全區沿用 W1 慣例；坑與熔岩帶一律 ≤ 8 欄、牆高 ≤ 3 列。
+- **每個機關都有純地形的備援路線**（友善版）：不靠升降板 / 彈簧也走得完，機關是「比較輕鬆 / 拿得到金幣」那條。
+
+## 四個新機制（全部是**關卡資料裡的物件**，不是硬編碼）
+| 機制 | 資料 | 行為 |
+|---|---|---|
+| 礦車升降板 mover | `level.movers[] = {c,r,w,axis:'x'|'y',range,period,phase}` | 位置是**時間的三角波純函式** ⇒ 可預測、可重現，通關機器人能往前推演；單向平台語意，站上去被水平帶著走 |
+| 崩塌礦石磚 crumble | 磚語意 `ST.TILE.CRUMBLE` | 踩住 36 幀後碎掉（最後 12 幀抖動預警）、240 幀後復原；碎掉只重寫 1 byte 名稱表 |
+| 蒸氣彈簧 spring | 磚語意 `ST.TILE.SPRING` | 站上去以 `Hero.launch(−5 px/幀 + 固定小重力)` 彈高 100 px（≈12.5 格），高度與有沒有按 A 無關 |
+| 熔岩間歇泉 geyser | `level.geysers[] = {c,r,h,period,on,phase}` | 週期噴火柱（噴發前 24 幀冒小火預警），也是時間的純函式 |
+
+## 新敵 / 魔王 / 道具
+- 敵人（`enemies_w2.js`，走新的 `ST.Enemies.register()` 登記表，W1 三種一行未動）：
+  ④ `bat` 礦坑蝙蝠（倒掛 → 主角進 72 px 才醒 → 俯衝後平飛，可踩）
+  ⑤ `armor` 護甲礦兵（走路 0.5 px/幀、坑邊轉向、**不可踩**，逼玩家繞路或吃無敵星）
+  ⑥ `spitter` 岩漿噴吐者（固定不動，每 100 幀朝主角吐拋物線火球，可踩）＋ ⑦ `fire` 火球（一次性投射物）
+- 魔王（`boss_w2.js`，`ST.BossW2`，介面同 `ST.Boss`）：**熔心巨像** 32×32、5 格血、**三階段**
+  （walk → jump → slam 落地兩道衝擊波 → [階段 2 起] spit 火球 → rest 弱點窗口；血量越低走得越快、休息越短）。
+- 道具：**無敵星**（`level.items[] = {c,r,kind:'star'}`）→ `hero.star` 旗標 480 幀：熔岩 / 尖刺 / 火柱不致命、
+  撞到敵人直接打倒、掉坑被拉回檢查點（不扣命）。一鍵密技（C / ★密技）現在也帶這個旗標。
+
+## 檔案所有權（本輪）
+| agent | 擁有檔案 | 內容 |
+|---|---|---|
+| star-w2 | `games/star/{chr_w2,levels_w2,objects_w2,enemies_w2,boss_w2,song_w2}.js`（新增）、`games/star/{chr_world,hero,enemies,levels_w1,main,song}.js`（擴充）、`star.html`、`tools/playthrough_star.py`、`games/star/test_w2.py`（新增）、`test_star.py` | 見上 |
+
+- `engine/` 一行未改。
+- `levels_w1.js` 擴充成「磚語意 + Level 類別 + W1 四關」：新增磚碼 44..55、`ST.LevelKit`（Level / rle /
+  `addTheme` / 常數）與 `ST.Levels.register(def)`，讓 `levels_w2.js` 不必複製建圖程式。
+- `song.js` 新增 `ST.Audio.BUILD`（Builder / mel / drm / echoOf / stab / hold / INST）、`has(key)`、
+  `register(key, song, info)`；`play(key)` 行為**不變**（未知 key 仍 warn + 回 false），
+  缺鍵退回既有曲由 `main.js` 的 `songKey()` 負責（契約同 cruiser）。
+
+## 驗收
+- `games/star/test_w2.py` **187 項**（CHR 容量 / 新磚語意 / 三主題 / 四關資料 / 可達性 BFS（含升降板）/
+  坑寬・危險帶・牆高 / 機關純函式與行為 / 三新敵 + 火球 / 魔王三階段可擊破 / 四首新曲 / lint /
+  真頁機關會動 + 無敵星 + 旗桿演出 + 每關 3 張截圖）。
+- `games/star/test_star.py` 226 → **249 項**（⑪ R3 組 23 項：旗桿下滑演出、無敵星旗標、
+  一鍵密技擋熔岩 / 掉坑、標題世界選擇、破完 1-4 自動接 2-1；並把「破關畫面」改成驗最後一關 2-4）。
+- `games/star/test_w1.py` 177 項不變全綠。
+- `tools/playthrough_star.py` 加 `--w2` / `--all8`，模擬器加入升降板與間歇泉的時間預測、
+  新增「站在升降板上就別往右跑」的 riding 分支；W1 四關結果與 R2c **完全相同**。

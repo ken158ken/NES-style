@@ -2495,3 +2495,132 @@ R2 只有關卡 1（2816 px）。本輪做到 **6 關**（研究 16 §7-2 的 FC
    要更漂亮可以讓它在過關時把剩餘 gauge 花掉。
 6. **`--assist` 尚無自動化驗收**：本輪六關純實力就過，沒有跑 `--assist`。若日後某關調難了，
    先跑 `--assist` 確認「通路存在」再調數值，比直接改地形安全。
+
+---
+
+## star-w2（R3，2026-09-25）
+
+2026-09-25 ｜ star-w2 agent ｜ 對象：`docs/PLAN.md` §4「R3 內容 A」的 **W2** 部分
+（W2 四關 + 世界 2 魔王 + 新敵 3 種 + 新道具 1 種 + 世界選擇），
+並收掉 R2b / R2c「留給後續」裡 star 的三條：**無敵星未放進關卡**、**旗桿下滑演出**、
+**一鍵無敵擋不住熔岩 / 掉坑**。`engine/` 一行未改；`games/cruiser/**` 一行未碰。
+
+### 1. 交付
+
+**新檔（6 支，`games/star/`）**
+
+| 檔 | 內容 |
+|---|---|
+| `chr_w2.js` | W2 追加 CHR：背景 20 磚（礦岩 / 熔岩黑岩 / 鐵石 / 崩塌磚 / 彈簧 2 幀 / 礦脈 / 噴氣孔 / 結晶 / 礦燈 / 支撐梁 / 軌道 / 齒輪 / 爐窗）＋ 精靈 70 磚（蝙蝠 / 護甲礦兵 / 噴吐者 各 2 幀、火球 2 幀、升降板、火柱 2 幀、魔王 32×32 兩姿勢、衝擊波 2 幀）＋ 三個新主題調色盤 `mine / magma / forge`。**刻意放在 `ST.BG_W2` / `ST.SPR_W2`**（不併進 `ST.BG_WORLD` / `ST.SPR_WORLD`），R2b 的容量契約（bg ≤ 192 / spr ≤ 128）與 `test_w1.py` 完全不受影響 |
+| `levels_w2.js` | 三個主題註冊（`ST.LevelKit.addTheme`）＋ 2-1 ~ 2-4 四關純資料（floor RLE / ceil / objs / movers / geysers / items / spawns / boss） |
+| `objects_w2.js` | `ST.Objects`：礦車升降板、崩塌礦石磚、蒸氣彈簧、熔岩間歇泉、道具（無敵星）。**升降板位置與間歇泉開關都是「時間的純函式」**（三角波 / 週期），所以通關機器人可以往前推演 |
+| `enemies_w2.js` | 用新的 `ST.Enemies.register()` 登記 `bat` / `armor` / `spitter` / `fire`（W1 三種敵人的程式一行未動） |
+| `boss_w2.js` | `ST.BossW2` 熔心巨像（介面同 `ST.Boss`）：32×32、5 血、三階段 |
+| `song_w2.js` | 四首原創曲 `mine / magma / forge / boss2`，用 `ST.Audio.BUILD`（song.js 本輪新開的工具出口）寫 |
+| `test_w2.py` | **187 項**（見下） |
+
+**擴充的既有檔**
+
+| 檔 | 改了什麼 |
+|---|---|
+| `levels_w1.js` | 磚語意表 44 → **56**（CRUMBLE / SPRING / ORE / VENT / CRYSTAL / LAMP / BEAM_T / BEAM_B / MBG / RAIL / GEAR / FWIN）；新增 `ST.LevelKit`（`Level` / `rle` / `addTheme` / 常數）與 `ST.Levels.register(def)`；`objs` 新增 `deco` / `dline` / `crumble` / `spring` / `beam` 五種；`Level` 多帶 `movers / geysers / items / bossKind / world`；彈簧兩幀動畫 |
+| `chr_world.js` | `bgIndex / oam16` 查不到磚名時**回 0 不丟例外**（只載 W1 的 `test_w1.py` 在 rebind 時會查到 W2 磚名） |
+| `hero.js` | `h.star`（無敵星旗標，每幀倒數）：`hurt()` 直接 return false、危險磚掃描整段跳過、掉出畫面時走 `g.onPitSave`；新增 `Hero.launch(vel)`（機關彈飛，固定小重力 ⇒ 高度可重現）；新增 `'pole'` 姿勢；無敵星期間主角調色盤輪替 |
+| `enemies.js` | 新增 `EXT` 登記表 + `ST.Enemies.register()` + 共用工具 `ST.Enemies.API`；`each()` 的魔王改看 `ST.ActiveBoss`；投射物 `fragile`；**16×16 精靈水平翻轉修正**（兩塊要各自翻 **且** 左右對調） |
+| `main.js` | 關卡順序接成 1-1..2-4、魔王模組依 `lv.bossKind` 切換、`ST.Objects` 接線、`lv.onTileChange` → 單格重寫名稱表、**旗桿下滑演出**、無敵星撿取 / 結束換曲、`onPitSave`、一鍵密技也給 `h.star`、標題**世界選擇**（SELECT 切 WORLD 1/2）、破關畫面依世界寫 `WORLD n CLEAR`、曲目缺鍵退回（`songKey`）、`state()` 多 12 個欄位、`dev.objects/moverTops/objNow/hazardAt` |
+| `song.js` | 新增 `ST.Audio.BUILD`（Builder / mel / drm / echoOf / stab / hold / INST / 和弦常數）、`has(key)`、`register(key, song, info)`。`play()` 行為不變 |
+| `star.html` | 六支新腳本進載入順序（`?v=` 版本戳已拿掉，等總控跑 `tools/stamp.py`） |
+| `tools/playthrough_star.py` | 模擬器加入升降板（`moverTops(t)`）與間歇泉（`hazardAt(...,t)`）的時間預測；新增「站在升降板上就別往右跑，等能安全跳到實地再跳」的 riding 分支；「等飛行體飛過去」只對**飛在空中**的不可踩敵人成立（地面上的護甲礦兵要跳過去）；決策快取的 key 在有機關的關卡帶上時間桶；新增 `--w2` / `--all8` |
+| `test_star.py` | 226 → **249 項**（⑪ R3 組 23 項；破關畫面測試改成驗最後一關 2-4 的 `WORLD 2 CLEAR`） |
+
+**四關（主題 / 長度 / 節奏）**
+
+| 關 | 主題 | 欄（畫面） | 檢查點 | 金幣 | 敵 | 新機制 |
+|---|---|---|---|---|---|---|
+| 2-1 | mine 礦坑入口 | 320（10） | 102、190 | 46 | 13 | 教學：崩塌磚 → 彈簧 → 升降板（水平 1 / 垂直 1）＋ 間歇泉 1 |
+| 2-2 | mine 崩落礦道 | 320（10） | 100、196 | 40 | 16 | 節奏：崩塌磚連段 5 處 + 彈簧 3 + 升降板 3 + 間歇泉 2 |
+| 2-3 | magma 熔岩豎坑 | 288（9） | 94、190 | 43 | 15 | 垂直升降板塔（2 座，共 4 塊板）+ 間歇泉 5 + 熔岩坑 5 |
+| 2-4 | forge 熔爐要塞 | 256（8） | 100、172 | 40 | 13 | 護甲礦兵走廊 + 間歇泉 3 + 升降板 2 + 魔王 |
+
+**四個新機制**（全部寫在關卡資料裡，沒有任何一關的座標被硬編碼）
+升降板 `movers[]`（三角波純函式、單向平台、水平帶人）／崩塌礦石磚 `TILE.CRUMBLE`（踩 36 幀碎、240 幀復原）／
+蒸氣彈簧 `TILE.SPRING`（彈高 100 px ≈ 12.5 格，與有沒有按 A 無關）／熔岩間歇泉 `geysers[]`（週期噴發 + 24 幀預警）。
+**每個機關都留了純地形的備援路線**（坑 / 熔岩帶 ≤ 8 欄、牆高 ≤ 3 列）⇒ 不靠機關也走得完（友善版）。
+
+**新敵 3 種 + 魔王 + 道具**
+`bat` 礦坑蝙蝠（進 72 px 才醒 → 俯衝 → 平飛，可踩）／`armor` 護甲礦兵（不可踩、坑邊轉向）／
+`spitter` 岩漿噴吐者（每 100 幀吐拋物線火球，可踩）＋ `fire` 火球（碰到就消失）。
+魔王 **熔心巨像**：5 血、三階段（走 → 跳 → 砸地放兩道衝擊波 → [階段 2 起] 吐火球 → 休息＝弱點窗口；
+血量越低走得越快、休息越短、火球越多）。道具 **無敵星** 8 秒（四關各一顆，放在彈簧 / 升降板才拿得到的高台）。
+
+### 2. 驗證
+
+| 項目 | 結果 |
+|---|---|
+| `games/star/test_w2.py` | **187 / 187 PASS**（新增） |
+| `games/star/test_star.py` | 226 → **249 / 249 PASS** |
+| `games/star/test_w1.py` | **177 / 177 PASS**（一項未改） |
+| `bash tools/run_all.sh` | **總結：PASS**（node --check 40 檔、15 支測試、3 個 build --check、冒煙截圖、lint 抽查 8 張） |
+| `$PY tools/build.py --src star.html` | **內嵌 26 檔、571 KB**（W1 時是 20 檔；`build.py` 會自動補漏列檔，但 `star.html` 已明列） |
+| 截圖 | `shots/agent_w2/` 12 張（每關 3 張，`test_w2.py` ⑪ 自動產生 + lint）＋ `chk_enemies.png`（三種新敵特寫）。**每張都 Read 看過圖** |
+
+**通關機器人**（`$PY tools/playthrough_star.py`）
+
+| 關 | cleared | frames | deaths | 備註 |
+|---|---|---|---|---|
+| 1-1 | True | 1400 | 1 | 與 R2c fix5 **一幀不差** |
+| 1-2 | True | 1070 | 0 | 同上 |
+| 1-3 | True | 1265 | 0 | 同上 |
+| 1-4 | True | 1385 | 1 | 同上 |
+| 2-1 | True | 1126 | 0 | score 5400 |
+| 2-2 | True | 1128 | 0 | score 3400 |
+| 2-3 | True | 929 | 0 | score 4000 |
+| 2-4 | True | 1702 | 0 | score 4500（打魔王） |
+
+`$PY tools/playthrough_star.py --cheat` **37 項全 PASS**（fix4 暫停 + SELECT／fix5 一鍵 C 全部保留）。
+
+### 3. 偏離（與任務書不同的決定）
+
+1. **主題選「熔岩礦坑」而不是「雲海遺跡」**：W1 已有 1-3 天空（雲 / 星 / 浮台），雲海會撞題；
+   礦坑 → 熔岩層 → 熔爐要塞這條線跟四個新機制（崩塌礦石、蒸氣彈簧、礦車升降板、熔岩間歇泉）
+   是同一套世界觀，主題與機制對得上。PLAN 沒有指定 W2 主題。
+2. **做了 4 個新機制（任務書要求「至少兩個」）**，但**沒做「上升熔岩」與「傳送門」**：
+   本專案的鏡頭是水平單向、垂直固定（26 列），上升熔岩需要垂直捲動才有意義；傳送門則會讓
+   「可達性 BFS」與通關機器人的地形推演失效（跳到另一個座標系）。兩者記在「留給後續」。
+3. **每個機關都留了純地形的備援路線**：任務書沒要求，但符合使用者一貫的「友善版」方向，
+   也讓可達性測試與通關機器人不必依賴機關才過得去（機關失效 = 難走，不是卡關）。
+4. **魔王打法只有「踩頭」一條**（W1 的鐵鎚王有斧頭機關第二條路）：熔爐要塞盡頭放了旗桿，
+   所以「繞過魔王碰旗桿」仍然是第二條路（跟 1-4 的三條路同精神）。
+5. **`--all` 維持只跑 W1 四關**（回歸基準不變），W2 用 `--w2`、八關用 `--all8`。
+
+### 4. 跨檔需求（給總控 / 其他 agent）
+
+1. **`tools/stamp.py` 尚未跑**（任務書指定不跑）：`star.html` 裡 **14 支** 腳本目前都**沒有 `?v=` 戳記**
+   （本輪把舊戳記一起拿掉，避免手寫雜湊錯位）。**commit 前請跑 `$PY tools/stamp.py`**。
+2. 新檔 6 支要進版本控制：`games/star/{chr_w2,song_w2,enemies_w2,boss_w2,objects_w2,levels_w2}.js`
+   ＋ `games/star/test_w2.py`。`dist/星塵勇者.html` 已重新產生（571 KB / 26 檔）。
+3. `README.md` / `index.html` 若有寫「星塵勇者：4 關 / 1 個世界」，請改成 **8 關 / 2 個世界**。
+4. **`engine/` 沒有任何需求**（本輪全部在遊戲層解決）。唯一想記一筆的是：
+   `NES.SH.OAM` 若之後能提供「16×16 精靈」的便利 add（自動處理 flipH 時的左右對調），
+   `enemies.js` / `boss*.js` 三處就不必各自手寫（本輪 `enemies.js` 的 ext 繪製曾因此畫錯，已修）。
+5. `docs/ENGINE_API.md` 不需要改（沒有新增 engine API）。`docs/TASKS.md` 已加「R3 star W2」段。
+
+### 5. 留給後續
+
+1. **上升熔岩 / 傳送門沒做**（理由見「偏離」2）。要做的話：上升熔岩需要 `main.js` 的鏡頭支援垂直捲動
+   （現在 `ppu.split(32)` 之後只改 x）；傳送門要先讓 `tools/playthrough_star.py` 的兩步推演知道
+   「進門會被傳到哪裡」，否則機器人必卡。
+2. **W3 ~ W5 尚未開工**（PLAN §4 R3 內容 A 還要 3 個世界、敵人 12 種、魔王 4）。本輪的
+   `ST.LevelKit.addTheme` / `ST.Levels.register` / `ST.Enemies.register` / `ST.Objects` 四個擴充點
+   就是為了讓 W3+ 只要加資料檔，不必再動 W1 / W2 的程式。
+3. **密碼 / 存檔、世界地圖完整版沒做**：本輪只做了標題的「SELECT 切 WORLD 1 / 2」簡版
+   （`main.js` 的 `titleLines(world)` / `WORLD_FIRST`）。PLAN 要的是 SMB3 式世界地圖 + 密碼。
+4. **護甲礦兵的「正解」目前只有繞過 / 吃無敵星**：研究 04 §2 建議這類敵人應該有第二種解法
+   （副武器 / 從下方頂磚）。副武器是 R3 後段的項目，屆時可以讓火球 / 飛鏢打掉它。
+5. **`ST.Objects` 的崩塌磚沒有視覺抖動**：`crumbleTimer(c,r)` 已經留了介面（最後 12 幀會回非 0），
+   但 `main.js` 的 draw 還沒用它畫抖動粒子。加上去會更好讀（研究 04 §2「預警幀」）。
+6. **機器人在 2-4 是「打魔王」通關**（不是繞旗桿），但沒有驗「繞旗桿」那條路；
+   `test_w2.py` ⑩ 已分別驗過「踩 5 次擊破 → clear」與「四關碰旗桿都有下滑演出」。
+7. **升降板與單向平台的外觀有點像**（都是橫條）：升降板用精靈 pal 3（灰 / 白），
+   平台用背景 bg3（主題色）。真機上動起來分得出來（一個會動），靜態截圖較難分。
+   要更明確可以給升降板加「兩端的輪子」磚（精靈 bank 還剩 4 磚，會超，得先省別處）。

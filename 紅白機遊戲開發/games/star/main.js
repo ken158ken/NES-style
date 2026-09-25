@@ -37,7 +37,11 @@
   var CAM_L = 64;                             // 畫面 25% → 往左回捲觸發
   var NT_WINDOW = 64;                         // 兩張名稱表 = 64 欄的環形視窗
   var SCROLL_AHEAD = 34;
-  var LEVEL_ORDER = ['1-1', '1-2', '1-3', '1-4'];
+  var LEVEL_ORDER = ['1-1', '1-2', '1-3', '1-4', '2-1', '2-2', '2-3', '2-4'];
+  var WORLD_FIRST = { 1: '1-1', 2: '2-1' };   // 標題畫面的世界選擇（R3 star-w2）
+  var POLE_VY = 3;                            // 旗桿下滑 3 px/幀（R3：補上 W1 留下的演出）
+  var POLE_WALK = 24;                         // 下滑到底後往右走 24 幀進城
+  var STAR_SCORE = 1000;                      // 撿到無敵星的分數
   var TIME_START = 300;
   var SCORE_STOMP = 100, SCORE_COIN = 200, SCORE_GOAL = 1000, SCORE_PER_TIME = 50;
   var CLEAR_HOLD = 40;                        // 結算完停幾幀再進下一關
@@ -163,7 +167,11 @@
     ground: { backdrop: 0x22, bg: [[0x0F, 0x10, 0x30], [0x07, 0x17, 0x27], [0x0F, 0x17, 0x28], [0x09, 0x1A, 0x2A]] },
     cave: { backdrop: 0x0F, bg: [[0x0F, 0x10, 0x30], [0x01, 0x11, 0x21], [0x0F, 0x17, 0x28], [0x00, 0x10, 0x20]] },
     sky: { backdrop: 0x21, bg: [[0x0F, 0x10, 0x30], [0x02, 0x12, 0x22], [0x0F, 0x17, 0x28], [0x10, 0x20, 0x30]] },
-    castle: { backdrop: 0x0F, bg: [[0x0F, 0x10, 0x30], [0x06, 0x16, 0x26], [0x0F, 0x17, 0x28], [0x00, 0x10, 0x20]] }
+    castle: { backdrop: 0x0F, bg: [[0x0F, 0x10, 0x30], [0x06, 0x16, 0x26], [0x0F, 0x17, 0x28], [0x00, 0x10, 0x20]] },
+    // R3 star-w2（ST.World.applyPalettes 缺席時的後備）
+    mine: { backdrop: 0x0F, bg: [[0x0F, 0x10, 0x30], [0x07, 0x17, 0x27], [0x00, 0x10, 0x30], [0x01, 0x21, 0x30]] },
+    magma: { backdrop: 0x0F, bg: [[0x0F, 0x10, 0x30], [0x00, 0x07, 0x17], [0x06, 0x16, 0x27], [0x01, 0x11, 0x30]] },
+    forge: { backdrop: 0x0F, bg: [[0x0F, 0x10, 0x30], [0x00, 0x10, 0x30], [0x06, 0x16, 0x27], [0x08, 0x18, 0x28]] }
   };
   var SPR_PAL = [
     [0x0F, 0x12, 0x27],   // 0 主角（黑描邊 / 藍戰衣 / 膚色）
@@ -196,6 +204,8 @@
       // fix5：真·一鍵密技（鍵盤 C / 觸控 ★密技 / nes-cheat 事件），不必先暫停
       cheatReq: false, cheatCool: 0, cheats: 0, cheatContinues: 0, lastCheat: '',
       floatBanner: null, floatCam: 0,
+      // R3 star-w2
+      bossMod: null, pole: null, titleWorld: 1, starMusic: false, objInit: false,
       lastSfx: null, colWrites: 0
     };
   }
@@ -213,7 +223,11 @@
   function setTileCode(col, row, t) {
     var lv = g.lv;
     if (lv && typeof lv.setTile === 'function') {
+      // R3 star-w2：lv.onTileChange 由本檔掛給 ST.Objects（崩塌磚）用，這條路自己會寫名稱表
+      var keep = lv.onTileChange;
+      lv.onTileChange = null;
       try { lv.setTile(col, row, t); if (lv.clearDirty) lv.clearDirty(); } catch (e) { g.over[col * 32 + row] = t; }
+      lv.onTileChange = keep;
     } else {
       g.over[col * 32 + row] = t;
     }
@@ -316,6 +330,10 @@
     g.bossMusic = 0;
     g.cheatInv = false;
     g.paused = false;
+    g.pole = null;
+    g.starMusic = false;
+    g.bossMod = (lv.bossKind === 'colossus' && ST.BossW2) ? ST.BossW2 : ST.Boss;
+    ST.ActiveBoss = g.bossMod;               // enemies.js 的 each() 要知道現在是哪一隻魔王
     g.floatBanner = null; g.secretMsg = 0;   // fix5：換關整片重畫 ⇒ 浮動疊字記錄作廢
     g.pops.length = 0;
     g.bump = null;
@@ -335,12 +353,41 @@
     rebuildScreen();
     // 敵人 / 魔王：交給 star-world 自己初始化（出怪表、橋 / 斧頭機關）
     if (ST.Enemies && typeof ST.Enemies.init === 'function') { try { ST.Enemies.init(lv, { solidAt: g.solidAt }); } catch (e) { } }
-    if (ST.Boss && typeof ST.Boss.init === 'function') { try { ST.Boss.init(lv); } catch (e) { } }
+    if (ST.Boss && typeof ST.Boss.reset === 'function' && g.bossMod !== ST.Boss) { try { ST.Boss.reset(); } catch (e) { } }
+    if (ST.BossW2 && typeof ST.BossW2.reset === 'function' && g.bossMod !== ST.BossW2) { try { ST.BossW2.reset(); } catch (e) { } }
+    if (g.bossMod && typeof g.bossMod.init === 'function') { try { g.bossMod.init(lv); } catch (e) { } }
+    // R3 star-w2：關卡機關（升降板 / 崩塌磚 / 彈簧 / 間歇泉 / 道具）
+    if (typeof lv.setTile === 'function') lv.onTileChange = onLevelTileChange;
+    if (ST.Objects && typeof ST.Objects.init === 'function') {
+      try { ST.Objects.init(lv, { setTile: objSetTile }); g.objInit = true; } catch (e) { g.objInit = false; }
+    }
     g.hudDirty = true;
-    audio('play', lv.music || themeOf(lv));
+    audio('play', levelSong(lv));
+  }
+
+  // 關卡自己改了一格地形（ST.Objects 的崩塌磚）⇒ 只重寫那一格名稱表（1 byte）
+  function onLevelTileChange(col, row) { if (ppu0) writeOneTile(col, row); }
+  function objSetTile(col, row, code) {
+    if (!g.lv || typeof g.lv.setTile !== 'function') return false;
+    g.lv.setTile(col, row, code);      // onTileChange 會把那一格寫進名稱表
+    return true;
   }
 
   function themeOf(lv) { return (lv && lv.theme) || 'ground'; }
+  function worldOf(lv) { return (lv && lv.world) || (parseInt(String(lv && lv.id).charAt(0), 10) || 1); }
+
+  /* R3 star-w2：W1 用 ST.Boss（鐵鎚王）、W2 用 ST.BossW2（熔心巨像）。
+   * 兩者介面相同（init / reset / update / draw / dead / active / box / state）。 */
+  function bossMod() { return (g && g.bossMod) ? g.bossMod : ST.Boss; }
+
+  /* 曲目：缺鍵就退回既有曲（契約同 cruiser 的 song.js） */
+  function songKey(k, fb) {
+    if (!k) return fb;
+    if (ST.Audio && typeof ST.Audio.has === 'function') return ST.Audio.has(k) ? k : fb;
+    return k;
+  }
+  function levelSong(lv) { return songKey(lv && (lv.music || themeOf(lv)), 'ground'); }
+  function bossSong(lv) { return songKey(worldOf(lv) === 2 ? 'boss2' : 'boss', 'boss'); }
 
   function applyPalettes(ppu, lv) {
     var th = THEMES[themeOf(lv)] || THEMES.ground;
@@ -467,13 +514,18 @@
   // 文字跨兩張名稱表）都會被自動分段寫到「目前看得見的那一張」。
   // （qa2-star P1-1：舊版只寫 nt 0 的固定欄，camX 一大就看不到字。）
 
-  var TITLE = [
-    { row: 9, col: 9, text: 'STARDUST HERO' },
-    { row: 11, col: 11, text: 'WORLD 1' },
-    { row: 14, col: 10, text: 'PRESS START' },
-    { row: 17, col: 8, text: '$ 2026 ORIGINAL' },
-    { row: 19, col: 5, text: 'SECRET: C KEY OR $ BTN' }      // fix5：標題也寫出一鍵密技
-  ];
+  // R3 star-w2：標題有了「世界選擇」（SELECT 切 WORLD 1 / 2 ＝ PLAN §4 的世界地圖簡版）
+  function titleLines(world) {
+    return [
+      { row: 9, col: 9, text: 'STARDUST HERO' },
+      { row: 11, col: 11, text: 'WORLD ' + (world || 1) },
+      { row: 12, col: 7, text: '$ SELECT = WORLD' },
+      { row: 14, col: 10, text: 'PRESS START' },
+      { row: 17, col: 8, text: '$ 2026 ORIGINAL' },
+      { row: 19, col: 5, text: 'SECRET: C KEY OR $ BTN' }      // fix5：標題也寫出一鍵密技
+    ];
+  }
+  var TITLE = titleLines(1);
   var GAMEOVER_LINES = [
     { row: 12, col: 12, text: 'GAME OVER' },
     { row: 16, col: 10, text: 'PRESS START' },
@@ -496,7 +548,7 @@
   // 破完 1-4：多一行分數（進入畫面時才算得出來，所以用函式產生）
   function winLines() {
     return [
-      { row: 10, col: 9, text: 'WORLD 1 CLEAR' },
+      { row: 10, col: 9, text: 'WORLD ' + worldOf(g.lv) + ' CLEAR' },
       { row: 13, col: 11, text: 'THANK YOU' },
       { row: 16, col: 10, text: 'SCORE ' + pad(g.hero.score, 6) },
       { row: 19, col: 10, text: 'PRESS START' }
@@ -568,8 +620,24 @@
     if (bud) bud.mute = muted;
   }
 
-  function drawTitle(ppu) { drawBanner(ppu, TITLE); }
+  function drawTitle(ppu) { TITLE = titleLines(g.titleWorld); drawBanner(ppu, TITLE); }
   function clearTitle(ppu) { clearBanner(ppu, TITLE); }
+  // SELECT：切換世界（只重畫「WORLD n」那一行）
+  function toggleTitleWorld(ppu) {
+    var list = levelList(), i, worlds = [];
+    for (i = 0; i < list.length; i++) {
+      var w = parseInt(String(list[i]).charAt(0), 10) || 1;
+      if (worlds.indexOf(w) < 0) worlds.push(w);
+    }
+    if (worlds.length < 2) return false;
+    var at = worlds.indexOf(g.titleWorld);
+    g.titleWorld = worlds[(at + 1) % worlds.length];
+    clearBanner(ppu, TITLE);
+    TITLE = titleLines(g.titleWorld);
+    drawBanner(ppu, TITLE);
+    sfx('coin');
+    return true;
+  }
 
   /* ------------------ fix4：暫停 / 一鍵密技 / 一鍵續關 ------------------
    * 使用者回饋：「多個一鍵密技好了，當然也保留舊密技，不然死到一半就玩不下去了。」
@@ -626,6 +694,10 @@
     var h = g.hero;
     h.lives = SECRET_LIVES;
     h.inv = SECRET_INV;                   // 走現有的受傷無敵（閃爍 + hurt() 直接 return false）
+    // R3 star-w2：一鍵密技也帶「無敵星」旗標 ⇒ 熔岩 / 尖刺 / 火柱 / 掉坑都擋得住
+    // （收掉 R2c fix5「留給後續」第 3 條）
+    h.star = SECRET_INV;
+    g.starMusic = true;
     g.cheatInv = true;
     g.hudDirty = true;
     if (g.paused) setBanner(PAUSE_SECRET_LINES);   // 暫停版：PAUSE 兩行 + SECRET!
@@ -741,7 +813,7 @@
       g.hudDirty = true;
       sfx('coin');
     } else if (t === T.GOAL && g.mode === 'play') {
-      enterClear();
+      startPole(col);                      // R3：旗桿下滑演出（W1 留下的待辦）
     }
   }
 
@@ -766,6 +838,52 @@
     } else {
       sfx('bump');
     }
+  }
+
+  /* --------------------- R3 star-w2：旗桿下滑演出 ---------------------
+   * W1（R2b）碰到旗桿是「瞬間 clear」，這裡補上 SMB 式的三拍：
+   *   ① 抓住桿子往下滑 3 px/幀（姿勢 'pole'）② 落地 ③ 往右走 24 幀進城 → 開始結算。
+   * 演出期間 `mode` 已經是 'clear'（機器人與既有測試看到的仍是 clear），
+   * 只是結算（時間換分）延到演出結束才跑。
+   */
+  function startPole(col) {
+    var h = g.hero;
+    var px2 = col * 8 - 6;
+    if (px2 < 0) px2 = 0;
+    g.pole = { col: col, phase: 'slide', t: 0, frames: 0, endY: groundYAt(col) };
+    if (h.crouch) Hero.setCrouch(h, ctx, false);
+    FX.aset(h.vxA, 0); FX.aset(h.vyA, 0);
+    FX.vsetPx(h.px, px2);
+    h.x = px2;
+    h.inv = 0; h.star = 0; h.onMover = null;
+    if (h.y > g.pole.endY) { FX.vsetPx(h.py, g.pole.endY); h.y = g.pole.endY; }
+    enterClear();
+  }
+
+  function stepPole() {
+    var p = g.pole, h = g.hero, y, x;
+    if (!p) return false;
+    p.frames++;
+    h.inv = 0;
+    if (p.phase === 'slide') {
+      h.state = 'pole';
+      h.facing = 1;
+      y = FX.floorPx(h.py.sub) + POLE_VY;
+      if (y >= p.endY) { y = p.endY; p.phase = 'walk'; p.t = 0; sfx('bump'); }
+      FX.vsetPx(h.py, y);
+      h.y = y;
+    } else {
+      h.state = 'walk';
+      h.facing = 1;
+      if (++h.animTimer >= 4) { h.animTimer = 0; h.anim = (h.anim + 1) & 3; }
+      x = FX.floorPx(h.px.sub) + 1;
+      FX.vsetPx(h.px, x);
+      h.x = x;
+      if (++p.t >= POLE_WALK) { g.pole = null; h.state = 'idle'; }
+    }
+    stepCamera();
+    streamColumns();
+    return true;
   }
 
   /* ------------------------------- 鏡頭 ------------------------------- */
@@ -862,7 +980,11 @@
     // 檢查點復活：相機左邊的敵人視為已出過，右邊的重新排隊（契約 ENGINE_API §15.8-5）
     if (ST.Enemies && typeof ST.Enemies.seek === 'function') { try { ST.Enemies.seek(g.camX); } catch (e) { } }
     else if (ST.Enemies && typeof ST.Enemies.reset === 'function') { try { ST.Enemies.reset(); } catch (e) { } }
-    if (ST.Boss && typeof ST.Boss.reset === 'function') { try { ST.Boss.reset(); } catch (e) { } }
+    var BM = bossMod();
+    if (BM && typeof BM.reset === 'function') { try { BM.reset(); } catch (e) { } }
+    if (ST.Objects && typeof ST.Objects.seek === 'function') { try { ST.Objects.seek(g.camX); } catch (e) { } }
+    g.pole = null;
+    g.starMusic = false;
     g.bossMusic = 0;                          // 魔王房復活：重新進房時再切一次 boss 曲
     g.cheatInv = false;
     g.paused = false;
@@ -870,7 +992,7 @@
     g.mode = 'play';
     g.modeFrames = 0;
     g.hudDirty = true;
-    audio('play', lv.music || themeOf(lv));
+    audio('play', levelSong(lv));
   }
 
   function nextLevel() {
@@ -916,6 +1038,44 @@
     g.hero.score += SCORE_STOMP;
     g.hudDirty = true;
   }
+  // R3 star-w2：撿到無敵星
+  function onItem(it) {
+    var h = g.hero;
+    if (!it || it.kind !== 'star') return false;
+    h.star = (ST.Objects && ST.Objects.STAR_FRAMES) || 480;
+    h.stars++;
+    h.score += STAR_SCORE;
+    g.hudDirty = true;
+    g.starMusic = true;
+    sfx('powerup');
+    audio('play', songKey('invincible', levelSong(g.lv)));
+    return true;
+  }
+  // 無敵（星塵 / 一鍵密技）時掉出畫面：拉回最近的檢查點，**不扣命**
+  function onPitSave(h) {
+    var lv = g.lv, rp = null;
+    if (typeof lv.respawn === 'function') { try { rp = lv.respawn(g.checkpoint >= 0 ? g.checkpoint : -1); } catch (e) { rp = null; } }
+    if (!rp) {
+      var col = (g.checkpoint > 0) ? g.checkpoint : ((lv.start && lv.start.x) | 0) >> 3;
+      rp = { x: col * 8, y: groundYAt(col) };
+    }
+    FX.vsetPx(h.px, rp.x | 0);
+    FX.vsetPx(h.py, rp.y | 0);
+    FX.aset(h.vxA, 0); FX.aset(h.vyA, 0);
+    h.onGround = false; h.onMover = null;
+    g.camX = clampCam((rp.x | 0) - CAM_R);
+    rebuildScreen();
+    sfx('powerup');
+    return true;
+  }
+  // 無敵星結束 → 換回關卡曲（魔王房則回魔王曲）
+  function onStarEnd() {
+    if (!g.starMusic) return;
+    g.starMusic = false;
+    if (g.bossMusic === 2) return;
+    audio('play', g.bossMusic === 1 ? bossSong(g.lv) : levelSong(g.lv));
+  }
+
   function onBossDie(how) {
     g.hero.score += 2000;
     g.hudDirty = true;
@@ -958,7 +1118,9 @@
   var ctx = {
     input: null, cols: 0,
     tileAt: tileAt, kindAt: kindAt, isLava: isLava,
-    onTouch: onTouch, onBump: onBump, sfx: sfx
+    onTouch: onTouch, onBump: onBump, sfx: sfx,
+    // R3 star-w2
+    onPitSave: onPitSave, onStarEnd: onStarEnd
   };
 
   /* ============================== GAME ============================== */
@@ -980,6 +1142,9 @@
       g.onStar = onStar;
       g.onDie = onBossDie;
       g.onAxe = function () { sfx('bump'); };
+      // R3 star-w2：機關 / 魔王 / 敵人要用的共用 callback
+      g.onItem = onItem;
+      g.sfx = sfx;
 
       // ---- CHR：精靈表 1 = 主角(0..127) + 世界(128..255)；背景表 0 = HUD(0..63) + 地形 ----
       var sprObj = {}, bgObj = {}, k;
@@ -991,6 +1156,13 @@
       for (k in ST.BG_FALLBACK) if (Object.prototype.hasOwnProperty.call(ST.BG_FALLBACK, k)) bgObj[k] = ST.BG_FALLBACK[k];
       if (ST.BG_WORLD) {
         for (k in ST.BG_WORLD) if (Object.prototype.hasOwnProperty.call(ST.BG_WORLD, k)) bgObj[k] = ST.BG_WORLD[k];
+      }
+      // R3 star-w2：世界 2 的追加磚（背景 20 磚 / 精靈 70 磚），合併後 bank 仍 ≤ 256
+      if (ST.BG_W2) {
+        for (k in ST.BG_W2) if (Object.prototype.hasOwnProperty.call(ST.BG_W2, k)) bgObj[k] = ST.BG_W2[k];
+      }
+      if (ST.SPR_W2) {
+        for (k in ST.SPR_W2) if (Object.prototype.hasOwnProperty.call(ST.SPR_W2, k)) sprObj[k] = ST.SPR_W2[k];
       }
       sprBank = NES.CHR.bank('st_spr', sprObj);
       bgBank = NES.CHR.bank('st_bg', bgObj);
@@ -1022,6 +1194,7 @@
       if (!first) first = list.length ? list[0] : 'test';
       g.startLevel = first;
       g.skipTitle = !!want;
+      g.titleWorld = parseInt(String(first).charAt(0), 10) || 1;
 
       audio('init', nes);
       loadLevel(first, false);
@@ -1051,11 +1224,16 @@
       if (!g.paused && g.secretMsg > 0 && --g.secretMsg === 0) endFloat(true);
 
       if (g.mode === 'title') {
-        if (input.pressed(BTN.START) || input.pressed(BTN.A)) {
+        // R3 star-w2：SELECT 切世界（WORLD 1 / 2），START 從該世界的第一關開始
+        if (input.pressed(BTN.SELECT)) {
+          toggleTitleWorld(nes.ppu);
+        } else if (input.pressed(BTN.START) || input.pressed(BTN.A)) {
+          var want = WORLD_FIRST[g.titleWorld] || g.startLevel;
           clearTitle(nes.ppu);
+          if (ST.LEVELS[want] && want !== g.levelId) loadLevel(want, false);
           g.mode = 'play';
           g.modeFrames = 0;
-          audio('play', g.lv.music || themeOf(g.lv));
+          audio('play', levelSong(g.lv));
         }
       } else if (g.mode === 'play' && g.paused) {
         // fix4：暫停中遊戲完全凍結，只收 SELECT（一鍵密技）與 START（解除）
@@ -1066,9 +1244,12 @@
         pauseGame();
       } else if (g.mode === 'play') {
         Hero.update(h, ctx);
+        // R3 star-w2：機關（升降板 / 崩塌磚 / 彈簧 / 間歇泉 / 道具）在主角移動之後結算
+        if (ST.Objects && typeof ST.Objects.update === 'function') { try { ST.Objects.update(g); } catch (e) { } }
         var worldDidCollide = false;
+        var BM = bossMod();
         if (ST.Enemies && typeof ST.Enemies.update === 'function') { try { ST.Enemies.update(g); worldDidCollide = true; } catch (e) { } }
-        if (ST.Boss && typeof ST.Boss.update === 'function') { try { ST.Boss.update(g); worldDidCollide = true; } catch (e) { } }
+        if (BM && typeof BM.update === 'function') { try { BM.update(g); worldDidCollide = true; } catch (e) { } }
         if (!worldDidCollide) stepEnemyCollisionsFallback();
         stepPops();
         if (ST.World && typeof ST.World.setAnim === 'function') ST.World.setAnim(g.frames >> 4);
@@ -1083,16 +1264,17 @@
         // fix4：一鍵密技的 20 秒無敵結束 → 換回關卡曲（魔王房則回魔王曲）
         if (g.cheatInv && h.inv <= 0) {
           g.cheatInv = false;
-          if (g.bossMusic !== 2) audio('play', g.bossMusic === 1 ? 'boss' : (g.lv.music || themeOf(g.lv)));
+          g.starMusic = false;
+          if (g.bossMusic !== 2) audio('play', g.bossMusic === 1 ? bossSong(g.lv) : levelSong(g.lv));
         }
         // 魔王曲（qa2-star P2-1）：進魔王房 → boss、擊破 → clear、離開魔王房 → 回關卡曲
-        if (g.lv.boss && ST.Boss) {
-          if (g.bossMusic === 1 && ST.Boss.dead) { g.bossMusic = 2; audio('play', 'clear'); }
-          else if (g.bossMusic === 0 && ST.Boss.active && !ST.Boss.dead) { g.bossMusic = 1; audio('play', 'boss'); }
-          else if (g.bossMusic === 1 && !ST.Boss.active) { g.bossMusic = 0; audio('play', g.lv.music || themeOf(g.lv)); }
+        if (g.lv.boss && BM) {
+          if (g.bossMusic === 1 && BM.dead) { g.bossMusic = 2; audio('play', 'clear'); }
+          else if (g.bossMusic === 0 && BM.active && !BM.dead) { g.bossMusic = 1; audio('play', bossSong(g.lv)); }
+          else if (g.bossMusic === 1 && !BM.active) { g.bossMusic = 0; audio('play', levelSong(g.lv)); }
         }
-        // 魔王關（1-4）沒有旗桿磚：打倒魔王 = 過關（star-world 的 ST.Boss.dead）
-        if (g.mode === 'play' && g.lv.boss && ST.Boss && ST.Boss.dead && !g.cleared) {
+        // 魔王關（1-4 / 2-4）：打倒魔王 = 過關（旗桿是第二條路）
+        if (g.mode === 'play' && g.lv.boss && BM && BM.dead && !g.cleared) {
           if (++g.bossClear >= 60) enterClear();
         }
         if (h.state === 'dead') enterDead();
@@ -1106,8 +1288,9 @@
           else respawn();
         }
       } else if (g.mode === 'clear') {
-        // 結算：剩餘時間換分（每單位 50 分，每幀最多 10 單位 ⇒ 300 秒約 30 幀）
-        if (g.time > 0) {
+        // R3：旗桿演出（下滑 → 落地 → 走進城）跑完才開始結算
+        if (g.pole) { stepPole(); }
+        else if (g.time > 0) {
           var d = g.time > 10 ? 10 : g.time;
           g.time -= d;
           h.score += d * SCORE_PER_TIME;
@@ -1156,8 +1339,10 @@
       }
       // fix4：GAME OVER 畫面不畫敵人（主角本來就不畫）—— 三行字才不會被路過的敵人精靈蓋掉
       if (g.mode !== 'gameover') {
+        if (ST.Objects && typeof ST.Objects.draw === 'function') { try { ST.Objects.draw(oam, g); } catch (e) { } }
         if (ST.Enemies && typeof ST.Enemies.draw === 'function') { try { ST.Enemies.draw(oam, g); } catch (e) { } }
-        if (ST.Boss && typeof ST.Boss.draw === 'function') { try { ST.Boss.draw(oam, g); } catch (e) { } }
+        var BD = bossMod();
+        if (BD && typeof BD.draw === 'function') { try { BD.draw(oam, g); } catch (e) { } }
       }
       oam.end();
     },
@@ -1191,6 +1376,13 @@
         // fix5：一鍵密技
         cheats: g.cheats | 0, cheatContinues: g.cheatContinues | 0,
         cheatCool: g.cheatCool | 0, lastCheat: g.lastCheat || '',
+        // R3 star-w2
+        world: worldOf(g.lv), theme: themeOf(g.lv),
+        star: h.star | 0, stars: h.stars | 0, pitSaves: h.pitSaves | 0,
+        onMover: !!h.onMover, pole: g.pole ? g.pole.phase : null,
+        titleWorld: g.titleWorld | 0,
+        springs: (ST.Objects && ST.Objects.springs) | 0,
+        picked: (ST.Objects && ST.Objects.picked) | 0,
         floatBanner: g.floatBanner ? g.floatBanner.map(function (t) { return t.text; }) : null
       };
     },
@@ -1238,16 +1430,29 @@
       // 通關機器人 / 測試用：目前活著的敵人（含魔王）矩形
       enemyList: function () {
         var out = [];
-        eachEnemy(function (e) { out.push({ x: e.x | 0, y: e.y | 0, w: e.w | 0, h: e.h | 0, kind: e.kind || '', stompable: (e.stompable === undefined) ? true : !!e.stompable }); });
-        if (!(ST.Enemies && ST.Enemies.includeBoss) && ST.Boss && ST.Boss.box) {
-          try { var bb = ST.Boss.box(g); if (bb) out.push({ x: bb.x | 0, y: bb.y | 0, w: bb.w | 0, h: bb.h | 0, kind: 'boss' }); } catch (e2) { }
+        eachEnemy(function (e) {
+          out.push({
+            x: e.x | 0, y: e.y | 0, w: e.w | 0, h: e.h | 0, kind: e.kind || '',
+            stompable: (e.stompable === undefined) ? true : !!e.stompable,
+            ground: !!e.onGround            // R3 star-w2：地面巡邏（armor）vs 飛行（flyer）
+          });
+        });
+        var BB = bossMod();
+        if (!(ST.Enemies && ST.Enemies.includeBoss) && BB && BB.box) {
+          try { var bb = BB.box(g); if (bb) out.push({ x: bb.x | 0, y: bb.y | 0, w: bb.w | 0, h: bb.h | 0, kind: 'boss' }); } catch (e2) { }
         }
         return out;
       },
       boss: function () {
-        if (!ST.Boss) return null;
-        return { x: ST.Boss.x | 0, y: ST.Boss.y | 0, w: 32, h: 32, alive: !!ST.Boss.alive, active: !!ST.Boss.active, dead: !!ST.Boss.dead, hp: ST.Boss.hp | 0, phase: ST.Boss.phase };
+        var B2 = bossMod();
+        if (!B2) return null;
+        return { x: B2.x | 0, y: B2.y | 0, w: 32, h: 32, alive: !!B2.alive, active: !!B2.active, dead: !!B2.dead, hp: B2.hp | 0, phase: B2.phase, stage: B2.stage | 0 };
       },
+      // R3 star-w2：機關（給通關機器人與測試）
+      objects: function () { return (ST.Objects && ST.Objects.state) ? ST.Objects.state() : null; },
+      moverTops: function (t) { return (ST.Objects && ST.Objects.moverTops) ? ST.Objects.moverTops(t) : []; },
+      objNow: function () { return (ST.Objects && ST.Objects.now) ? ST.Objects.now() : 0; },
+      hazardAt: function (x, y, w, h2, t) { return !!(ST.Objects && ST.Objects.hazardHit && ST.Objects.hazardHit(x, y, w, h2, t)); },
       tiles: function () { return heroTiles; },
       scroller: function () { return g.scr; }
     }

@@ -51,6 +51,8 @@
       x: 0, y: 0, w: W, h: H, vx: 0, vy: 0,
       state: 'idle', facing: 1, onGround: true,
       inv: 0, coins: 0, lives: 3, score: 0, power: 0,
+      // R3 star-w2：無敵星（熔岩 / 尖刺 / 火柱 / 坑都不致命，撞到敵人直接打倒）
+      star: 0, stars: 0, onMover: null, pitSaves: 0,
       // --- 內部（定點數）---
       px: FX.Vec(0), py: FX.Vec(0), vxA: FX.Acc(0), vyA: FX.Acc(0),
       jumpS: null,
@@ -73,6 +75,7 @@
     h.crouch = false; h.sliding = false; h.turning = false;
     h.anim = 0; h.animTimer = 0;
     h.inv = 0; h.hurtTimer = 0; h.deadTimer = 0; h.deadDone = false; h.dropThru = 0;
+    h.star = 0; h.onMover = null;
     h.prevFeet = (y | 0) + H;
     h.jumpApexSub = h.py.sub; h.jumpStartSub = h.py.sub;
     sync(h);
@@ -132,8 +135,29 @@
     return true;
   }
 
+  /* R3 star-w2：被機關彈飛（蒸氣彈簧）。
+   * 先用 `jumpStart` 依當下水平速度選好 SMB 的那一段重力（不然會沿用上一次跳躍的段，
+   * 高度會隨「上一次怎麼跳的」而變 ⇒ 不可重現），再把初速覆寫成機關給的值。
+   * 按住 A ⇒ gHold（彈更高）、放開 ⇒ gFall，手感與一般跳躍一致。 */
+  // 機關彈飛專用的跳躍段：上升 / 下降都用 SMB 的「按住 A」小重力（0.125 px/幀²）
+  //   ⇒ 高度 = v²/2g，只跟機關給的初速有關（−5 px/幀 = 100 px ≈ 12 格），
+  //     不會因為玩家有沒有按住 A 而變，機器人也推得準。
+  var LAUNCH_SEG = { belowSpeed: Infinity, vy0: 0, gHold: SMB.jump[0].gHold, gFall: SMB.jump[0].gHold, h: 0 };
+  function launch(h, vel) {
+    h.jumpS.seg = LAUNCH_SEG;
+    FX.aset(h.vyA, vel | 0);
+    h.jumpS.fastFall = false;
+    h.jumpS.first = true;
+    h.jumpS.startSub = h.py.sub;
+    h.onGround = false;
+    h.crouch = false;
+    h.jumpStartSub = h.py.sub;
+    h.jumpApexSub = h.py.sub;
+    return h;
+  }
+
   function hurt(h, g, fromX) {
-    if (h.inv > 0 || h.state === 'dead') return false;
+    if (h.inv > 0 || h.star > 0 || h.state === 'dead') return false;
     h.inv = INV_FRAMES;
     h.hurtTimer = HURT_FRAMES;
     h.hits++;
@@ -296,10 +320,16 @@
     sync(h);
     scanTiles(h, g);
     if (h.state === 'dead') return h;
-    if (h.y > 240) { kill(h, g); return h; }       // 掉出畫面（坑）
+    if (h.y > 240) {                               // 掉出畫面（坑）
+      // R3 star-w2：無敵星（含一鍵密技的無敵）時交給 main 的 onPitSave 拉回來，不扣命。
+      // 收掉 R2c fix5「留給後續」的「一鍵無敵擋不住熔岩 / 掉坑」。
+      if (h.star > 0 && g.onPitSave && g.onPitSave(h)) { h.pitSaves++; sync(h); return h; }
+      kill(h, g); return h;
+    }
 
     // ---- ⑧ 狀態機 ----
     if (h.inv > 0) h.inv--;
+    if (h.star > 0 && --h.star === 0 && g.onStarEnd) g.onStarEnd(h);
     var absv = FX.abs(h.vxA.v);
     if (h.hurtTimer > 0) {
       h.state = 'hurt';
@@ -359,6 +389,7 @@
         if (g.onTouch) g.onTouch(col, row, t);
       }
     }
+    if (h.star > 0) return;                    // R3 star-w2：無敵星無視熔岩 / 尖刺
     if (lava) { kill(h, g); return; }
     if (spike) hurt(h, g, null);
   }
@@ -373,6 +404,7 @@
     var bodies = (A && A.bodies) || ['H_BODY', 'H_BW1', 'H_BW2'];
     switch (h.state) {
       case 'dead': return { body: 'H_BDEAD', leg: 'H_LD' };
+      case 'pole': return { body: 'H_BJUMP', leg: 'H_LJ' };   // R3：抓旗桿下滑
       case 'hurt': return { body: 'H_BHURT', leg: 'H_LH' };
       case 'crouch': return { single: 'H_CR' };
       case 'slide': return { single: 'H_SL' };
@@ -396,10 +428,12 @@
     var sx = h.x + OFF_X - camX;
     var sy = h.y + OFF_Y;
     var n = 0;
+    // R3 star-w2：無敵星期間調色盤輪替（SMB 的閃色做法；不增加同屏色數）
+    var pal = (h.star > 0) ? ((h.frames >> 2) & 3) : 0;
     function put(name, dx, dy) {
       var t = tiles[name];
       if (t === undefined) return;
-      oam.add({ x: sx + dx, y: sy + dy, tile: t, pal: 0, flipH: flip, prio: 0 });
+      oam.add({ x: sx + dx, y: sy + dy, tile: t, pal: pal, flipH: flip, prio: 0 });
       n++;
     }
     if (f.single) {
@@ -429,13 +463,13 @@
 
   ST.Hero = {
     W: W, H: H, CROUCH_H: CROUCH_H, SPR_W: SPR_W, SPR_H: SPR_H,
-    OFF_X: OFF_X, OFF_Y: OFF_Y,
+    OFF_X: OFF_X, OFF_Y: OFF_Y, LAUNCH_SEG: LAUNCH_SEG,
     MAX_FALL: MAX_FALL, BOUNCE: BOUNCE,
     INV_FRAMES: INV_FRAMES, HURT_FRAMES: HURT_FRAMES, DEATH_FRAMES: DEATH_FRAMES,
     DROP_FRAMES: DROP_FRAMES, COIN_1UP: COIN_1UP,
     ROWS: ROWS, TOP_ROW: TOP_ROW,
     create: create, reset: reset, update: update, draw: draw,
-    stomp: stomp, hurt: hurt, kill: kill, addCoin: addCoin,
+    stomp: stomp, hurt: hurt, kill: kill, addCoin: addCoin, launch: launch,
     setCrouch: setCrouch, boxH: boxH, sync: sync,
     frameNames: frameNames, tileNames: tileNames
   };

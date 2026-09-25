@@ -33,6 +33,7 @@ from playwright.sync_api import sync_playwright
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 LEVELS = ['1-1', '1-2', '1-3', '1-4']
+LEVELS_W2 = ['2-1', '2-2', '2-3', '2-4']            # R3 star-w2
 
 BOT_JS = r"""
 (opt) => {
@@ -48,9 +49,19 @@ BOT_JS = r"""
   // ---- 跳躍模擬器：用 engine 的同一套物理（NES.FX.SMB）+ 關卡查詢，往前推演一次 ----
   // 把「該按住 A 幾幀」從猜測變成**驗證**：只挑真的能安全落地、而且有前進的那個。
   // 只模擬地形（不含敵人）：一路按住 右 + B，按住 A `hold` 幀（hold = 0 就是完全不跳）。
+  // R3 star-w2：關卡機關（升降板 / 間歇泉）都是「時間的純函式」⇒ 模擬器可以往前推演。
+  //   d.moverTops(t)  第 t 幀所有升降板的 {x0, x1, top}
+  //   d.hazardAt(x, y, w, h, t)  第 t 幀該矩形是否碰到火柱
+  const HAS_OBJ = !!(d.moverTops && d.objNow);
+  const HAS_OBJ2 = (function () {
+    if (!HAS_OBJ || !d.objects) return false;
+    const o = d.objects();
+    return !!(o && ((o.movers && o.movers.length) || (o.geysers && o.geysers.length)));
+  })();
   window.__botSim = function (hold, x0, y0, vx0, noB) {
     const FX = NES.FX, SMB = FX.SMB;
     const W = 12, H = 22, MAXF = hold ? 220 : LOOK, MAXFALL = FX.v88(4, 0);
+    const T0 = HAS_OBJ ? d.objNow() : 0;
     const px = FX.Vec(x0), py = FX.Vec(y0), vx = FX.Acc(vx0), vy = FX.Acc(0);
     const js = SMB.jumpState(vy);
     let onGround = (hold === 0);
@@ -82,7 +93,21 @@ BOT_JS = r"""
       }
       return false;
     }
-    let f = 0, air = 0, x = x0, y = y0, firstAir = -1;
+    // 升降板：只從上方擋（同 ST.Objects.ride 的條件）
+    function moverTop(x, feet, prevFeet, t) {
+      if (!HAS_OBJ) return -1;
+      const list = d.moverTops(t);
+      for (let i = 0; i < list.length; i++) {
+        const m = list[i];
+        if (x + W <= m.x0 || x >= m.x1) continue;
+        if (vy.v < 0) continue;
+        if (prevFeet > m.top + 3) continue;
+        if (feet < m.top - 1 || feet > m.top + 10) continue;
+        return m.top;
+      }
+      return -1;
+    }
+    let f = 0, air = 0, x = x0, y = y0, firstAir = -1, onMover = false;
     while (f < MAXF) {
       const run = (!noB) && (onGround || Math.abs(vx.v) >= SMB.airRunSpeed);
       FX.aapproach(vx, run ? SMB.maxRun : SMB.maxWalk, run ? SMB.accRun : SMB.accWalk);
@@ -96,8 +121,12 @@ BOT_JS = r"""
       if (vy.v >= 0) {
         const frow2 = (y + H) >> 3;
         if (foot(x, frow2, prevFeet) || foot(x + W - 1, frow2, prevFeet)) {
-          y = (frow2 << 3) - H; FX.vsetPx(py, y); FX.aset(vy, 0); onGround = true;
-        } else onGround = false;
+          y = (frow2 << 3) - H; FX.vsetPx(py, y); FX.aset(vy, 0); onGround = true; onMover = false;
+        } else {
+          const mt = moverTop(x, y + H, prevFeet, T0 + f + 1);
+          if (mt >= 0) { y = mt - H; FX.vsetPx(py, y); FX.aset(vy, 0); onGround = true; onMover = true; }
+          else onGround = false;
+        }
       } else {
         onGround = false;
         const hrow2 = y >> 3;
@@ -109,9 +138,12 @@ BOT_JS = r"""
       if (!onGround) { air++; if (firstAir < 0) firstAir = f; }
       if (y > 240) return { ok: false, why: 'pit', x: x, y: y, f: f, dx: x - x0, firstAir: firstAir };
       if (hurtAt(x, y)) return { ok: false, why: 'hurt', x: x, y: y, f: f, dx: x - x0, firstAir: firstAir };
-      if (hold > 0 && onGround && air > 2) return { ok: true, x: x, y: y, f: f, dx: x - x0, vx: vx.v };
+      if (HAS_OBJ && d.hazardAt(x, y, W, H, T0 + f + 1)) {
+        return { ok: false, why: 'geyser', x: x, y: y, f: f, dx: x - x0, firstAir: firstAir };
+      }
+      if (hold > 0 && onGround && air > 2) return { ok: true, x: x, y: y, f: f, dx: x - x0, vx: vx.v, onMover: onMover };
     }
-    return { ok: hold === 0, x: x, y: y, f: f, dx: x - x0, firstAir: firstAir, vx: vx.v };
+    return { ok: hold === 0, x: x, y: y, f: f, dx: x - x0, firstAir: firstAir, vx: vx.v, onMover: onMover };
   };
 
   window.__bot = {
@@ -139,7 +171,8 @@ BOT_JS = r"""
       }
     }
     // ② 「完全不跳」往前看 60 幀：能安全前進 ≥ 80 px 就不用跳
-    const key = (s.x >> 1) + ':' + (s.y >> 1) + ':' + (s.vx >> 5) + ':' + (b.loose > 0 ? 1 : 0) + ':' + b.warnT + (b.longBias ? 'L' : '');
+    const tk = HAS_OBJ2 ? (':' + (((d.objNow() % 960) >> 5))) : '';
+    const key = (s.x >> 1) + ':' + (s.y >> 1) + ':' + (s.vx >> 5) + ':' + (b.loose > 0 ? 1 : 0) + ':' + b.warnT + (b.longBias ? 'L' : '') + tk;
     const hit = b.cache[key];
     if (hit !== undefined) return hit;
     // 兩步推演：從落點 (x,y,vx) 出發，「不跳」或「某一種跳」至少要有一條活路
@@ -173,6 +206,9 @@ BOT_JS = r"""
       for (let i = 0; i < fl.length; i++) {
         const e = fl[i];
         if (e.stompable !== false) continue;
+        // R3 star-w2：只有「飛的」才值得等；地面上的不可踩敵人（armor）會一直在那裡
+        // 巡邏，等下去就是永遠卡住 ⇒ 該跳就跳（撞到只是受傷，不會死）。
+        if (e.ground) continue;
         if (e.x + e.w > s.x - 8 && e.x - s.x < 72 && Math.abs(e.y - s.y) < 44) return 0;
       }
     }
@@ -184,8 +220,8 @@ BOT_JS = r"""
         if (!r.ok || r.dx < 16 || (r0.ok && r.dx <= r0.dx)) continue;
         if (!(SIM(h, s.x - 10, s.y, s.vx - 96).ok && SIM(h, s.x + 8, s.y, s.vx).ok
           && SIM(h, s.x, s.y, s.vx - 96).ok)) continue;
-        if (!survivable(r)) continue;          // 兩步：落點還要有活路（天空關的小浮台很關鍵）
-        hold = h; break;
+        if (!r.onMover && !survivable(r)) continue;   // 兩步：落點還要有活路（天空關的小浮台很關鍵）
+        hold = h; break;                               // 落在升降板上 ⇒ 交給 riding 分支處理
       }
       // 還是找不到就試「放開 B 的短跳」（空中鎖走速 ⇒ 飛得近很多，適合小浮台）
       if (!hold) {
@@ -265,6 +301,29 @@ BOT_JS = r"""
         b.lastX = -1; b.stuck = 0;
         if (b.frames >= opt.maxFrames) { b.done = { cleared: false, reason: 'timeout', x: S().x, level: S().level }; return b; }
         continue;
+      }
+      // R3 star-w2：站在礦車升降板上 ⇒ **先別往右跑**（會直接跑出板子），
+      // 等「從現在這個位置跳出去能安全落在實地」再跳。板子帶著人走，遲早等得到。
+      if (b.back === 0 && b.jump === 0 && s.onMover) {
+        const SIM2 = window.__botSim;
+        const alive2 = (r) => {
+          if (SIM2(0, r.x, r.y, r.vx).ok) return true;
+          for (let j = 0; j < HOLDS.length; j++) if (SIM2(HOLDS[j], r.x, r.y, r.vx).ok) return true;
+          return false;
+        };
+        let rideHold = 0;
+        for (let ci = 0; ci < HOLDS.length; ci++) {
+          const r = SIM2(HOLDS[ci], s.x, s.y, 0);
+          if (r.ok && !r.onMover && r.dx >= 10 && alive2(r)) { rideHold = HOLDS[ci]; break; }
+        }
+        if (!rideHold) {
+          __nes.press(0, 1);                 // 原地站著讓板子載
+          b.frames++;
+          b.lastX = -1; b.stuck = 0;
+          if (b.frames >= opt.maxFrames) { b.done = { cleared: false, reason: 'timeout', x: S().x, level: S().level }; return b; }
+          continue;
+        }
+        b.jump = rideHold; b.jumpNoB = false;
       }
       if (b.back === 0) {
         mask = BTN.RIGHT | ((b.jump > 0 && b.jumpNoB) ? 0 : BTN.B);
@@ -537,7 +596,9 @@ def run_level(page, url, level, seed, max_frames, verbose, lives):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--level', default='1-1')
-    ap.add_argument('--all', action='store_true', help='依序跑 1-1..1-4')
+    ap.add_argument('--all', action='store_true', help='依序跑 1-1..1-4（W1 回歸）')
+    ap.add_argument('--w2', action='store_true', help='依序跑 2-1..2-4（R3 世界 2）')
+    ap.add_argument('--all8', action='store_true', help='依序跑 1-1..2-4（八關）')
     ap.add_argument('--seed', type=int, default=1)
     ap.add_argument('--max-frames', type=int, default=20000)
     ap.add_argument('--lives', type=int, default=60, help='給機器人幾條命（死亡數照實回報）')
@@ -567,7 +628,14 @@ def main():
             browser.close()
         return rc
 
-    todo = LEVELS if a.all else [a.level]
+    if a.all8:
+        todo = LEVELS + LEVELS_W2
+    elif a.w2:
+        todo = LEVELS_W2
+    elif a.all:
+        todo = LEVELS
+    else:
+        todo = [a.level]
     bad = 0
     with sync_playwright() as pw:
         browser = pw.chromium.launch()
@@ -578,7 +646,7 @@ def main():
             has = page.evaluate if False else None
             r = run_level(page, url, lv, a.seed, a.max_frames, a.verbose, a.lives)
             if r is None:
-                if a.all:
+                if a.all or a.w2 or a.all8:
                     print('%-4s SKIP（關卡尚未就緒）' % lv)
                     continue
                 bad = 1
