@@ -2216,3 +2216,282 @@ $PY tools/nes_lint.py --palette engine/palette.js shots/agent_fix2star/*.png # 2
    要做「真·無敵星」得在 `games/star/hero.js` 的危險磚掃描加 `h.star` 旗標（那是 star-hero 的檔）；
    `★密技` 的中文字靠瀏覽器系統字型（覆蓋層是 DOM，不是 PPU），冷門環境缺字會退成方框，
    要完全無字型相依就得改成純 CSS 畫的星形圖示。
+
+---
+
+## cruiser-song（R3，2026-09-25）
+2026-09-25 ｜ 擁有檔案：`games/cruiser/song.js`、`games/cruiser/test_song.py`（新）
+｜ 新增 **7 首原創曲 + 1 個別名鍵**（`CR.SONGS` 由 6 首 → 14 鍵）
+｜ `games/cruiser/test_song.py` **154 項全綠**、`tools/test_apu.py` **103 項全綠**、
+`games/cruiser/test_cruiser.py` **264 項全綠**、`bash tools/run_all.sh --quick` **總結 PASS**
+
+### 1. 交付
+
+**全部原創**（旋律 / 和聲 / 低音 / 鼓組自寫，只借鑑研究 06 §2 的編曲技法與 §2.7 的鼓型表；
+不含任何《宇宙巡航艦》/ 沙羅曼蛇或其他商業遊戲的旋律片段）。
+
+| key | 曲名 | 調性 / 素材 | speed | BPM | rows/小節 | 小節 | 長度 | 循環 | 使用聲道 |
+|---|---|---|---:|---:|---:|---:|---:|:--:|---|
+| `stage2` | 熔岩星 | D 小調（弗里吉亞 ♭2） | 5 | 180 | 16 | 20 | **26.62 s** | 是 | p1 lead(50%) ／ p2 琶音墊(12.5%) ／ tri 重拍低音 ／ noi 雙大鼓 16 beat |
+| `stage3` | 巨石迷宮 | A 小調**五聲**（A C D E G，零半音） | 6 | 150 | 16 | 16 | **25.56 s** | 是 | p1 lead ／ p2 **回音（延後 6 row、detune +6、-4 級）** ／ tri 空心五度 ／ noi 極簡 |
+| `stage4` | 逆向世界 | G 小調 **3/4 拍** | 6 | 150 | **12** | 24 | **28.75 s** | 是 | p1 上行琶音 ／ p2 和弦（第 1 拍） ／ tri **第 2・3 拍**低音 ／ noi 倒立華爾滋 |
+| `stage5` | 生物洞窟 | C 小調 + 三全音 / 半音鄰音 | 6 | 150 | 16 | 16 | **25.56 s** | 是 | p1 organ ／ p2 **失諧回音（延後 3 row、detune +10 ≈ -70 音分）** ／ tri 半音爬行 ／ noi **呼吸脈動** |
+| `stage6` | 敵母艦要塞 | **C 大調 → C 小調**（第 9 小節轉） | 5 | 180 | 16 | 20 | **26.62 s** | 是 | p1 連續 16 分音符跑句 ／ p2 琶音 ／ tri 八度衝刺 ／ noi 16 beat |
+| `boss_final` | 母艦核心 | A 小調 + 減七 | **4** | **225** | 16 | 16 | **17.04 s** | 是 | **p1 / p2 交錯（hocket）** ／ tri 衝刺低音 ／ noi 16 beat |
+| `ending` | 凱旋 | C 大調 | 7 | 128.6 | 16 | 13 | **24.23 s** | **否** | p1 號角（末 3 小節 15→11→8→5 漸弱） ／ p2 和弦 ／ tri 進行曲（第 12 小節起退場） ／ noi（第 11 小節起退場） |
+| `stageclear` | （= `clear`） | E 大調 | 5 | 180 | 16 | 3 | 3.99 s | 否 | **別名**：關卡過場號角沿用既有的 `clear`（見「偏離」③） |
+
+- 長度 = 小節 × rows × speed ÷ 60.0988 幀；BPM = 3600 ÷ (speed × 4)。
+- **沒有任何一首用到 DMC 軌**（延續 R2 的卡帶預算原則），同時發聲聲道數最多 4（2A03 上限 5）。
+- 五首關卡曲都 ≥ 24 s、`boss_final` ≥ 16 s、`ending` 落在 20~30 s，全部符合任務規格。
+- 新樂器（加在既有 `INST`）：`lava`（50%↔25% 粗管）、`stone`（慢起音長尾 = 洞窟回響）、
+  `waltz`（鐘琴）、`organ`（音量 / 占空比都在循環 = 一直在呼吸）、`siren`（占空比每幀跳的警報）。
+  新鼓型：`DRUM_LAVA` / `DRUM_LAVA_F` / `DRUM_STONE` / `DRUM_STONE_F` / `DRUM_W` / `DRUM_W_F` ＋
+  `breathBar()`（每 2 row 一擊、週期與音量跟 8 步正弦起伏）。
+- 新資料工具（都在 `song.js` 內、可重用）：`flatN(bars, per)`（任意拍號）、`midiOf/nameOf/tr`（移調）、
+  `bassBar(root, style)`（`R O L 5 4 3 7 b #` 符號寫低音型）、`arpPad/arpBars/ch2`（琶音和弦墊）、
+  `hocket(notes)`（單一旋律線拆成 p1 / p2 交錯）、`volBars(bars, fn)`（逐小節漸弱）。
+- **`CR.Audio` 新欄位**：`KEYS`（14 鍵清單）、`LOOPED`（循環表）、`ECHO_DELAY3`（stage3 回音延遲）；
+  `CR.Audio.state()` 多回 `loop`（這首要不要循環）與 `keys`（曲目清單），既有欄位一個都沒動。
+
+### 2. 驗證
+
+| 項目 | 結果 |
+|---|---|
+| `$PY tools/apu_render.py --game cruiser --song <8 個新鍵> --seconds 30 --out-dir shots/agent_song` | **56 項全 PASS**：每首都出 wav、零 exception、無 NaN、峰值 0.37~0.55（不削波）、暫存器只落在 `$4000~$4017` 的五個聲道區塊 + `$4015/$4017`、宣告用到的四軌都有訊號且沒宣告的軌全靜音、**前 12 個頻譜峰全部可歸屬單一聲道**（＝沒有第六個音源） |
+| `shots/agent_song/wave_*.png` + `sheet_all.png` | 每首的波形 + 對數頻譜圖（Pillow 自畫，`apu_render.py` 不出 PNG），**已用 Read 逐張看圖**：stage3 看得到稀疏留白、stage4 的三拍分組、stage5 的呼吸起伏、stage6 / boss_final 的 16 分音符密度、**ending 尾段振幅階梯下降且鼓消失（漸弱成立）** |
+| `$PY games/cruiser/test_song.py`（**新**） | **154 項全綠** |
+| `$PY tools/test_apu.py` | **103 項全綠**（15.2~15.8 的逐首合法性檢查本來就涵蓋新曲） |
+| `$PY games/cruiser/test_cruiser.py` | **264 項全綠**（音樂相關的 ①開局 stage1 / 復活 / 魔王切 boss / 擊破切 clear 四項照常） |
+| 瀏覽器實測（scratchpad 的 playwright 腳本，`cruiser.html?debug=1&scale=1` 不 mute） | 14 鍵全部 `play()` 回 true、`state().song` / `playing` / `loop` 正確、推 40 幀後 row/order 有前進、**零 JS 錯誤**；另驗 `sfx('explode')` 搶 p2/noi 時 p1/tri 不被搶、音效結束後聲道歸還音樂 |
+| `bash tools/run_all.sh --quick` | **總結 PASS**（node --check 34 檔、13 支測試、三入口 build --check；`test_song.py` 已被 run_all 自動收錄） |
+
+`test_song.py` 的 154 項涵蓋：①鍵齊全（R2 六首仍在 + R3 八鍵 + `SONGS`/`LOOPED`/`KEYS` 同鍵）、
+②2A03 合法性（音名解析、**方波 / 三角波 timer 沒有被夾在 0 或 $7FF**＝音真的發得出來、方波 timer ≥ 8、
+三角波 ≤ C-5、雜訊 note 0..15、vol 0..15、duty 0..3、order 有效、無 DMC、每首 ≤ 5 軌）、
+③長度 / BPM / 小節數與曲目表逐欄相符且符合任務規格、④循環旗標（循環曲播完一輪仍在播、
+不循環曲自己停）、⑤`play(key)` → `state()`（song / playing / loop / 推進 / `stop()` 後歸零 /
+不存在的鍵回 `false`）、⑥整首逐幀統計同時發聲聲道數 ≤ 4 且 DMC 全程 0、
+⑦每個 pattern 的每軌長度 = 該曲 rows、總 row = 小節數 × rows（整數倍）、
+⑧編曲契約（stage3/stage5 回音延遲與 detune 逐 row 比對含 loop 接點、boss_final 的 p1/p2
+**無同時觸發且無空隙**、ending 末三小節音量遞減 + 漸弱段無鼓、`stageclear === clear`）。
+
+### 3. 偏離
+
+1. **動了 `tools/test_apu.py` 一行**（授權外，但不動就一定 FAIL）：15.1 原本斷言 `CR.SONGS` **恰好六首**，
+   改成「**R2 六首仍在**（目前共 14 首）」，並同步 docstring 第 27 行。該檔 header 自述是 audio agent 的檔，
+   而新曲的專屬驗證放在 `games/cruiser/test_song.py`；15.2~15.8 逐首掃全部曲目的行為完全沒變。
+2. **沒有動 `tools/apu_render.py`**（本來授權「必要時加參數」）：`--game cruiser --song <key>` 已能渲染任一首，
+   頻譜 / 波形 PNG 改用 Pillow 自畫（腳本留在 scratchpad，不進專案），避免在共用工具裡新增 Pillow 相依。
+3. **`stageclear` 做成 `clear` 的別名，沒有另寫一首**：既有 `clear` 就是 3.99 s 的上行號角 + 滾奏，
+   正好是規格要的「4~6 s 短號角」（3.99 s 只差 0.01 s，是 speed 5 × 48 row 的整數結果）。
+   六關若出現兩種過場號角反而不一致。**兩個鍵都可以叫**，`LOOPED` 都是 `false`。
+4. **`song.js` 頂部曲目表修正**：`title` 原本寫「~8.5 s」，實測與 `test_apu` 15.9 都是 **17.04 s**，順手改正；
+   同時把曲目表擴成 14 鍵並補上「調性」欄（任務要求的調性 / BPM / 小節 / 聲道表，註解與本節同步）。
+5. **stage4 一小節是 12 row（3/4 拍），不是 16**：driver 的 `rowsInPattern()` 取當前 pattern 的最大軌長，
+   12 row 的 pattern 完全合法（`song.rows` 也設 12）。`test_song.py` 的「時值 = 小節整數倍」是逐首比對
+   `rows`，不是寫死 16。另外 `gameover` 是 R2 就設計成 16+14 row 的收尾 jingle，該項檢查對它豁免（已註明）。
+6. **ending 的漸弱**靠逐小節改 row 音量（15→11→8→5）＋ 低音第 12 小節起、鼓第 11 小節起退場：
+   三角波沒有音量暫存器（真機限制），所以低音只能「不再下音」，不能淡出。
+
+### 4. 跨檔需求（給 cruiser-stages agent）
+
+**鍵名清單**（`CR.Audio.KEYS` 也拿得到，打錯鍵 `play()` 回 `false`，退回既有曲的設計照舊可用）：
+
+| 時機 | 呼叫 |
+|---|---|
+| 標題 | `CR.Audio.play('title')` |
+| 第 1~6 關開場 / 復活 | `CR.Audio.play('stage1')` … `CR.Audio.play('stage6')` |
+| 關 1~5 的魔王進場 | `CR.Audio.play('boss')`（既有曲，10.7 s 循環） |
+| **關 6 最終魔王進場** | `CR.Audio.play('boss_final')`（17.0 s 循環，225 BPM） |
+| 關卡過場 | `CR.Audio.play('stageclear')` 或 `'clear'`（同一首） |
+| 全破演出 | `CR.Audio.play('ending')`（**不循環** 24.2 s） |
+| GAME OVER / 1-UP | `play('gameover')` / `play('extend')`（不變） |
+
+1. **每關在哪裡切曲**：沿用 stage1 的寫法 —— 關卡 `restart()` / 進關時 `play('stage' + n)`（`camX` 不限），
+   魔王段用「`stage.bossActive` 由 false → true 的那一幀」切魔王曲，**不要用固定 camX 比大小**
+   （復活回檢查點時會重複觸發）。若各關沿用 stage1 的 3072 px 長度與 `BOSS_COL0 = 320`（camX 2560）
+   核心室配置，**建議的切曲點就是 camX ≈ 2560**；關卡曲 25~29 s 循環、3072 px 大約 51 s，玩家會聽到約兩輪，
+   loop 點都接得上（回音軌是 wrap 的，不會斷句）。
+2. **三段式關卡不需要再切曲**：stage2~6 的 A / B 段本身就有對比（換音域 / 換節奏密度 / 轉調），
+   中途切曲會從第 1 小節重播，聽起來像卡帶跳針。要強化「進入地形段」的感覺請用音效（`sfx('laser')` 等）。
+3. **最終魔王的多階段**：`boss_final` 是**一首 17 s 的循環曲**，階段切換時**不要重播**（`play()` 會從頭開始）。
+   建議只在「最終階段（HP < 1/3 或核心露出）」重播一次 `play('boss_final')` 當作再一次高潮；
+   中間階段用畫面 + 音效表現即可。要查目前在播哪首：`CR.Audio.state().song`（另有 `loop` / `keys` 欄位）。
+4. **ending 何時結束**：`ending` 是唯一「會自己停」的長曲。演出結束的判定用
+   `CR.Audio.state().playing === false`（約 24.2 s ≈ 1456 幀），或自己數幀；
+   之後接「第二輪」就 `play('stage1')`。
+5. `song.js` 只有 cruiser-song agent 改；stages agent **不需要**、也請不要改這個檔。
+   需要新曲或改長度請寫在 PROGRESS 的跨檔需求，我這邊加。
+
+### 5. 留給後續
+
+1. **第二輪（二週目）沒有專屬曲**：目前設計是重播 `stage1`~`stage6`。若要「二週目變奏」，
+   最省的做法是同一份 pattern 資料 + 整軌 `detune`（移調）或 `speed - 1`（加快），
+   不必再寫一份旋律；要做的話由本 agent 在 `song.js` 加 `stage1b` 之類的鍵。
+2. **關 1~5 共用同一首 `boss`**：六個魔王聽同一首。若日後想要「關 3 / 關 5 專屬魔王曲」，
+   建議用 `boss` 的 pattern + 換調 / 換鼓型做變體（`boss_b` / `boss_c`），成本約半小時一首。
+3. **DMC 軌仍然全空**：五聲道只用四軌。若美術預算允許放取樣，最有價值的是把 `boss_final` 與
+   `stage6` 的大鼓換成 DPCM 取樣（研究 06 §1.5），臨場感提升最大，但要先確認卡帶預算。
+4. **音樂 duck**：研究 06 §8.2 第 19 條建議播 jingle（`extend`）時把音樂降到 30~35% 再平滑回復，
+   目前 `extend` 是整首接管（音樂停）。要做 duck 需要在 `engine/music.js` 加「全域音量倍率」，
+   那是引擎檔，要等有人擁有 `engine/music.js` 的那一輪一起做。
+5. **手機喇叭實聽**（研究 06 §8.2 第 18 條）本輪只做到頻譜 / 波形驗證，沒有人耳確認；
+   建議總控在真機聽一次 `stage5`（失諧回音在小喇叭上可能糊成一團，必要時把 detune 由 +10 降到 +6）。
+
+---
+
+## cruiser-stages（R3，2026-09-25）
+
+使用者需求：「**紅白機的巡航艦需要大擴關卡，關卡太少了**」。
+R2 只有關卡 1（2816 px）。本輪做到 **6 關**（研究 16 §7-2 的 FC 七關節奏），每關不同地形主題 /
+不同敵人組合 / 不同魔王，全破後進**第二輪（loop）**。一鍵密技 / 續關 / 檢查點在**每一關**都有效。
+
+### 1. 交付
+
+**新檔**
+| 檔 | 行數 | 內容 |
+|---|---|---|
+| `games/cruiser/stages.js` | 437 | **只有資料**：`CR.STAGES[1..6]`（地形 RLE / 主題磚對應 / 難度參數 / 出怪表 / 魔王 key / 曲目 key）＋共用出怪骨架 `CR.StageData.buildWaves`（空戰段自動排、檢查點安全規則自動過濾） |
+| `games/cruiser/stage_runtime.js` | 713 | **執行層**，取代 `stage1.js`。`CR.stage` 的 R2 契約**一字未改**，只多 `load(n)` / `index` / `setLoop(n)` / `escapeT` / `spawnAtSurface` / `spawnMoaiAt` |
+| `games/cruiser/bosses.js` | 556 | 參數化魔王機 `makeBoss(cfg)` + 關卡 2..6 的五隻魔王；介面與 `boss.js` 完全相同 |
+| `games/cruiser/test_stages.py` | 604 | **R3 擴關驗收 217 項**（見下） |
+
+**改檔**
+- `games/cruiser/chr_world.js`：+51 精靈磚（火山彈 / 爬行砲 / 石像 / 環狀彈 / 分裂體 / 追蹤導彈 /
+  觸手 3 張 / 卵 / 岩壁 / 四方砲 / 巨眼 / 母艦中樞）、+9 背景磚（熔岩 ×2 / 火山岩 / 巨石 / 石板 /
+  肉壁 / 血管 / 電路 / 母艦核心背板）、**每關調色盤表 `CR.STAGE_PAL` + `applyStagePalette(ppu, n)`**。
+  用量 **精靈 103/128、背景 42/192**（都還有餘裕）。
+- `games/cruiser/enemies.js`：`KINDS` 5 → **15 種**（新增 lava / crawl / moai / mouth / split /
+  homing / tent / egg / brick / turret4）；新增 **每關難度參數 `setParams()`**（`bulletScale` /
+  `period` / `easyPeriod` / `easyCol0-1` / `maxAlive`）；`hit()` 加 `invuln`、`kill()` 加
+  「連動部位 `link`」與「死亡分裂 `splits`」。
+- `games/cruiser/boss.js`：**邏輯完全沒動**，只在檔尾加 `CR.Bosses` 登記處（`CR.Bosses.core = CR.Boss`）。
+- `games/cruiser/main.js`：`stageclear` → 分數結算（列 13 新增 `STAGE n BONUS xxxxx`）→ `load(n+1)`；
+  第 6 關破 → `ending` 模式 → START 進第二輪；`?stage=N`；HUD 第 1 列尾端 `ST<關>`；
+  曲目 key 解析（`CR.SONGS` 缺鍵就退回 `stage1` / `boss` / `clear`）；最終魔王的**脫出倒數文字**。
+- `cruiser.html`：腳本改成 `… boss.js → bosses.js → stages.js → stage_runtime.js → main.js`
+  （`stage1.js` 已刪，`build.py --check` PASS，dist 內嵌 22 檔 / 547 KB）。
+- `tools/playthrough_cruiser.py`：加 `--stage N` / `--all` / `--chain` / `--assist`；
+  機器人認得 10 種新敵人（不追無敵目標、打不破的威脅權重 620）。
+- `docs/TASKS.md`：新增「R3 cruiser 擴關」段（六關規格表 + 架構表 + 擁有檔）。
+
+**六關規格（實作值）**
+| 關 | 主題 | 長度 px | 欄 | 通道下限 | 魔王（總血量） | 新要素 |
+|---|---|---|---|---|---|---|
+| 1 | ASTEROID BELT 小行星帶 → 星際要塞 | 2816 | 384 | 18 列 | CORE FORTRESS（24） | **R2 原封不動**（fix3 三段式 = 回歸基準） |
+| 2 | VOLCANO 火山星 / 熔岩 | 2560 | 352 | 18 列 | EYE FORTRESS（20） | 火山彈（拋物線、落地重噴、**不可破壞**）、貼牆爬行砲 |
+| 3 | STONEHENGE 石陣 / 巨石迷宮 | 2816 | 384 | 18 列 | TWIN MOAI（20，兩顆頭都要打） | 可破壞岩壁（永遠留 2 個缺口＝友善版）、石像（**只有嘴可打**）、環狀彈 |
+| 4 | INVERTED WORLD 倒立世界 | 2688 | 368 | 17 列 | MIRROR CORE（24，上下對稱雙核） | 上下鏡像地形 + **減速段**（欄 176..240，0.5 → 0.25 px/幀）、分裂體、追蹤導彈 |
+| 5 | BIO CAVERN 生物洞窟 | 2944 | 400 | 17 列 | BIO CORE（26） | 伸縮觸手（**用敵人物件做，不是磚**，24~72 px）、孵化卵（150 幀孵 2 隻） |
+| 6 | MOTHER SHIP 敵母艦最終要塞 | 3072 | 416 | 16 列 | MOTHER BRAIN（40，含三連雷射） | 四方砲台、高速彈幕走廊、**脫出倒數 300 幀** → ENDING → 第二輪 |
+
+**難度曲線（一張表，`stages.js` 的 `params`，不散在程式裡）**
+| 關 | 敵彈倍率 | 砲台週期 | 同屏上限 | 通道下限 |
+|---|---|---|---|---|
+| 1 | 1.00 | 90（要塞段 130） | 10 | 18 列 |
+| 2 | 1.05 | 120 | 11 | 18 列 |
+| 3 | 1.10 | 112 | 12 | 18 列 |
+| 4 | 1.15 | 104 | 12 | 17 列 |
+| 5 | 1.20 | 96 | 13 | 17 列 |
+| 6 | 1.30 | 88 | 14 | 16 列 |
+
+第二輪起 runtime 再加成：`bulletScale + 24/輪`（上限 460 = 1.80×）、`period − 10/輪`（下限 48）、
+`maxAlive + 1/輪`（上限 16）。研究 16 §7-5 的 `$1A` loop 旗標就是「只改敵彈速度與射速分支」。
+
+**CHR 策略（不做 bank 切換）**：結構磚（牆 / 地板 / 天花板 / 管線 / 壁燈）**六關共用同一組**，
+主題靠 `CR.STAGE_PAL` 換調色盤 + 每關 1~2 張 signature 磚（FC 時代標準手法，0 額外 CHR 成本）。
+六關色系：① 藍要塞 ② 紅橘熔岩 ③ 灰巨石 / 土黃神殿 ④ 藍紫 + 紅岩 ⑤ 紫綠肉壁 ⑥ 鋼藍 + 青綠核心室。
+
+### 2. 驗證
+
+| 項目 | 結果 |
+|---|---|
+| `games/cruiser/test_stage1.py` | **174 / 174 PASS**（介面沒變，關卡 1 資料原封搬移） |
+| `games/cruiser/test_cruiser.py` | **300 / 300 PASS**（264 → 300，新增 R3 段 36 項） |
+| `games/cruiser/test_stages.py`（新） | **217 / 217 PASS** |
+| `bash tools/run_all.sh` | **總結 PASS**（14 支測試 + 3 個 build --check + 冒煙 + nes_lint 8 張全綠） |
+| `tools/build.py --src cruiser.html` | PASS，`dist/星塵巡航艦.html` 547 KB（內嵌 22 檔） |
+| lint / 預算 | 六關 × 三個位置（開頭 / 中段 / 魔王）各截圖 + `__nes.lint()` 全綠（9~13 色），`Scroller` 單欄尖峰 ≤ 39 byte，600 幀 VBlank 預算 **0 次超支**，OAM `dropped = 0` |
+
+`test_stages.py` 的九節：① 六關資料 / `load(n)` / 魔王登記處 ② 每關通道寬度（含大隕石的「實際可通行
+縱向區段」）+ `solidAt` 與名稱表一致 ③ 出怪表遞增 / 座標在世界內 / **檢查點安全規則**（後 22 欄無固定砲、
+後 14 欄有紅色單體）④ 10 種新敵人各自的行為 ⑤ 五隻新魔王（可被打死 / 階段數 / cleared / `force(3)`）
+⑥ 難度曲線遞增 + 第二輪加成 + 上下限 ⑦ 切關 / ENDING / 第二輪 ⑧ `?stage=N` ⑨ 每關三張截圖 + lint + 預算。
+
+**機器人通關表（`tools/playthrough_cruiser.py --all`，純實力、不用密技）**
+| 段落 | 主題 | 結束 | 幀數 | 死亡 | 剩船 | 分數 |
+|---|---|---|---|---|---|---|
+| `--stage 1` | ASTEROID BELT | cleared | **6455** | **0** | 3 | 18000 |
+| `--stage 2` | VOLCANO | cleared | 6810 | 0 | 3 | 15900 |
+| `--stage 3` | STONEHENGE | cleared | 6446 | 0 | 4 | 23300 |
+| `--stage 4` | INVERTED WORLD | cleared | 8765 | 0 | 4 | 26150 |
+| `--stage 5` | BIO CAVERN | cleared | 6713 | 0 | 4 | 29950 |
+| `--stage 6` | MOTHER SHIP | cleared | 7990 | 0 | 4 | 38900 |
+| `--chain`（1 → 6 → ENDING） | 全六關一口氣 | **ending** | 39970 | **0** | 11 | 175250 |
+
+- **關卡 1 回歸基準達成**：6455 幀 / 0 死，與 R2c 一幀不差（分數 18000 = 原 17000 + 新增的過關獎金 1000）。
+- `--assist`（每 120 幀按一次一鍵密技）保留給日後的通路驗證，本輪六關**純實力就全過，沒有用到**。
+
+截圖 `shots/agent_stages/`（六關 × 開頭 / 中段 / 魔王 = 18 張 + `flow_stage4_start` / `flow_ending` /
+`flow_loop2` / `t6_d_escape`），每張都用 Read 看過、`tools/nes_lint.py` 抽查 0 違規。
+
+### 3. 偏離
+
+1. **`--cheat` 沒有拿來當「密技輔助通關」**：R2c 已經把 `--cheat` 設成 `--konami` 的別名（秘技流程驗證，
+   24 項），改掉會打斷既有文件與總控習慣。密技輔助通關改叫 **`--assist`**，`--cheat` / `--konami` 維持原義。
+2. **關卡 4 的「逆向捲動」用替代做法**：`NES.SH.Scroller` 只能單向往前串流（`ENGINE_API` §15.5：
+   世界第 c 欄固定寫進 `c & 63`），反向捲動要改 engine。依任務指示改用
+   **「上下鏡像地形 + 減速段」**（欄 176..240 捲動 0.5 → 0.25 px/幀）表現天地顛倒，**engine 完全沒動**。
+3. **石像的「只有嘴可打」用兩個物件實作**：`main.js` 的碰撞用 `e.x/y/w/h` 同一個框判「自機彈命中」與
+   「撞到船」，單一物件無法區分弱點。作法是本體（`moai`，`invuln`）+ 嘴（`mouth`，hp 3）互為 `link`，
+   打掉嘴 → 本體一起爆；嘴不另外畫精靈（是本體圖的一部分）⇒ **0 額外 OAM 成本**。
+4. **可破壞岩壁是「敵人」不是「磚」**：真的改地形磚要在捲動中重寫名稱表 + 重算屬性，VBlank 很緊。
+   改用 16×16 的 `brick` 敵人（hp 4、撞到會死），而且**永遠留 2 個 16 px 缺口**（不打也過得去）——
+   延續 travian 那邊訂的「原作反人性限制一律做友善版」。
+5. **魔王平衡改過三次**（都附機器人實測依據，寫在程式註解）：① `HOMING_LIFE` 420 → 300
+   ② 關卡 2 的 EYE FORTRESS 階段 3 拿掉追蹤導彈（無強化復活時必死）③ 關卡 5 的 BIO CORE
+   `ring12 → ring(8)`、`p3Period 50 → 72`、核心開合 60/64、核心 hp 12 → 10
+   （原設定同屏 20 顆彈 ⇒ 復活等於死局）。
+6. **`test_cruiser.py` 動了一行既有斷言**：HUD 第 1 列尾端新增 `ST<關>` ⇒
+   `r['b'].rstrip().endswith('x7')` 改成 `'x7' in r['b']`，並**新增**一項驗 `ST1`。
+   畫面文字本身（`1P` / `HI` / `x` / `STAGE CLEAR` / `PRESS START` / `GAME OVER` / `PAUSE` /
+   `SECRET!` / `C OR $ = CONTINUE`）**全部沒改**。
+7. **魔王進場改成無敵**（只在 `bosses.js`，`boss.js` 沒動）：外殼板在 phase 0 被打死會讓艦體停在畫面外
+   （`drawHull` 是背景磚、位置鎖在 `B.x >> 3`）。關卡 1 維持 R2 行為不變。
+
+### 4. 跨檔需求
+
+**給 cruiser-song agent（已交付，本輪直接對接成功）**
+本輪呼叫的鍵：`title` / `stage1`~`stage6` / `boss` / `boss_final` / `clear` / `gameover` / `ending`。
+- 切曲時機完全照你在 PROGRESS 寫的三條：關卡 `restart()` / 進關時 `play('stage' + n)`；
+  魔王用 `stage.bossActive` false → true 那一幀；最終關用 `boss_final`。
+- **缺鍵自動退回**：`CR.SONGS[key]` 不存在就退 `stage1` / `boss` / `clear`（`main.js` 的 `songKey()`），
+  所以兩邊任何時候各自可測。`test_cruiser.py` 的新斷言也是「有就用新的、沒有就用舊的」寫法。
+- 每關氣氛（給你對照，若要微調曲子）：② 火山＝壓迫 / 低音重 ③ 石陣＝空曠 / 節奏稀疏 / 神秘
+  ④ 倒立＝不安定 / 半音下行 ⑤ 生物洞窟＝黏稠 / 顫音 ⑥ 母艦＝高速 / 密集 16 分音。
+- **尚未用到**：`stageclear` 別名（本輪用 `clear`）。`ending` 的「播完自己停」目前沒被偵測——
+  ENDING 畫面是按 START 進第二輪，不是等音樂結束。若要改成「音樂播完自動進第二輪」再說一聲。
+
+**給總控**
+1. `games/cruiser/stage1.js` **已刪除**（內容拆進 `stages.js` + `stage_runtime.js`），commit 時記得帶上刪除。
+2. 新檔三支要進版本戳：`bosses.js` / `stages.js` / `stage_runtime.js`；
+   **commit 前請跑 `$PY tools/stamp.py`**（`cruiser.html` 裡這三支目前還沒有 `?v=` 戳記）。
+3. `dist/星塵巡航艦.html` 已重新產生（547 KB / 22 檔）。
+4. `README.md` 若有寫「星塵巡航艦：1 關」之類的字樣，請改成 6 關 + 第二輪。
+
+### 5. 留給後續
+
+1. **第二輪只加難度、沒換內容**：研究 §7-5 的日版彩蛋是「每輪不同訊息」。要做的話最省是
+   ENDING 文字依 `loop` 換一行（`main.js` 的 `endingLines(loop)` 已經吃 loop 參數）。
+2. **關卡 2 / 4 的大隕石表是空的**：為了不重蹈 fix3「一開始就一堆撞了會死的礁石」，
+   非關卡 1 一律不放地形隕石。要加視覺變化建議加「不會擋路的背景裝飾磚」（放在通道中央、非 solid）。
+3. **`escapeT` 的倒數文字用 `drawMsg`**（每秒重寫一次 ≈ 24 byte）。若之後 HUD 要放倒數，
+   移到名稱表列 26..28 會更穩（不會跟 `SECRET!` 的 `msgCells` 互相覆蓋）。
+4. **魔王 `force(phase)` 對多核心魔王是近似值**（把每顆核心血量平均壓到 `phase3At / 核心數`）。
+   只影響 `?boss=3` 的除錯入口與測試，不影響正式流程。
+5. **機器人沒有「跨關保留強化」的策略**：`--chain` 時過關不清強化（研究 §7：只有死亡才清），
+   但機器人的願望清單 `WISH` 只在死亡時重置，過關後若已經買滿就不再買。實測 39970 幀 0 死沒問題，
+   要更漂亮可以讓它在過關時把剩餘 gauge 花掉。
+6. **`--assist` 尚無自動化驗收**：本輪六關純實力就過，沒有跑 `--assist`。若日後某關調難了，
+   先跑 `--assist` 確認「通路存在」再調數值，比直接改地形安全。

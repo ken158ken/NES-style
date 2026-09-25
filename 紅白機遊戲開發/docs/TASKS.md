@@ -106,3 +106,50 @@
 | star-hero | games/star/chr_hero.js、hero.js、main.js、test_star.py、tools/playthrough_star.py | 主角狀態機 + 物理 + 鏡頭 + HUD + 主程式 + 手感測試 + 機器人 |
 | star-world | games/star/chr_world.js、levels_w1.js、enemies.js、boss.js、test_w1.py | W1 四關地圖與磚語意、3 敵、魔王、可達性測試 |
 | star-audio | games/star/song.js | 8 曲 + 7 音效（原創） |
+
+---
+# R3 cruiser 擴關 —— 《星塵巡航艦》六關（2026-09-25 開工）
+使用者需求（2026-09-25）：「**紅白機的巡航艦需要大擴關卡，關卡太少了**」。
+R2 只有關卡 1（空戰段 → 小行星帶 → 星際要塞 → 核心要塞，2816 px）。R3 做到 **6 關**（原作 FC 七關的節奏，
+研究 16 §7-2），每關**不同地形主題、不同敵人組合、不同魔王**，全破後進**第二輪（loop）**難度提升。
+
+## 架構（R2 的 stage1.js 拆成資料 + 執行）
+| 檔 | 內容 |
+|---|---|
+| `games/cruiser/stages.js` | **只有資料**：`CR.STAGES[1..6]`（地形 RLE / 主題磚對應 / 大隕石 / 難度參數 / 出怪表 / 魔王 key / 曲目 key）+ 共用出怪骨架 `CR.StageData.buildWaves` |
+| `games/cruiser/stage_runtime.js` | **執行層**（取代 stage1.js）：`CR.stage` 介面與 R2 契約**一字未改**，只多 `load(n)` / `index` / `setLoop(n)` / `escapeT` |
+| `games/cruiser/boss.js` | 關卡 1 魔王「核心要塞」（不動）＋ 魔王登記處 `CR.Bosses`（`CR.Bosses.core`） |
+| `games/cruiser/bosses.js` | 參數化魔王機 `makeBoss(cfg)` + 關卡 2..6 的五隻魔王（介面與 boss.js 相同） |
+| `games/cruiser/enemies.js` | 擴充 `KINDS`（+10 種）與 **每關難度參數表** `setParams()` |
+| `games/cruiser/chr_world.js` | +51 精靈磚 / +9 背景磚、**每關調色盤表 `CR.STAGE_PAL`**（結構磚六關共用，只換顏色） |
+| `games/cruiser/main.js` | `stageclear` → 分數結算 → `load(n+1)`；第 6 關破 → `ending` → 第二輪；`?stage=N`；HUD 關卡編號；脫出倒數 |
+
+## 六關規格（實作值）
+| 關 | 主題 | 長度 px | 欄 | 通道下限 | 魔王（總血量） | 新要素 |
+|---|---|---|---|---|---|---|
+| 1 | ASTEROID BELT 小行星帶 → 星際要塞 | 2816 | 384 | 18 列 | CORE FORTRESS（24） | R2 原封不動（機器人 0 死 6455 幀是回歸基準） |
+| 2 | VOLCANO 火山星 / 熔岩 | 2560 | 352 | 18 列 | EYE FORTRESS（20） | 火山彈（拋物線、不可破壞）、貼牆爬行砲 |
+| 3 | STONEHENGE 石陣 / 巨石迷宮 | 2816 | 384 | 18 列 | TWIN MOAI（20，兩顆頭） | 可破壞岩壁、石像（只有嘴可打）、環狀彈 |
+| 4 | INVERTED WORLD 倒立世界 | 2688 | 368 | 17 列 | MIRROR CORE（24，上下對稱雙核） | 上下鏡像地形 + **減速段**、分裂體、追蹤導彈 |
+| 5 | BIO CAVERN 生物洞窟 | 2944 | 400 | 17 列 | BIO CORE（26） | 伸縮觸手（敵人物件，非磚）、孵化卵 |
+| 6 | MOTHER SHIP 敵母艦最終要塞 | 3072 | 416 | 16 列 | MOTHER BRAIN（40） | 四方砲台、三連雷射、**脫出倒數** → ENDING → 第二輪 |
+
+- 檢查點一律**每 512 px**；魔王復活點 = `camMax - 56`（死在魔王戰只要空捲 112 幀）。
+- 安全規則（fix2 訂的，六關通用，`buildWaves` 會自動過濾）：①檢查點後 22 欄內不放固定砲
+  ②檢查點後 14 欄內至少一隻紅色單體（1 發必掉膠囊）。檢查點 0 = 開局，不適用②。
+- 難度曲線寫成**一張參數表**（`stages.js` 的 `params`）：敵彈倍率 1.00→1.30、砲台週期 90→88、
+  同屏上限 10→14；第二輪起 runtime 再加成（彈速 +24/輪、週期 −10/輪，有上下限）。
+- **CHR 不做 bank 切換**：結構磚（牆 / 地板 / 天花板 / 管線）六關共用，主題只靠 **`CR.STAGE_PAL` 換調色盤**
+  + 每關 1~2 張 signature 磚（FC 時代標準手法）。用量：精靈 103/128、背景 42/192。
+
+## 驗收
+- `games/cruiser/test_stage1.py` 174 項全綠（介面沒變）、`test_cruiser.py` 292 項、
+  **新增 `games/cruiser/test_stages.py` 217 項**（六關資料 / 通道寬度 / 出怪表安全規則 / 10 種新敵人 /
+  5 隻新魔王 / 難度曲線 / 切關 / ENDING / 第二輪 / `?stage=` / 每關三張截圖 + lint）。
+- `tools/playthrough_cruiser.py` 加 `--stage N` / `--all` / `--chain` / `--assist`；
+  六關**純實力（不用密技）各自 0 死通關**，`--chain` 一口氣 1→6 → ENDING 也 0 死。
+
+| agent | 擁有檔案 | 內容 |
+|---|---|---|
+| cruiser-stages | games/cruiser/{stages,stage_runtime,bosses,boss,enemies,chr_world,main}.js、test_cruiser.py、test_stages.py、cruiser.html、tools/playthrough_cruiser.py | 見上（**不動 song.js**：那是 cruiser-song agent 的） |
+| cruiser-song | games/cruiser/song.js | `stage2`~`stage6`、`boss_final`、`ending` 七首新曲 |

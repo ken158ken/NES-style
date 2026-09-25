@@ -539,7 +539,9 @@ def test_hud(page):
       const b = GAME.state().hud.split('|')[0];
       return { a, b }; }""")
     ok('HUD 分數欄更新', '0123456' in r['a'], r['a'])
-    ok('HUD 剩餘船更新', r['b'].rstrip().endswith('x7'), r['b'])
+    # R3 擴關：第 1 列尾端多了「ST<關卡編號>」（欄 29..31）⇒ 改驗「含 x7」而不是「結尾是 x7」
+    ok('HUD 剩餘船更新', 'x7' in r['b'], r['b'])
+    ok('HUD 第 1 列尾端顯示關卡編號 ST1（R3 擴關新增）', r['b'].rstrip().endswith('ST1'), r['b'])
 
     r = page.evaluate(r"""() => {
       const s = CR.ship; s.invul = 999999;
@@ -1326,6 +1328,139 @@ def test_fix5(page):
        (k2['secretLeft'], k2['power']))
 
 
+# ============================================ 15 R3 擴關（main.js 這一側的契約）
+# 關卡資料 / 地形 / 魔王本身的驗收在 `games/cruiser/test_stages.py`（217 項）；
+# 本節只驗 **主程式這一側**：state() 欄位、HUD 關卡編號、過場 → 下一關、ENDING → 第二輪、
+# `?stage=N`，以及「密技 / 暫停 / 續關在**別關**也要有效」（fix3~fix5 的契約不能只在關卡 1 成立）。
+def test_r3(page):
+    print('[15 R3 擴關：關卡切換 / ENDING / 第二輪 / ?stage= / 密技跨關有效]')
+    g = fresh(page)
+    ok('state() 有 stageNo / loop / stageCount 欄位',
+       g['stageNo'] == 1 and g['loop'] == 0 and g['stageCount'] == 6,
+       (g['stageNo'], g['loop'], g['stageCount']))
+    ok('state().stage 有 index / name / count / camMax',
+       g['stage']['index'] == 1 and g['stage']['count'] == 6 and g['stage']['camMax'] == 2816,
+       g['stage'])
+    ok('開局 HUD 顯示 ST1', g['hud'].split('|')[0].rstrip().endswith('ST1'), g['hud'].split('|')[0])
+    ok('曲目 key 解析：關卡 1 = stage1（song.js 缺 stage2~6 時會退回 stage1）',
+       g['song'] == 'stage1', g['song'])
+
+    # ---- 曲目 key 解析（song agent 平行開發：缺席就退回既有曲，兩邊獨立可測）----
+    r = page.evaluate(r"""() => {
+      const out = {};
+      for (let n = 1; n <= 6; n++) { CR.stage.load(n); const g = GAME.state(); out[n] = [g.song, g.bossSongKey]; }
+      CR.stage.load(1);
+      return { out: out, keys: (window.CR.SONGS ? Object.keys(CR.SONGS) : []) };
+    }""")
+    for n in range(1, 7):
+        want = 'stage%d' % n if ('stage%d' % n) in r['keys'] else 'stage1'
+        ok('關卡 %d 曲目 key 解析 = %s' % (n, want), r['out'][str(n)][0] == want, r['out'][str(n)])
+    wantb = 'boss_final' if 'boss_final' in r['keys'] else 'boss'
+    ok('關卡 6 魔王曲 key = %s（缺席退回 boss）' % wantb, r['out']['6'][1] == wantb, r['out']['6'])
+    ok('關卡 1~5 魔王曲 key = boss',
+       all(r['out'][str(n)][1] == 'boss' for n in range(1, 6)), r['out'])
+
+    # ---- 過關 → 下一關（關卡 2）----
+    r = page.evaluate(r"""() => {
+      CR.g.mode = 'play';
+      const s = CR.stage;
+      s.load(1); s.restart(s.CAM_MAX);
+      CR.ship.invul = 1 << 28; CR.ship.lives = 9;
+      for (let i = 0; i < 3000; i++) {
+        __nes.step(1);
+        s.enemies.each(e => { if (e.boss && e.alive) e.hit(9); });
+        if (GAME.state().mode === 'stageclear') break;
+      }
+      const a = GAME.state();
+      NES.Input.inject(NES.Input.BTN.START, 1); __nes.step(1); NES.Input.inject(0, 1); __nes.step(3);
+      const b = GAME.state();
+      return { mode0: a.mode, msg0: a.msg, msg2: a.msg2, bonus: a.bonus, sc0: a.score,
+               mode1: b.mode, st1: b.stage.index, hud: b.hud, sc1: b.score,
+               name: b.stage.name, lives: b.lives };
+    }""")
+    ok('打掉關卡 1 魔王 → stageclear', r['mode0'] == 'stageclear', r['mode0'])
+    ok('列 11 仍是 STAGE CLEAR（R2 既有文字不變）', 'STAGE CLEAR' in r['msg0'].split('|')[0], r['msg0'])
+    ok('列 13 新增分數結算 STAGE 1 BONUS', 'STAGE 1' in r['msg2'].split('|')[0] and
+       'BONUS' in r['msg2'].split('|')[0], r['msg2'])
+    ok('過關獎金 1000 × 關數 × 輪數 = 1000', r['bonus'] == 1000, r['bonus'])
+    ok('stageclear 按 START → 進關卡 2（以前是回標題）', r['mode1'] == 'play' and r['st1'] == 2, r)
+    ok('關卡 2 名稱 = VOLCANO', r['name'] == 'VOLCANO', r['name'])
+    ok('切關後 HUD 改成 ST2', r['hud'].split('|')[0].rstrip().endswith('ST2'), r['hud'].split('|')[0])
+    ok('切關不清命數 / 分數', r['lives'] >= 1 and r['sc1'] >= r['sc0'], (r['lives'], r['sc0'], r['sc1']))
+
+    # ---- 第 6 關破 → ENDING → 第二輪 ----
+    r = page.evaluate(r"""() => {
+      CR.g.mode = 'play';
+      const s = CR.stage;
+      s.load(6); s.restart(s.CAM_MAX);
+      CR.ship.invul = 1 << 28; CR.ship.lives = 9;
+      for (let i = 0; i < 5000; i++) {
+        __nes.step(1);
+        s.enemies.each(e => { if (e.boss && e.alive) e.hit(9); });
+        if (GAME.state().mode === 'stageclear') break;
+      }
+      NES.Input.inject(NES.Input.BTN.START, 1); __nes.step(1); NES.Input.inject(0, 1); __nes.step(3);
+      const a = GAME.state();
+      const txt = [9, 11, 15].map(r2 => CR.screenText(r2).trim());
+      NES.Input.inject(NES.Input.BTN.START, 1); __nes.step(1); NES.Input.inject(0, 1); __nes.step(3);
+      const b = GAME.state();
+      return { mode: a.mode, txt: txt, endings: a.endings,
+               mode2: b.mode, st: b.stage.index, loop: b.loop, hud: b.hud };
+    }""")
+    ok('打掉第 6 關魔王 + START → ENDING 模式', r['mode'] == 'ending', r['mode'])
+    ok('ENDING 畫面：CONGRATULATIONS / ALL STAGE CLEAR / PRESS START',
+       'CONGRATULATIONS' in r['txt'][0] and 'ALL STAGE CLEAR' in r['txt'][1] and
+       'PRESS START' in r['txt'][2], r['txt'])
+    ok('ENDING 按 START → 第二輪從關卡 1 開始（loop = 1）',
+       r['mode2'] == 'play' and r['st'] == 1 and r['loop'] == 1, r)
+    ok('第二輪 HUD 回到 ST1', r['hud'].split('|')[0].rstrip().endswith('ST1'), r['hud'].split('|')[0])
+
+    # ---- ?stage=N ----
+    for n, name in ((3, 'STONEHENGE'), (6, 'MOTHER SHIP')):
+        page.goto((ROOT / 'cruiser.html').as_uri() + '?debug=1&scale=1&mute=1&stage=%d' % n)
+        page.wait_for_function('() => !!window.__nes && !!window.CR && !!window.CR.ship')
+        g = page.evaluate("() => { __nes.tap('start', 1); __nes.step(10); return GAME.state(); }")
+        ok('?stage=%d → 直接開關卡 %d（%s）' % (n, n, name),
+           g['stage']['index'] == n and g['stage']['name'] == name, (g['stage']['index'], g['stage']['name']))
+        ok('?stage=%d → HUD 顯示 ST%d' % (n, n),
+           g['hud'].split('|')[0].rstrip().endswith('ST%d' % n), g['hud'].split('|')[0])
+
+    # ---- fix3~fix5 的密技 / 暫停 / 續關在關卡 4 也要有效 ----
+    page.goto((ROOT / 'cruiser.html').as_uri() + '?debug=1&scale=1&mute=1&stage=4')
+    page.wait_for_function('() => !!window.__nes && !!window.CR && !!window.CR.ship')
+    page.evaluate("() => { __nes.tap('start', 1); __nes.step(30); __nes.release(); __nes.step(10); }")
+    b4 = page.evaluate('() => GAME.state()')
+    page.keyboard.press('KeyC')
+    page.evaluate('() => __nes.step(2)')
+    k4 = page.evaluate('() => GAME.state()')
+    ok('關卡 4：一鍵密技（C）照樣生效（SPEED %d → %d、OPTION×2、護盾 5）'
+       % (b4['speed'], k4['speed']),
+       k4['speed'] == b4['speed'] + 1 and k4['power']['option'] == 2 and k4['power']['shield'] == 5,
+       k4['power'])
+    ok('關卡 4：密技畫面出現 SECRET!', 'SECRET' in k4['msg'].split('|')[1], k4['msg'])
+    p4 = page.evaluate(JS_TAPS, ['START'])
+    ok('關卡 4：START 暫停照樣有效', p4['paused'] is True, p4['paused'])
+    s4 = page.evaluate(JS_TAPS, ['SELECT'])
+    ok('關卡 4：暫停 + SELECT 密技照樣有效', s4['selectSecrets'] == 1, s4['selectSecrets'])
+    page.evaluate(JS_TAPS, ['START'])
+    o4 = page.evaluate(r"""() => {
+      CR.ship.addScore(4321);
+      CR.ship.lives = 1; CR.ship.invul = 0; CR.ship.power.shield = 0; CR.ship.hit(true);
+      __nes.step(150);
+      return GAME.state();
+    }""")
+    ok('關卡 4：死光 → GAME OVER（續關點是本關的檢查點）',
+       o4['mode'] == 'gameover' and (o4['continueCam'] % 512 == 0 or o4['continueCam'] == 2632),
+       (o4['mode'], o4['continueCam']))
+    c4 = page.evaluate(JS_TAPS, ['SELECT'])
+    ok('關卡 4：SELECT 續關 → 回到關卡 4（不會跳回關卡 1）',
+       c4['mode'] == 'play' and c4['stage']['index'] == 4 and c4['lives'] == 3,
+       (c4['mode'], c4['stage']['index'], c4['lives']))
+    lt = page.evaluate("() => { __nes.render(); return __nes.lint(); }")
+    ok('關卡 4 續關後畫面 lint 綠', lt['ok'] is True and lt['colors'] <= 25,
+       {'ok': lt['ok'], 'colors': lt['colors']})
+
+
 def main():
     if not (ROOT / 'cruiser.html').exists():
         print('找不到 cruiser.html')
@@ -1350,6 +1485,7 @@ def main():
         test_fix3(page)
         test_fix4(page)
         test_fix5(page)
+        test_r3(page)
         test_no_errors(page, errors)
         browser.close()
 

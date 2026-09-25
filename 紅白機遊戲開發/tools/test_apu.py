@@ -24,7 +24,7 @@ apu.js / music.js / games/cruiser/song.js（這三個都是 audio agent 自己�
   12 music：pattern / row 推進與 speed
   13 music：sfx 搶聲道 + 結束後復原
   14 music：slide（滑音）/ detune 效果欄（R2 新增，QA R1 P2-7 / X15）
-  15 cruiser：CR.SONGS 六首曲的 pattern 合法性（音域 / 聲道分配 / order / 長度）
+  15 cruiser：CR.SONGS 全部曲目的 pattern 合法性（音域 / 聲道分配 / order / 長度；R2 六首另有長度表）
   16 cruiser：CR.SFX 優先權表 + 搶佔後音樂軌回復
   17 cruiser：10 秒離線渲染無 NaN / 不削波
 """
@@ -860,7 +860,12 @@ def main():
             # 15 曲目資料合法性
             r = run('cruiserSongs')
             want_keys = ['title', 'stage1', 'boss', 'clear', 'gameover', 'extend']
-            check('15.1 六首曲齊全 %s' % want_keys, sorted(r['keys']) == sorted(want_keys), r['keys'])
+            # R3（cruiser-song agent）起 CR.SONGS 會多出 6 關擴充的曲目
+            # （stage2~6 / boss_final / ending / stageclear）；這裡只保證 R2 六首仍在，
+            # 新曲的長度 / 循環 / 編曲契約驗證在 games/cruiser/test_song.py。
+            # 下面 15.2~15.8 的合法性檢查本來就是逐首掃全部曲目，新曲一樣涵蓋。
+            check('15.1 R2 六首曲仍齊全 %s（CR.SONGS 目前共 %d 首）' % (want_keys, len(r['keys'])),
+                  all(k in r['keys'] for k in want_keys), r['keys'])
             bad = r['bad']
             check('15.2 p1/p2/tri 的音名都解析得出且在 C1..B7（midi 24..107）',
                   not bad['range'], bad['range'][:6])

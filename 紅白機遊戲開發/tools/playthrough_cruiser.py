@@ -61,16 +61,36 @@ BOT_JS = r"""
   // 敵人種類 → 瞄準優先序（fan 編隊最優先：整隊打光才掉膠囊）
   // fix3：`e.drop` 的**紅色單體**是「1 發必掉膠囊」的保底管道 ⇒ 優先序排在 fan 之前
   //       （人類玩家學到「紅色 = 有獎」之後也是這樣打）。
-  function aimRank(k) { return k === 'fan' ? 1 : (k === 'zig' ? 2 : (k === 'turret' ? 3 : (k === 'rock' ? 4 : 5))); }
+  // R3 擴關：mouth（石像的嘴）= 打掉整隻石像的唯一方法 ⇒ 最優先；invuln 的（火山彈 / 石像本體）跳過
+  const AIMR = {fan: 1, mouth: 1, zig: 2, split: 2, egg: 2, homing: 2,
+                turret: 3, crawl: 3, turret4: 3, rock: 4, brick: 5, tent: 5};
+  function aimRank(k) { return AIMR[k] || 5; }
+  // 威脅權重：打不破的東西（火山彈 / 石像本體 / 岩壁 / 觸手）要更遠地避開
+  function threatWt(e) {
+    if (e.boss) return 150;
+    if (e.invuln) return 620;
+    if (e.kind === 'tank') return 560;
+    if (e.kind === 'brick' || e.kind === 'tent') return 560;
+    if (e.kind === 'homing') return 480;
+    return 380;
+  }
+  function threatPad(e) {
+    if (e.kind === 'fan') return 10;
+    if (e.kind === 'homing') return 10;
+    if (e.kind === 'zig' || e.kind === 'tank' || e.kind === 'split') return 8;
+    return 2;
+  }
 
   window.__bot = {
     wish: WISH.slice(), deaths: 0, frames: 0, lastLives: 3, log: [], cause: '', wasAlive: true,
     lastMove: [0, 0],
+    // R3：--assist（密技輔助）與跨關統計
+    assist: false, cheats: 0, stages: [], lastStage: 1, stageF0: 0,
     dbg: false, dbgCost: [], dbgHist: [],
     tick() {
       const s = CR.ship, st = CR.stage, g = window.GAME.state();
       let mask = 0;
-      if (g.mode === 'title' || g.mode === 'gameover' || g.mode === 'stageclear') {
+      if (g.mode === 'title' || g.mode === 'gameover' || g.mode === 'stageclear' || g.mode === 'ending') {
         if ((this.frames & 7) === 0) mask |= BTN.START;
         NESg.Input.inject(mask, 1); window.__nes.step(1); this.frames++;
         return g.mode;
@@ -84,6 +104,8 @@ BOT_JS = r"""
       const solid = (x, y) => { try { return !!st.solidAt(x | 0, y | 0); } catch (e) { return false; } };
 
       // ── 威脅清單（螢幕座標 + px/幀速度）──────────────────────────────
+      // R3 --assist：每 120 幀按一次一鍵密技（SPEED / MISSILE / OPTION x2 / 護盾），驗「通路存在」
+      if (this.assist && (this.frames % 120) === 0 && CR.cheat) { CR.cheat(); this.cheats++; }
       const threats = [];
       st.bullets.each(b => {
         if (b.bg || b.big) threats.push({x: b.x, y: b.y, w: b.w, h: b.h, vx: 0, vy: 0, wt: 520});
@@ -92,15 +114,15 @@ BOT_JS = r"""
       st.enemies.each(e => {
         // fan 是正弦蛇行、zig 每 32 幀換向 ⇒ 垂直方向多留餘裕（線性外推不準）
         // 追蹤 / 蛇行的敵人線性外推不準 ⇒ 多留餘裕；tank 鎖定高度直衝，正面站著必死
-        const pad = (e.kind === 'fan') ? 10 : (e.kind === 'zig' ? 8 : (e.kind === 'tank' ? 8 : 2));
+        const pad = threatPad(e);
         // 魔王部位釘在畫面上（上下小幅擺動），但 e.vx 是內部用的殘值 ⇒ 外推會誤判成「衝過來」，
         // 導致機器人把整片上下空間都當成死路，停在角落不敢靠近（實測卡 13000 幀不掉血）
         threats.push({x: e.x, y: e.y - pad, w: e.w, h: e.h + pad * 2,
                       vx: e.boss ? 0 : e.vx / 256,
-                      vy: (e.boss || e.kind === 'fan' || e.kind === 'zig') ? 0 : e.vy / 256,
+                      vy: (e.boss || e.kind === 'fan' || e.kind === 'zig' || e.anchored) ? 0 : e.vy / 256,
                       // 魔王部位是「必須靠近才打得到」的固定目標 ⇒ 威脅權重調低，不然機器人只會躲
                       // tank 鎖定高度直衝、hp 3 打不掉 ⇒ 權重最高；魔王部位最低（必須靠近才打得到）
-                      wt: e.boss ? 150 : (e.kind === 'tank' ? 560 : 380), boss: !!e.boss});
+                      wt: threatWt(e), boss: !!e.boss});
       });
 
       // 魔王階段 3 的三連雷射：預告 30 幀是「背景磚」，機器人看不到，等雷射變成判定彈時
@@ -128,6 +150,7 @@ BOT_JS = r"""
       let aimY = null, aimBest = 1e9;
       st.enemies.each(e => {
         if (e.x <= s.sx + 40) return;
+        if (e.invuln) return;                 // R3：打不破的（火山彈 / 石像本體）不值得瞄
         const k = (e.boss ? -1e6 : (e.drop ? 0 : aimRank(e.kind) * 500)) + (e.x - s.sx);
         if (k < aimBest) { aimBest = k; aimY = e.y + e.h / 2; }
       });
@@ -274,11 +297,19 @@ BOT_JS = r"""
       for (let i = 0; i < n; i++) {
         const m = this.tick();
         const g = window.GAME.state();
-        if (g.stage && g.stage.cleared) return {done: 'cleared', mode: m};
+        const sn = (g.stage && g.stage.index) || 1;
+        if (sn !== this.lastStage) {           // R3：換關 -> 記一筆並重新計時
+          this.stages.push({stage: this.lastStage, frames: this.frames - this.stageF0,
+                            deaths: this.deaths, score: g.score, loop: g.loop});
+          this.lastStage = sn; this.stageF0 = this.frames;
+        }
+        if (g.stage && g.stage.cleared && !this.chain) return {done: 'cleared', mode: m};
+        if (m === 'ending') return {done: 'ending', mode: m};
         if (m === 'gameover') return {done: 'gameover', mode: m};
       }
       return {done: '', mode: window.GAME.state().mode};
-    }
+    },
+    chain: false
   };
   return true;
 }
@@ -525,10 +556,59 @@ def run_konami(page, out):
     return 1 if bad else 0
 
 
+def play(page, q, tag, args, chain=False):
+    """跑一段（一關或一整輪）。回傳 {done, frames, deaths, lives, camX, score, cleared, log, stages}。"""
+    page.goto((ROOT / 'cruiser.html').as_uri() + q)
+    page.wait_for_function('()=>!!window.__nes && !!window.CR && !!window.CR.ship')
+    page.evaluate("()=>{__nes.tap('start',1); __nes.step(2);}")
+    page.evaluate(BOT_JS)
+    page.evaluate('(o)=>{ __bot.assist = !!o.assist; __bot.chain = !!o.chain; '
+                  '__bot.lastStage = (window.GAME.state().stage.index || 1); }',
+                  {'assist': bool(args.assist), 'chain': bool(chain)})
+    done = ''
+    chunk = 600
+    total = 0
+    while total < args.max_frames:
+        r = page.evaluate("(n)=>__bot.run(n)", chunk)
+        total = page.evaluate("()=>__bot.frames")
+        g = page.evaluate("()=>window.GAME.state()")
+        print('f=%-6d st=%d mode=%-10s camX=%-5d lives=%d deaths=%d score=%-7d gauge=%d spd=%d '
+              'pow=%s enemies=%d boss=%s' %
+              (total, g['stage'].get('index', 1), g['mode'], g['camX'], g['lives'],
+               page.evaluate("()=>__bot.deaths"), g['score'], g['gauge'], g['speed'],
+               ''.join(k[0].upper() if g['power'][k] else '-'
+                       for k in ('missile', 'double', 'laser')) + str(g['power']['option']) +
+               str(g['power']['shield']),
+               g['enemies'], g['stage']['bossActive']),
+              ' caps=%d/%d' % (g['capsules'], page.evaluate("()=>CR.stage.capsuleSeq()")))
+        if args.shots and (total // 1200) != ((total - chunk) // 1200):
+            shot(page, OUT / 'bot' / ('%s_f%05d.png' % (tag, total)))
+        if r['done']:
+            done = r['done']
+            break
+    g = page.evaluate("()=>window.GAME.state()")
+    out = {
+        'tag': tag, 'done': done or 'maxframes', 'frames': total,
+        'deaths': page.evaluate("()=>__bot.deaths"), 'lives': g['lives'],
+        'camX': g['camX'], 'camMax': g['stage'].get('camMax', 0), 'score': g['score'],
+        'cleared': bool(g['stage']['cleared']), 'stage': g['stage'].get('index', 1),
+        'log': page.evaluate("()=>__bot.log"), 'stages': page.evaluate("()=>__bot.stages"),
+        'cheats': page.evaluate("()=>__bot.cheats"),
+    }
+    shot(page, OUT / 'bot' / ('%s_end.png' % tag))
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--camx', type=int, default=None)
     ap.add_argument('--boss', type=int, default=None)
+    ap.add_argument('--stage', type=int, default=None, help='R3：從第 N 關開始（1..6）')
+    ap.add_argument('--all', action='store_true', help='R3：六關逐關各跑一次，最後印通關表')
+    ap.add_argument('--chain', action='store_true',
+                    help='R3：不在過關時停下，一路打到 ENDING（驗證關卡串接 / 第二輪）')
+    ap.add_argument('--assist', action='store_true',
+                    help='R3：每 120 幀按一次一鍵密技（驗「通路存在」；不用這個就是純實力通關）')
     ap.add_argument('--max-frames', type=int, default=30000)
     ap.add_argument('--tag', default='')
     ap.add_argument('--shots', action='store_true', help='每 1200 幀截一張')
@@ -537,14 +617,6 @@ def main():
                          ' + fix4 一鍵密技（暫停 SELECT / GAME OVER SELECT，不限次數）'
                          ' + fix5 真·一鍵密技（鍵盤 C / 觸控 ★密技 / nes-cheat，不必暫停）')
     args = ap.parse_args()
-
-    q = '?debug=1&scale=1&mute=1'
-    if args.camx is not None:
-        q += '&camx=%d' % args.camx
-    if args.boss is not None:
-        q += '&boss=%d' % args.boss
-    tag = args.tag or ('camx%d' % args.camx if args.camx is not None else
-                       ('boss%d' % args.boss if args.boss is not None else 'full'))
 
     with sync_playwright() as p:
         br = p.chromium.launch()
@@ -559,45 +631,47 @@ def main():
                 rc = 1
             br.close()
             return rc
-        page.goto((ROOT / 'cruiser.html').as_uri() + q)
-        page.wait_for_function('()=>!!window.__nes && !!window.CR && !!window.CR.ship')
-        page.evaluate("()=>{__nes.tap('start',1); __nes.step(2);}")
-        page.evaluate(BOT_JS)
-        done = ''
-        chunk = 600
-        total = 0
-        while total < args.max_frames:
-            r = page.evaluate("(n)=>__bot.run(n)", chunk)
-            total = page.evaluate("()=>__bot.frames")
-            g = page.evaluate("()=>window.GAME.state()")
-            print('f=%-6d mode=%-10s camX=%-5d lives=%d deaths=%d score=%-7d gauge=%d spd=%d '
-                  'pow=%s enemies=%d boss=%s' %
-                  (total, g['mode'], g['camX'], g['lives'],
-                   page.evaluate("()=>__bot.deaths"), g['score'], g['gauge'], g['speed'],
-                   ''.join(k[0].upper() if g['power'][k] else '-'
-                           for k in ('missile', 'double', 'laser')) + str(g['power']['option']) +
-                   str(g['power']['shield']),
-                   g['enemies'], g['stage']['bossActive']),
-                  ' caps=%d/%d' % (g['capsules'], page.evaluate("()=>CR.stage.capsuleSeq()")))
-            if args.shots and (total // 1200) != ((total - chunk) // 1200):
-                shot(page, OUT / 'bot' / ('%s_f%05d.png' % (tag, total)))
-            if r['done']:
-                done = r['done']
-                break
-        g = page.evaluate("()=>window.GAME.state()")
-        log = page.evaluate("()=>__bot.log")
-        deaths = page.evaluate("()=>__bot.deaths")
-        print('\n==== 機器人結果（%s）====' % tag)
-        print('結束原因 =', done or '達到 --max-frames')
-        print('幀數 =', total, ' 死亡數 =', deaths, ' 剩餘船 =', g['lives'],
-              ' camX =', g['camX'], '/', g['stage']['length'] * 8,
-              ' score =', g['score'], ' cleared =', g['stage']['cleared'])
-        print('死亡紀錄 =', json.dumps(log, ensure_ascii=False))
+
+        base = '?debug=1&scale=1&mute=1'
+        rows = []
+        rc = 0
+        if args.all:
+            for n in range(1, 7):
+                q = base + '&stage=%d' % n
+                tag = (args.tag + '_' if args.tag else '') + 'stage%d' % n
+                print('\n======== 關卡 %d（%s）========' % (n, 'assist' if args.assist else '實力'))
+                r = play(page, q, tag, args)
+                rows.append(r)
+                if not r['cleared']:
+                    rc = 1
+        else:
+            q = base
+            if args.stage is not None:
+                q += '&stage=%d' % args.stage
+            if args.camx is not None:
+                q += '&camx=%d' % args.camx
+            if args.boss is not None:
+                q += '&boss=%d' % args.boss
+            tag = args.tag or ('stage%d' % args.stage if args.stage is not None else
+                               ('camx%d' % args.camx if args.camx is not None else
+                                ('boss%d' % args.boss if args.boss is not None else 'full')))
+            r = play(page, q, tag, args, chain=args.chain)
+            rows.append(r)
+            rc = 0 if (r['cleared'] or r['done'] == 'ending') else 1
+
+        print('\n==== 機器人結果%s ====' % ('（--assist 密技輔助）' if args.assist else '（純實力）'))
+        print('%-10s %-10s %8s %7s %6s %9s %8s' % ('段落', '結束', '幀數', '死亡', '剩船', '分數', 'camX'))
+        for r in rows:
+            print('%-10s %-10s %8d %7d %6d %9d %5d/%d' %
+                  (r['tag'], r['done'], r['frames'], r['deaths'], r['lives'],
+                   r['score'], r['camX'], r['camMax']))
+            if r['log']:
+                print('   死亡紀錄 =', json.dumps(r['log'], ensure_ascii=False)[:400])
         if errs:
             print('頁面錯誤 =', errs[:5])
-        shot(page, OUT / 'bot' / ('%s_end.png' % tag))
+            rc = 1
         br.close()
-    return 0 if done == 'cleared' else 1
+    return rc
 
 
 if __name__ == '__main__':

@@ -423,4 +423,14 @@
       };
     }
   };
+
+  /* ---------------------------------------------------------- R3：魔王登記處
+   * 擴關後每一關有自己的魔王。`CR.Bosses` 是 key -> 實作的登記處，
+   * `stage_runtime.load(n)` 會把 `CR.Boss` 換成該關的實作（介面完全相同）。
+   * 本檔的「核心要塞」是**關卡 1 的魔王，也是預設值**（test_stage1.py 的驗收對象）。
+   */
+  CR.Boss.key = 'core';
+  CR.Boss.NAME = 'CORE FORTRESS';
+  CR.Bosses = CR.Bosses || {};
+  CR.Bosses.core = CR.Boss;
 })();

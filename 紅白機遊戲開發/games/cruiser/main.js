@@ -213,7 +213,7 @@
     ppu.setTile(0, c + 4, r, on ? B.H_GRON : B.H_GR);
   }
 
-  var hud = { score: null, hi: null, lives: null, gauge: -1 };
+  var hud = { score: null, hi: null, lives: null, gauge: -1, stage: null };
   var hudOn = true;                  // P3-1：標題畫面不掛能量表 HUD
 
   // HUD 三列（+ 裁掉的列 29）整個清空；hudOn = false 時 draw 也不會再同步
@@ -237,7 +237,8 @@
       writeText(ppu, GAUGE_COL[i], r0 + 1, CR.Ship.GAUGE_LABEL[i]);
       gaugeCell(ppu, i, false);
     }
-    hud.score = null; hud.hi = null; hud.lives = null; hud.gauge = 0;
+    writeText(ppu, 29, r0, 'ST1');                         // R3：關卡編號（hudSync 會改）
+    hud.score = null; hud.hi = null; hud.lives = null; hud.gauge = 0; hud.stage = 'ST1';
     hudOn = true;
   }
 
@@ -254,6 +255,9 @@
       if (s.gauge > 0) gaugeCell(ppu, s.gauge - 1, true);
       hud.gauge = s.gauge;
     }
+    var stg = st();                                        // R3：關卡編號（每關只寫 1 格）
+    var sn = 'ST' + Math.max(1, Math.min(9, (stg && stg.index) || 1));
+    if (sn !== hud.stage) { writeDiff(ppu, 29, r0, sn, hud.stage); hud.stage = sn; }
   }
 
   function hudString(ppu) {
@@ -301,6 +305,27 @@
     { row: 11, col: 10, text: 'STAGE CLEAR' },
     { row: 15, col: 10, text: 'PRESS START' }
   ];
+  /* ---- R3 擴關：關卡過場 / ENDING / 脫出倒數 -----------------------------
+   * 列 11 的 'STAGE CLEAR' 與列 15 的 'PRESS START' 位置**不動**（既有測試斷言），
+   * 只在列 13 多一行「STAGE n  BONUS xxxxx」的分數結算。
+   */
+  function clearLines(n, bonus) {
+    var b = String(bonus | 0);
+    while (b.length < 5) b = '0' + b;
+    return [
+      { row: 11, col: 10, text: 'STAGE CLEAR' },
+      { row: 13, col: 7, text: 'STAGE ' + n + '  BONUS ' + b },
+      { row: 15, col: 10, text: 'PRESS START' }
+    ];
+  }
+  function endingLines(loop) {
+    return [
+      { row: 9, col: 8, text: 'CONGRATULATIONS' },
+      { row: 11, col: 8, text: 'ALL STAGE CLEAR' },
+      { row: 13, col: 8, text: 'LOOP ' + (loop + 2) + ' BEGINS' },
+      { row: 15, col: 10, text: 'PRESS START' }
+    ];
+  }
 
   /* ---- 訊息文字（TITLE / GAME OVER / STAGE CLEAR）------------------------
    * QA R2 P1-2：遊戲區捲動是 `ppu.scroll(camX % 512, 0, 0)` 的**兩張名稱表**，
@@ -361,6 +386,8 @@
     ship: null, camX: 0, hits: 0, kills: 0, bossOn: false,
     lastEvent: '', noStageWarn: false,
     // fix3：暫停 / Konami 秘技 / GAME OVER 續關
+    // R3 擴關：關卡編號 / 第二輪 / 過場結算 / 脫出倒數
+    stageNo: 1, loop: 0, startStage: 1, lastBonus: 0, escSec: 0, endings: 0,
     paused: false, secretLeft: 1, secrets: 0, secretMsg: 0,
     continues: 0, continueCam: 0, lastCode: '',
     // fix4：一鍵密技（SELECT）。selectUsed = 這一次暫停已經用過（防連按重複觸發）
@@ -394,6 +421,32 @@
   function camX() {
     var s2 = st();
     return (s2 && typeof s2.camX === 'number') ? s2.camX : 0;
+  }
+
+  /* ============================================ R3：曲目 key（song agent 平行開發）
+   * song.js 由 **song agent** 擁有，`stage2`~`stage6` / `boss_final` / `ending` 可能還沒到位。
+   * 一律先查 `CR.SONGS[key]`，缺席就退回關卡 1 的既有曲目 ⇒ 兩邊獨立可測、永遠不會靜音。
+   */
+  function songKey(key, fb) {
+    if (key && CR.SONGS && CR.SONGS[key]) return key;
+    return fb;
+  }
+  function stageSong() {
+    var s2 = st();
+    return songKey((s2 && s2.music) || 'stage1', 'stage1');
+  }
+  function bossSong() {
+    var s2 = st();
+    if (s2 && s2.index >= (s2.count || 6)) return songKey('boss_final', 'boss');
+    return 'boss';
+  }
+  function queryStage() {
+    try {
+      var q = new URLSearchParams(window.location.search);
+      var n = parseInt(q.get('stage') || '', 10);
+      if (!isNaN(n) && n >= 1) return n;
+    } catch (e) { /* about:blank */ }
+    return 1;
   }
 
   /* ================================================ 暫停 + Konami 指令（fix3）
@@ -560,8 +613,8 @@
     g.mode = 'play'; g.paused = false; g.bossOn = false;
     g.secretLeft = 1; g.secretMsg = 0; g.continues++;
     g.selectUsed = false; g.cheatCool = 0;
-    hud.score = null; hud.hi = null; hud.lives = null; hud.gauge = -1;
-    if (CR.Audio && CR.Audio.play) call(CR.Audio, 'play', 'stage1');
+    hud.score = null; hud.hi = null; hud.lives = null; hud.gauge = -1; hud.stage = null;
+    if (CR.Audio && CR.Audio.play) call(CR.Audio, 'play', stageSong());
   }
 
   /* ---------------------------------------------------------- 模式切換 */
@@ -569,18 +622,22 @@
     var ppu = g.ppu;
     muteBudget(true);
     clearMsg(ppu);
-    call(st(), 'restart', 0);
+    // R3：新一局一律回到「起始關卡」（預設 1；`?stage=N` 直接從該關開始）與第 1 輪
+    g.loop = 0;
+    call(st(), 'setLoop', 0);
+    if (!call(st(), 'load', g.startStage)) call(st(), 'restart', 0);
     hudStatic(ppu);                      // P3-1：標題把 HUD 收起來了 ⇒ 進遊戲重建
     muteBudget(false);
     g.ship.newGame();
+    g.stageNo = (st() && st().index) || 1; g.escSec = 0; g.lastBonus = 0; g.endings = 0;
     g.mode = 'play'; g.playFrames = 0; g.hits = 0; g.kills = 0; g.bossOn = false;
     g.paused = false; g.secretLeft = 1; g.secrets = 0; g.secretMsg = 0;
     g.continues = 0; g.continueCam = 0; g.lastCode = '';
     g.selectUsed = false; g.selectSecrets = 0; g.selectContinues = 0;
     g.cheatReq = false; g.cheatCool = 0; g.cheats = 0; g.cheatContinues = 0; g.lastCheat = '';
     konamiClear();
-    hud.score = null; hud.hi = null; hud.lives = null; hud.gauge = -1;
-    if (CR.Audio && CR.Audio.play) call(CR.Audio, 'play', 'stage1');
+    hud.score = null; hud.hi = null; hud.lives = null; hud.gauge = -1; hud.stage = null;
+    if (CR.Audio && CR.Audio.play) call(CR.Audio, 'play', stageSong());
   }
   function toTitle() {
     var ppu = g.ppu;
@@ -604,13 +661,60 @@
     if (CR.Audio && CR.Audio.play) call(CR.Audio, 'play', 'gameover');
   }
   function toStageClear() {
+    var s2 = st(), n = (s2 && s2.index) || 1;
+    // R3：分數結算（關數 x 輪數 x 1000），列 13 顯示
+    g.lastBonus = 1000 * n * (g.loop + 1);
+    g.ship.addScore(g.lastBonus);
     muteBudget(true);
     restorePlayMsg();                    // fix5：先還原進行中的 SECRET!
-    drawMsg(g.ppu, CLEAR, 0);            // P1-2：魔王在 camX 2816（% 512 = 256）⇒ 文字其實在 nt1
+    drawMsg(g.ppu, clearLines(n, g.lastBonus), 0);   // P1-2：文字寫到目前捲動的名稱表
     muteBudget(false);
-    g.mode = 'stageclear'; g.paused = false; g.secretMsg = 0;
+    g.mode = 'stageclear'; g.paused = false; g.secretMsg = 0; g.escSec = 0;
     g.secretLeft++;                      // [源] 每打掉一隻 Big Core，秘技可再用 1 次
     if (CR.Audio && CR.Audio.play) call(CR.Audio, 'play', 'clear');
+  }
+
+  /* ---------------------------------------------------- R3：下一關 / ENDING / 第二輪 */
+  // 強化**不歸零**（研究 §7：只有死亡才清裝備，過關不清）⇒ 過關的獎勵就是「帶著火力進下一關」
+  function nextStage() {
+    var s2 = st(), n = (s2 && s2.index) || 1, count = (s2 && s2.count) || 1;
+    if (n >= count) { toEnding(); return; }
+    var ppu = g.ppu;
+    muteBudget(true);
+    clearMsg(ppu);
+    call(s2, 'load', n + 1);
+    hudStatic(ppu);
+    muteBudget(false);
+    g.ship.reset(false);                 // 位置回起點、保留強化（false = 不清裝備）
+    g.ship.invul = CR.Ship.INVUL_FRAMES;
+    g.mode = 'play'; g.paused = false; g.bossOn = false; g.secretMsg = 0; g.escSec = 0;
+    g.stageNo = n + 1;
+    hud.score = null; hud.hi = null; hud.lives = null; hud.gauge = -1; hud.stage = null;
+    if (CR.Audio && CR.Audio.play) call(CR.Audio, 'play', stageSong());
+  }
+  function toEnding() {
+    muteBudget(true);
+    restorePlayMsg();
+    drawMsg(g.ppu, endingLines(g.loop), 0);
+    muteBudget(false);
+    g.mode = 'ending'; g.paused = false; g.secretMsg = 0; g.escSec = 0; g.endings++;
+    if (CR.Audio && CR.Audio.play) call(CR.Audio, 'play', songKey('ending', 'clear'));
+  }
+  // [源] §7-5：七關打完從第 1 關重來、難度更高（`$1A` loop 計數改敵彈速度 / 射速分支）
+  function startLoop() {
+    var ppu = g.ppu;
+    g.loop++;
+    muteBudget(true);
+    clearMsg(ppu);
+    call(st(), 'setLoop', g.loop);
+    call(st(), 'load', 1);
+    hudStatic(ppu);
+    muteBudget(false);
+    g.ship.reset(false);                 // 第二輪保留強化（不然是純虐）
+    g.ship.invul = CR.Ship.INVUL_FRAMES;
+    g.mode = 'play'; g.paused = false; g.bossOn = false; g.stageNo = 1; g.escSec = 0;
+    hud.score = null; hud.hi = null; hud.lives = null; hud.gauge = -1; hud.stage = null;
+    if (CR.Audio && CR.Audio.play) call(CR.Audio, 'play', stageSong());
   }
 
   /* -------------------------------------------------------------- 碰撞 */
@@ -731,14 +835,34 @@
     g.bossOn = false;                        // restart 會把魔王收掉 ⇒ 重新進場時再播 boss 曲
     // QA P1-3：`die` 音效會停掉音樂（song.js 的設計），復活後要自己重播
     if (CR.Audio && CR.Audio.play) {
-      call(CR.Audio, 'play', (st() && st().bossActive) ? 'boss' : 'stage1');
+      call(CR.Audio, 'play', (st() && st().bossActive) ? bossSong() : stageSong());
+    }
+  }
+
+  /* ------------------------------------------------ R3：脫出倒數（最終魔王 phase 5）
+   * `CR.stage.escapeT` 由 bosses.js 的母艦中樞倒數；本檔**只在「秒數變了」那一幀重寫文字**
+   * （每秒一次 ≈ 24 byte，遠低於 160 byte VBlank 預算），倒數結束再把地形重畫回來。
+   */
+  function escapeMsg() {
+    var s2 = st(), esc = (s2 && s2.escapeT) | 0;
+    if (esc > 0) {
+      var sec = Math.ceil(esc / 60);
+      if (sec !== g.escSec) {
+        g.escSec = sec;
+        muteBudget(true);
+        drawMsg(g.ppu, [{ row: 9, col: 11, text: 'ESCAPE ' + sec }], 0);
+        muteBudget(false);
+      }
+    } else if (g.escSec > 0) {
+      g.escSec = 0;
+      muteBudget(true); clearMsg(g.ppu); call(st(), 'redraw'); muteBudget(false);
     }
   }
 
   /* ================================================================ draw */
   function drawShip(oam) {
     var s2 = g.ship;
-    if (g.mode === 'title' || g.mode === 'gameover') return;   // 標題 / GAME OVER 畫面不畫船
+    if (g.mode === 'title' || g.mode === 'gameover' || g.mode === 'ending') return;   // 標題 / GAME OVER / ENDING 不畫船
     if (!s2.alive) return;
     if (s2.blink()) return;                  // 無敵閃爍
     var a = s2.anim;
@@ -753,7 +877,7 @@
 
   function drawOptions(oam) {
     var s2 = g.ship, i;
-    if (g.mode === 'title' || g.mode === 'gameover') return;
+    if (g.mode === 'title' || g.mode === 'gameover' || g.mode === 'ending') return;
     if (!s2.alive) return;
     for (i = 0; i < s2.options.length; i++) {
       var o = s2.options[i];
@@ -842,6 +966,8 @@
 
       call(CR.Audio, 'init', nes);
       call(CR.Audio, 'play', 'title');
+      g.startStage = queryStage();        // R3：`?stage=N` 直接從第 N 關開始（機器人 --stage 用）
+      g.stageNo = (st() && st().index) || 1;
       g.mode = 'title'; g.frames = 0;
     },
 
@@ -868,7 +994,11 @@
         else if (konamiHit()) { konamiClear(); continueGame(); }
         else if (input.pressed(BTN.START)) toTitle();
       } else if (g.mode === 'stageclear') {
-        if (input.pressed(BTN.START)) toTitle();
+        // R3：START = 進入下一關（第 6 關破 -> ENDING）。以前是回標題，擴關後改成接關。
+        if (input.pressed(BTN.START) || input.pressed(BTN.A)) nextStage();
+      } else if (g.mode === 'ending') {
+        // R3：全破畫面 -> START 進第二輪（loop+1，難度加成；分數 / 強化保留）
+        if (input.pressed(BTN.START) || input.pressed(BTN.A)) startLoop();
       } else if (g.paused) {
         // 暫停中：遊戲完全凍結，只收 SELECT（fix4 一鍵密技）、Konami 指令與 START（研究 §7-3「暫停」）
         if (input.pressed(BTN.SELECT)) trySelectSecret();
@@ -888,10 +1018,11 @@
           call(st(), 'update', g);                  // 關卡：捲動 / 出怪 / 敵彈 / 膠囊
           // QA P2-2：魔王進場（bossActive false→true）換魔王曲；擊破後由 toStageClear 換 clear
           var bossNow = !!(st() && st().bossActive);
-          if (bossNow && !g.bossOn && CR.Audio && CR.Audio.play) call(CR.Audio, 'play', 'boss');
+          if (bossNow && !g.bossOn && CR.Audio && CR.Audio.play) call(CR.Audio, 'play', bossSong());
           g.bossOn = bossNow;
           collide();                                // 碰撞 + 撿膠囊
           drainScore();                             // 收 stage 記的分（EXTEND / HI 一併處理）
+          escapeMsg();                              // R3：最終魔王的「脫出倒數」文字
           if (!g.ship.alive) g.mode = 'dead';
           else if (st() && st().cleared) toStageClear();
         } else if (g.mode === 'dead') {
@@ -936,8 +1067,17 @@
         camX: camX(), enemies: n, kills: g.kills, hits: g.hits,
         stage: stg ? {
           present: true, camX: camX(), cleared: !!stg.cleared, bossActive: !!stg.bossActive,
-          length: stg.length || 0
+          length: stg.length || 0,
+          // R3 擴關
+          index: stg.index | 0, name: stg.name || '', key: stg.key || '',
+          count: stg.count | 0, loop: stg.loop | 0, boss: stg.bossKey || '',
+          camMax: stg.CAM_MAX | 0, escapeT: stg.escapeT | 0, minFree: stg.minFree | 0
         } : { present: false },
+        // R3：關卡編號 / 輪數 / 過場結算（測試與機器人的驗收欄位）
+        stageNo: (stg && stg.index) || g.stageNo, loop: g.loop | 0,
+        stageCount: (stg && stg.count) || 1, bonus: g.lastBonus | 0,
+        escapeSec: g.escSec | 0, endings: g.endings | 0, startStage: g.startStage | 0,
+        song: stageSong(), bossSongKey: bossSong(),
         oam: { dropped: (g.oam && g.oam.dropped) | 0, used: (g.oam && g.oam.used) | 0, engine: SH ? SH.usingEngine : false },
         hud: hudOn && g.ppu ? hudString(g.ppu) : '',
         hudOn: hudOn,

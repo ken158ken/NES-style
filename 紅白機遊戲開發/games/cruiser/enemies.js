@@ -40,9 +40,32 @@
     tank:   { w: 12, h: 12, hp: 3, score: 400, small: false, size: 16, pal: 3 },
     // fix3（使用者回饋「一開始還沒吃到強化就一堆撞了會死的礁石」）：
     // 小行星帶的小碎塊改成**可破壞的敵人**（hp 2、100 分），只有 16×16 大隕石維持地形。
-    rock:   { w: 8,  h: 8,  hp: 2, score: 100, small: true,  size: 8,  pal: 3 }
+    rock:   { w: 8,  h: 8,  hp: 2, score: 100, small: true,  size: 8,  pal: 3 },
+    /* -- R3 擴關新增（stage 2..6）-------------------------------------------
+     * (5) lava    火山彈：從地板噴出的拋物線熔岩塊，**不可破壞**（invuln），落地後重噴
+     * (6) crawl   貼牆爬行砲：貼地板 / 天花板往左爬，邊爬邊瞄準射擊
+     * (7) moai    石像：本體無敵，只有「嘴」（mouth）可打；嘴死 → 本體一起爆
+     * (7b) mouth  石像的嘴（吐環狀彈的部位；打掉 = 打掉整隻石像）
+     * (8) split   分裂體：打掉分裂成 2 隻小蜂（斜上 / 斜下）
+     * (9) homing  追蹤導彈：每 24 幀重新瞄準，壽命 420 幀
+     * (10) tent   觸手：貼天 / 貼地的伸縮柱（用敵人物件做，不是磚）
+     * (11) egg    孵化卵：150 幀後孵出 2 隻小蜂
+     * (12) brick  可破壞岩壁：石陣迷宮的閘門，hp 4，撞到會死 => 打掉才有路
+     * (13) turret4 四方砲台：母艦要塞的四向砲（上下左右各 1 發）
+     */
+    lava:    { w: 6,  h: 6,  hp: 1, score: 0,   small: false, size: 8,  pal: 3, invuln: true },
+    crawl:   { w: 8,  h: 8,  hp: 2, score: 200, small: true,  size: 8,  pal: 2 },
+    moai:    { w: 14, h: 14, hp: 1, score: 0,   small: false, size: 16, pal: 3, invuln: true },
+    mouth:   { w: 6,  h: 8,  hp: 3, score: 600, small: false, size: 8,  pal: 2 },
+    split:   { w: 12, h: 12, hp: 2, score: 300, small: true,  size: 16, pal: 2 },
+    homing:  { w: 6,  h: 6,  hp: 1, score: 150, small: true,  size: 8,  pal: 3 },
+    tent:    { w: 8,  h: 8,  hp: 6, score: 500, small: false, size: 8,  pal: 2 },
+    egg:     { w: 8,  h: 8,  hp: 1, score: 100, small: true,  size: 8,  pal: 3 },
+    brick:   { w: 16, h: 16, hp: 4, score: 200, small: false, size: 16, pal: 3 },
+    turret4: { w: 12, h: 12, hp: 3, score: 300, small: true,  size: 16, pal: 3 }
   };
-  var KINDS = ['fan', 'turret', 'zig', 'tank', 'rock'];
+  var KINDS = ['fan', 'turret', 'zig', 'tank', 'rock',
+    'lava', 'crawl', 'moai', 'mouth', 'split', 'homing', 'tent', 'egg', 'brick', 'turret4'];
   // 研究 §3-3 [源]「**紅色單體**：一般敵人多是灰 / 藍配色，紅色版本必掉膠囊」。
   // R2 原本只實作「編隊全滅掉膠囊」⇒ qa2 的機器人 2400 幀 0 顆膠囊、全程速度 1（`capsuleSeq()` 恆 0），
   // 等於沒有強化管道。改用 spr1（ship 的 紅 $16 / 橘 $28 / 白 $30，已在場上）畫紅色版本，0 新顏色、0 新磚。
@@ -63,13 +86,53 @@
   var EASY_PERIOD = 130;
   var EASY_COL0 = 248, EASY_COL1 = 383;          // 世界欄（含）；砲台站在這段裡就放寬（＝整個要塞）
   function turretPeriod(wx) {
-    var c = (wx | 0) >> 3;
-    return (c >= EASY_COL0 && c <= EASY_COL1) ? EASY_PERIOD : TURRET_PERIOD;
+    var P = getParams(), c = (wx | 0) >> 3;
+    if (P.easyCol0 >= 0 && c >= P.easyCol0 && c <= P.easyCol1) return P.easyPeriod;
+    return P.period;
   }
   var BULLET_BASE = FX.v88(2, 0);      // 敵彈基礎 2.0 px/幀（研究 16 §10）
   var LEAD_FRAMES = 20;                // rank ≥ 3 預判：往船的位移方向外推 20 幀
 
   var GAME_H = 208;                    // 遊戲區高（HUD 在下方 32 線）
+  var ROWS = 26;
+
+  /* ------------------------------------------------ R3：每關難度參數（一張表） */
+  // 難度曲線**全部寫在這裡**，不要散在各處的 if：stage_runtime.load(n) 會把
+  // `CR.STAGES[n].params` 丟進 setParams()，第二輪（loop）再由 runtime 乘上倍率。
+  //   bulletScale  敵彈速度倍率（8.8，256 = 1.0）
+  //   period       砲台 / 爬行砲 / 石像的射擊週期（幀；越小越密）
+  //   easyPeriod   「放寬區」的射擊週期（stage 1 的 fix2 相容欄位）
+  //   easyCol0/1   放寬區的世界欄範圍（stage 1 專用；其他關設成 -1 = 無放寬區）
+  //   maxAlive     同屏（非魔王）敵人上限
+  var DEF_PARAMS = {
+    bulletScale: 256, period: TURRET_PERIOD, easyPeriod: EASY_PERIOD,
+    easyCol0: EASY_COL0, easyCol1: EASY_COL1, maxAlive: 10
+  };
+  var params = null;
+  function setParams(p) {
+    var o = {}, k;
+    for (k in DEF_PARAMS) if (DEF_PARAMS.hasOwnProperty(k)) o[k] = DEF_PARAMS[k];
+    if (p) for (k in p) if (p.hasOwnProperty(k) && p[k] !== undefined) o[k] = p[k];
+    params = o;
+    return o;
+  }
+  function getParams() { return params || setParams(null); }
+  setParams(null);
+
+  /* ------------------------------------------------ R3：新敵人的手感常數 */
+  var LAVA_VY0 = -FX.v88(3, 0);        // 火山彈初速 -3.0 px/幀（約 70 px 高）
+  var LAVA_G = FX.v88(0, 22);          // 重力 +0.086 px/幀^2
+  var CRAWL_VX = FX.v88(0, 64);        // 爬行砲：世界座標每幀往左 0.25 px（+ 捲動 = 相對 0.75）
+  var HOMING_SPEED = FX.v88(1, 32);    // 追蹤導彈 1.125 px/幀（比船的 1.5 慢 => 拉得開）
+  var HOMING_RETARGET = 24;            // 每 24 幀重新瞄準
+  var HOMING_LIFE = 300;                // 壽命 300 幀（5 秒）—— 追不到就自爆，不讓它無限糾纏
+  var SPLIT_VX = -FX.v88(1, 0);        // 分裂體 -1.0 px/幀
+  var MOAI_RING_N = 6;                 // 石像一次吐 6 顆環狀彈
+  var RING_SPEED = FX.v88(1, 64);      // 環狀彈 1.25 px/幀（比瞄準彈慢，靠密度不靠速度）
+  var TENT_STEP = 2;                   // 觸手相位（256 = 一圈 => 128 幀一次伸縮）
+  var TENT_MIN = 24, TENT_AMP = 48;    // 觸手長度 24..72 px
+  var EGG_HATCH = 150;                 // 卵 150 幀孵化
+  var TUR4_N = 4;
 
   var ctx = null;          // stage 注入的介面
   var tmpV = { vx: 0, vy: 0, a: 0 };   // aim 的重複使用物件（每幀零配置）
@@ -79,7 +142,11 @@
     if (s && typeof s.rank === 'function') { var r = s.rank() | 0; return r < 0 ? 0 : (r > 3 ? 3 : r); }
     return 0;
   }
-  function bulletSpeed() { return (rank() >= 2) ? ((BULLET_BASE * 5) >> 2) : BULLET_BASE; }   // ×1.25
+  // 基礎速度 x 每關倍率（params.bulletScale）x rank 倍率（rank >= 2 -> x1.25）
+  function bulletSpeed() {
+    var v = (BULLET_BASE * getParams().bulletScale) >> 8;
+    return (rank() >= 2) ? ((v * 5) >> 2) : v;
+  }
 
   /* ---------------------------------------------------------- 編隊記帳 */
   // fan 編隊：5 隻同一個 grp；全滅（left === 0）→ 在標記個體（第 3 隻）的死亡位置掉紅膠囊。
@@ -96,6 +163,8 @@
       xs: FX.Vec(0), ys: FX.Vec(0), vx: 0, vy: 0,
       wx: 0, anchored: false, slot: 0,
       t: 0, phase: 0, y0: 0, grp: 0, marked: false, drop: 0, fireT: 0, period: TURRET_PERIOD, flash: 0,
+      // R3：invuln 無敵（火山彈 / 石像本體）、link 連動部位（石像的嘴）、splits 死亡分裂數
+      invuln: false, link: null, splits: 0, life: 0, amp: 0, base: 0, ceiling: false,
       boss: false, onHit: null, onKill: null, customStep: null, customDraw: null,
       hit: null, kill: null
     };
@@ -103,6 +172,7 @@
       if (!e.alive) return false;
       dmg = (dmg === undefined ? 1 : dmg) | 0;
       if (e.onHit) return e.onHit(dmg);                    // 魔王部位自己算傷害
+      if (e.invuln) { e.flash = 2; return false; }         // R3：火山彈 / 石像本體打不破（只閃一下）
       e.hp -= dmg;
       e.flash = 4;
       if (e.hp <= 0) { e.kill(); return true; }
@@ -115,6 +185,22 @@
       ctx.boom(e.x + (e.size >> 1), e.y + (e.size >> 1));
       ctx.addScore(e.score);
       if (e.drop) ctx.dropCapsule(e.x, e.y);
+      // R3：連動部位（石像本體 <-> 嘴）——先斷開再殺，避免互相遞迴
+      if (e.link) {
+        var lk = e.link; e.link = null;
+        if (lk.link === e) lk.link = null;
+        if (lk.alive) { lk.invuln = false; lk.hp = 0; lk.kill(); }
+      }
+      // R3：分裂體 —— 記下座標，先歸還自己的槽再生小怪（NES 風：沒槽就少生幾隻）
+      if (e.splits) {
+        var sx = e.x | 0, sy = e.y | 0, sn = e.splits | 0, si;
+        e.splits = 0;
+        ctx.freeEnemy(e);
+        for (si = 0; si < sn; si++) {
+          spawn('fan', sx, SH.clamp(sy + (si ? 10 : -10), 0, GAME_H - 8), { phase: si * 64 });
+        }
+        return;
+      }
       var g = groups[e.grp];
       if (g) {
         g.left--;
@@ -154,6 +240,8 @@
     e.y0 = y | 0;
     e.vx = 0; e.vy = 0; e.fireT = 0;
     e.boss = false; e.onHit = null; e.onKill = null; e.customStep = null; e.customDraw = null;
+    e.invuln = !!sp.invuln; e.link = null; e.splits = 0; e.life = 0;
+    e.amp = 0; e.base = 0; e.ceiling = !!opt.ceiling;
 
     if (kind === 'fan') {
       e.vx = FAN_VX;
@@ -172,6 +260,53 @@
       if (sh && sh.alive !== false) { e.y = e.y0 = clampY(sh.y - 6); FX.vsetPx(e.ys, e.y); }
     } else if (kind === 'rock') {
       e.vx = ROCK_VX;                                      // 直線飄，不追人、不開火
+
+    /* ---------------------------------------------------- R3 擴關的新敵人 */
+    } else if (kind === 'lava') {                          // 火山彈（拋物線 + 重噴）
+      e.anchored = true;
+      e.wx = (opt.wx === undefined ? (ctx.stage.camX + x) : opt.wx) | 0;
+      e.y0 = y | 0;                                        // 噴發口的 y（落回這裡就重噴）
+      e.vy = LAVA_VY0;
+      e.period = (opt.period || 0) | 0;                    // > 0 = 重噴前的冷卻幀數
+      e.fireT = 0;
+
+    } else if (kind === 'crawl') {                         // 貼牆爬行砲
+      e.anchored = true;
+      e.wx = (opt.wx === undefined ? (ctx.stage.camX + x) : opt.wx) | 0;
+      FX.vsetPx(e.xs, e.wx);                               // xs 存**世界**座標
+      e.flipV = !!opt.ceiling;
+      e.period = ((turretPeriod(e.wx) * 5) >> 2) | 0;      // 比固定砲台慢 25%（它會動）
+      e.fireT = e.period;
+
+    } else if (kind === 'moai' || kind === 'mouth' || kind === 'brick' || kind === 'turret4') {
+      e.anchored = true;                                   // 全部釘在世界座標上
+      e.wx = (opt.wx === undefined ? (ctx.stage.camX + x) : opt.wx) | 0;
+      e.y0 = y | 0;
+      e.period = (opt.period || turretPeriod(e.wx)) | 0;
+      e.fireT = e.period;
+      if (kind === 'turret4') e.flipV = !!opt.ceiling;
+
+    } else if (kind === 'split') {
+      e.vx = SPLIT_VX;
+      e.splits = (opt.splits === undefined ? 2 : opt.splits) | 0;
+
+    } else if (kind === 'homing') {
+      e.life = HOMING_LIFE;
+      e.fireT = 1;                                         // 第 1 幀就先瞄一次
+
+    } else if (kind === 'tent') {                          // 觸手（伸縮柱）
+      e.anchored = true;
+      e.wx = (opt.wx === undefined ? (ctx.stage.camX + x) : opt.wx) | 0;
+      e.ceiling = !!opt.ceiling;
+      e.y0 = y | 0;                                        // 附著點（貼天 = 上緣；貼地 = 下緣）
+      e.base = (opt.min === undefined ? TENT_MIN : opt.min) | 0;
+      e.amp = (opt.amp === undefined ? TENT_AMP : opt.amp) | 0;
+      e.h = e.base; e.w = 8;
+
+    } else if (kind === 'egg') {
+      e.anchored = true;
+      e.wx = (opt.wx === undefined ? (ctx.stage.camX + x) : opt.wx) | 0;
+      e.fireT = (opt.hatch === undefined ? EGG_HATCH : opt.hatch) | 0;
     }
     e.alive = true;
     return e;
@@ -210,6 +345,35 @@
     return ctx.fire(e.x + 6, e.y + 6, tmpV.vx, tmpV.vy);
   }
 
+  // R3：新敵人的瞄準射擊（中心點依 size 算，8x8 與 16x16 都正確）
+  function aimedFire(e) {
+    var sh = ctx.ship();
+    if (!sh || sh.alive === false) return null;
+    if (e.x < -16 || e.x > 272) return null;
+    var h = e.size >> 1;
+    SH.aim(e.x + h, e.y + h, sh.x + (sh.w >> 1), sh.y + (sh.h >> 1), bulletSpeed(), tmpV);
+    return ctx.fire(e.x + h, e.y + h, tmpV.vx, tmpV.vy);
+  }
+  // R3：環狀 / 扇形彈（石像、四方砲台）。ring = true 的彈由 stage 用 W_RING 畫。
+  function spread(e, n, a0, aStep, speed88) {
+    var h = e.size >> 1, i, b, made = 0;
+    for (i = 0; i < n; i++) {
+      SH.vel((a0 + i * aStep) & 255, speed88, tmpV);
+      b = ctx.fire(e.x + h, e.y + h, tmpV.vx, tmpV.vy);
+      if (b) { b.ring = true; made++; }
+    }
+    return made;
+  }
+  // R3：石像本體 + 嘴（互為 link）。回傳 [body, mouth]（槽不夠時 mouth 可能是 null）
+  function spawnMoai(x, y, opt) {
+    opt = opt || {};
+    var body = spawn('moai', x, y, opt);
+    if (!body) return [null, null];
+    var mouth = spawn('mouth', x - 2, y + 4, { wx: body.wx - 2 });
+    if (mouth) { body.link = mouth; mouth.link = body; }
+    return [body, mouth];
+  }
+
   function step(e) {
     if (e.customStep) { e.customStep(e); return; }         // 魔王部位（boss.js）自己走
     e.t++;
@@ -233,9 +397,77 @@
       if (e.y < 0) { e.y = 0; FX.vsetPx(e.ys, 0); e.vy = ZIG_VY; }
       if (e.y > GAME_H - 16) { e.y = GAME_H - 16; FX.vsetPx(e.ys, e.y); e.vy = -ZIG_VY; }
 
-    } else if (e.kind === 'tank' || e.kind === 'rock') {
+    } else if (e.kind === 'tank' || e.kind === 'rock' || e.kind === 'split') {
       FX.vadd(e.xs, e.vx);
       e.x = FX.vpx(e.xs);
+
+    /* ---------------------------------------------------- R3 擴關的新敵人 */
+    } else if (e.kind === 'lava') {                        // 火山彈：拋物線 + 落回噴發口重噴
+      e.x = e.wx - ctx.stage.camX;
+      FX.vadd(e.ys, e.vy);
+      e.vy += LAVA_G;
+      e.y = FX.vpx(e.ys);
+      if (e.y > e.y0 + 8) {
+        if (e.x > -16 && e.x < 300) {                      // 還在（或即將進）畫面 => 再噴一次
+          e.y = e.y0; FX.vsetPx(e.ys, e.y0); e.vy = LAVA_VY0;
+          e.phase = (e.phase + 1) & 255;
+        } else { e.alive = false; ctx.freeEnemy(e); return; }
+      }
+
+    } else if (e.kind === 'crawl') {                       // 貼牆爬行砲：沿地形往左爬
+      FX.vadd(e.xs, -CRAWL_VX);
+      e.wx = FX.vpx(e.xs);
+      e.x = e.wx - ctx.stage.camX;
+      var cc = e.wx >> 3;
+      e.y = e.flipV ? (ctx.stage.ceilAt(cc) * 8) : (GAME_H - ctx.stage.floorAt(cc) * 8 - 8);
+      if (--e.fireT <= 0) { e.fireT = e.period; aimedFire(e); }
+
+    } else if (e.kind === 'moai') {                        // 石像：張嘴吐 6 顆環狀彈
+      e.x = e.wx - ctx.stage.camX;
+      if (--e.fireT <= 0) { e.fireT = e.period; spread(e, MOAI_RING_N, 112, 8, RING_SPEED); }
+
+    } else if (e.kind === 'mouth') {                       // 石像的嘴：跟著本體
+      if (e.link && e.link.alive) { e.x = e.link.x + 1; e.y = e.link.y + 4; }
+      else { e.x = e.wx - ctx.stage.camX; }
+
+    } else if (e.kind === 'homing') {                      // 追蹤導彈：每 24 幀重新瞄準
+      if (--e.fireT <= 0) {
+        e.fireT = HOMING_RETARGET;
+        var shh = ctx.ship();
+        if (shh && shh.alive !== false) {
+          SH.aim(e.x + 3, e.y + 3, shh.x + (shh.w >> 1), shh.y + (shh.h >> 1), HOMING_SPEED, tmpV);
+          e.vx = tmpV.vx; e.vy = tmpV.vy;
+        }
+      }
+      FX.vadd(e.xs, e.vx); FX.vadd(e.ys, e.vy);
+      e.x = FX.vpx(e.xs); e.y = FX.vpx(e.ys);
+      if (--e.life <= 0) { e.alive = false; ctx.boom(e.x + 4, e.y + 4); ctx.freeEnemy(e); return; }
+
+    } else if (e.kind === 'tent') {                        // 觸手：伸縮（長度 base..base+amp）
+      e.x = e.wx - ctx.stage.camX;
+      e.phase = (e.phase + TENT_STEP) & 255;
+      var ext = e.base + (((SH.sin(e.phase) + 256) * e.amp) >> 9);
+      e.h = ext;
+      e.y = e.ceiling ? e.y0 : (e.y0 - ext);
+
+    } else if (e.kind === 'egg') {                         // 卵：150 幀孵出 2 隻小蜂
+      e.x = e.wx - ctx.stage.camX;
+      if (--e.fireT <= 0) {
+        var ex = e.x | 0, ey = e.y | 0;
+        e.alive = false;
+        ctx.boom(ex + 4, ey + 4); ctx.addScore(e.score);
+        ctx.freeEnemy(e);
+        spawn('fan', ex, SH.clamp(ey - 10, 0, GAME_H - 8), { phase: 0 });
+        spawn('fan', ex, SH.clamp(ey + 10, 0, GAME_H - 8), { phase: 128 });
+        return;
+      }
+
+    } else if (e.kind === 'brick') {                       // 可破壞岩壁：釘在世界座標
+      e.x = e.wx - ctx.stage.camX;
+
+    } else if (e.kind === 'turret4') {                     // 四方砲台：上下左右各 1 發
+      e.x = e.wx - ctx.stage.camX;
+      if (--e.fireT <= 0) { e.fireT = e.period; spread(e, TUR4_N, (e.t >> 4) & 63, 64, bulletSpeed()); }
     }
 
     // 離開畫面（或砲台被捲走）→ 回收，不計分、不算「編隊全滅」
@@ -243,6 +475,11 @@
       e.alive = false;
       var g = groups[e.grp];
       if (g) g.left--;
+      if (e.link) {                                        // R3：石像本體 / 嘴一起收掉
+        var lk = e.link; e.link = null;
+        if (lk.link === e) lk.link = null;
+        if (lk.alive) { lk.alive = false; ctx.freeEnemy(lk); }
+      }
       ctx.freeEnemy(e);
     }
   }
@@ -288,6 +525,35 @@
     } else if (e.kind === 'rock') {
       // hp 2 → 1 換成「裂開」那一張（研究 §10-6：每吃一點傷害換一張圖 = 最便宜的命中回饋）
       put(oam, e.x, e.y, (e.hp <= 1) ? S.MROCK1 : S.MROCK0, pal, false, PRIO_ENEMY);
+    /* ---------------------------------------------------- R3 擴關的新敵人 */
+    } else if (e.kind === 'lava') {
+      put(oam, e.x - 1, e.y - 1, f ? S.LAVA1 : S.LAVA0, pal, false, PRIO_ENEMY);
+    } else if (e.kind === 'crawl') {
+      put(oam, e.x, e.y, f ? S.CRAWL1 : S.CRAWL0, pal, e.flipV, PRIO_ENEMY);
+    } else if (e.kind === 'moai') {
+      // 張嘴（射擊前 30 幀）換第 2 張 = 「要吐環了」的預告
+      draw16(oam, (e.fireT <= 30) ? S.MOAI1 : S.MOAI0, e.x - 1, e.y - 1, pal, false, PRIO_ENEMY);
+    } else if (e.kind === 'mouth') {
+      // 嘴是石像本體圖的一部分 => 不另外畫精靈（0 OAM 成本）；單獨存在時才畫一格
+      if (!e.link) put(oam, e.x - 1, e.y, S.RING0, pal, false, PRIO_ENEMY);
+    } else if (e.kind === 'split') {
+      draw16(oam, S.SPLIT0, e.x - 2, e.y - 2, pal, false, PRIO_ENEMY);
+    } else if (e.kind === 'homing') {
+      put(oam, e.x - 1, e.y - 1, f ? S.HOMING1 : S.HOMING0, pal, false, PRIO_ENEMY);
+    } else if (e.kind === 'tent') {
+      // 伸縮柱：每 8 px 一節，最後一節是吸盤（貼天 => 吸盤在下、貼地 => 吸盤在上）
+      var n = (e.h + 7) >> 3, i2, ty;
+      for (i2 = 0; i2 < n; i2++) {
+        ty = e.ceiling ? (e.y + i2 * 8) : (e.y + (n - 1 - i2) * 8);
+        put(oam, e.x, ty, (i2 === n - 1) ? S.TENTT : ((i2 & 1) ? S.TENT1 : S.TENT0),
+          pal, false, PRIO_ENEMY);
+      }
+    } else if (e.kind === 'egg') {
+      put(oam, e.x, e.y, (e.fireT <= 40 && f) ? S.EGG1 : S.EGG0, pal, false, PRIO_ENEMY);
+    } else if (e.kind === 'brick') {
+      draw16(oam, S.BRICK0, e.x, e.y, (e.hp <= 2) ? 2 : pal, false, PRIO_ENEMY);
+    } else if (e.kind === 'turret4') {
+      draw16(oam, S.TUR4, e.x - 2, e.y - 2, pal, false, PRIO_ENEMY);
     }
   }
 
@@ -413,6 +679,13 @@
     KINDS: KINDS,
     SPEC: SPEC,
     TURRET_PERIOD: TURRET_PERIOD, EASY_PERIOD: EASY_PERIOD, turretPeriod: turretPeriod, PAL_DROP: PAL_DROP,
+    // R3：每關難度參數（stage_runtime.load(n) 會呼叫 setParams）
+    DEF_PARAMS: DEF_PARAMS, setParams: setParams, params: getParams,
+    LAVA_VY0: LAVA_VY0, LAVA_G: LAVA_G, CRAWL_VX: CRAWL_VX,
+    HOMING_SPEED: HOMING_SPEED, HOMING_LIFE: HOMING_LIFE, HOMING_RETARGET: HOMING_RETARGET,
+    MOAI_RING_N: MOAI_RING_N, RING_SPEED: RING_SPEED, EGG_HATCH: EGG_HATCH,
+    TENT_MIN: TENT_MIN, TENT_AMP: TENT_AMP, TENT_STEP: TENT_STEP, TUR4_N: TUR4_N,
+    aimedFire: aimedFire, spread: spread, spawnMoai: spawnMoai,
     ZIG_PERIOD: ZIG_PERIOD,
     BULLET_BASE: BULLET_BASE,
     ROCK_VX: ROCK_VX,
