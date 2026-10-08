@@ -306,6 +306,34 @@ def test_layout_opts(pg, dev):
     pg.evaluate("()=>KB.TOUCH.setLayout({mode:'auto', side:'right', size:1, opacity:0.5})")
 
 
+def test_settings_help(pg):
+    """Round 12（K12-4）：設定頁多了「貼身判定加倍」、說明頁多了三頁，觸控裝置上都不能破版。"""
+    print('\n-- I. Round 12 設定頁 / 說明頁（觸控裝置）--')
+    info = pg.evaluate("""()=>{ const m = new KB.SettingsMenu(), ids = m.items.map(i=>i.id);
+      const i = ids.indexOf('meleeOff'), it = m.items[i];
+      return { n: ids.length, ids, i, label: it && it.label,
+               lw: it ? KB.UI.textWidth(it.label, {size: KB.UI.MS}) : -1,
+               win: 7 }; }""")
+    check('設定頁在觸控裝置上 = 14 項（Round 11b 的 13 項 + 貼身判定加倍）',
+          info['n'] == 14 and info['i'] >= 0, info['ids'])
+    check('「貼身判定加倍」在捲動視窗第一頁看得到（index < 7）', 0 <= info['i'] < info['win'], info['i'])
+    check('「貼身判定加倍」標籤寬 ≤ 72px（設定頁標籤欄寬，不會被截成「貼身判定…」）',
+          0 < info['lw'] <= 72, info['lw'])
+    hp = pg.evaluate("""()=>{ const t = KB.UI.helpPages().map(d=>d.title);
+      const cell = v => (typeof v === 'function' ? String(v()||'') : String(v));
+      const over = [];
+      KB.UI.helpPages().forEach((d, i) => { let r = []; try { r = d.rows()||[]; } catch(e){}
+        if (r.length > 11) over.push(['rows', i, r.length]);
+        r.forEach(x => { if (KB.UI.textWidth(cell(x[0]), {size:12, nomix:true}) > 88) over.push(['k', i, cell(x[0])]);
+                         if (KB.UI.textWidth(cell(x[1]), {size:12}) > 138) over.push(['v', i, cell(x[1])]); }); });
+      return { t, over, touchHint: KB.UI.hint('jump','Z') }; }""")
+    check('說明頁在觸控裝置上每頁 ≤ 11 列、兩欄都不溢出', not hp['over'], hp['over'][:3])
+    check('說明頁的鍵名在觸控時換成虛擬鍵（jump → A）', hp['touchHint'] == 'A', hp['touchHint'])
+    check('說明頁第 3 頁仍是「觸控操作」（觸控時 openHelp 直接翻到這頁）',
+          len(hp['t']) >= 3 and hp['t'][2] == '觸控操作',
+          [hp['t'], pg.evaluate("()=>{KB.UI.openHelp(); return KB.UI.helpPage;}")])
+
+
 def test_overlap(pg, tag, dev):
     L = screen_rect(pg)
     pg.evaluate("()=>KB.TOUCH.setLayout({mode:'on'})")
@@ -569,6 +597,7 @@ def main():
         test_stick(pg, t)
         test_autoshow(pg, t)
         test_layout_opts(pg, dev)
+        test_settings_help(pg)
         goto_game(pg)
         print('\n-- F/H. 版面（畫面外空白處）--')
         test_overlap(pg, 'iPhone13 橫', dev)

@@ -95,6 +95,14 @@
       this.t += dt; this.frame++;
       if (UI && UI.stepFade && UI.stepFade(this)) return;
       const inp = KB.input;
+      // Round 12（K12-2 ghost-replay）：世界頁按 X 開「本關計時排行」面板（幽靈開關 / 觀看最佳重播）
+      if (KB.REPLAY && KB.REPLAY.boardOpen(this)) {
+        const pg = this.page;
+        KB.REPLAY.boardUpdate(this, () => KB.setScene(new RecordsScene(pg)));
+        return;
+      }
+      const worldLv = (this.page > 0 && this.page !== this.chPage) ? (KB.LEVELS || [])[this.page - 1] : null;
+      if (KB.REPLAY && worldLv && inp.pressed('attack')) { sfx('menu'); KB.REPLAY.openBoard(this, worldLv.id); return; }
       const d = inp.pressed('right') ? 1 : inp.pressed('left') ? -1 : 0;
       if (d) { this.page = (this.page + d + this.pages) % this.pages; sfx('menu'); }
       if (inp.pressed('down')) { this.page = (this.page + 1) % this.pages; sfx('menu'); }
@@ -130,7 +138,11 @@
       if (this.page === 0) this.drawOverview(ctx);
       else if (this.page === this.chPage) this.drawChallenge(ctx);
       else this.drawWorld(ctx, this.page - 1);
-      UI.fitText(ctx, '←→ 切換頁面　Z / SELECT 返回', 128, 206, 240, { color: C.grey, align: 'center', size: UI.MS });
+      // Round 12（K12-2）：世界頁多一段「X 排行」提示（其餘頁維持原字串）
+      const world = this.page > 0 && this.page !== this.chPage && (KB.LEVELS || [])[this.page - 1];
+      const tip = (KB.REPLAY && world) ? '←→ 換頁　X 計時排行　Z 返回' : '←→ 切換頁面　Z / SELECT 返回';
+      UI.fitText(ctx, tip, 128, 206, 240, { color: C.grey, align: 'center', size: UI.MS });
+      if (KB.REPLAY && KB.REPLAY.boardOpen(this)) KB.REPLAY.drawBoardPanel(ctx, this._rb.lv, this._rb);
       if (UI.drawMuteToast) UI.drawMuteToast(ctx);
       if (UI.drawFade) UI.drawFade(ctx, this);
     }

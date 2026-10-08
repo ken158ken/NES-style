@@ -52,6 +52,23 @@ window.KB = window.KB || {};
     swimUpEvery: 12,      // 水中按住 ↑ 每 n 幀輕划一次
     swimUpHoldMul: 0.7,   // 水中按住 ↑ 的上浮初速 = swimUp × 此倍率
     meleeScale: 2,        // Round 10：貼身招判定框放大倍率（entity.js Hitbox 依規則自動套用；遠程投射物不受影響）
+    // ---- Round 12（polish-docs）：設定頁「貼身判定加倍」的基準值 ----
+    //   meleeScale0 ＝ 開啟時的倍率（＝ Round 10 的 2，不可改）；設定關掉時 KB.meleeScale()
+    //   會把 meleeScale 改成 1（＝ Round 9 的原始尺寸）。既有常數一個都沒動。
+    meleeScale0: 2,
+  };
+
+  /**
+   * 目前生效的貼身判定倍率（entity.js 的 Hitbox 建構子每次建框時呼叫）。
+   * 設定頁「貼身判定加倍」= 開（預設，`settings.meleeOff` falsy）→ KB.PHYS.meleeScale0（2）；
+   * 關 → 1。順手把 KB.PHYS.meleeScale 同步成生效值，除錯 / QA 讀那個常數仍然看得到真相。
+   */
+  KB.meleeScale = function () {
+    const st = KB.save && KB.save.settings;
+    const base = KB.PHYS.meleeScale0 || 1;
+    const v = (st && st.meleeOff) ? 1 : base;
+    if (KB.PHYS.meleeScale !== v) KB.PHYS.meleeScale = v;
+    return v;
   };
   // 鏡頭手感（game.js updateCamera）
   KB.CAM = {
@@ -69,6 +86,50 @@ window.KB = window.KB || {};
   KB.MAXFALL = KB.PHYS.maxFall;
   KB.MAX_HP = 6;
   KB.START_LIVES = 3;
+
+  // ======================================================================
+  // Round 12（polish-docs）：出招方向快照 / 招式優先序
+  //   Round 9~10 時這兩個工具函式在 abilities.js / _weapons / _magic / _forms /
+  //   _mix / _mix2 各有一份（三種寫法、兩種呼叫慣例），這裡收斂成唯一事實來源，
+  //   六個檔只留一層同名的區域包裝（行為零變化，pickMode 的回傳值逐招實測相同）。
+  // ======================================================================
+  KB.ATK = {
+    /**
+     * 出招方向快照。player.js 的 startAttack 會在按下攻擊的當幀寫入
+     * `p.atkDir = { up, down, air }`；沒有這個欄位（或不是物件，例如 startStone
+     * 這種不經過 startAttack 的路徑）時即時讀 KB.input，行為與 Round 5 相同。
+     */
+    dir(p) {
+      const a = p && p.atkDir;
+      if (a && typeof a === 'object') return { up: !!a.up, down: !!a.down, air: !!a.air };
+      const inp = KB.input;
+      return {
+        up: !!(inp && inp.down('up')),
+        down: !!(inp && inp.down('down')),
+        air: !(p && p.onGround),
+      };
+    },
+    /**
+     * 招式優先序（Round 9 約定）：排隊的招（d.next）> ↑X > ↓X > 空中 X > X。
+     *   d ＝ 該能力的 abilityData（放 next 的地方，取完立刻清掉）
+     *   o = { up, down, air, ground, airUp, airDown, airOk }
+     *     up / down / air / ground：各方向的招；falsy ＝ 這個方向沒有專用招 ⇒ 往下一順位退
+     *       （所以地面 / 空中都不會出現「按了沒反應」）
+     *     airUp / airDown：空中專用變體（沒填就沿用地面版，判定框跟著卡比走）
+     *     airOk：回傳 false ＝ 這個狀態不算空中（幽靈穿牆時 onGround 恆 false）
+     */
+    pick(d, p, o) {
+      const q = d ? d.next : null;
+      if (d) d.next = null;
+      if (q) return q;
+      const a = KB.ATK.dir(p);
+      const air = a.air && (!o.airOk || o.airOk(p));
+      if (a.up && o.up) return (air && o.airUp) || o.up;
+      if (a.down && o.down) return (air && o.airDown) || o.down;
+      if (air && o.air) return o.air;
+      return o.ground;
+    },
+  };
 
   KB.DEBUG = /[?&]debug=1/.test(location.search);
   KB.MUTE = /[?&]mute=1/.test(location.search);

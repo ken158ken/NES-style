@@ -272,6 +272,8 @@
     if (s.achievements[id]) return false;
     s.achievements[id] = Date.now();
     store();
+    // Round 12（K12-1）：成就獎勵（src/rewards.js）—— 解鎖的同時就取得對應獎勵，記一個「有新獎勵」旗標
+    try { if (KB.REWARDS && KB.REWARDS.onUnlock) KB.REWARDS.onUnlock(id); } catch (e) { }
     if (P.silent > 0 || (opts && opts.silent)) return true;
     P.toastQ.push({ id, t: 0 });
     if (P.toastQ.length > 8) P.toastQ.shift();
@@ -633,6 +635,13 @@
       const blink = ((t.t >> 2) & 1) && t.t < 24;
       P.drawTrophy(ctx, x + 5, y + 8, blink ? '#fff' : '#ffe040');
       KB.text(ctx, 'ACHIEVEMENT', x + 18, y + 3, { color: '#8fa0bc' });
+      // Round 12（K12-1）：右上角標一顆小星星，提示「這個成就有附帶獎勵，去成就頁看」
+      try {
+        if (KB.REWARDS && KB.REWARDS.byAch && KB.REWARDS.byAch(t.id)) {
+          const sx = x + 112, sy = y + 4;
+          KB.rect(ctx, sx, sy - 2, 1, 5, '#ffe040'); KB.rect(ctx, sx - 2, sy, 5, 1, '#ffe040'); KB.rect(ctx, sx - 1, sy - 1, 3, 3, '#ffe040');
+        }
+      } catch (e) { }
       T(ctx, def.name, x + 18, y + 12, { color: '#ffe040', size: (KB.UI && KB.UI.MS) || 12 });
       ctx.restore();
     }

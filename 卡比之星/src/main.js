@@ -185,6 +185,9 @@
       else if (name === 'ending') KB.setScene(KB.EndingScene ? new KB.EndingScene(null) : KB.scene);
       else if (name === 'arena') KB.setScene(KB.ArenaScene ? new KB.ArenaScene() : KB.scene);
       else if (name === 'result') KB.setScene(KB.ResultScene ? new KB.ResultScene(KB.game) : KB.scene);
+      // Round 12（K12-3 level-editor）：o.slot = 要載入的自製關卡槽位（沒傳 / 空槽 = 新建空白關）
+      else if (name === 'editor') KB.setScene(KB.EditorScene ? new KB.EditorScene(o.slot !== undefined ? { slot: o.slot } : undefined) : KB.scene);
+      else if (name === 'custom') KB.setScene(KB.CustomLevelsScene ? new KB.CustomLevelsScene(o.slot || 0) : KB.scene);
       return true;
     },
     step(n) { for (let i = 0; i < (n || 1); i++) step(); render(); return KB.frameCount; },
@@ -202,7 +205,9 @@
     pause() { running = false; },
     resume() { if (!running) { running = true; last = 0; requestAnimationFrame(loop); } },
     hitbox(v) { KB.showHitbox = !!v; },
-    entities() { return KB.game ? KB.game.entities.filter(e => !e.dead).map(e => ({ t: e.name || e.constructor.name || e.type, x: +e.x.toFixed(1), y: +e.y.toFixed(1), type: e.type, hp: e.hp, state: e.state, spr: e.spr })) : []; },
+    // Round 12（polish-docs）：補 w / h 與 w0 / h0 / meleeScaled（判定框原尺寸與貼身加倍倍率，
+    //   entity.js Hitbox 建構子寫入）—— 之前驗判定框的人得各自再掛一層 KB.spawn hook（QA R10-P2-05）。
+    entities() { return KB.game ? KB.game.entities.filter(e => !e.dead).map(e => ({ t: e.name || e.constructor.name || e.type, x: +e.x.toFixed(1), y: +e.y.toFixed(1), type: e.type, hp: e.hp, state: e.state, spr: e.spr, w: e.w, h: e.h, w0: e.w0 === undefined ? e.w : e.w0, h0: e.h0 === undefined ? e.h : e.h0, meleeScaled: e.meleeScaled || 0, owner: e.owner || '', kind: e.kind || '' })) : []; },
   };
 
   function boot() {

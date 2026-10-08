@@ -58,7 +58,6 @@
   // ---------- 共用工具（與 abilities.js 同一套慣例）----------
   const rnd = (a, b) => a + Math.random() * (b - a);
   const data = p => p.abilityData || (p.abilityData = {});
-  const down = k => KB.input.down(k);
   const sfx = n => { try { if (KB.audio && KB.audio.sfx) KB.audio.sfx(n); } catch (e) { } };
   const beat = b => { if (b && !b.dead) b.life = 3; };
   const light = r => { const g = KB.game; if (g) { g.lightR = r; g.lightT = 180; g.lightF = g.frame; } };
@@ -71,17 +70,10 @@
   function restartAttack(p) { p.setState('idle'); p.startAttack(); }
   function startMove(p, m) { data(p).next = m; restartAttack(p); }
   function holding(p, held) { const d = p.abilityDef; return (held && d.maxHold > 0 && p.stateT < d.maxHold) || p.attackTimer > 2; }
-  // Round 9：招式方向快照（player-input 在 startAttack 當幀寫入 p.atkDir；沒有時自己讀輸入）
-  const atkDir = p => p.atkDir || { up: down('up'), down: down('down'), air: !p.onGround };
   // 優先序：↑X > ↓X > 空中 X > X（空中按 ↑ / ↓ 一樣出對應的招，各招內部做空中版變體）
+  // Round 12（polish-docs）：方向快照與優先序本體在 const.js 的 KB.ATK，這裡只留包裝。
   function pickMode(p, air, upMode, ground, downMode) {
-    const d = data(p), q = d.next; d.next = null;
-    if (q) return q;
-    const a = atkDir(p);
-    if (a.up && upMode) return upMode;
-    if (a.down && downMode) return downMode;
-    if (a.air && air) return air;
-    return ground;
+    return KB.ATK.pick(data(p), p, { up: upMode, down: downMode, air, ground });
   }
   function setup(p, o) {
     const D = p.abilityDef;

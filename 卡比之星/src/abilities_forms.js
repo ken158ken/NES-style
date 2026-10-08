@@ -53,7 +53,6 @@
   // ---------- 共用工具 ----------
   const rnd = (a, b) => a + Math.random() * (b - a);
   const data = p => p.abilityData || (p.abilityData = {});
-  const down = k => KB.input.down(k);
   const sfx = n => { try { if (KB.audio && KB.audio.sfx) KB.audio.sfx(n); } catch (e) { } };
   /** KB.VFX 防呆呼叫：vf('ring', x, y, o) */
   const vf = function (fn) {
@@ -94,16 +93,7 @@
   function restartAttack(p) { p.setState('idle'); p.startAttack(); }
   function startMove(p, m) { data(p).next = m; restartAttack(p); }
 
-  // ---------- Round 9：出招方向 / 優先序（與 abilities_magic.js 同一套約定）----------
-  // player-input 在 startAttack 當幀寫入 `p.atkDir = { up, down, air }`；舊版 player.js 沒這欄位時退回即時輸入。
-  function atkDir(p) {
-    const a = p.atkDir;
-    return {
-      up: a ? !!a.up : down('up'),
-      down: a ? !!a.down : down('down'),
-      air: a ? !!a.air : !p.onGround,
-    };
-  }
+  // ---------- Round 9：出招方向 / 優先序（Round 12 起本體在 const.js 的 KB.ATK）----------
   /**
    * 優先序：排隊的招 > ↑X > ↓X > 空中 X > X。
    * o = { up, down, air, ground, airUp, airDown, airOk }
@@ -111,14 +101,7 @@
    *   airOk：回傳 false 代表「這個狀態不算空中」（幽靈穿牆時 onGround 恆 false）
    */
   function pickMode(p, o) {
-    const d = data(p), q = d.next; d.next = null;
-    if (q) return q;
-    const a = atkDir(p);
-    const air = a.air && (!o.airOk || o.airOk(p));
-    if (a.up && o.up) return (air && o.airUp) || o.up;
-    if (a.down && o.down) return (air && o.airDown) || o.down;
-    if (air && o.air) return o.air;
-    return o.ground;
+    return KB.ATK.pick(data(p), p, o);
   }
   const slowFall = (p, v) => { if (!p.onGround && p.vy > v) p.vy = v; };
   /** 空中出招的緩降：最多 lim 幀（預設 28 < 30 幀上限），之後恢復自然重力 ⇒ 空中出招一定會下墜 */

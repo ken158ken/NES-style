@@ -59,6 +59,9 @@
 
   const cur = {}, prev = {}, raw = {}, virt = {}, touch = {};
   let anyKey = false, virtualOnly = false, gpActive = false;
+  // Round 12（K12-2 ghost-replay）：最後一次 pollGamepad 的結果（srcDown 讀硬體狀態用）、
+  // 以及重播注入的上一幀遮罩（applyReplay 要靠它算 pressed / released）。
+  let gpLast = null, rpLast = 0, rpOn = false;
   NAMES.forEach(n => { cur[n] = false; prev[n] = false; raw[n] = false; touch[n] = false; });
 
   // ---------- 觸控來源（Round 11，touch.js 呼叫 setTouch）----------
@@ -105,7 +108,7 @@
   KB.input = {
     update() {
       const gp = pollGamepad();
-      gpActive = !!gp;
+      gpActive = !!gp; gpLast = gp;
       frames++;
       let touching = false;
       for (const n of NAMES) {
@@ -161,6 +164,46 @@
     },
     /** 虛擬鍵標籤表（ui agent 需要時可讀） */
     TOUCH_NAMES,
+
+    // ---------- 重播輸入注入（Round 12 K12-2；src/replay.js 使用）----------
+    // 位元順序＝ACTIONS（left right up down jump attack select start）＝ bit 0~7。
+    /** 這一幀實際使用的輸入快照（含鍵盤 / 手把 / 觸控 / 虛擬），回傳 0~255 的遮罩 */
+    maskNow() {
+      let m = 0;
+      for (let i = 0; i < NAMES.length; i++) if (cur[NAMES[i]]) m |= (1 << i);
+      return m;
+    },
+    /** 遮罩 → 動作名稱陣列（除錯 / 測試） */
+    maskNames(m) { return NAMES.filter((n, i) => !!((m | 0) & (1 << i))); },
+    /**
+     * 注入重播的一幀：prev 取「上一次注入的遮罩」、cur 取這次的遮罩
+     * ⇒ pressed / released / down 在重播中與原本錄製時完全一致。
+     * 由 src/replay.js 在每次 GameScene.update 之前呼叫（快轉時一幀呼叫多次）。
+     */
+    applyReplay(mask) {
+      if (mask === null || mask === undefined) return false;
+      const m = mask | 0;
+      for (let i = 0; i < NAMES.length; i++) {
+        const n = NAMES[i];
+        prev[n] = !!(rpLast & (1 << i));
+        cur[n] = !!(m & (1 << i));
+      }
+      rpLast = m; rpOn = true;
+      return true;
+    },
+    /** 結束重播注入（清空按鍵狀態，避免殘留按著的鍵流進一般遊玩） */
+    endReplay() {
+      rpLast = 0; rpOn = false;
+      for (const n of NAMES) { cur[n] = prev[n] = !!(raw[n] || (gpLast && gpLast[n]) || touch[n] || virt[n]); }   // qa12 P1-01：仍按著的鍵要記成「已經按住」，否則下一幀會被當成新按下（跳過重播的 START 會變成「在選關按 START」）
+      return true;
+    },
+    /** 目前是否處於重播注入狀態 */
+    replaying() { return rpOn; },
+    /**
+     * 硬體來源（鍵盤 / 手把 / 觸控）目前按著的狀態。
+     * 重播播放中 cur / prev 會被 applyReplay 覆寫，重播 UI（快轉 / 跳過）要讀真實輸入就用這個。
+     */
+    srcDown(n) { return !!(raw[n] || (gpLast && gpLast[n]) || touch[n] || virt[n]); },
 
     // ---------- 按鍵重映射（供設定頁） ----------
     ACTIONS: NAMES.slice(),

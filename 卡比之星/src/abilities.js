@@ -76,19 +76,12 @@
   // hold 型能力：是否仍在噴射中（按住且未超過 maxHold，或最短噴射時間尚未用完）
   // maxHold 由各招式動態改寫：非按住型招式會設成 0，讓 player.js 的續命條件失效
   function holding(p, held) { const d = p.abilityDef; return (held && d.maxHold > 0 && p.stateT < d.maxHold) || p.attackTimer > 2; }
-  // Round 9：招式方向快照。player-input 會在 startAttack 當幀寫入 p.atkDir = {up, down, air}；
-  //   舊版 player.js（或 onStoneStart 這種不經過 startAttack 的路徑）沒有時就自己讀輸入，兩種都支援。
-  const atkDir = p => p.atkDir || { up: down('up'), down: down('down'), air: !p.onGround };
   // 取出本次攻擊的招式：優先用 data.next（蹲攻 / 蓄力放開），否則依優先序「↑X > ↓X > 空中 X > X」判斷。
   //   空中按 ↑ / ↓ 一樣出對應的招（各招自己在內部做「空中版」變體：判定框跟著卡比 + slowFall 緩降）。
+  // Round 12（polish-docs）：方向快照與優先序本體收斂到 const.js 的 KB.ATK（原本六個 abilities 檔各一份）；
+  //   這裡只留呼叫慣例的包裝，行為與 Round 9~10 完全相同。
   function pickMode(p, air, upMode, ground, downMode) {
-    const d = data(p), q = d.next; d.next = null;
-    if (q) return q;
-    const a = atkDir(p);
-    if (a.up && upMode) return upMode;
-    if (a.down && downMode) return downMode;
-    if (a.air && air) return air;
-    return ground;
+    return KB.ATK.pick(data(p), p, { up: upMode, down: downMode, air, ground });
   }
   // 設定本招的動畫 / 長度 / 移動鎖（player.js 讀 def.anim、p.attackTimer、p.attackLock、p.attackFps）
   function setup(p, o) {

@@ -78,7 +78,9 @@ const SPEC_SFX = ['jump', 'inhale', 'spit', 'swallow', 'hurt', 'die', 'enemyhit'
   'awk_gunner', 'awk_ninja', 'awk_blade', 'awk_bow', 'awk_mage', 'awk_time', 'awk_gravity', 'awk_clone',
   'awk_giant', 'awk_dragon', 'awk_mech', 'awk_ghost', 'awk_ready', 'awk_start', 'awk_end',
   // Round 8 —— 挑戰模式
-  'tick', 'time_up', 'floor_clear', 'nohit_fail', 'new_record'];
+  'tick', 'time_up', 'floor_clear', 'nohit_fail', 'new_record',
+  // Round 12（fix12）追加：操作失敗 / 不能按（關卡編輯器 9 處）
+  'error'];
 const SPEC_MUSIC = ['title', 'select', 'green', 'castle', 'island', 'cloud', 'dedede', 'boss', 'finalboss', 'invincible', 'clear', 'gameover', 'ending',
   // Round 1 追加
   'boss2', 'finalboss2', 'secret', 'miniboss',
@@ -94,8 +96,12 @@ const SPEC_AMBIENT = ['water', 'wind', 'cave', 'castle'];
 const usedSfx = new Set(), usedMusic = new Set();
 for (const f of fs.readdirSync(path.join(ROOT, 'src')).filter(f => f.endsWith('.js') && f !== 'audio.js')) {
   const src = fs.readFileSync(path.join(ROOT, 'src', f), 'utf8');
-  for (const m of src.matchAll(/audio\.sfx\(\s*'([^']+)'/g)) usedSfx.add(m[1]);
-  for (const m of src.matchAll(/\bsfx\s*[:=]\s*'([^']+)'/g)) usedSfx.add(m[1]);
+  // 只收「完整字面值」：'x' 後面緊接 , 或 ) ⇒ sfx('awk_' + k) 這種字串拼接與註解裡的 sfx('awk_<key>') 不算
+  const addSfx = n => { if (/^[A-Za-z0-9_]+$/.test(n)) usedSfx.add(n); };
+  for (const m of src.matchAll(/audio\.sfx\(\s*'([^']+)'\s*[,)]/g)) addSfx(m[1]);
+  // 各檔開頭常見的區域別名（const sfx = n => KB.audio.sfx(n)）⇒ 直接寫 sfx('x') 也要抓得到（fix12 / R12-P3-01）
+  for (const m of src.matchAll(/(?<![.\w])sfx\(\s*'([^']+)'\s*[,)]/g)) addSfx(m[1]);
+  for (const m of src.matchAll(/\bsfx\s*[:=]\s*'([^']+)'/g)) addSfx(m[1]);
   for (const m of src.matchAll(/audio\.music\(\s*'([^']+)'/g)) usedMusic.add(m[1]);
   for (const m of src.matchAll(/\bmusic:\s*'([^']+)'/g)) usedMusic.add(m[1]);
 }
@@ -106,7 +112,8 @@ for (const n of SPEC_MUSIC) A.MUSIC_NAMES.includes(n) ? null : fail('music 未�
 // src 引用了但尚未實作的名稱：其他 agent 的檔案還在開發中，只列出提醒，不算失敗
 const unknownSfx = [...usedSfx].filter(n => !A.SFX_NAMES.includes(n)).sort();
 const unknownMusic = [...usedMusic].filter(n => !A.MUSIC_NAMES.includes(n)).sort();
-if (unknownSfx.length) console.log('  WARN src 引用了未實作的 sfx（請回報總控 / audio agent 補做）: ' + unknownSfx.join(', '));
+// fix12（R12-P3-01）：src 引用了卻沒實作的 sfx 一律算失敗（之前只是 WARN，而且別名呼叫根本抓不到）
+if (unknownSfx.length) fail('src 引用了未實作的 sfx: ' + unknownSfx.join(', '));
 if (unknownMusic.length) console.log('  WARN src 引用了未實作的 music（請回報總控 / audio agent 補做）: ' + unknownMusic.join(', '));
 if (!unknownSfx.length && !unknownMusic.length) ok('src 引用的 sfx / music 名稱全部已實作');
 ok(`sfx 實作 ${A.SFX_NAMES.length} 種，程式引用 ${usedSfx.size} 種，SPEC ${SPEC_SFX.length} 種`);

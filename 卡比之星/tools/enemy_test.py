@@ -61,11 +61,13 @@ GROUND_TOP = 160          # row 10 上緣
 PLAYER_H = 15
 
 # 頁面內測試輔助：記錄所有 KB.spawn 產生的實體、玩家受傷來源；取樣快照
+# Round 12（polish-docs）：__spawned / __t.others() 的每一筆都帶 w0 / h0 / meleeScaled
+#   （判定框原尺寸與貼身加倍倍率，entity.js Hitbox 寫入）⇒ 驗判定框不用再自己掛 KB.spawn hook。
 HOOK_JS = r"""() => {
   window.__spawned = []; window.__hurts = []; window.__te = null; window.__shot1 = null;
   const os = KB.spawn;
   KB.spawn = e => {
-    if (KB.game) __spawned.push({ f: KB.game.frame, type: e.type, kind: e.kind || '', spr: e.spr || '', owner: e.owner || '', cls: e.constructor.name, name: e.name || '', x: +e.x.toFixed(1), y: +e.y.toFixed(1), w: e.w, h: e.h, dmg: e.dmg, freeze: !!e.freeze });
+    if (KB.game) __spawned.push({ f: KB.game.frame, type: e.type, kind: e.kind || '', spr: e.spr || '', owner: e.owner || '', cls: e.constructor.name, name: e.name || '', x: +e.x.toFixed(1), y: +e.y.toFixed(1), w: e.w, h: e.h, w0: e.w0 === undefined ? e.w : e.w0, h0: e.h0 === undefined ? e.h : e.h0, meleeScaled: e.meleeScaled || 0, dmg: e.dmg, freeze: !!e.freeze });
     return os(e);
   };
   const cap = () => { __kb.render(); const c = KB.canvas, o = document.createElement('canvas'); o.width = c.width * 3; o.height = c.height * 3; const x = o.getContext('2d'); x.imageSmoothingEnabled = false; x.drawImage(c, 0, 0, o.width, o.height); return o.toDataURL('image/png'); };
@@ -96,7 +98,7 @@ HOOK_JS = r"""() => {
     },
     others() {
       return KB.game.entities.filter(e => !e.dead && (e.type === 'proj' || e.type === 'hitbox' || (e.type === 'enemy' && e !== __te)))
-        .map(e => ({ type: e.type, kind: e.kind || '', spr: e.spr || '', owner: e.owner || '', name: e.name || '', cls: e.constructor.name, x: +e.x.toFixed(1), y: +e.y.toFixed(1), w: e.w, h: e.h, vx: +e.vx.toFixed(2), vy: +e.vy.toFixed(2), onGround: !!e.onGround, inhalable: !!e.inhalable, hurtsPlayer: !!e.hurtsPlayer, contactDamage: e.contactDamage !== false, dir: e.dir }));
+        .map(e => ({ type: e.type, kind: e.kind || '', spr: e.spr || '', owner: e.owner || '', name: e.name || '', cls: e.constructor.name, x: +e.x.toFixed(1), y: +e.y.toFixed(1), w: e.w, h: e.h, w0: e.w0 === undefined ? e.w : e.w0, h0: e.h0 === undefined ? e.h : e.h0, meleeScaled: e.meleeScaled || 0, vx: +e.vx.toFixed(2), vy: +e.vy.toFixed(2), onGround: !!e.onGround, inhalable: !!e.inhalable, hurtsPlayer: !!e.hurtsPlayer, contactDamage: e.contactDamage !== false, dir: e.dir }));
     },
     player() { const p = KB.player; return { x: +p.x.toFixed(1), y: +p.y.toFixed(1), cx: +p.cx.toFixed(1), cy: +p.cy.toFixed(1), hp: p.hp, state: p.state, mouth: p.mouth, ability: p.ability, dir: p.dir, onGround: p.onGround }; },
     sample() { return { f: KB.game.frame, e: __t.ent(), o: __t.others(), p: __t.player(), nh: __hurts.length, score: KB.game.score }; },

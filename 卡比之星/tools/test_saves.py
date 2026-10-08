@@ -182,6 +182,17 @@ def main():
           return { a, g: g.settings.vfx, shared: KB.save.settings === KB.SAVES.globals().settings }; }""")
         check('設定是全域的：換槽後 vfx 仍是 low', st['a'] == 'low' and st['g'] == 'low', st)
         check('KB.save.settings 與全域設定是同一個物件', st['shared'] is True)
+        # Round 12（K12-4）：設定頁「貼身判定加倍」= settings.meleeOff（0 / 未設 ＝ 開）
+        mel = ev("""()=>{
+          KB.SAVES.load(1); KB.UI.settings().meleeOff = 1; KB.UI.saveSettings();
+          const a = KB.PHYS.meleeScale;
+          KB.SAVES.load(2); const b = [KB.save.settings.meleeOff, KB.PHYS.meleeScale];
+          const g = JSON.parse(localStorage.getItem('kirbystar_global'));
+          KB.UI.settings().meleeOff = 0; KB.UI.saveSettings();
+          return { a, b, g: g.settings.meleeOff, c: KB.PHYS.meleeScale }; }""")
+        check('「貼身判定加倍」關掉 → KB.PHYS.meleeScale 1（UI.settings() 當場套用）', mel['a'] == 1, mel)
+        check('「貼身判定加倍」是全域設定：換槽後仍是關', mel['b'] == [1, 1] and mel['g'] == 1, mel)
+        check('「貼身判定加倍」打開 → 回到 Round 10 的 2', mel['c'] == 2, mel)
 
         # ------------------------------------------------------------------ 5. 按鍵綁定
         print('-' * 8, '按鍵綁定')

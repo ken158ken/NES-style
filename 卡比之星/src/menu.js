@@ -21,9 +21,15 @@
     for (const k in DEFAULTS) if (typeof cur[k] !== 'boolean') cur[k] = DEFAULTS[k];
     if (!cur.volMemo) cur.volMemo = { music: 0.7, sfx: 1 };
     KB.save.settings = cur;
+    // Round 12（polish-docs）：把「貼身判定加倍」套到 KB.PHYS.meleeScale（換槽 / 載入 / 切設定都會經過這裡）
+    try { if (KB.meleeScale) KB.meleeScale(); } catch (e) { }
     return cur;
   };
-  UI.saveSettings = function () { try { KB.saveGame && KB.saveGame(); } catch (e) { } };
+  UI.saveSettings = function () {
+    // Round 12（polish-docs）：設定一改就把「貼身判定加倍」套到 KB.PHYS.meleeScale（不等下一次 UI.settings()）
+    try { if (KB.meleeScale) KB.meleeScale(); } catch (e) { }
+    try { KB.saveGame && KB.saveGame(); } catch (e) { }
+  };
 
   // 音量（0~1）：audio.js 提供 setVolume / getVolume，並自動存檔
   const AU = () => KB.audio || null;
@@ -172,10 +178,15 @@
     // 全螢幕：KB.toggleFullscreen 一定在（main.js），瀏覽器不支援時畫灰字（UI.fullscreenOK）
     if (KB.toggleFullscreen) r0.push({ id: 'fs', label: '全螢幕', fs: true });
     const r1 = [{ id: 'music', label: '音樂', vol: 'music' }, { id: 'sfx', label: '音效', vol: 'sfx' }, { id: 'title', label: '回到標題' }];
-    return [r0, r1];
+    // Round 12（K12-3 level-editor）：測玩自製關卡時，「回到地圖」換成「回編輯」（回編輯器且保留狀態）
+    try { if (KB.EDITOR && KB.EDITOR.testing && KB.EDITOR.testing()) r0[2] = { id: 'editor', label: '回編輯' }; } catch (e) { }
+    // Round 12（K12-1）：音樂盒自己一列（第 3 列）—— 第 1 / 2 列已排滿（音量項的值欄要 70px），放不進去
+    const rows = [r0, r1];
+    if (KB.MUSICBOX && KB.MUSICBOX.menu) rows.push([{ id: 'musicbox', label: '音樂盒' }]);
+    return rows;
   };
   // 3 欄＝Round 10 原座標；4 欄＝重新排（游標畫在 x-14，所以每欄至少要隔 label 寬 + 16）
-  const COL_X = [24, 102, 180], COL_X4 = [20, 62, 128, 194], ROW_Y = [134, 154];
+  const COL_X = [24, 102, 180], COL_X4 = [20, 62, 128, 194], ROW_Y = [134, 154, 172];
   /** 攤平成含 r / c / x / y 的清單（this.sel 仍是單一索引） */
   function pauseItems() {
     const rows = PAUSE_ROWS(), out = [];
@@ -193,7 +204,7 @@
   function unduck() { const a = AU(); if (a && a.duck) { try { a.duck(false); } catch (e) { } } }
 
   class PauseMenu {
-    constructor(game) { this.sel = 0; this.frame = 0; this.page = 'main'; this.game = game || null; this.items = pauseItems(); }
+    constructor(game) { this.sel = 0; this.frame = 0; this.page = 'main'; this.game = game || null; this.items = pauseItems(); this.box = null; }
     resume(game) { game.paused = false; unduck(); sfx('unpause'); if (game.resumeMusic) game.resumeMusic(); }
     update(game) {
       this.frame++;
@@ -201,6 +212,14 @@
       if (this.page === 'help') {
         if (inp.pressed('jump') || inp.pressed('attack') || inp.pressed('select') || inp.pressed('start')) { this.page = 'main'; sfx('menu_back'); return; }
         UI.helpUpdate();
+        return;
+      }
+      // Round 12（K12-1）：音樂盒（暫停中開啟 → 離開時由 box.leave() 還原關卡音樂）
+      if (this.page === 'musicbox') {
+        if (!this.box) { this.page = 'main'; return; }
+        let r = null;
+        try { r = this.box.update(); } catch (e) { r = 'back'; }
+        if (r === 'back') { this.box = null; this.page = 'main'; }
         return;
       }
       if (inp.pressed('start') || inp.pressed('select')) { this.resume(game); return; }
@@ -233,6 +252,13 @@
       sfx('select');
       if (it.id === 'resume') { this.resume(game); return; }
       if (it.id === 'help') { this.page = 'help'; UI.openHelp(); return; }
+      if (it.id === 'musicbox') {
+        this.page = 'musicbox';
+        this.box = KB.MUSICBOX.menu({ restore: 'game', game: game });
+        return;
+      }
+      // Round 12（K12-3）：測玩中 → 回編輯器（KB.EDITOR 保留整個編輯狀態）
+      if (it.id === 'editor') { unduck(); KB.EDITOR.backToEditor(); return; }
       if (it.id === 'map') {
         unduck(); KB.session.lives = game.lives; KB.session.score = game.score;
         KB.setScene(KB.StageSelectScene ? new KB.StageSelectScene(Math.max(0, KB.LEVELS.indexOf(game.level))) : new KB.GameScene(game.levelId));
@@ -248,6 +274,7 @@
       // 只蓋住遊戲區（y < 192），HUD 仍然看得見
       KB.rect(ctx, 0, 0, W, VH, 'rgba(0,0,0,0.58)');
       if (this.page === 'help') { UI.drawHelp(ctx, { hint: UI.hint('jump', 'Z') + ' / ' + UI.hint('select', 'SELECT') + '：返回暫停選單' }); return; }
+      if (this.page === 'musicbox' && this.box) { try { this.box.draw(ctx); return; } catch (e) { this.page = 'main'; this.box = null; } }
       const f = this.frame, ms = MS();
       UI.drawAbilityCard(ctx, 4, 10, 248, 114, game.player ? game.player.ability : null);
       // PAUSE 標籤（壓在卡片上緣，整塊在畫面內）
@@ -271,9 +298,12 @@
       }
       // 不支援全螢幕的瀏覽器（iOS Safari）：游標停在該項時於提示行說明原因
       const fsSel = items[this.sel] && items[this.sel].fs && !fsOK;
-      fit(ctx, fsSel ? '全螢幕：此瀏覽器不支援'
-        : (UI.hint('up', '↑↓←→') + ' 選擇　' + UI.hint('jump', 'Z') + ' 確認　' + UI.hint('start', 'ENTER') + ' 繼續'),
-        128, 173, 240, { color: fsSel ? '#e0a0a0' : C.grey, align: 'center', size: ms });
+      // Round 12（K12-1）：第 3 列（音樂盒）在 y=172 左側 ⇒ 提示行讓到右半邊（中心 162、寬 176）
+      const row3 = items.some(it => it.r === 2);
+      const tip = fsSel ? '全螢幕：此瀏覽器不支援'
+        : row3 ? (UI.hint('jump', 'Z') + ' 確認　' + UI.hint('start', 'ENTER') + ' 繼續')          // 176px 放不下「↑↓←→ 選擇」
+          : (UI.hint('up', '↑↓←→') + ' 選擇　' + UI.hint('jump', 'Z') + ' 確認　' + UI.hint('start', 'ENTER') + ' 繼續');
+      fit(ctx, tip, row3 ? 162 : 128, 173, row3 ? 176 : 240, { color: fsSel ? '#e0a0a0' : C.grey, align: 'center', size: ms });
     }
   }
   KB.PauseMenu = PauseMenu;
@@ -293,13 +323,20 @@
     // Round 6：tab 0 = 能力圖鑑、tab 1 = 成就（SELECT 切換）
     constructor(tab) { this.i = 0; this.t = 0; this.frame = 0; this.tab = tab | 0; this.ap = 0; this.ai = 0; UI.clearAbilityNew(); }
     get achList() { return (KB.PROG && KB.PROG.ACH) || []; }
-    get achPages() { return Math.max(1, Math.ceil((this.achList.length || 1) / ACH_PER_PAGE)); }
+    // Round 12（K12-1）：rewards.js 接手成就頁後改成 9 列 / 頁（多一行獎勵資訊）⇒ 頁數跟著它走
+    get achPerPage() { return (KB.REWARDS && KB.REWARDS.PER_PAGE) || ACH_PER_PAGE; }
+    get achPages() { return Math.max(1, Math.ceil((this.achList.length || 1) / this.achPerPage)); }
     get keys() { return UI.abilityKeys(); }
     get pages() { return Math.max(1, Math.ceil((this.keys.length || 1) / GAL_PER_PAGE)); }
     get page() { return Math.floor(this.i / GAL_PER_PAGE); }
     update() {
       this.frame++; this.t += 1 / 60;
       const inp = KB.input;
+      // Round 12（K12-1）：成就分頁（含獎勵欄 / 套用）由 src/rewards.js 接手輸入
+      if (this.tab === 1 && KB.REWARDS && KB.REWARDS.achUpdate) {
+        const rr = KB.REWARDS.achUpdate(this);
+        if (rr !== undefined) return rr;
+      }
       // SELECT：能力圖鑑 ↔ 成就分頁
       if (inp.pressed('select')) { this.tab = this.tab ? 0 : 1; sfx('menu'); return null; }
       if (inp.pressed('start') || inp.pressed('jump') || inp.pressed('attack')) { sfx('menu_back'); return 'back'; }
@@ -335,6 +372,8 @@
     }
     // 成就分頁（40 條 / 每頁 10 條）：清單只放名稱與狀態，游標那一條的提示與解鎖時間畫在下方詳情條
     drawAch(ctx) {
+      // Round 12（K12-1）：有 rewards.js 時改畫「成就 + 獎勵」版（回 true＝已接手）
+      if (KB.REWARDS && KB.REWARDS.drawAch) { try { if (KB.REWARDS.drawAch(ctx, this)) return; } catch (e) { } }
       const PG = KB.PROG, list = this.achList, total = list.length;
       const got = (PG && PG.achCount) ? PG.achCount() : 0;
       KB.rect(ctx, 0, 0, W, H, 'rgba(0,0,0,0.72)');
@@ -503,6 +542,11 @@
     { id: 'hints', label: '按鍵提示' },
     { id: 'scale', label: '畫面縮放', cycle: [0, 2, 3, 4], names: ['自動', '2x', '3x', '4x'] },
     { id: 'vfx', label: '特效強度', cycle: ['high', 'mid', 'low'], names: ['高', '中', '低'], str: true },
+    // ── Round 12（polish-docs）：Round 10「貼身判定加倍」做成可關的開關（QA R10-P2-03 / P2-04 的裁決旋鈕）
+    //    值存 KB.save.settings.meleeOff（全域設定）：0 / 未設 ＝ 加倍（預設，Round 10 行為），1 ＝ 關（Round 9 原始尺寸）。
+    //    存的是「關掉的旗標」而不是「開啟的旗標」，才能讓「沒有這個欄位的舊存檔」自然落在預設的「開」。
+    //    生效點：KB.meleeScale()（const.js）→ entity.js 的 Hitbox 建構子每次建框時讀。
+    { id: 'meleeOff', label: '貼身判定加倍', cycle: [0, 1], names: ['開', '關'] },
     // ── Round 8（ach2 整合）：下面兩項在對應系統載入時才出現 ─────────────────────
     // skins agent：KB.SKINS.list() / current() / set(id) / unlocked(id) / name(id)
     { id: 'skin', label: '卡比配色', skins: true, need: () => !!(KB.SKINS && KB.SKINS.list) },
@@ -515,6 +559,9 @@
     // Round 11b（touch2）：方向鍵樣式（十字 / 搖桿）與浮動搖桿（手指落在空白區就把搖桿搬過去）
     { id: 'touchStick', label: '方向鍵樣式', touch: 'stick', cycle: ['dpad', 'stick'], names: ['十字', '搖桿'], need: hasTouchApi },
     { id: 'touchFloat', label: '搖桿浮動', touch: 'stickFloat', cycle: [false, true], names: ['關', '開'], need: hasTouchApi },
+    // ── Round 12（K12-1）：PWA 兩項（走 KB.PWA 的 uiCan / uiValue / uiDo；條件不成立時整項不出現）
+    { id: 'pwaInstall', label: '加到主畫面', pwa: 'install', need: () => !!(KB.PWA && KB.PWA.uiCan && KB.PWA.uiCan('install')) },
+    { id: 'pwaUpdate', label: '有新版本', pwa: 'update', need: () => !!(KB.PWA && KB.PWA.uiCan && KB.PWA.uiCan('update')) },
     // saves-input agent：KB.KeyConfigMenu()（子選單版，update() 回傳 'back'）；只有 KeyConfigScene 時退而用 {menu:true}
     {
       id: 'keyconfig', label: '按鍵設定', arrow: true,
@@ -606,6 +653,8 @@
       } else if (it.touch) {
         const step = d || (inp.pressed('jump') || inp.pressed('attack') ? 1 : 0);
         if (step && touchStep(it, step)) sfx('menu');
+      } else if (it.pwa) {
+        if (inp.pressed('jump') || inp.pressed('attack')) { sfx('select'); try { KB.PWA.uiDo(it.pwa); } catch (e) { } }
       } else if (it.cycle) {
         const step = d || (inp.pressed('jump') || inp.pressed('attack') ? 1 : 0);
         if (step) {
@@ -652,7 +701,7 @@
         const i = top + k; if (i >= n) break;
         const it = items[i], y = y0 + k * rowH, sel = this.sel === i;
         if (sel) cursor(ctx, 34, y + 3, this.frame);
-        fit(ctx, it.label, 48, y, 66, { color: sel ? C.yellow : '#fff', size: ms });
+        fit(ctx, it.label, 48, y, 72, { color: sel ? C.yellow : '#fff', size: ms });   // 72px ＝ 6 個全形字（音量滑桿從 x122 開始，不會撞到）
         if (it.vol) { slider(ctx, 122, y + 2, UI.volLevel(it.vol)); KB.text(ctx, String(UI.volLevel(it.vol)), vx, y + 3, { color: '#c8d8f0', align: 'right' }); }
         else if (it.arrow) fit(ctx, '設定 ›', vx, y, 76, { color: sel ? C.yellow : '#80e0a0', align: 'right', size: ms });
         else if (it.skins) {
@@ -663,6 +712,11 @@
         else if (it.touch) {
           const j = touchIdx(it);
           T(ctx, it.names[j], vx, y, { color: (it.touch === 'mode' && j === 2) ? C.grey : '#80e0a0', align: 'right', size: ms });
+        }
+        else if (it.pwa) {
+          let v = '-';
+          try { v = KB.PWA.uiValue(it.pwa) || '-'; } catch (e) { }
+          fit(ctx, v, vx, y, 82, { color: sel ? C.yellow : '#80e0a0', align: 'right', size: ms });
         }
         else if (it.cycle) {
           let j = it.cycle.indexOf(it.str ? (st[it.id] || it.cycle[0]) : (st[it.id] | 0)); if (j < 0) j = 0;
@@ -692,6 +746,8 @@
   // ======================================================================
   const anyCleared = () => !!(KB.save && KB.save.cleared && Object.keys(KB.save.cleared).some(k => KB.save.cleared[k]));
   const anyPlayed = () => !!(KB.save && KB.save.playCount && Object.keys(KB.save.playCount).length);
+  // Round 12（K12-3）：localStorage 裡有任何自製關卡（KB.CUSTOM 自己的槽位，不走 KB.save）
+  const anyCustom = () => { try { return !!(KB.CUSTOM && KB.CUSTOM.slotNames().some(Boolean)); } catch (e) { return false; } };
 
   // Round 8（ach2）：標題選單最多同時顯示幾項；超過就捲動（上下各畫一個小箭頭）
   const TITLE_WINDOW = 7;
@@ -706,10 +762,15 @@
       // Round 8（challenge agent）：挑戰模式 —— KB.ChallengeScene 存在才顯示
       if (KB.ChallengeScene) this.items.push({ id: 'challenge', label: '挑戰模式' });
       this.items.push({ id: 'help', label: '操作說明' }, { id: 'gallery', label: '能力圖鑑' });
+      // Round 12（K12-1）：音樂盒（曲目「聽過即解鎖」，所以入口一開始就在）
+      if (KB.MUSICBOX && KB.MUSICBOX.menu) this.items.push({ id: 'musicbox', label: '音樂盒' });
       // Round 7（extra）：本機成績板（有任何通關 / 通關次數紀錄，或 ?debug=1 時顯示）
       if (KB.RecordsScene && (KB.DEBUG || anyCleared() || anyPlayed())) this.items.push({ id: 'records', label: '成績板' });
       // 競技場：通關 W5（或 ?debug=1）後解鎖
       if (KB.ArenaScene && (KB.DEBUG || (KB.save && KB.save.cleared && KB.save.cleared.w5))) this.items.push({ id: 'arena', label: '競技場' });
+      // Round 12（K12-3 level-editor）：關卡編輯器 + 自製關卡（有存過的自製關、或 ?debug=1 才顯示後者）
+      if (KB.EditorScene) this.items.push({ id: 'editor', label: '關卡編輯器' });
+      if (KB.CustomLevelsScene && (KB.DEBUG || anyCustom())) this.items.push({ id: 'custom', label: '自製關卡' });
       // Round 8（saves-input agent）：存檔槽 —— KB.SaveSelectScene 存在才顯示
       if (KB.SaveSelectScene) this.items.push({ id: 'saves', label: '存檔槽' });
       this.items.push({ id: 'settings', label: '設定' });
@@ -746,9 +807,12 @@
         else if (it.id === 'extra') scene.startGame(false, true);
         else if (it.id === 'help') { this.page = 'help'; UI.openHelp(); }
         else if (it.id === 'gallery') this.sub = new AbilityGallery();
+        else if (it.id === 'musicbox') this.sub = KB.MUSICBOX.menu({ restore: 'title' });
         else if (it.id === 'arena') { UI.leave(scene, () => KB.setScene(new KB.ArenaScene())); }
         else if (it.id === 'records') { UI.leave(scene, () => KB.setScene(new KB.RecordsScene())); }
         else if (it.id === 'challenge') { UI.leave(scene, () => KB.setScene(new KB.ChallengeScene())); }
+        else if (it.id === 'editor') { UI.leave(scene, () => KB.setScene(new KB.EditorScene())); }
+        else if (it.id === 'custom') { UI.leave(scene, () => KB.setScene(new KB.CustomLevelsScene())); }
         else if (it.id === 'saves') { UI.leave(scene, () => KB.setScene(new KB.SaveSelectScene())); }
         else if (it.id === 'settings') this.sub = new SettingsMenu();
       }

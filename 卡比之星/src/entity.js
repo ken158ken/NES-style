@@ -271,7 +271,9 @@
       //   保留 w0 / h0（原尺寸）與 meleeScaled（倍率）給測試與除錯 API 查驗。
       this.w0 = this.w; this.h0 = this.h; this.meleeScaled = 0;
       {
-        const ms = (KB.PHYS && KB.PHYS.meleeScale) || 1;
+        // Round 12（polish-docs）：倍率改問 KB.meleeScale()（const.js）—— 設定頁「貼身判定加倍」
+        //   關掉時回 1（＝ Round 9 原始尺寸），開著時回 KB.PHYS.meleeScale0（2）。
+        const ms = (KB.meleeScale ? KB.meleeScale() : (KB.PHYS && KB.PHYS.meleeScale)) || 1;
         let melee = o.melee;
         if (melee === undefined) melee = this.owner === 'player' && !!o.follow && o.follow.type === 'player' && !this.stone && o.w <= 48 && o.h <= 48;
         if (melee && ms !== 1) {

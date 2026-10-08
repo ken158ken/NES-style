@@ -64,7 +64,6 @@
   // ======================================================================
   const rnd = (a, b) => a + Math.random() * (b - a);
   const data = p => p.abilityData || (p.abilityData = {});
-  const down = k => KB.input.down(k);
   const sfx = n => { try { if (KB.audio && KB.audio.sfx) KB.audio.sfx(n); } catch (e) { } };
   const vx = function (name) {
     const V = KB.VFX;
@@ -82,22 +81,10 @@
   }
   function restartAttack(p) { p.setState('idle'); p.startAttack(); }
   function startMove(p, m) { data(p).next = m; restartAttack(p); }
-  // Round 9：攻擊方向快照。player-input 會在 startAttack 當幀把 { up, down, air } 存進 p.atkDir；
-  //   舊版 player.js 沒有這個欄位時自己讀 KB.input（行為相同）。
-  function atkDir(p) {
-    const a = p.atkDir;
-    if (a && typeof a === 'object') return { up: !!a.up, down: !!a.down, air: !!a.air };
-    return { up: down('up'), down: down('down'), air: !p.onGround };
-  }
   // Round 9 招式優先序：↑X > ↓X > 空中 X > X
+  // Round 12（polish-docs）：本體收斂到 const.js 的 KB.ATK（同 abilities_mix.js 的翻譯方式）。
   function pickMode(p, MV) {
-    const d = data(p), q = d.next; d.next = null;
-    if (q) return q;
-    const a = atkDir(p);
-    if (a.up && MV.up) return 'up';
-    if (a.down && MV.dn) return 'dn';
-    if (a.air && MV.air) return 'air';
-    return 'm1';
+    return KB.ATK.pick(data(p), p, { up: MV.up && 'up', down: MV.dn && 'dn', air: MV.air && 'air', ground: 'm1' });
   }
   function setup(p, o) {
     const D = p.abilityDef;

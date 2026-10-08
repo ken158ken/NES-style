@@ -150,6 +150,56 @@
     }
   };
 
+  // ======================================================================
+  // Round 12（K12-1）：設定頁的兩個選單項（menu.js SET_ITEMS 走 it.pwa 分支）
+  //   'install' → 加到主畫面：Android / 桌機 Chromium 有 beforeinstallprompt 就跳原生安裝提示；
+  //               iOS Safari 沒有 API ⇒ 值欄直接寫「分享→加入」當成操作說明。
+  //   'update'  → 有新版本：按下去呼叫 PWA.update()（skipWaiting + 接管後自動 reload）。
+  // 條件不成立時 uiCan() 回 false ⇒ 該項整個不出現（桌機 file:// 也不會看到）。
+  // ======================================================================
+  PWA.uiCan = function (kind) {
+    try {
+      if (kind === 'install') return !PWA.installed && !PWA.standalone && (PWA.canInstall || (PWA.iosSafari && PWA.supported));
+      if (kind === 'update') return !!(PWA.updateReady && PWA.registered);
+    } catch (e) { }
+    return false;
+  };
+  /** 值欄文字（≤ 6 個中文字；menu.js 以 fit 收在 82px 內） */
+  PWA.uiValue = function (kind) {
+    try {
+      if (kind === 'install') {
+        if (PWA.uiMsg) return PWA.uiMsg;
+        if (PWA.canInstall) return '安裝 ›';
+        if (PWA.iosSafari) return '分享→加入';
+      }
+      if (kind === 'update') return PWA.uiMsg || '重新載入 ›';
+    } catch (e) { }
+    return '-';
+  };
+  PWA.uiMsg = '';
+  /** 選單按下去：回傳 Promise（menu.js 不等它） */
+  PWA.uiDo = function (kind) {
+    try {
+      if (kind === 'install') {
+        if (!PWA.canInstall) { PWA.uiMsg = PWA.iosSafari ? '分享→加入' : '不支援'; return Promise.resolve('unavailable'); }
+        return PWA.promptInstall().then(function (r) {
+          PWA.uiMsg = (r === 'accepted') ? '已加入！' : (r === 'dismissed' ? '已取消' : '');
+          setTimeout(function () { PWA.uiMsg = ''; }, 3000);
+          return r;
+        });
+      }
+      if (kind === 'update') {
+        PWA.uiMsg = '更新中…';
+        return PWA.update().then(function (r) {
+          PWA.uiMsg = r ? '更新中…' : '已是最新';
+          setTimeout(function () { PWA.uiMsg = ''; }, 3000);
+          return r;
+        });
+      }
+    } catch (e) { }
+    return Promise.resolve(false);
+  };
+
   try {
     const proto = location.protocol;
     const httpish = (proto === 'http:' || proto === 'https:');

@@ -61,30 +61,14 @@
   function restartAttack(p) { p.setState('idle'); p.startAttack(); }
   function startMove(p, m) { data(p).next = m; restartAttack(p); }
 
-  // ---------- Round 9：出招方向 / 優先序 ----------
-  // player-input 會在 startAttack 當幀寫入 `p.atkDir = { up, down, air }`（KB.input 的快照）；
-  // 舊版 player.js 沒有這個欄位時自動退回即時輸入，行為與 Round 5 相同。
-  function atkDir(p) {
-    const a = p.atkDir;
-    return {
-      up: a ? !!a.up : down('up'),
-      down: a ? !!a.down : down('down'),
-      air: a ? !!a.air : !p.onGround,
-    };
-  }
+  // ---------- Round 9：出招方向 / 優先序（Round 12 起本體在 const.js 的 KB.ATK）----------
   /**
    * 招式優先序（Round 9 約定）：排隊的招 > ↑X > ↓X > 空中 X > X。
    * o = { up, down, air, ground, airUp, airDown }；airUp / airDown 是「空中專用變體」，
-   * 沒填就沿用地面版（判定框位置跟著卡比走）。
+   * 沒填就沿用地面版（判定框位置跟著卡比走）。詳細規則見 KB.ATK.pick 的註解。
    */
   function pickMode(p, o) {
-    const d = data(p), q = d.next; d.next = null;
-    if (q) return q;
-    const a = atkDir(p);
-    if (a.up && o.up) return (a.air && o.airUp) || o.up;
-    if (a.down && o.down) return (a.air && o.airDown) || o.down;
-    if (a.air && o.air) return o.air;
-    return o.ground;
+    return KB.ATK.pick(data(p), p, o);
   }
   /**
    * 空中出招的緩降：最多 lim 幀（預設 28 < 30 幀上限），之後恢復自然重力 —— 保證「空中出招仍會下墜」。

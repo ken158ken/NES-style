@@ -222,3 +222,56 @@
 | pwa | src/pwa.js、sw.js（根目錄）、assets/manifest.webmanifest、assets/icons/*（pillow 產 192 / 512 / 180 / maskable，畫像素卡比臉，原創）、tools/build.py、tools/mobile_shot.py（僅擴充）、README.md、說明.md | 契約 4；manifest（name 卡比之星、display fullscreen、orientation landscape、start_url ./index.html、scope ./、icons）；sw.js 快取清單由 build.py 從 index.html 的 script 標籤自動產生（`build.py` 新增：寫出 sw.js 的 ASSETS 陣列與版本 = 內容 hash）；dist 單檔仍能離線雙擊；README / 說明.md 加「手機遊玩」章節（網址、加到主畫面、觸控配置、橫向建議）；驗證：`python -m http.server` + mobile_shot `--url http://localhost:8000/index.html` 看 sw 註冊成功（`--eval "navigator.serviceWorker.controller?1:0"` 需重載一次）、Lighthouse 不必 |
 | ui | src/ui.js、src/menu.js、src/keyconfig.js | 契約 5 的消費端：標題「PRESS START」與底部提示在觸控時改「點 START 或 A 開始」等（用 KB.input.hint）；操作說明加第 3 頁「觸控操作」（觸控時預設顯示該頁）；設定選單加「觸控按鍵：自動 / 開 / 關」「按鍵位置：右手 / 左手」「按鍵大小」「按鍵透明度」（呼叫 KB.TOUCH.setLayout；KB.TOUCH 不存在時隱藏）；暫停選單加「全螢幕」項（呼叫 KB.toggleFullscreen；iOS 不支援時顯示灰）；按鍵設定頁在觸控時加一行「觸控按鍵請到設定調整」；所有新中文字串跑 `font_subset.py --check`（缺字就跑 font_subset.py 重做，字集檔在 assets/fonts 算 ui agent 可改）；驗證：shot.py 與 mobile_shot 截圖看圖（設定頁、說明第 3 頁、暫停選單）+ test_saves / test_progression 不壞 |
 | qa11（第二波，總控派）| docs/QA_REPORT.md | 全測試 + 三裝置直橫向截圖 + 觸控實測（CDP 多點）+ dist 單檔手機開 + http.server 下 sw + playthrough |
+
+---
+# Round 12：音樂盒 / 幽靈重播 / 關卡編輯器 / 打磨（2026-10-08）
+（任務卡總表見 `docs/ROUND12_BRIEF.md`。以下是各卡收工後補的實際範圍。）
+
+## K12-1 music-box（已完成 2026-10-08）
+| 項目 | 內容 |
+|---|---|
+| 擁有檔案 | 新 `src/musicbox.js`、`src/rewards.js`、`tools/test_musicbox.py`；插入式修改 `src/progression.js`、`src/menu.js`、`src/saves.js`、`src/pwa.js`、`index.html`；`tools/test_progression.py`（成就頁分頁斷言改成跟著每頁列數算） |
+| 音樂盒 | `KB.MUSICBOX`：40 首全收（與 `KB.audio.SONGS` 一對一）分 6 類（系統 6 / 世界 15 / 魔王 9 / 挑戰 5 / 覺醒 3 / 結局 2）、**遊戲中聽過即解鎖**（包一層 `KB.audio.music()` 寫 `KB.save.musicHeard`）、←→ 分類 / ↑↓ 上下首 / A 播放停止 / B 停止 / SELECT 返回（自動還原原本的音樂）、原創音符捲軸可視化（compileSong 的四軌 + 播放頭 + BAR n/16）；入口＝標題選單「音樂盒」＋暫停選單第 3 列 |
+| 成就獎勵 | `KB.REWARDS`：40 成就 ↔ 40 獎勵 1 對 1（背景皮膚 ×8 / 標題曲 ×6 / 選關曲 ×3 / 卡比配色 ×8（接 KB.SKINS）/ 標題裝飾 ×10 / 標題小夥伴 ×5）；存檔新欄位 `KB.save.rewards`；成就頁加「獎勵」欄 + 詳情第 2 行（使用中 / 已領・可切換 / 未取得），**B 鍵套用 / 取消**，每頁 10 → 9 列（4 → 5 頁）；套用後標題畫面真的會變（`KB.BG.title` 與 `KB.audio.music` 各包一層） |
+| PWA | `KB.PWA.uiCan / uiValue / uiDo` ＋ 設定頁兩項「加到主畫面」（iOS 改寫「分享→加入」）、「有新版本」（重新載入） |
+| 驗證 | `tools/test_musicbox.py` **77/77**；engine 167 / enemy 393+79 / boss ALL PASS / weapons 417 / magic 248 / forms 315 / charge 140 / mix 701 / mix2 801 / helper 131 / elements 96 / progression 101 / awaken 270 / extra 53 / challenge 93 / saves 70 / skins 67 / touch 111；level_check（含 --extra）0 error；audio_check 全過；font_subset --check 無缺字；playthrough w1 / w4 / w7 `--godmode` 全 cleared。截圖 `shots/agent_musicbox/`（桌機 + iPhone 13 橫向，收工留 3 張 + 工具 `mb.py`） |
+
+## K12-3 level-editor（已完成 2026-10-08）
+| 項目 | 內容 |
+|---|---|
+| 擁有檔案 | 新 `src/levels_custom.js`、`src/editor.js`、`src/editor_ui.js`、`tools/test_editor.py`；插入式修改 `index.html`、`src/menu.js`（標題 2 項 + 暫停「回編輯」）、`src/main.js`（`__kb.goto('editor'/'custom')`）、`src/tilemap.js`（檔尾 `TileMap.fromData`）、`tools/level_check.js`（`--custom` 模式） |
+| 資料與建關 | `KB.CUSTOM` 資料格式 `{v,name,theme,w,h,rows,deco,spawn,exit,objs,boss,bossPos}`（欄位與 levels.js 房間一對一）；`toLevel()` → `KB.EXTRA_LEVELS` → `new KB.GameScene(id)` → `loadRoom()` → `KB.TileMap`，**與本體關卡同一條建關路徑**（測試逐列比對）。尺寸 24~160 × 12~28、7 主題、魔王 7 選 1 |
+| 編輯器 | `KB.EditorScene` 六頁（地圖 / 調色盤 / 選單 / 檢查 / 分享碼 / 說明）。筆刷：磁磚 14 種、裝飾（依主題）、物件 46 種（道具 8 / 敵人 21 / 能力敵 12 / 中魔王 3；能力台座可選 44 能力、大星星 0/1/2）、標記 4（起點 / 終點旗 / 魔王位置 / 橡皮擦）。縮放 8/12/16/24px + 捲動條、復原 / 重做 60 步、吸管、檢查（可達性）、一鍵測玩 |
+| 輸入 | 鍵盤（方向鍵游標 + 邊緣自動捲動 / A 畫 / B 擦 / C 吸管 / START 選單 / U・Y・P・T・Tab・Ctrl+S・ESC）、滑鼠（拖曳連畫 / 右鍵擦 / 滾輪捲動 / Shift+滾輪縮放）、觸控（單指點畫 + 拖曳連畫、**兩指拖曳捲動**）。工具列 8 顆 29×29 內部像素 ⇒ iPhone 13 橫向 **44.3 CSS px**、Pixel 5 直向 44.5（皆 ≥ 44） |
+| 測玩往返 | `KB.CustomGameScene extends KB.GameScene`：測玩 ESC / 暫停選單「回編輯」原封不動回編輯器（地圖 / 游標 / 縮放 / 復原堆疊全保留）；過關或死光自動回編輯器。**不寫 `KB.save.cleared`、不跑本體結算**，有 error 時擋住不讓測玩 |
+| 存檔 / 分享 / 排行 | localStorage `kirbystar_custom` **8 槽**（不碰 `KB.save`）＋ 每關排行前 5 筆（時間 / 分數 / 能力 / 日期）；分享碼 `KBL1.<base64url>.<FNV-1a>`（地形 / 裝飾 RLE + 物件字典化，48×14 約 230 字），**壞碼（前綴 / 校驗 / 截斷 / 竄改 / 未知字元 / 未知物件）一律回 null**；「自製關卡」選單可遊玩 / 編輯 / 刪除（需確認）/ 排行 / 匯入 / 新建 |
+| 可達性檢查 | `KB.CUSTOM.check()` 兩次 4 連通泛洪（卡比會飛 ⇒ 非實心即通行；第二次把 `* B X I W` 視為可通行）：只有第二次可達 = 「要先打破方塊」warn、兩次都不可達 = 終點旗 error / 物件 warn；另查起點埋牆懸空、底部無底洞、地面型敵人懸空、水中敵人、硬磚 / 導火線 / 冰磚的能力來源、大星星 > 3。`node tools/level_check.js --custom <檔案>` 跑同一份程式（吃 data JSON / `{slots:[]}` / 分享碼）並加驗分享碼往返 |
+| 驗證 | `tools/test_editor.py` **134/134**（要求 ≥ 40）；engine 167 / enemy 393 / boss ALL PASS / weapons 417 / magic 248 / forms 315 / charge 140 / mix 701 / mix2 801 / helper 131 / elements 96 / progression 101 / awaken 270 / extra 53 / challenge 93 / saves 70 / skins 67 / touch 111；level_check（含 --extra）0 error；audio_check 全過；font_subset --check 無缺字；playthrough w1~w7 `--godmode` 全 cleared。截圖 `shots/agent_editor/`（桌機 + iPhone 13 橫向，看過 14 張、留 3 張） |
+| 跨檔需求 | touch.js 請提供 `KB.TOUCH.setZoneEnabled(bool)`（浮動搖桿感應區 `.kb-zone` 會吃掉畫布左下角的點擊，目前由 editor_ui 直接改該元素的 `pointerEvents`）；ui.js 的 `drawLevelBanner` 遇到 `game.level.custom === true` 建議改印「自製關卡」而不是「WORLD 1」；STATUS 品質基準加「editor 134」 |
+
+## K12-4 polish-docs（已完成 2026-10-08）
+| 項目 | 內容 |
+|---|---|
+| 擁有檔案 | `src/ui.js`（說明頁）、`src/const.js`、六個 `src/abilities*.js`（只動 atkDir / pickMode）、`src/entity.js`、`tools/enemy_test.py`、`說明.md`、新 `tools/test_polish12.py`；插入式修改 `src/main.js`（`__kb.entities()`）、`src/menu.js`（設定項 + 套用 + 標籤欄寬）；`tools/test_saves.py` / `tools/test_touch.py` 各加項 |
+| 說明頁 | 第 1 頁「按住 ↑」右欄改「持續飛行，到房頂為止」（`UI.HELP1_FIX` 右欄覆寫表，不動 input.js）；頁面清單化 `UI.HELP_DEF` / `UI.helpPages()`（標題隨頁換、頁碼動態、`UI.HELP_PAGES` 變 getter）；新增第 4~6 頁 音樂盒 / 幽靈重播 / 關卡編輯器（文案照 musicbox / replay / editor 實作寫，`need` 判斷系統載入才出現，`UI.HELP_FORCE` 可強制顯示） |
+| atkDir / pickMode | 收斂到 `src/const.js` 的 **`KB.ATK.dir / KB.ATK.pick`**（支援 next 排隊、airUp / airDown / airOk）；六個 abilities 檔只留呼叫慣例包裝。**行為零變化**：搬家前後 44 能力 × 6 方向組合 ＝ 264 個 `abilityData.mode` diff 0 |
+| 貼身判定加倍 | 設定頁新項（預設「開」）＝ `settings.meleeOff`；`KB.PHYS.meleeScale0 = 2` 基準 + `KB.meleeScale()` 生效值（同步 `KB.PHYS.meleeScale`），`entity.js` Hitbox 改問它；關掉 ＝ Round 9 原尺寸，遠程投射物不受影響 |
+| 除錯欄位 | `__kb.entities()` 補 `w / h / w0 / h0 / meleeScaled / owner / kind`；`enemy_test.py` 的 `HOOK_JS`（`__spawned`）與 `__t.others()` 同步（QA R10-P2-05） |
+| 驗證 | `tools/test_polish12.py` **61/61**（要求 ≥ 25）；engine 167 / enemy 393+79 / boss ALL PASS / weapons 417 / magic 248 / forms 315 / charge 140 / mix 701 / mix2 801 / helper 131 / elements 96 / progression 101 / awaken 270 / extra 53 / challenge 93 / **saves 70** / skins 67 / **touch 111**；level_check（含 --extra）0 error；audio_check 全過；`font_subset.py` 重做子集後 --check 無缺字；playthrough w1~w7 `--godmode` 全 cleared。截圖 `shots/agent_polish12/`（桌機 6 頁 + iPhone 13 橫向 6 頁說明頁 + 設定頁，看過 16 張、留 3 張 + 工具 `help_shot.py` / `set_shot.py`） |
+| 跨檔需求 | STATUS 品質基準加 **polish12 61**、saves 改 70、touch 改 111；「已知問題」可刪掉「說明頁可一直上升」「atkDir / pickMode 四份」「`__kb.entities()` 缺 w0/h0/meleeScaled」三條，Round 10 待裁決 ①②改成「設定頁可一鍵關掉加倍」；三位 agent 文案定稿後請再跑一次 `font_subset.py` 再 `build.py`（我已跑過一次，1897 字） |
+
+---
+## K12-2 ghost-replay（Round 12，2026-10-08）— 完成
+擁有檔案：新 `src/replay.js`、`tools/test_replay.py`；Edit 插入 `src/game.js`（3 處）/ `src/input.js`（6 個新 API）/ `src/ui.js`（結算 + 選關入口）/ `src/records.js`（成績板世界頁入口）/ `index.html`（1 行 script）。
+
+| 項目 | 結果 |
+|---|---|
+| 定幀確定性 | `KB.RNG`（mulberry32 種子 PRNG）+「只在 GameScene.enter / loadRoom / update 期間替換 `Math.random`」⇒ **76 處既有亂數一行未改**；`KB.audio.*` 包成走原生亂數（噪音起始點不可偷 PRNG 序列）；draw 不在作用域內 ⇒ 每幀 render 次數不固定也不影響模擬 |
+| 每幀輸入快照 | `KB.input.maskNow / maskNames / applyReplay / endReplay / replaying / srcDown`（位元序＝`ACTIONS`）；`applyReplay` 以「上一次注入的遮罩」當 prev ⇒ pressed / released 與錄製完全一致 |
+| 壓縮 | 輸入 RLE（遮罩 + varint）+ 幽靈軌跡逐幀位元打包（11 bits/幀）；**18000 幀（5 分鐘）38.6KB < 50KB**，真實 w1 一段 0.79KB |
+| 幽靈 | 最佳重播軌跡 → 半透明水藍卡比（描邊 + alpha 0.55，精靈 / 方向逐幀還原）；**只畫不碰撞**；開關 `KB.save.settings.ghost`（預設開） |
+| 計時排行 | 每關最佳 5 筆（時間 `mm:ss.ff` / 日期 / 使用能力 / 死亡數），插入排序；一般與 Extra 分開（key `w1` / `w1#x`）；**結算 / 選關 / 成績板世界頁**共用同一個面板，提示列輪播、不新增列 |
+| 觀看最佳重播 | `KB.REPLAY.watch()` 全自動播；快轉 ×1/×2/×4/×8（B）、跳過（START）；HUD 4 秒後縮成左上小牌；**播放中不寫任何存檔**；環境不同顯示「紀錄環境已變更」 |
+| 手機 | 面板與 HUD 全走 `KB.UI.hint()` ⇒ A 觀看 / B 快轉・幽靈 / C 關閉 / START 跳過；iPhone 13 橫向截圖確認 |
+| 驗證 | `tools/test_replay.py` **75/75**（要求 ≥ 30）；engine 167 / enemy 393 / boss ALL PASS / weapons 417 / magic 248 / forms 315 / charge 140 / mix 701 / mix2 801 / helper 131 / elements 96 / progression 101 / awaken 270 / extra 53 / challenge 93 / saves 70 / skins 67 / touch 111；level_check 0 error；audio_check 全過；font_subset --check 無缺字；playthrough w1~w7 `--godmode` 全 cleared。截圖 `shots/agent_ghost/`（看過 8 張、留 3 張 + 工具 `shot.py`） |
+| 跨檔需求 | STATUS 品質基準加 **replay 75**、「下一步候選」劃掉「幽靈重播」；`index.html` 的 `src/replay.js` 必須在 `game.js` 之後（載入時包住 `KB.GameScene.prototype`）；build.py 不用改；設定頁要加「幽靈」項就呼叫 `KB.REPLAY.setGhost()`；自動測試要固定亂數可用 `KB.REPLAY.forceSeed(n)` |

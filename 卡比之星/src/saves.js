@@ -33,6 +33,8 @@
     return {
       cleared: {}, score: 0, best: {}, arena: {}, playCount: {}, bestTime: {}, extraCleared: {},
       stars: {}, seen: {}, abilityXp: {}, abilityLv: {}, achievements: {}, rank: {}, secrets: {}, prog: {},
+      // Round 12（K12-1）：音樂盒「聽過即解鎖」{曲目 key: 時間戳}、成就獎勵目前套用的 id
+      musicHeard: {}, rewards: {},
       playTime: 0, savedAt: 0,
     };
   }

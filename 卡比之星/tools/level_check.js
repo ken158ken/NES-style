@@ -89,6 +89,44 @@ for (const k of Object.keys(W7_ENEMY)) w7stat[k] = {};
 
 const argv = process.argv.slice(2);
 const EXTRA = argv.includes('--extra');
+
+// ---- Round 12（K12-3 level-editor）：自製關卡檢查 ----
+// node tools/level_check.js --custom <檔案>   檔案可為 KB.CUSTOM 的 data JSON、整個 kirbystar_custom
+// 匯出（{slots:[...]}），或一行分享碼（KBL1.…）。檢查項目與遊戲內「檢查關卡」完全同一份程式
+// （src/levels_custom.js 的 KB.CUSTOM.check，含「從起點飛得到嗎」的可達性泛洪）。
+if (argv.includes('--custom')) {
+  const fs = require('fs');
+  const file = argv[argv.indexOf('--custom') + 1];
+  if (!file) { console.log('用法：node tools/level_check.js --custom <檔案>'); process.exit(2); }
+  const CUSTOM = require(path.join(__dirname, '..', 'src', 'levels_custom.js'));
+  const raw = fs.readFileSync(file, 'utf8').trim();
+  let list = [];
+  if (raw.indexOf(CUSTOM.CODE_PREFIX + '.') === 0) {
+    const d = CUSTOM.decode(raw);
+    if (!d) { console.log('  [ERR ] 分享碼無效（前綴 / 校驗 / 內容）'); process.exit(1); }
+    list = [d];
+  } else {
+    const j = JSON.parse(raw);
+    list = Array.isArray(j) ? j : (Array.isArray(j.slots) ? j.slots.filter(Boolean) : [j]);
+  }
+  let errs = 0, wrs = 0;
+  list.forEach((d, i) => {
+    const r = CUSTOM.check(d);
+    const nm = (d && d.name) || ('#' + (i + 1));
+    console.log(`== 自製關卡 ${i + 1} ${nm}`);
+    for (const s of r.info) console.log('  (info) ' + s);
+    for (const s of r.warns) { wrs++; console.log('  [warn] ' + s); }
+    for (const s of r.errors) { errs++; console.log('  [ERR ] ' + s); }
+    // 分享碼往返（存進分享碼再讀回來，內容必須一致）
+    const code = CUSTOM.encode(d), back = CUSTOM.decode(code);
+    if (!back) { errs++; console.log('  [ERR ] 分享碼往返失敗（decode 回 null）'); }
+    else if (JSON.stringify(back) !== JSON.stringify(CUSTOM.normalize(d))) { errs++; console.log('  [ERR ] 分享碼往返內容不一致'); }
+    else console.log(`  (info) 分享碼 ${code.length} 字，往返一致`);
+  });
+  console.log(`\n${errs} error(s), ${wrs} warning(s)`);
+  process.exit(errs ? 1 : 0);
+}
+
 const only = argv.filter(a => a[0] !== '-');
 // 一般層（w4 r0 / w5 r1 的可燃植被）永遠套用；Extra 疊加層只有 --extra 才套用。
 // 兩者都做在房間副本上，套完直接替換 lv.rooms（只影響這個檢查行程，不會寫回檔案）。

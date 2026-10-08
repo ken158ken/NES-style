@@ -5,7 +5,7 @@
  * 策略：install 預快取（逐個 add，個別失敗不整批失敗）／activate 清舊版 + claim／
  *       fetch 同源 GET「網路優先、失敗回快取」，導覽請求離線時回 ./index.html；跨域直接放行。
  */
-const VERSION = 'e8e71e8396';
+const VERSION = '7d8095e3af';
 const ASSETS = [
   "./", "./index.html", "./src/const.js",
   "./src/gfx.js", "./src/input.js", "./src/audio.js",
@@ -25,8 +25,10 @@ const ASSETS = [
   "./src/levels_extra.js", "./src/game.js", "./src/progression.js",
   "./src/awaken.js", "./src/records.js", "./src/saves.js",
   "./src/keyconfig.js", "./src/ui.js", "./src/menu.js",
-  "./src/arena.js", "./src/challenge.js", "./src/touch.js",
-  "./src/pwa.js", "./src/main.js", "./assets/fonts/fusion12-zh_hant.woff2",
+  "./src/arena.js", "./src/challenge.js", "./src/levels_custom.js",
+  "./src/editor.js", "./src/editor_ui.js", "./src/replay.js",
+  "./src/touch.js", "./src/pwa.js", "./src/musicbox.js",
+  "./src/rewards.js", "./src/main.js", "./assets/fonts/fusion12-zh_hant.woff2",
   "./assets/fonts/unifont16-subset.woff2", "./assets/fonts/unifont_chars.txt", "./assets/manifest.webmanifest",
   "./assets/icons/icon-180.png", "./assets/icons/icon-192.png", "./assets/icons/icon-512.png",
   "./assets/icons/icon-maskable-512.png"

@@ -479,21 +479,25 @@ def main():
         check('KB.Enemy.die monkeypatch 記下擊殺來源 → 元素擊殺自動統計',
               ek and ek['dead'] and ek['src'] and (ek['elem'] or {}).get('fire') == 1, ek)
 
-        # ------------------------------------------------------------------ 9. 成就頁分頁（40 條 / 每頁 10）
+        # ------------------------------------------------------------------ 9. 成就頁分頁
+        # Round 12（K12-1）：成就頁加了「獎勵」欄與詳情第 2 行 ⇒ 每頁列數改由 KB.REWARDS.PER_PAGE 決定
+        #（rewards.js 在時是 9，不在時維持 menu.js 的 10）⇒ 斷言一律用實際每頁列數 per 推算。
         print('-' * 8, '成就頁分頁')
         ap = ev("""()=>{ const g = new KB.AbilityGallery(1);
           const tap = k => { KB.input.setVirtual({[k]:true}, true); KB.input.update(); const r = g.update();
                              KB.input.setVirtual({}, true); KB.input.update(); return r; };
-          const n = g.achList.length, pages = g.achPages;
+          const n = g.achList.length, pages = g.achPages, per = g.achPerPage || 10;
           tap('right'); const p1 = g.ap, i1 = g.ai;      // →：換頁，游標跟到該頁第一條
           tap('down'); const i2 = g.ai;                   // ↓：移動游標
           tap('left'); const p2 = g.ap;
           // ↑ 越過頁首 → 自動翻到上一頁
-          g.ap = 1; g.ai = 10; tap('up'); const p3 = g.ap, i3 = g.ai;
-          return { n, pages, p1, i1, i2, p2, p3, i3 }; }""")
-        check('成就頁 40 條 / 4 頁（每頁 10 條）', ap['n'] == 40 and ap['pages'] == 4, ap)
-        check('←→ 翻頁、游標跟到該頁第一條', ap['p1'] == 1 and ap['i1'] == 10 and ap['p2'] == 0, ap)
-        check('↑↓ 移動游標、越過頁邊自動換頁', ap['i2'] == 11 and ap['p3'] == 0 and ap['i3'] == 9, ap)
+          g.ap = 1; g.ai = per; tap('up'); const p3 = g.ap, i3 = g.ai;
+          return { n, pages, per, p1, i1, i2, p2, p3, i3 }; }""")
+        import math as _m
+        check('成就頁 40 條 / %d 頁（每頁 %d 條）' % (ap['pages'], ap['per']),
+              ap['n'] == 40 and ap['pages'] == _m.ceil(40 / ap['per']), ap)
+        check('←→ 翻頁、游標跟到該頁第一條', ap['p1'] == 1 and ap['i1'] == ap['per'] and ap['p2'] == 0, ap)
+        check('↑↓ 移動游標、越過頁邊自動換頁', ap['i2'] == ap['per'] + 1 and ap['p3'] == 0 and ap['i3'] == ap['per'] - 1, ap)
         drawn = ev("""()=>{ KB.PROG.reset(); const ids = KB.PROG.ACH.slice(0, 24).map(a=>a.id);
           for (const id of ids) KB.save.achievements[id] = Date.now();
           __kb.goto('title'); KB.scene.fade = 0; KB.scene.fadeDir = 0; __kb.step(2);

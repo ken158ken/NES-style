@@ -482,6 +482,19 @@
   // 可燃植被（依主題）：green 草/花/灌木/蘑菇、island 海草、castle 蜘蛛網、
   // Round 7（extra）：cloud 雲草 'g' / 雲花 'f'、dedede 旗幟 'k' / 地毯邊 'v'（art/world.js 有對應的焦黑圖）
   TileMap.BURN_DECO = { green: 'gfbm', island: 'g', castle: 'b', cloud: 'gf', dedede: 'kv' };
+
+  /**
+   * Round 12（K12-3 level-editor）：由「關卡資料」建 TileMap —— 自製關卡與本體關卡走同一條路。
+   * 接受 levels.js 的房間物件 `{ map: [字串], deco: [字串] }`，也接受編輯器的
+   * `{ rows: [字串], deco: [字串] }`（KB.CUSTOM 的 data）。回傳與 new TileMap(rows, deco) 完全相同。
+   * game.js 的 loadRoom 仍直接用 new KB.TileMap(room.map, room.deco)，兩邊等價（本函式只是同一個入口的具名版本）。
+   */
+  TileMap.fromData = function (data) {
+    if (!data) return new TileMap(['#'.repeat(16)], null);
+    if (Array.isArray(data)) return new TileMap(data.slice(), null);
+    const rows = data.map || data.rows || [];
+    return new TileMap(rows.slice(), data.deco ? data.deco.slice() : null);
+  };
   KB.TileMap = TileMap;
 
   // 磁磚精靈以左上為錨點：drawSpr 預設錨點是 bottom，所以此處包一層

@@ -139,6 +139,9 @@
     }
     levelClear() {
       if (this.clearT >= 0) return;
+      // Round 12（K12-2 ghost-replay）：錄製中 ⇒ 把這次通關寫進計時排行 / 最佳重播；
+      // 觀看重播中 ⇒ 回 'handled'，直接結束播放回到原畫面（不寫任何存檔）。
+      if (KB.REPLAY && KB.REPLAY.onLevelClear && KB.REPLAY.onLevelClear(this) === 'handled') return;
       this.clearT = 0; KB.audio.music('clear'); KB.audio.sfx('clear');
       this.player.startDance();
       // 挑戰模式（時間攻擊 / 無傷）：不寫 cleared / playCount / best，只記挑戰紀錄
@@ -462,6 +465,8 @@
       // 實體（依 z 排序）
       const list = this.entities.filter(e => !e.dead || e === this.player).sort((a, b) => a.z - b.z);
       for (const e of list) e.draw(g);
+      // Round 12（K12-2）：幽靈重播——最佳紀錄的半透明卡比（只畫、不碰撞、不進實體清單）
+      if (KB.REPLAY && KB.REPLAY.drawGhost) KB.REPLAY.drawGhost(g, ctx, this);
       // 水層（半透明疊在實體之上）
       this.map.drawWater(ctx, cam, this.t);
       // R2-P1-14：水層蓋掉水中的卡比 → 水層之後以半透明再畫一次玩家，粉紅色才分得出來
@@ -512,6 +517,8 @@
         (KB.UI && KB.UI.text ? KB.UI.text : KB.text)(ctx, tt.msg, KB.W / 2, toastY, { color: '#fff', align: 'center', outline: '#000' });
         ctx.globalAlpha = oa;
       }
+      // Round 12（K12-2）：觀看重播時的 HUD（REPLAY ×n / 進度條 / 快轉・跳過提示）
+      if (KB.REPLAY && KB.REPLAY.drawOverlay) KB.REPLAY.drawOverlay(ctx, this);
       if (this.paused) {
         if (this.pauseMenu) this.pauseMenu.draw(ctx, this);
         else if (KB.drawPause) KB.drawPause(ctx, this);

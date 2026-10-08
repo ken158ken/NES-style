@@ -473,13 +473,91 @@
     ['橫向遊玩', '畫面最大最好按'],
     ['觸控按鍵', '設定裡可調樣式大小'],
   ];
+  // ======================================================================
+  // Round 12（polish-docs）：第 1 頁文案修正 + 音樂盒 / 幽靈重播 / 關卡編輯器三頁
+  // ======================================================================
+  // 第 1 頁的列是 input.js 的 `KB.input.HELP`（鍵名要跟著按鍵設定 / 觸控即時變，所以放在那裡）。
+  // 右欄有過期 / 不精確的文案時，在這裡用「左欄 → 右欄」覆寫表改掉：說明頁是 ui.js 的責任，
+  // 而 input.js 這一輪是別人的擁有檔 ⇒ 不動它也能把字改對。
+  //   `按住 ↑`：Round 9 寫「持續飛行（可一直上升）」，但 fix9 之後有 KB.PHYS.flyCeilY 房頂封頂
+  //   （卡比 top 不得高於房間頂 8px，沒天花板的房間也飛不出去）⇒ 改成說得出上限的寫法。
+  //   右欄 12px 上限 138px ＝ 11 個全形字，這一列 10 字（120px）。
+  UI.HELP1_FIX = {
+    '按住 ↑': '持續飛行，到房頂為止',
+  };
+  /** 第 1 頁的列：KB.input.HELP 套上 UI.HELP1_FIX（左欄是函式的列不覆寫，原樣保留） */
+  UI.help1 = function () {
+    const rows = (KB.input && KB.input.HELP) || [];
+    return rows.map(r => {
+      const fix = (typeof r[0] === 'string') ? UI.HELP1_FIX[r[0]] : null;
+      return fix ? [r[0], fix] : r;
+    });
+  };
+  // 第 4~6 頁：Round 12 的三個新系統（音樂盒 / 幽靈重播 / 關卡編輯器）。
+  //   文案是 K12-4 讀 musicbox.js / replay.js / editor*.js 的實作寫的（三位 agent 收工當下還沒交 PROGRESS）
+  //   ⇒ 他們若改了入口鍵或版面，直接覆寫 `KB.UI.HELP4 / HELP5 / HELP6`
+  //   （格式同 HELP2：`[左欄鍵名, 右欄說明]`，左欄 ≤ 88px、右欄 ≤ 138px ＝ 11 全形字、列數 ≤ 11），
+  //   或由總控把真實文案填進這裡。頁面本身只在對應系統載入時才出現（見 UI.HELP_DEF 的 need）。
+  UI.HELP4 = [
+    ['音樂盒', '標題／暫停選單進入'],
+    ['曲目', '六類共 40 首'],
+    [() => UI.hint('left', '←→'), '切換分類'],
+    [() => UI.hint('up', '↑↓'), '換曲'],
+    [() => UI.hint('jump', 'Z'), '播放／停止'],
+    ['解鎖', '遊戲中聽過就解鎖'],
+    ['畫面', '音符捲軸＋音量條'],
+    [() => UI.hint('select', 'SELECT'), '返回選單'],
+  ];
+  UI.HELP5 = [
+    ['幽靈重播', '每關最佳通關的紀錄'],
+    [() => UI.hint('attack', 'X') + '／' + UI.hint('select', 'C'), '選關／結算 開排行'],
+    ['排行', '每關最佳 5 筆'],
+    ['欄位', '時間／日期／能力／死亡'],
+    [() => UI.hint('jump', 'Z'), '觀看最佳重播'],
+    [() => UI.hint('attack', 'X'), '幽靈同步 開／關'],
+    ['幽靈', '半透明卡比同步跑'],
+    ['重播中', '可快轉 1／2／4／8 倍'],
+  ];
+  UI.HELP6 = [
+    ['關卡編輯器', '標題選單進入'],
+    ['工具列', '筆刷／復原／重做／縮放'],
+    ['', '測玩／檢查／存檔／選單'],
+    ['畫筆', '選磁磚後在格子上畫'],
+    ['物件', '敵人／道具／起點終點'],
+    ['測玩', '即時試玩，可回編輯'],
+    ['分享碼', '一段文字貼給朋友玩'],
+    ['自製關卡', '標題選單可玩／匯入'],
+    ['手機', '觸控畫筆＋大工具列'],
+  ];
+  // 某個系統有沒有載入（各 agent 的全域命名還沒定案 ⇒ 幾個可能的名字都認）
+  const sysOn = names => names.some(n => !!KB[n]);
+  /**
+   * 說明頁的頁面清單：`{ title（16px 標題）, rows（取得該頁的列）, need（沒有就永遠顯示）}`。
+   * `UI.HELP_FORCE = true` 可強制顯示全部頁面（截圖 / 測試用）。
+   */
+  UI.HELP_DEF = [
+    { title: '操作說明', rows: () => UI.help1() },
+    { title: '操作說明', rows: () => UI.HELP2 },
+    { title: '觸控操作', rows: () => UI.HELP3 },
+    { title: '音樂盒', rows: () => UI.HELP4, need: () => sysOn(['MUSICBOX', 'MusicBox', 'MUSIC_BOX', 'MUSICROOM']) },
+    { title: '幽靈重播', rows: () => UI.HELP5, need: () => sysOn(['REPLAY', 'Replay', 'GHOST', 'REPLAYS']) },
+    { title: '關卡編輯器', rows: () => UI.HELP6, need: () => sysOn(['EDITOR', 'Editor', 'EDITOR_UI', 'LEVEL_EDITOR', 'CUSTOM_LEVELS']) },
+  ];
+  UI.HELP_FORCE = false;
+  /** 目前實際要顯示的頁面（未載入的系統那幾頁不出現 ⇒ 不會翻到空白頁） */
+  UI.helpPages = function () {
+    return UI.HELP_DEF.filter(d => UI.HELP_FORCE || !d.need || (() => { try { return !!d.need(); } catch (e) { return false; } })());
+  };
   UI.helpPage = 0;
-  UI.HELP_PAGES = 3;
+  // 舊程式 / 測試仍可讀 UI.HELP_PAGES（＝目前頁數，三個新系統載入後自己長大）
+  try { Object.defineProperty(UI, 'HELP_PAGES', { get: () => UI.helpPages().length, configurable: true }); }
+  catch (e) { UI.HELP_PAGES = 3; }
   // 說明頁的左右翻頁（TitleScene / PauseMenu / TitleMenu 顯示說明時每幀呼叫）
   UI.helpUpdate = function () {
-    const inp = KB.input;
-    if (inp.pressed('right')) { UI.helpPage = (UI.helpPage + 1) % UI.HELP_PAGES; sfx('menu'); }
-    else if (inp.pressed('left')) { UI.helpPage = (UI.helpPage + UI.HELP_PAGES - 1) % UI.HELP_PAGES; sfx('menu'); }
+    const inp = KB.input, n = Math.max(1, UI.helpPages().length);
+    if (UI.helpPage >= n) UI.helpPage = 0;
+    if (inp.pressed('right')) { UI.helpPage = (UI.helpPage + 1) % n; sfx('menu'); }
+    else if (inp.pressed('left')) { UI.helpPage = (UI.helpPage + n - 1) % n; sfx('menu'); }
   };
   // 觸控時直接翻到「觸控操作」那頁（手機玩家最需要的一頁）
   UI.openHelp = function () { UI.helpPage = UI.touchOn() ? 2 : 0; };
@@ -487,11 +565,16 @@
     opts = opts || {};
     KB.rect(ctx, 0, 0, W, H, 'rgba(0,0,0,0.62)');
     panel(ctx, 6, 6, 244, 188);
-    const page = opts.page !== undefined ? (opts.page | 0) : (UI.helpPage | 0);
-    T(ctx, '操作說明', 128, 10, { color: C.yellow, align: 'center', size: 16, outline: '#402000' });
-    KB.text(ctx, (page + 1) + '/' + UI.HELP_PAGES, 240, 16, { color: C.grey, align: 'right' });
+    // Round 12：頁面清單化（標題隨頁換；未載入的系統那幾頁不在清單裡）
+    const pages = UI.helpPages(), np = Math.max(1, pages.length);
+    let page = opts.page !== undefined ? (opts.page | 0) : (UI.helpPage | 0);
+    if (page < 0 || page >= np) page = 0;
+    const def = pages[page] || UI.HELP_DEF[0];
+    T(ctx, def.title || '操作說明', 128, 10, { color: C.yellow, align: 'center', size: 16, outline: '#402000' });
+    KB.text(ctx, (page + 1) + '/' + np, 240, 16, { color: C.grey, align: 'right' });
     KB.rect(ctx, 20, 30, 216, 1, '#405070');
-    const rows = page === 2 ? UI.HELP3 : page === 1 ? UI.HELP2 : ((KB.input && KB.input.HELP) || []);
+    let rows = [];
+    try { rows = def.rows() || []; } catch (e) { rows = []; }
     const top = 35, bottom = 170, n = Math.max(1, rows.length);
     const gap = Math.max(11, Math.min(18, Math.floor((bottom - top) / n)));
     let y = top + Math.max(0, Math.floor((bottom - top - gap * n) / 2));
@@ -723,6 +806,12 @@
       if (stepFade(this)) return;
       if (this.bump > 0) this.bump--;
       const inp = KB.input;
+      // Round 12（K12-2）：本關計時排行 / 幽靈開關 / 觀看最佳重播（X 開，面板開著時吃掉所有輸入）
+      if (KB.REPLAY && KB.REPLAY.boardOpen(this)) {
+        const at = this.cur;
+        KB.REPLAY.boardUpdate(this, () => KB.setScene(new StageSelectScene(at)));
+        return;
+      }
       if (this.target >= 0) {
         this.moveT += 1 / 26;
         if (this.moveT >= 1) { this.cur = this.target; this.target = -1; this.moveT = 0; sfx('menu'); }
@@ -738,6 +827,7 @@
         if (this.canEnter(this.cur)) { sfx('select'); const id = this.level(this.cur).id; leave(this, () => KB.setScene(new KB.GameScene(id))); }
         else { this.bump = 10; this.bumpDir = 0; }
       }
+      if (KB.REPLAY && inp.pressed('attack') && this.exists(this.cur)) { sfx('menu'); KB.REPLAY.openBoard(this, this.level(this.cur).id); return; }
       if (inp.pressed('select')) { sfx('menu'); leave(this, () => KB.setScene(new TitleScene())); }
     }
     kirbyPos() {
@@ -844,8 +934,12 @@
       // R7-P2-06：游標停在鎖定 / 製作中的節點時，不要再寫「Z 進入」（按 Z 進不去）
       // （解鎖條件本身寫在上方資訊列，這裡只換掉會誤導的「Z 進入」，字數保持塞得下）
       const mv = UI.hint('left', '←→'), en = UI.hint('jump', 'Z'), bk = UI.hint('select', 'SELECT');
-      const hint = mv + ' 移動　' + (ok ? en + ' 進入' : !this.exists(i) ? '製作中' : '未解鎖') + '　' + bk + ' 回標題';
+      // Round 12（K12-2）：最後一段提示輪播「X 計時排行」（同一列輪播，寬度不變）
+      const tail = (KB.REPLAY && this.exists(i) && (f % 300) >= 150)
+        ? UI.hint('attack', 'X') + ' 計時排行' : bk + ' 回標題';
+      const hint = mv + ' 移動　' + (ok ? en + ' 進入' : !this.exists(i) ? '製作中' : '未解鎖') + '　' + tail;
       fit(ctx, hint, 128, 197, 234, { color: C.grey, align: 'center', size: UI.MS });
+      if (KB.REPLAY && KB.REPLAY.boardOpen(this)) KB.REPLAY.drawBoardPanel(ctx, this.level(i) ? this.level(i).id : '', this._rb);
       drawMuteToast(ctx); drawFade(ctx, this);
     }
   }
@@ -1006,6 +1100,12 @@
     // 真正的繪製交給 UI.paintLevelBanner()，由 drawGameHint（postWorld 之後）第一行呼叫。
     bn.paint = { age, game };
   };
+  /** 開場橫幅第 1 行的字（fix12 / R12-P3-02：自製關卡印「自製關卡」，不是 WORLD n）*/
+  UI.bannerTitle = function (game) {
+    const lv = game && game.level;
+    if (lv && lv.custom) return '自製關卡';
+    return 'WORLD ' + (Math.max(0, KB.LEVELS.indexOf(lv)) + 1);
+  };
   /** 真正畫出開場橫幅（在 VFX.postWorld 之後呼叫，才不會被 worldTint 染到）*/
   UI.paintLevelBanner = function (ctx) {
     const q = bn.paint; bn.paint = null;
@@ -1015,9 +1115,12 @@
     if (age < BANNER.slideIn) { const u = age / BANNER.slideIn; off = -BANNER.dist * Math.pow(1 - u, 3); }
     else if (age > BANNER.slideIn + BANNER.hold) { const u = (age - BANNER.slideIn - BANNER.hold) / BANNER.slideOut; off = BANNER.dist * u * u * u; }
     const x = Math.round(23 + off), by = BANNER.y;
-    const n = Math.max(0, KB.LEVELS.indexOf(game.level)) + 1, name = (game.level && game.level.name) || '';
+    const custom = !!(game.level && game.level.custom), name = (game.level && game.level.name) || '';
     panel(ctx, x, by, 210, BANNER.h, 'rgba(10,16,34,0.88)');
-    bigText(ctx, 'WORLD ' + n, x + 105, by + 5, 2, { color: C.yellow, outline: '#603000', shadow: '#a06000', align: 'center', spacing: 1 });
+    // fix12（R12-P3-02）：自製關卡沒有「World」這種世界編號（KB.LEVELS.indexOf 找不到會退回 1）
+    //   ⇒ 第 1 行改印中文「自製關卡」（16px 像素字，bigText 只有 8×8 ASCII 畫不出中文）
+    if (custom) fit(ctx, UI.bannerTitle(game), x + 105, by + 4, 190, { color: C.yellow, align: 'center', size: 16 });
+    else bigText(ctx, UI.bannerTitle(game), x + 105, by + 5, 2, { color: C.yellow, outline: '#603000', shadow: '#a06000', align: 'center', spacing: 1 });
     KB.rect(ctx, x + 12, by + 25, 186, 1, '#405070');
     fit(ctx, name, x + 105, by + 28, 190, { color: '#fff', align: 'center', size: 16 });
   };
@@ -1102,6 +1205,13 @@
       for (const q of this.conf) { q.y += q.vy; q.x += Math.sin(this.t * 2 + q.ph) * 0.3; if (q.y > H) { q.y = -4; q.x = Math.random() * W; } }
       if (stepFade(this)) return;
       const inp = KB.input;
+      // Round 12（K12-2）：計時排行 / 觀看最佳重播面板（C / SELECT 開，面板開著時吃掉所有輸入）
+      if (KB.REPLAY && KB.REPLAY.boardOpen(this)) {
+        const g0 = this.game;
+        KB.REPLAY.boardUpdate(this, () => { const sc = new ResultScene(g0); KB.setScene(sc); sc.finishAll(); });
+        return;
+      }
+      if (this.done && KB.REPLAY && inp.pressed('select')) { sfx('menu'); KB.REPLAY.openBoard(this, this.levelId); return; }
       if (inp.pressed('jump') || inp.pressed('start') || inp.pressed('attack')) {
         if (!this.done) { this.finishAll(); return; }
         if (this.frame > 8) { sfx('select'); this.exitScene(); return; }
@@ -1167,8 +1277,11 @@
         if (this.newBest && ((f >> 3) & 1)) KB.text(ctx, 'NEW!', 60, 155, { color: C.yellow });
         this.drawRank(ctx);
         const go = UI.hint('jump', 'Z') + ' / ' + UI.hint('start', 'ENTER');
-        if ((f % 60) < 42) fit(ctx, go + '：繼續', 128, 196, 240, { color: '#fff', align: 'center', size: ms });
+        // Round 12（K12-2）：第 2 段提示輪播「計時排行・觀看重播」（同一列輪播，版面不動）
+        if (KB.REPLAY && (f % 240) >= 120) fit(ctx, UI.hint('select', 'C') + '：排行・觀看重播', 128, 196, 240, { color: C.cyan, align: 'center', size: ms });
+        else if ((f % 120) < 102) fit(ctx, go + '：繼續', 128, 196, 240, { color: '#fff', align: 'center', size: ms });
       } else fit(ctx, UI.hint('jump', 'Z') + ' / ' + UI.hint('start', 'ENTER') + '：跳過', 128, 196, 240, { color: C.grey, align: 'center', size: ms });
+      if (KB.REPLAY && KB.REPLAY.boardOpen(this)) KB.REPLAY.drawBoardPanel(ctx, this.levelId, this._rb);
       drawMuteToast(ctx); drawFade(ctx, this);
     }
     // Style Rank：左邊是評分細項、右邊是砸下來的印章大字
@@ -1368,4 +1481,9 @@
     return n + '/' + (levels * 3);
   };
   KB.EndingScene = EndingScene;
+
+  // Round 12（polish-docs）：開機就把設定頁「貼身判定加倍」套到 KB.PHYS.meleeScale。
+  //   saves.js 的啟動 refresh() 跑在 ui.js 之前（那時 KB.UI.settings 還不存在）⇒ 在這裡補一次，
+  //   除錯 / QA 一開頁讀 KB.PHYS.meleeScale 就是真值（判定框本身每次建框都問 KB.meleeScale()，本來就對）。
+  try { if (KB.meleeScale) KB.meleeScale(); } catch (e) { }
 })();
