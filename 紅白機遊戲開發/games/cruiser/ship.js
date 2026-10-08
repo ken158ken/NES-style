@@ -64,6 +64,11 @@
   var MAX_SPEED = 5;
 
   var SHOT_V = FX.v88(7, 0);                            // [源] 標準彈 7 px/幀
+  // R4 新裝備「波動（ripple）」—— 研究 11 §14.1 / 16 §8：沙羅曼蛇用 Ripple 取代 DOUBLE，
+  // 「會擴張的能量環，遠處比近處好打」。本作：5 px/幀、每 6 幀長高一節（8 → 24 px），
+  // 不貫通（命中即消失）、傷害 1，與 DOUBLE / LASER 互斥。能量表格 3 第二次按 B 由 DOUBLE 升級而來。
+  var RIPPLE_V = FX.v88(5, 0);
+  var RIPPLE_GROW = 6, RIPPLE_MAX_SEG = 3, RIPPLE_SEG = 8;
   var LASER_V = FX.v88(12, 0);                          // [源] 雷射 12 px/幀
   var DIAG_VX = FX.v88(4, 0), DIAG_VY = -FX.v88(4, 0);  // [源] DOUBLE (+4, −4)
   var MIS_FLY_VX = FX.v88(0, 128), MIS_FLY_VY = FX.v88(2, 0);   // [源] 空中 (+0.5, +2)
@@ -89,7 +94,12 @@
   var CLEAR_CAPSULE_EVERY = 16;                         // [源] 每第 16 顆 = 清屏
   var HI_KEY = 'cruiser_hi';
 
-  var K = { SHOT: 0, DIAG: 1, LASER: 2, MISSILE: 3 };
+  var K = { SHOT: 0, DIAG: 1, LASER: 2, MISSILE: 3, RIPPLE: 4 };
+  // R4：Option 編隊（SELECT 循環）—— 0 跟隨（R2 原行為）/ 1 固定 / 2 旋轉
+  var OPT_MODE = { TRAIL: 0, FIXED: 1, ORBIT: 2 };
+  var OPT_MODE_NAME = ['TRAIL', 'FIXED', 'ORBIT'];
+  var OPT_FIXED_DX = [-24, -44];        // 固定編隊：船後方兩個定點
+  var OPT_ORBIT_R = 22, OPT_ORBIT_STEP = 3;   // 旋轉編隊：半徑 22 px、每幀 3/256 圈（約 85 幀一圈）
   var GAUGE_MAX = 6;
   var GAUGE_NAME = ['', 'SPEED', 'MISSILE', 'DOUBLE', 'LASER', 'OPTION', '?'];
   // QA R2 P2-1：5 字標籤 6 格相連會擠成 `SPEEDMISSLDOUBL…`；改成 4 欄一格（3 字 + 1 空欄），
@@ -143,7 +153,7 @@
       // ---- 契約欄位 ----
       x: 0, y: 0, w: BOX_W, h: BOX_H,
       alive: true, speed: 1,
-      power: { missile: false, double: false, laser: false, option: 0, shield: 0 },
+      power: { missile: false, double: false, laser: false, ripple: false, option: 0, shield: 0 },
       gauge: 0, shots: [], options: [],
       invul: 0, lives: START_LIVES, score: 0, hi: loadHi(),
       // ---- 內部 ----
@@ -154,7 +164,9 @@
       deathTimer: 0, deathDone: false, debris: [],
       frames: 0, anim: 0, optAnim: 0,
       extendAt: EXTEND_EVERY, shotId: 1,
-      capsules: 0, deaths: 0, fired: 0
+      capsules: 0, deaths: 0, fired: 0,
+      // R4：Option 編隊模式（玩家偏好，死亡 / 過關都不重設）
+      optMode: OPT_MODE.TRAIL, optSwitches: 0, optT: 0
     };
     for (i = 0; i < SHOTS + MISSILES; i++) s.shots.push(newShot());
     for (i = 0; i < DEBRIS; i++) s.debris.push({ alive: false, px: FX.Vec(0), py: FX.Vec(0), vx: 0, vy: 0, t: 0, tile: 0, x: 0, y: 0 });
@@ -178,6 +190,7 @@
       if (hard) {
         s.speed = 1; s.gauge = 0;
         s.power.missile = false; s.power.double = false; s.power.laser = false;
+        s.power.ripple = false;
         s.power.option = 0; s.power.shield = 0;
       }
       s.place(SPAWN_X, SPAWN_Y);
@@ -191,13 +204,44 @@
 
     /* ------------------------------------------------------ Option 位置 */
     // [源] 沒有 Option 時兩個槽仍每幀更新座標（撿到當下就位）
+    // R4：三種編隊 —— TRAIL（[源] 位置歷史環，R2 原行為）/ FIXED（船後定點）/ ORBIT（繞船旋轉）
+    function trig(fn, a) {
+      var SH = NES.SH;
+      if (SH && SH[fn]) return SH[fn](a & 255);
+      return Math.round(256 * (fn === 'sin' ? Math.sin(a * Math.PI / 128) : Math.cos(a * Math.PI / 128)));
+    }
     s.syncOptions = function () {
-      for (var j = 0; j < MAX_OPTION; j++) {
-        var o = s.options[j];
+      var mode = s.optMode | 0, j, o, h, a;
+      for (j = 0; j < MAX_OPTION; j++) {
+        o = s.options[j];
         o.on = j < s.power.option;
-        var h = (s.head - OPT_LAG[j]) % RING; if (h < 0) h += RING;
-        o.x = s.ring[h * 2]; o.y = s.ring[h * 2 + 1];
+        if (mode === OPT_MODE.FIXED) {
+          o.x = clamp(s.sx + OPT_FIXED_DX[j], -8, 248);
+          o.y = s.sy;
+        } else if (mode === OPT_MODE.ORBIT) {
+          a = (s.optT * OPT_ORBIT_STEP + j * 128) & 255;
+          o.x = clamp(s.sx + ((trig('cos', a) * OPT_ORBIT_R) >> 8), -8, 248);
+          o.y = clamp(s.sy + ((trig('sin', a) * OPT_ORBIT_R) >> 8), -8, 200);
+        } else {
+          h = (s.head - OPT_LAG[j]) % RING; if (h < 0) h += RING;
+          o.x = s.ring[h * 2]; o.y = s.ring[h * 2 + 1];
+        }
       }
+    };
+    s.optModeName = function () { return OPT_MODE_NAME[s.optMode | 0] || 'TRAIL'; };
+    // SELECT（遊戲進行中）/ 手機「編隊」鍵 → 循環切換；回傳新的模式名稱
+    s.cycleOptMode = function () {
+      s.optMode = ((s.optMode | 0) + 1) % OPT_MODE_NAME.length;
+      s.optSwitches++;
+      s.syncOptions();
+      return s.optModeName();
+    };
+    s.setOptMode = function (m) {
+      if (typeof m === 'string') m = OPT_MODE_NAME.indexOf(m.toUpperCase());
+      if (m < 0 || m === undefined || m === null) return s.optModeName();
+      s.optMode = (m | 0) % OPT_MODE_NAME.length;
+      s.syncOptions();
+      return s.optModeName();
     };
 
     /* ------------------------------------------------------------ 移動 */
@@ -260,6 +304,7 @@
       t.vx = vx; t.vy = vy; t.x = x | 0; t.y = y | 0;
       t.w = 4; t.h = 4; t.dmg = DMG_SHOT; t.len = 1; t.crawl = false; t.anim = 0;
       if (kind === K.LASER) { t.w = LASER_STEP; t.h = 4; }
+      if (kind === K.RIPPLE) { t.w = RIPPLE_SEG; t.h = RIPPLE_SEG; t.len = 1; }
       if (kind === K.MISSILE) { t.dmg = DMG_MISSILE; }
       return t;
     }
@@ -271,6 +316,9 @@
         if (free > 0) {
           if (s.power.laser) {
             spawn(K.LASER, src, ox + 16, oy + 2, LASER_V, 0); made++;
+            if (src === 0) sfx('laser');
+          } else if (s.power.ripple) {
+            spawn(K.RIPPLE, src, ox + 14, oy + 2, RIPPLE_V, 0); made++;
             if (src === 0) sfx('laser');
           } else {
             spawn(K.SHOT, src, ox + 14, oy + 2, SHOT_V, 0); made++;
@@ -322,8 +370,13 @@
       switch (sel) {
         case 1: if (s.speed < MAX_SPEED) { s.speed++; got = 'SPEED'; } break;
         case 2: if (!s.power.missile) { s.power.missile = true; got = 'MISSILE'; } break;
-        case 3: if (!s.power.double) { s.power.double = true; s.power.laser = false; got = 'DOUBLE'; } break;
-        case 4: if (!s.power.laser) { s.power.laser = true; s.power.double = false; got = 'LASER'; } break;
+        // R4：格 3 兩段式 —— 還沒有 DOUBLE → DOUBLE；已經有 DOUBLE → 升級成 RIPPLE（波動）。
+        //     （沙羅曼蛇的格 3 就是 Ripple；兩段式讓舊玩家的 DOUBLE 手感原封不動還留著）
+        case 3:
+          if (!s.power.double && !s.power.ripple) { s.power.double = true; s.power.laser = false; got = 'DOUBLE'; }
+          else if (s.power.double) { s.power.double = false; s.power.ripple = true; s.power.laser = false; got = 'RIPPLE'; }
+          break;
+        case 4: if (!s.power.laser) { s.power.laser = true; s.power.double = false; s.power.ripple = false; got = 'LASER'; } break;
         case 5: if (s.power.option < MAX_OPTION) { s.power.option++; got = 'OPTION'; } break;
         case 6: if (s.power.shield <= 0) { s.power.shield = SHIELD_HP; got = 'SHIELD'; } break;
       }
@@ -368,7 +421,8 @@
 
     // [源] rank = (主武器) + Option 數 + (護盾)，0..4；死亡自動歸 0（強化清空）
     s.rank = function () {
-      return ((s.power.laser || s.power.double) ? 1 : 0) + s.power.option + (s.power.shield > 0 ? 1 : 0);
+      return ((s.power.laser || s.power.double || s.power.ripple) ? 1 : 0) +
+        s.power.option + (s.power.shield > 0 ? 1 : 0);
     };
 
     /* ----------------------------------------------------- 每幀：子彈 */
@@ -383,6 +437,17 @@
           t.x = head - t.len * LASER_STEP;               // 碰撞框 = 整條光束（貫通）
           t.y = FX.floorPx(t.py.sub);
           t.w = t.len * LASER_STEP; t.h = 4;
+          if (t.x > KILL_X) t.alive = false;
+          continue;
+        }
+        if (t.kind === K.RIPPLE) {                       // 波動：往右飛 + 每 6 幀長高一節
+          FX.vadd(t.px, t.vx);
+          t.anim++;
+          if (t.len < RIPPLE_MAX_SEG && (t.anim % RIPPLE_GROW) === 0) t.len++;
+          var cy = FX.floorPx(t.py.sub) + 2;
+          t.h = t.len * RIPPLE_SEG; t.w = RIPPLE_SEG;
+          t.x = FX.floorPx(t.px.sub);
+          t.y = cy - (t.h >> 1);
           if (t.x > KILL_X) t.alive = false;
           continue;
         }
@@ -442,6 +507,7 @@
       s.frames++;
       s.anim = (s.frames >> 2) & 1;
       s.optAnim = ((s.frames / OPT_ANIM) | 0) & 1;       // [源] 2 張、每 8 幀、自由跑
+      if (s.optMode === OPT_MODE.ORBIT) s.optT++;        // R4：旋轉編隊的相位（只有旋轉模式才走）
       var ev = '';
 
       if (s.alive) {
@@ -488,7 +554,8 @@
         alive: s.alive, speed: s.speed, speedPx: s.speedPx(),
         gauge: s.gauge, gaugeName: s.gaugeName(),
         power: { missile: s.power.missile, double: s.power.double, laser: s.power.laser,
-          option: s.power.option, shield: s.power.shield },
+          ripple: s.power.ripple, option: s.power.option, shield: s.power.shield },
+        optMode: s.optMode | 0, optModeName: s.optModeName(), optSwitches: s.optSwitches | 0,
         rank: s.rank(), options: opts, shots: list, shotCount: list.length,
         timers: [s.emit[0].timer, s.emit[1].timer, s.emit[2].timer],
         invul: s.invul, lives: s.lives, score: s.score, hi: s.hi,
@@ -503,6 +570,9 @@
 
   CR.Ship = {
     create: create, K: K, KIND: K,
+    OPT_MODE: OPT_MODE, OPT_MODE_NAME: OPT_MODE_NAME,
+    OPT_FIXED_DX: OPT_FIXED_DX, OPT_ORBIT_R: OPT_ORBIT_R, OPT_ORBIT_STEP: OPT_ORBIT_STEP,
+    RIPPLE_V: RIPPLE_V, RIPPLE_GROW: RIPPLE_GROW, RIPPLE_MAX_SEG: RIPPLE_MAX_SEG, RIPPLE_SEG: RIPPLE_SEG,
     SPEED_PX: SPEED_PX, SPEED_V: SPEED_V, MAX_SPEED: MAX_SPEED,
     SHIP_W: SHIP_W, SHIP_H: SHIP_H, BOX_DX: BOX_DX, BOX_DY: BOX_DY, BOX_W: BOX_W, BOX_H: BOX_H,
     PLAY: PLAY, SPAWN_X: SPAWN_X, SPAWN_Y: SPAWN_Y,

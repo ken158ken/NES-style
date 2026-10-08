@@ -2624,3 +2624,1060 @@ R2 只有關卡 1（2816 px）。本輪做到 **6 關**（研究 16 §7-2 的 FC
 7. **升降板與單向平台的外觀有點像**（都是橫條）：升降板用精靈 pal 3（灰 / 白），
    平台用背景 bg3（主題色）。真機上動起來分得出來（一個會動），靜態截圖較難分。
    要更明確可以給升降板加「兩端的輪子」磚（精靈 bank 還剩 4 磚，會超，得先省別處）。
+
+## star-w4（R4，2026-10-08）
+
+2026-10-08 ｜ star-w4 agent ｜ 對象：`docs/R4_BRIEF.md` 任務卡 **F4-2**
+（《星塵勇者》世界 4 四關 + 新敵 + 魔王 + 新機制 + 新曲 + 原創 CHR、崩塌磚視覺抖動、
+`NES.SH.OAM` 的 16×16 便利 add）。`games/cruiser/**` 一行未碰。
+
+### 1. 做了什麼
+
+**新檔（7 支）**
+
+| 檔 | 內容 |
+|---|---|
+| `games/star/chr_w4.js` | W4 追加 CHR：背景 **20 磚**（鋼板地表 / 內壁 / 鋼塊 / **輸送帶帶面** / **雷射發射座** / 金屬走道 / 齒輪 / 管線 / 鉚釘 / 螢幕 / 鋼樑上下 / 線束 / 閥門 / 電路背景 / 核心層 3 磚 / 要塞 2 磚）＋ 精靈 **66 磚**（無人機 2 幀 / 重裝守衛 3 幀 / 砲塔 2 幀 / 螺栓彈 2 幀 / 升降台 / 雷射 2 幀 / 滾動齒輪 2 幀 / 魔王 32×32 兩姿勢）＋ 三個新主題調色盤 `works / core / citadel` ＋ **`ST.SprBanks` 精靈 bank 切換器** |
+| `games/star/objects_w4.js` | `ST.ObjectsW4`：輸送帶 / 雷射柵欄 / 齒輪升降台。**全部是時間（或位置）的純函式** ⇒ 機器人能往前推演 |
+| `games/star/enemies_w4.js` | 用 `ST.Enemies.register()` 登記 `drone` / `guard` / `sentry` / `bolt`；**繪製一律走新的 `oam.add16()`** |
+| `games/star/boss_w4.js` | `ST.BossW4` 核心守護者（介面同 `ST.Boss` / `ST.BossW2`）：32×32、5 血、三階段 |
+| `games/star/levels_w4.js` | 三個主題註冊 + 4-1 ~ 4-4 四關純資料（floor RLE / ceil / objs / belts / lasers / lifts / items / spawns / boss） |
+| `games/star/song_w4.js` | 三首原創曲 `works / core / boss4`（`ST.Audio.BUILD`） |
+| `games/star/test_w4.py` | **224 項**（見下） |
+
+**精靈圖樣表滿了 ⇒ 真機做法：CHR bank 切換（本輪最大的架構決定）**
+R3 結束時主精靈 bank 已經用掉 **252 / 256 磚**（SPR_HERO 66 + SPR_WORLD 116 + SPR_W2 70），
+**剩 4 磚，連一個 16×16 精靈都放不下**。本輪沒有去擠別人的磚，而是照真機（MMC3）的做法做
+**每個世界一張精靈 bank**：`chr_w4.js` 的 `ST.SprBanks` 建 `st_spr_w4 = SPR_HERO + SPR_WORLD + SPR_W4`
+（**前 182 磚與主 bank 逐磚相同**），`main.js` 換關時呼叫 `ST.SprBanks.apply(level)` 切圖樣表 1，
+離開世界 4 自動指回 `ST.sprBank`。`ppu.render()` 每幀清 `_tileCache` ⇒ 切了立刻生效。
+⇒ 主角與 W1 世界精靈索引完全不變，`ST.heroTiles` / `enemies.js` / `ST.Objects` 的快取都還是對的
+（`test_w4.py ①` 逐名比對 149 個磚名驗證）。**F4-1（star-w3）本輪直接沿用這個切換器**（`st_spr_w3`）。
+
+**擴充的既有檔**
+
+| 檔 | 改了什麼（全部是插入，既有行為一行未改） |
+|---|---|
+| `engine/shmup.js` | `NES.SH.OAM.add16(s)` / `push16(...)`：16×16 精靈便利 add，**自己處理 flipH 的「兩塊各自翻 + 左右對調」**（R3 的 `enemies.js` 曾因此畫錯）。回傳實際收下的塊數 0..2，越界規則逐塊沿用 `add()` |
+| `docs/ENGINE_API.md` | §15.4 補 `add16` / `push16` 兩列 + 一整段說明與範例；§15.8-7 測試數字 157 → 168 |
+| `tools/test_shmup.py` | 157 → **168 項**（新增 11 項：回傳值 / x+8 / 不翻 L,R / 翻轉 R,L + 兩塊都帶 flipH / `tiles:[L,R]` 寫法 / flipV + behind / 右塊越界回 1 / 全越界回 0 / `push16` / 不影響既有 `add`） |
+| `games/star/main.js` | **只插入**：關卡順序 `.concat(['4-1'..'4-4']).sort()`、`WORLD_FIRST[4]`、標題 SELECT 的世界清單改從 `WORLD_FIRST` 補（W3 / W5 同享）、`ST.SprBanks.apply(lv)`、`ST.ObjectsW4.{init,seek,update,draw}`、`bossKind === 'guardian' → ST.BossW4`、`bossSong` 的 world 4 分支、`ST.BG_W4` 併進背景 bank、**`drawCrumbleShake()` 抖動粒子**、`state()` 四個欄位、`dev` 六個純函式 |
+| `star.html` | 六支新腳本進載入順序（`?v=` 戳記等總控跑 `tools/stamp.py`） |
+| `tools/playthrough_star.py` | 模擬器加入齒輪升降台（`liftTops(t)`）、雷射（`laserAt(...,t)`）、輸送帶（`convAt(x,row)`）的推演；`moverTop()` 改成同時吃 W2 的 mover 與 W4 的 lift；新增 `--w4` |
+| `games/star/test_star.py` | 「破完最後一關」改成**自動找真正的最後一關**（4-4 → 3-4 → 2-4 → 1-4）、魔王模組改讀 `GAME.dev.g().bossMod` ⇒ 不再寫死 2-4 / `ST.BossW2`。249 項不變全綠 |
+
+**四關（主題 / 長度 / 節奏）**
+
+| 關 | 主題 | 欄（畫面） | 檢查點 | 金幣 | 敵 | 機關 |
+|---|---|---|---|---|---|---|
+| 4-1 | works 輸入樓層 | 320（10） | 112、196 | 37 | 14 | 教學：順向帶 → 逆向帶 → 齒輪升降台 ×2 → 雷射 ×3 |
+| 4-2 | works 傳送帶迷宮 | 320（10） | 100、212 | 42 | 16 | 節奏：輸送帶 ×5（順 / 逆接力）+ 崩塌鋼板 ×5 + 升降台 ×3 + 雷射 ×3 |
+| 4-3 | core 核心反應層 | 288（9） | 96、196 | 39 | 15 | 機關：雷射 ×5 + 垂直升降台塔（4 座）+ 電漿池 ×5 + 輸送帶 ×3 |
+| 4-4 | citadel 要塞核心 | 256（8） | 100、172 | 36 | 13 | 守衛走廊 + 輸送帶 ×2 + 升降台 ×2 + 雷射 ×2 + 魔王 |
+
+**三個新機制**（全部寫在關卡資料裡，沒有任何一關的座標被硬編碼）
+**輸送帶** `belts[] = {c,r,w,dir}`（站上去每幀被帶 ±0.5 px；外觀是背景磚 `TILE.BRIDGE` → `BG_BELT`，
+`test_w4.py ③` 逐欄比對「物理資料 vs 磚」）／**雷射柵欄** `lasers[] = {c,r,h,period,on,phase}`
+（週期開關 + 24 幀預警，形狀與介面同 W2 的間歇泉 ⇒ 直接餵給機器人）／
+**齒輪升降台** `lifts[] = {c,r,w,axis,range,period,phase}`（三角波純函式、單向平台、水平帶人）。
+**每個機關都留了純地形的備援路線**（坑 / 電漿帶 ≤ 8 欄、牆高 ≤ 3 列、逆向帶 ≤ 12 欄
+⇒ 跑速 2.5 − 0.5 = 2.0 px/幀 仍然前進，不可能卡住）。
+
+**三種新敵 + 魔王**
+`drone` 巡邏無人機（生成點 ±range 來回 + 正弦浮動，可踩）／
+`guard` 重裝守衛（護罩關閉 150 幀**不可踩**、排氣窗開啟 60 幀**可踩**，關閉前 20 幀閃爍預警
+＝ 研究 04 §2「必須用別的手段處理的敵人」的**第二解法：等時機**，不必靠副武器）／
+`sentry` 螺栓砲塔（固定，每 90 幀射水平螺栓，射前 20 幀亮砲口）＋ `bolt` 螺栓彈（一次性）。
+魔王 **核心守護者**：5 血、三階段（walk → jump → slam 放兩顆**沿地面滾的齒輪** →
+[階段 2 起] volley 水平螺栓 3~4 發 → rest 弱點窗口；血越低走越快、休息越短）。
+
+**崩塌磚視覺抖動（R3 star-w2「留給後續」第 5 條，W2 也受惠）**
+`main.js` 的 draw 新增 `drawCrumbleShake()`：讀 R3 就留好的 `ST.Objects.crumbleTimer(c,r)`，
+最後 12 幀在磚上緣畫一顆**左右 ±1 px 抖動**的粉塵（`W_PUFF0/1`，SPR_WORLD 的磚 ⇒ 兩張 bank
+索引相同，世界 4 也畫得出來）。只掃主角腳下 3 欄 × 2 列 = 每幀 ≤ 6 次查詢。
+`test_w4.py ⑩` 對 **4-1（W4）與 2-1（W2）各驗一次**。
+
+### 2. 驗證數字表
+
+| 項目 | 結果 |
+|---|---|
+| `games/star/test_w4.py` | **224 / 224 PASS**（新增） |
+| `tools/test_shmup.py` | 157 → **168 / 168 PASS**（`add16` / `push16` 11 項） |
+| `games/star/test_star.py` | **249 / 249 PASS**（最後一關偵測改通用版後全綠） |
+| `games/star/test_w1.py` | **177 / 177 PASS**（一項未改） |
+| `games/star/test_w2.py` | **187 / 187 PASS**（一項未改） |
+| `bash tools/run_all.sh` | **總結：PASS**（node --check 68 檔、17 支測試、4 個 build --check、冒煙截圖、lint 抽查 8 張） |
+| 精靈 bank | 主 `st_spr` **252 / 256**、世界 4 `st_spr_w4` **248 / 256**；前 182 磚逐名索引相同（0 個錯位） |
+| 背景 bank | `st_bg` 141 → **161 / 256**（W4 的 20 磚） |
+| 截圖 | `shots/agent_w4/` **3 張**（41 輸送帶 + 雷射 / 43 核心層 + 守衛 + 無人機 / 44 魔王），每張 Read 看過、lint 10~12 色 ≤ 25、每線精靈 ≤ 8 |
+
+**通關機器人**（`$PY tools/playthrough_star.py`）
+
+| 關 | cleared | frames | deaths | 備註 |
+|---|---|---|---|---|
+| 4-1 | True | 1149 | 0 | score 4000 |
+| 4-2 | True | 1075 | 0 | score 3000 |
+| 4-3 | True | 1235 | 0 | score 4300 |
+| 4-4 | True | 1510 | 0 | score 5700（打魔王） |
+| 1-1 ~ 2-4 | True ×8 | 1400 / 1070 / 1265 / 1385 / 1126 / 1128 / 929 / 1702 | 1 / 0 / 0 / 1 / 0 ×4 | 與 R3 **一幀不差**（`--all8` 回歸） |
+
+### 3. 偏離（與任務書不同的決定）
+
+1. **主題選「機械要塞」**（任務書的第一建議），三個子主題 `works / core / citadel` 與
+   W1 四個、W2 三個主題都不同名、不同調色盤。
+2. **「電磁鐵吸附」沒做**，改成「輸送帶 + 雷射柵欄 + 齒輪升降台」三個：電磁鐵會在主角身上加一個
+   **與輸入無關的持續外力**，通關機器人的兩步推演（`__botSim`）要把磁鐵場也積分進去才準，
+   風險遠高於報酬。記在「留給後續」。
+3. **世界 4 接在 `LEVEL_ORDER` 最後而不是另開一條支線**：這樣 4-4 打完才會是 `WORLD 4 CLEAR`，
+   代價是 `test_star.py` 的「最後一關」硬寫死 2-4 會紅 ⇒ 順手改成通用版（見上表）。
+   `.sort()` 讓 W3 / W5 之後插進來順序自動正確（F4-1 本輪就是直接 `.concat().sort()`）。
+4. **精靈 bank 切換是本輪唯一動到「全域繪製機制」的地方**（理由見上）。沒有改 `engine/ppu.js`
+   或 `engine/chr.js` 一行 —— `NES.CHR.setPattern(1, bank)` 本來就吃 bank 物件。
+5. **W4 的四關不放 W2 的敵人**（bat / armor / spitter / fire）：它們的磚在 `st_spr_w4` 裡是別的圖。
+   `test_w4.py ③` 有一項專門擋這件事。W1 的 roller / bouncer / flyer 可以放（索引對齊）。
+6. **魔王打法只有「踩頭」一條**（同 W2）：要塞盡頭一樣放了旗桿 ⇒「繞過魔王碰旗桿」是第二條路。
+
+### 4. 跨檔需求（給總控 / 其他 agent）
+
+1. **`tools/stamp.py` 尚未跑**（任務書指定不跑）：`star.html` 新增的 **6 支** W4 腳本沒有 `?v=` 戳記。
+   **commit 前請跑 `$PY tools/stamp.py`**。
+2. 新檔 7 支要進版本控制：`games/star/{chr_w4,song_w4,enemies_w4,boss_w4,objects_w4,levels_w4}.js`
+   ＋ `games/star/test_w4.py`。
+3. **精靈圖樣表已經是 252 / 256（主 bank）**：**之後任何世界 / 新敵人都不要再往 `ST.SPR_WORLD`
+   或 `ST.SPR_W2` 加磚**，一律走 `ST.SprBanks.register(world, 'st_spr_wN', SPR_WN)`
+   （`chr_w4.js` 定義、`chr_w3.js` 已沿用；兩邊都用 `ST.SprBanks || (…)` 所以載入順序無所謂）。
+   新 bank 的前兩段**必須**是 `SPR_HERO + SPR_WORLD`，否則索引會錯位。
+4. **`engine/shmup.js` 新增了 `OAM.add16 / push16`**（`docs/ENGINE_API.md` §15.4 已補）。
+   `games/star/enemies.js` 與 `boss*.js` 裡還有三處手寫 16×16 翻轉的程式碼，之後可以改成 `add16`
+   （本輪沒動，因為那是 star-world / star-w2 的檔）。
+5. `README.md` / `index.html` 若有寫「星塵勇者：8 關 / 2 個世界」，請改成 **16 關 / 4 個世界**
+   （W3 本輪也上線）。本輪沒碰這兩個檔，避免與 F4-5 搶。
+6. `games/star/test_star.py` 的「最後一關」偵測已改成通用版（`BOSS_COL` 表 + `dev.g().bossMod`）；
+   之後加 W5 ~ W8 只要在那張表加一行。
+
+### 5. 留給後續
+
+1. **電磁鐵吸附沒做**（理由見「偏離」2）。要做的話先讓 `tools/playthrough_star.py` 的
+   `__botSim` 把磁力場（位置的純函式即可）積分進去，再放進關卡。
+2. **W4 沒有接世界地圖 / 密碼**：F4-3 的 `worldmap.js` / `password.js` 本輪同時上線，
+   W4 的四關是否要出現在地圖上、密碼要不要編進世界 4，留給總控或下一輪整合。
+3. **`guard` 的「第二解法」目前是「等排氣窗」**；F4-3 的副武器上線後，
+   也該讓火球 / 飛鏢能打掉關閉狀態的守衛（`enemies_w4.js` 的 `hit()` 介面已經是標準的）。
+4. **魔王場沒有輸送帶**：原本想讓核心守護者站在輸送帶上被帶著走（很符合主題），
+   但那會讓機器人的「貼上去踩頭」策略多一個變數，先不冒險。
+5. **`add16` 還沒被 W1 / W2 的敵人用上**（見「跨檔需求」4），三處手寫翻轉還在。
+6. **崩塌磚的抖動只有粉塵、磚本身沒有左右位移**：背景磚不能次格位移，要真的抖得更明顯，
+   得把崩塌磚改成「精靈畫的平台」（會吃精靈槽），或加一張「裂得更開」的第二幀背景磚
+   （`level.chrAt` 的 `ST.World.anim` 路徑已經支援 LAVA / TORCH / SPRING，加 CRUMBLE 只要一行）。
+
+## star-meta（R4，2026-10-08）
+
+2026-10-08 ｜ star-meta agent（F4-3）｜ 對象：`docs/R4_BRIEF.md` 的 **F4-3**
+（SMB3 式世界地圖 + 紅白機風密碼存檔 + 副武器），同時收掉 R3「留給後續」的第 3 條
+（密碼 / 世界地圖只做了 SELECT 切世界的簡版）與第 4 條（護甲礦兵只有繞路 / 無敵星一種解法）。
+`engine/` 一行未改；`games/cruiser/**`、`games/mech/**`、W3 / W4 的檔案一行未碰。
+
+### 1. 做了什麼
+
+**新檔（4 支，`games/star/`）**
+
+| 檔 | 行數 | 內容 |
+|---|---|---|
+| `password.js` | 266 | **純函式編解碼**（零相依、不碰 DOM / PPU）＋ `ST.PasswordUI` 輸入畫面。40 bit = 5 byte = **10 個字母**：通關位元 16（4 世界 × 4 關）／命 4／擁有 2 + 選中 2／分數千位 8／**校驗 8**。字母表 `ABCDEFGHJKLMNPRT`（16 個 = 4 bit，刻意去掉 I O Q S U V W X Y Z 這些 8×8 字型上會看錯的字） |
+| `subweapon.js` | 331 | 火球 / 飛鏢（池子 3 發、冷卻 16 幀）。**B 按下的瞬間**發射（按住 B 仍然是跑）、**↓ + B 或 SELECT** 切換、彈藥有限 / 無限自選、命中判定走 `ST.Enemies.each` + `starKill`，護甲礦兵吃 2 發、魔王 / 鐵鎚免疫 |
+| `worldmap.js` | 619 | SMB3 式世界地圖：**原創 23 個 8×8 背景磚**（`ST.BG_MAP`）、8 × 5 格節點圖（格 = 4×4 磚 = 32×32 px，對齊 16×16 屬性區塊）、蛇行 slot、走格子動畫 2 px/幀、已通關打勾、鎖住節點換 pal 2（灰）、**道具屋節點**（買火球 10 / 飛鏢 15 / 補彈 5 / 無限 40 金幣） |
+| `test_meta.py` | 748 | **150 項**（見下） |
+
+**三個系統怎麼接起來**
+
+1. **世界地圖**：節點直接從 `ST.LEVELS` / `ST.Levels.ids` 長出來 ⇒ **F4-1 / F4-2 用 `ST.Levels.register` 掛 W3 / W4 進來，地圖自動多一張**，`worldmap.js` 一行都不用改（測試裡有模擬「註冊第 9 世界五關」驗證）。`stage ≥ 5` 的 id（如 `3-5`）自動變成**支線 / 隱藏節點**（主線四關全通才解鎖）＝ 任務書要的「隱藏 / 支線節點預留 API」。
+2. **密碼**：過關時 `enterClear()` 把關卡 id 寫進通關位元；**破關畫面多一行 `CODE AAJAD FATTC`**；標題 SELECT 輪到 `PASSWORD` 後按 START 進輸入畫面，解開就套用（通關位元 / 命 / 分數 / 副武器）並直接進該世界的地圖。
+3. **副武器**：`hero.js` 只插了「把 `down / bPress / selectPress` 三個布林傳出去」的 hook，邏輯全在 `subweapon.js`；取得管道兩條 —— **關卡隱藏道具**（每關的「指定 ? 磚」＝ 該關所有 ? 磚裡最中間的一個，純函式 ⇒ 可測、機器人也算得出來）與**地圖道具屋**。
+
+**入口**：標題 `UP` 或 `B` = 世界地圖、`SELECT` 輪替 `WORLD 1 → 2 → … → PASSWORD`、選到 PASSWORD 按 `START` = 密碼輸入。
+
+### 2. 驗證
+
+| 項目 | 結果 |
+|---|---|
+| `games/star/test_meta.py` | **150 / 150 PASS**（新增） |
+| `games/star/test_star.py` | **249 / 249 PASS**（一項未改） |
+| `games/star/test_w1.py` / `test_w2.py` | **PASS**（未動） |
+| `bash tools/run_all.sh` | **總結：PASS**（node --check 68 檔、16 支測試、4 個 build --check、冒煙截圖、lint 抽查 8 張） |
+| `$PY tools/playthrough_star.py --all8` | 八關 **全部 cleared**，frames **與 R3 基準一幀不差**（1400 / 1070 / 1265 / 1385 / 1126 / 1128 / 929 / 1702；deaths 1 / 0 / 0 / 1 / 0 / 0 / 0 / 0＝R3 原樣） |
+| `$PY tools/playthrough_star.py --map`（新增） | 地圖：`mode=map world=1 鎖住提示=LOCKED 游標 1→0→1 走了 2 步 節點=1-2` → 進 1-2 `cleared=True frames=1070 deaths=0`、密碼 `AAABDAAALT` |
+| `$PY tools/playthrough_star.py --cheat` | **37 項全 PASS**（暫停 + SELECT / 一鍵 C / GAME OVER 續關全保留） |
+| 截圖 | `shots/test_meta/` 9 張（測試自動產生 + lint 全綠）＋ `shots/agent_meta/` 留 3 張代表圖。**每張都用 Read 看過** |
+
+測試涵蓋（150 項的分佈）：密碼字母表 / 往返 5 組 / **壞碼 150 組字母替換有 ≥ 95% 被校驗擋掉** / 長度 / 非法字 / 大小寫 / 分組格式、關卡 id ↔ 位元 16 關往返、地圖版面與解鎖規則（0 / 1 / 2 / 4 關通關四種狀態）、**註冊新世界自動長節點**、23 個 CHR 磚全部合法、標題輪替、走格子動畫（10 幀 = 20 px）、道具屋四種購買 + 金幣不足、密碼畫面的 ↑↓←→ / 壞碼 / 正確碼、副武器發射 / 冷卻 / 切換 / 彈藥耗盡 / 無限、**按住 B 跑 60 幀的位移與沒有副武器時位元相同（手感 ±0）**、護甲礦兵 2 發、一般敵 1 發、魔王免疫、隱藏 ? 磚、破關密碼解得回來、以及舊的標題 / 暫停 / 一鍵密技回歸。
+
+### 3. 偏離（與任務書不同的決定）
+
+1. **「標題 START 後進地圖」改成「標題 UP / B 進地圖，START 維持直接開始」**。
+   原因是**既有契約**：`test_star.py` ⑨ 驗「標題 START → mode play」、⑪ 驗「SELECT → WORLD 2、START → 直接開 2-1」，
+   而且 F4-1 / F4-2 的任務卡寫明「標題 SELECT 切到 WORLD 3 / 4」—— SELECT 必須留著切世界。
+   折衷：SELECT 的輪替清單**尾端多一個 PASSWORD**（哨兵 `titleWorld = 0`），地圖另給 UP / B 兩個鍵，
+   兩條新路都是**插入**，舊的兩條路一個位元都沒變（249 項舊測試全綠）。
+2. **密碼入口是「SELECT 輪到 PASSWORD → START」**而不是「SELECT 直接進輸入畫面」，理由同上。
+3. **副武器精靈沿用 `W2_FIRE0/1`（R3 的火球磚），一個新精靈磚都沒加**：精靈 bank 在 R3 之後是 252 / 256，
+   只剩 4 磚，而 F4-1 / F4-2 同時在加 W3 / W4 的敵人。改用**調色盤**區分：主角火球 pal 1（金 / 橘）、
+   飛鏢 pal 0（主角的藍 + 翻轉輪替做旋轉感）、敵人的火球維持 pal 2（紅）⇒ 一眼分得出誰的彈。
+   背景 bank 當時只有 141 / 256，所以地圖的 23 磚是真的手繪新磚。
+4. **火球是「平拋」不是高拋**：第一版用 −1.5 px/幀起飛，結果 56 px 外的敵人會從頭上飛過去；
+   改成 −0.5 px/幀 + 0.0625 px/幀²（升 8 幀 / 高 2 px、約 33 幀落地、射程 ≈ 80 px）。飛鏢則是直線 4 px/幀。
+5. **道具屋永遠解鎖**（不要求先過關）、**打過的關可以重玩**：延續使用者「友善版」的方向（`docs/PROGRESS.md` travian / 卡比同一條線）。
+6. **彈藥上限 99、同屏 3 發、冷卻 16 幀**是自訂數字（任務書沒指定），目的是不讓副武器取代踩頭。
+7. **`test_meta.py` 的截圖寫在 `shots/test_meta/`**（9 張，每次跑測試重產），`shots/agent_meta/` 只留 3 張代表圖，
+   以符合簡報「收工只留 ≤ 3 張」。
+
+### 4. 跨檔需求（給總控 / 其他 agent）
+
+**本卡對共用檔的改動（全部是插入，逐處列出）**
+
+| 檔 | 行（改完後） | 內容 |
+|---|---|---|
+| `games/star/main.js` | 218 | `newState()` 追加 `clearedMask / mapAt / lastCode` |
+| | 385 | `loadLevel()` 末尾呼叫 `ST.SubWeapon.initLevel(g)` |
+| | 546、552 | `titleLines()`：`world === 0` 顯示 `PASSWORD`、新增列 15 `UP OR B = WORLD MAP` |
+| | 584 | `winLines()` 追加列 21 `CODE <10 字母>` |
+| | 670 | `toggleTitleWorld()` 的世界清單尾端 `push(0)`（PASSWORD） |
+| | 811 ~ 960 | **新區塊**「R4 star-meta 膠水」：`metaMute / metaOnClear / metaSnapshot / metaPassword / metaApply / metaNextWorld / metaEnterMap / metaLeaveToTitle / metaEnterLevel / metaEnterPassword / metaTitleEnter / metaUpdate / metaDraw / metaNote` |
+| | 1020 | `onBump()` 開頭的隱藏 ? 磚 hook |
+| | 1136 | `enterClear()` 呼叫 `metaOnClear()` |
+| | 1378、1398 | `init()`：掛 `g.subNote`、合併 `ST.BG_MAP` 進背景 bank |
+| | 1472 | `update()` 的 title 分支插入 `metaTitleEnter(input)`（夾在 SELECT 與 START 之間） |
+| | 1494 | play 分支插入 `ST.SubWeapon.update(g)` |
+| | 1565 | `update()` 尾端新增 `mode 'map' / 'password'` 分支 |
+| | 1577、1595 | `draw()`：地圖 / 密碼早退、副武器投射物 |
+| | 1649 | `state()` 追加 13 個欄位（`clearedMask / password / sub* / map* / pw*`） |
+| | 1738 | `dev` 追加 `meta / openMap / openPassword / setCleared / clearLevel / applyCode / giveSub / fireSub / titleSel / levels / win` |
+| `games/star/hero.js` | 56、81、229 | `create()` 追加 `sub / subOwned / subAmmo / subCool / subShots`；`reset()` 清 `subCool`；`update()` 插 6 行副武器 hook |
+| `games/star/enemies_w2.js` | 29、98、100 | `ARM_SUB_HITS = 2`；armor 的 `subHits`；`setup` 裡 `e.subHp = 2` |
+| `star.html` | 83 ~ 86 | 三支新腳本（password → subweapon → worldmap，排在 `main.js` 前） |
+| `tools/playthrough_star.py` | `JS_MAP` / `run_map()` / `--map` | 新增（插在 `run_level` 前與 main 的分派裡） |
+
+1. **`tools/stamp.py` 尚未跑**（簡報指定不跑）：`star.html` 新加的三支腳本**沒有 `?v=` 戳記**。commit 前請跑 `$PY tools/stamp.py`。
+2. 新檔要進版控：`games/star/{password,subweapon,worldmap}.js` ＋ `games/star/test_meta.py`；截圖 `shots/agent_meta/`（3 張）、`shots/test_meta/`（9 張）。
+3. **`engine/` 沒有任何需求**，`docs/ENGINE_API.md` 不需要改（本卡沒有新增 engine API）。
+4. 給 F4-1 / F4-2：**W3 / W4 用 `ST.Levels.register` 註冊之後，世界地圖會自動多一張**（節點照 stage 排、`x-5` 以上自動變支線節點）。
+   如果想自訂節點位置或在地圖上放自己的道具屋，`ST.WorldMap.build(world, opts)` 的 `opts.shop = false` 可以關掉道具屋；
+   若 W4 換了精靈 bank（`chr_w4.js` 的 `st_spr_w4`），副武器會自動退回 `H_COIN` 的磚（`subweapon.js` 的 `tiles()` 每幀查 `ST.sprBank`）。
+5. `README.md` / `index.html` 若要寫新功能：「世界地圖 / 密碼存檔 / 副武器（火球 / 飛鏢）」。
+
+### 5. 留給後續
+
+1. **地圖上的敵人遭遇節點（SMB3 的鎚子兄弟）沒做**：`ST.WorldMap` 的節點種類目前只有 `level / shop / branch`，
+   加一種 `enemy`（會在節點間移動、碰到就進一場小戰鬥）要先決定「小戰鬥」是什麼關卡。
+2. **笛子 / 雲朵之類的地圖道具沒做**：道具屋只賣副武器與彈藥。地圖道具需要「存量欄」（SMB3 的 28 格），
+   HUD 上沒有位置（列 0..3 已經排滿），要做得先決定是否借用暫停畫面。
+3. **密碼沒有存金幣與「無限彈藥」旗標**：40 bit 已經用滿（通關 16 + 命 4 + 副武器 4 + 分數 8 + 校驗 8）。
+   要再塞就得加到 12 個字母（48 bit）—— 字母表與 `LEN` 都是常數，改一行就能擴，但舊密碼會失效。
+4. **副武器打不到魔王是刻意的**（`IMMUNE`）：若之後想讓某個魔王吃副武器，在 `ST.Enemies.EXT` 的定義裡加 `subHits` 即可。
+5. **道具屋沒有「賣命」（1UP）**：金幣的既有出口是 100 枚 1UP，怕兩條路重疊才沒放。
+6. **地圖目前是單層**（SMB3 第 5 世界有上下兩層）：`SLOTS` 只排了兩列（cy = 1 / 3），8 × 5 格還剩三列可用。
+
+---
+
+## cruiser-r4（R4，2026-10-08）
+
+任務卡 F4-4：《星塵巡航艦》**rank 動態難度** ＋ **第 7 關「魔王連戰」** ＋ **新裝備「波動」與 Option 編隊切換**
+＋ **每關 1 個隱藏獎勵** ＋ **結局畫面 / 工作人員名單捲動 / 結局曲** ＋ **分數排行（localStorage 前 10）**。
+擁有檔：`games/cruiser/**`、`tools/playthrough_cruiser.py`、`cruiser.html`（Edit 插入 4 個 script）。
+**engine/ 一個字都沒動、沒有 git / stamp / build 操作。**
+
+### 1. 做了什麼
+
+**新檔（4 支 JS + 1 支測試）**
+| 檔 | 行 | 內容 |
+|---|---:|---|
+| `games/cruiser/rank.js` | 169 | `CR.Rank`：每幀從「火力 + 存活時間 + 輪數 − 死亡罰」重算的 0..7 動態難度，附效果表與開關 |
+| `games/cruiser/bonus.js` | 144 | `CR.Bonus`：七關各 1 個隱藏獎勵（4 個擊殺型 / 3 個位置型），獎勵只有 1UP 與全消彈 |
+| `games/cruiser/credits.js` | 156 | `CR.Credits`：真機式垂直捲動工作人員名單（30 列環形緩衝，每 8 px 補 1 列 = 32 byte） |
+| `games/cruiser/hiscore.js` | 182 | `CR.HiScore`：localStorage 前 10 名 + 3 字母名字輸入（A..Z 與 `.`） |
+| `games/cruiser/test_r4.py` | 643 | **R4 驗收 115 項**（見 §2） |
+
+**改檔**
+- `stages.js`：**`CR.STAGE_COUNT` 6 → 7**，新增 `S7`「BOSS RUSH」（160 欄 / camMax 1024 / 通道 20 列 /
+  接近段 13 波純補給、零固定砲 / 連戰室 32 欄）。資料仍然**只有資料**，走共用的 `buildWaves`。
+- `bosses.js`（556 → 807）：`makeBoss` 加 `warnFrames` / `beamH` 兩個可調參數（預設 = R3 行為）、
+  cfg 登記處 `CFGS`、強化版產生器 `boost()`、**連戰機 `makeRush()`** 與 `CR.Bosses.rush`
+  （六隻強化版 + 原創真最終魔王 **OMEGA I / II / III** 三形態，第三形態有脫出倒數 420 幀）。
+- `ship.js`：新裝備 **RIPPLE（波動）**（能量表格 3 第二次按 B 由 DOUBLE 升級；5 px/幀、每 6 幀長高
+  一節 8 → 24 px、不貫通、與 DOUBLE / LASER 互斥）＋ **Option 三種編隊**（TRAIL / FIXED / ORBIT）。
+- `chr_ship.js`：+3 張精靈磚（`S_RIPPLE1` / `S_RIPPLE_T` / `S_RIPPLE_M`，下端用 flipV）。
+- `chr_world.js`：+`CR.STAGE_PAL[7]`（深紫連戰室 + 金色魔王）。
+- `enemies.js`：rank 改走 `CR.Rank`（缺席自動退回 R3 的裝備 rank）；新增 `firePeriod()`
+  （**`turretPeriod()` 的 90 / 130 一個數字都沒動** ⇒ `test_stage1` 的既有斷言原封不動）；
+  rank ≥ 5 / 7 的瞄準砲台改 2 / 3 發扇形；`spawnFan` 的隻數吃 `CR.Rank.fanPlus()`。
+- `stage_runtime.js`：每幀呼叫 `CR.Rank.update()`、`load()` 時重設連戰進度、`?rush=N` 除錯入口、
+  `info().rankState`。
+- `main.js`（1107 → 1366）：三個新模式 **credits / entry / scores**、ENDING → 名單 → 名字輸入 →
+  排行榜 → 第二輪的完整流程、遊戲中 **SELECT = 切 Option 編隊**、HUD 第 1 列欄 24 的編隊字母、
+  隱藏獎勵演出、手機「編隊」鈕（**自己建的 DOM 鈕，engine/touch.js 一個字沒改**）、`state()` +12 欄位。
+- `song.js`：新曲 **`credits`「星塵之後」**（F 大調 / speed 6 / 150 BPM / 14 小節 / **22.37 s** / 不循環）。
+- `cruiser.html`：Edit 插入 `rank.js`（ship 之前）與 `bonus.js` / `credits.js` / `hiscore.js`（main 之前）。
+- `tools/playthrough_cruiser.py`：`--all` 跑 7 關、`--norank` A/B 對照、`--max-frames` 預設 60000、
+  新畫面也會按 START、結果表加 rank / 連戰欄；三個策略修正（見 §3）。
+- `test_cruiser.py` / `test_stages.py`：關卡數 6 → 7 的斷言與 ENDING 流程更新（各 +3 / +1 項）。
+
+**rank 設計（研究 16 §7-4 / 11 §13）**
+```
+equip = (LASER|DOUBLE|RIPPLE ? 1 : 0) + Option 數 + (護盾 ? 1 : 0) + (SPEED >= 4 ? 1 : 0)
+surv  = equip >= 1 ? min(3, floor(存活幀 / 1200)) : 0     ← **裸機不會隨時間變難**
+loopB = min(4, loop × 2)                                   ← 第二輪 rank 起點更高（§7-5）
+pen   = 死亡當下 3，每存活 600 幀回補 1                      ← Gradius IV 的「死亡降 rank」
+rank  = clamp(0, 7, equip + surv + loopB − pen)
+```
+| rank | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+|---|---|---|---|---|---|---|---|---|
+| 敵彈速倍率 | 1.000 | 1.000 | 1.250 | 1.250 | 1.313 | 1.313 | 1.375 | 1.438 |
+| 砲台週期倍率 | 1.000 | 1.000 | 1.000 | 0.938 | 0.875 | 0.813 | 0.750 | 0.688 |
+| 瞄準砲台發數 | 1 | 1 | 1 | 1 | 1 | 2 | 2 | 3 |
+| fan 編隊 +n | 0 | 0 | 0 | 0 | +1 | +1 | +2 | +2 |
+| 預判射擊 | — | — | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+
+rank 0 / 1 的倍率全是 1.000 ⇒ **開局與每一次復活後的手感與 R3 完全相同**。
+`?rank=0`（或 `CR.Rank.setEnabled(false)`，存 `localStorage.cruiser_rank`）可整組關掉。
+
+**第 7 關「魔王連戰」（9 隻）**
+| # | 魔王 | 強化 | 血量 |
+|---|---|---|---:|
+| 1~6 | EYE FORTRESS 16 / TWIN MOAI 16 / MIRROR CORE 18 / BIO CORE 20 / MOTHER BRAIN 32 / CORE FORTRESS 18 | 血量 ×0.75、射速 ×0.9、環形彈 ×0.7、**拿掉追蹤導彈**、雷射預告 30 → 48 幀 / 判定 6 → 4 px | 120 |
+| 7 | **OMEGA I** 核心之眼（雙殼 + 單核、10 發環） | 原創 | 20 |
+| 8 | **OMEGA II** 雙核絞盤（無殼、兩核同時打、放分裂體） | 原創 | 18 |
+| 9 | **OMEGA III** 星塵終焉（四殼 + 大核 + 三連雷射 + **脫出倒數 420 幀**） | 原創 | 38 |
+| | **合計** | | **196** |
+
+- **友善版**：每打掉一隻掉 **4 顆膠囊**；死亡後接關不是從第 1 隻重打（記住 `far`），而且會再補 **4 顆**。
+  研究 §7-3 的「Gradius 症候群」在 9 連戰裡會直接變成處刑，這兩條是必要的解毒劑。
+- 隻與隻之間 150 幀空檔；`?stage=7&rush=N` 可直接跳到第 N 隻（除錯 / 截圖 / 測試）。
+
+**隱藏獎勵（每關 1 個，研究 §9-2 的兩類條件）**
+| 關 | 條件 | 獎勵 |
+|---|---|---|
+| 1 | 空戰段（欄 8..150）待在畫面上緣帶 20 幀**不開火** | 1UP |
+| 2 | 打掉 4 隻貼牆爬行砲 | 全消彈 |
+| 3 | 打掉 4 尊石像（打嘴） | 1UP |
+| 4 | 減速區（欄 176..240）待在畫面下緣帶 20 幀不開火 | 全消彈 |
+| 5 | 打掉 3 根觸手 | 1UP |
+| 6 | 打掉 5 座四方砲台 | 全消彈 |
+| 7 | 連戰開打前待在畫面正中央 20 幀不開火 | 1UP |
+
+「不開火」= 20 幀內沒有新發射**而且畫面上沒有自機彈**（只看「有沒有新發射」的話，自動連射的
+20~23 幀空窗會讓機器人不小心拿到，實測過）。一局每關只能拿 1 次，附帶 5000 分。
+
+**結局流程**：第 7 關破 → `ENDING`（R3 既有畫面不變）→ **START** → `credits`（名單捲動 + 新曲）
+→ 名單結束 → `entry`（上榜才有的 3 字母名字輸入）→ `scores`（前 10 名）→ **START** → 第二輪。
+GAME OVER 按 START：**有上榜**才進名字輸入，沒上榜維持 R2 的「直接回標題」。標題按 **SELECT** 看榜。
+
+### 2. 驗證數字表
+
+| 項目 | 結果 |
+|---|---|
+| `games/cruiser/test_r4.py`（新） | **115 / 115 PASS**（rank 20 / 第 7 關 21 / 波動 + 編隊 27 / 隱藏獎勵 15 / 結局 + 排行 27 / 密技回歸 4 / 零 JS 例外 1） |
+| `games/cruiser/test_cruiser.py` | **303 / 303 PASS**（300 → 303；關卡數 / ENDING 流程斷言更新） |
+| `games/cruiser/test_stage1.py` | **174 / 174 PASS**（**一行都沒改**：rank 0 時 90 / 130 幀與 2.0 px/幀敵彈原封不動） |
+| `games/cruiser/test_stages.py` | **218 / 218 PASS**（217 → 218） |
+| `games/cruiser/test_song.py` | **154 / 154 PASS**（新曲另由 test_r4 與 apu_render 驗） |
+| `tools/test_apu.py` / `test_touch.py` / `test_shmup.py` | **103 / 255 / 168 全 PASS**（engine 沒動，touch 仍是 7 顆鍵） |
+| ↑ 更正（fix-r4，qa-r4 P3-1） | `test_touch.py` 的 **255 是本卡當下的數字**；同一輪的 mech-r1 之後把 `mech.html` 加進 `PAGES`，現在是 **340 項**（255 + 85）。本卡沒有動那個檔，數字變動與 cruiser 無關 |
+| `tools/apu_render.py --game cruiser --song credits` | **7 / 7 PASS**：26 s wav、峰值 0.516、無 NaN、暫存器只落 `$4000~$4017`、p1+p2+tri+noi 都有訊號、DMC 全靜音、前 12 個頻譜峰可歸屬單聲道 |
+| `bash tools/run_all.sh`（完整） | **總結 PASS**：node --check 68 檔 / apu 103 / chr 91 / core / ppu 144 / shmup 168 /
+  touch 255 / **cruiser 303** / **r4 115** / song 154 / stage1 174 / **stages 218** / demo /
+  demo / mech / star 的 star・w1・w2・w3・w4・meta（本輪與 F4-1~F4-5 的檔案一起跑）/
+  四個入口 build --check / 冒煙截圖 / nes_lint 抽查 8 張 0 違規） |
+
+**機器人（`tools/playthrough_cruiser.py`，純實力、未用 `--assist`）**
+| 段落 | 結束 | 幀數 | 死亡 | 剩船 | 分數 | rank 峰/均 | 連戰 |
+|---|---|---:|---:|---:|---:|---|---:|
+| `--stage 1` | cleared | **6455** | **0** | 3 | 18000 | 5 / 1.1 | — |
+| `--stage 2` | cleared | 6363 | 0 | 4 | 21000 | 4 / 1.9 | — |
+| `--stage 3` | cleared | 6927 | 0 | 4 | 23400 | 5 / 2.4 | — |
+| `--stage 4` | cleared | 8765 | 0 | 4 | 26150 | 5 / 1.6 | — |
+| `--stage 5` | cleared | 6713 | 0 | 5 | 34950 | 4 / 0.8 | — |
+| `--stage 6` | cleared | 7990 | 0 | 4 | 38900 | 4 / 1.2 | — |
+| `--stage 7` | cleared | 16691 | **0** | 12 | 184500 | 6 / 3.5 | **9 / 9** |
+| **`--chain`（1 → 7 → ENDING）** | **ending** | **47610** | **0** | 22 | 376650 | 7 / 6.1 | **9 / 9** |
+
+- **關卡 1 / 4 / 5 / 6 與 R3 一幀不差**（6455 / 8765 / 6713 / 7990）；關卡 2 / 3 因為 rank 與
+  機器人策略微調而改變（6810 → 6363、6446 → 6927），**死亡數都是 0**。
+- **`--assist` 完全沒有用到**：七關與 `--chain` 都是純實力 0 死通關（任務卡允許用 assist，本輪不需要）。
+
+**截圖**（`shots/agent_r4/`，每張都用 Read 看過圖；收工只留 3 張）
+| 檔 | 內容 | lint |
+|---|---|---|
+| `r4_rush_omega1.png` | 第 7 關連戰第 7 隻 OMEGA I（`?stage=7&rush=7`）：金色艦體 + 開啟中的核心 + 自機的波動彈 | PASS 15 色、VBlank 0 超支 |
+| `r4_credits.png` | 工作人員名單捲動中 | PASS |
+| `r4_scores.png` | 前 10 名排行榜（含剛輸入的名字） | PASS |
+
+另外在 scratchpad 做過（看完即刪，不進專案）：**連戰 9 隻的 3×3 拼圖**（每隻 lint 9~10 色、
+`budget.over = 0`、艦體形變圖各不相同）、**三種 Option 編隊 + 波動彈道的直排拼圖**、
+**iPhone 13 橫向 / Pixel 5 直向**的「編隊」鈕版面（兩個方向都不壓畫面、不壓 NES.Touch 的 7 顆鍵）。
+
+### 3. 偏離
+
+1. **rank 會影響「編隊隻數」**：研究 §7-4 的界線是「rank 絕不改敵人的生成表」。任務卡 ① 明文要求
+   rank 影響「敵彈速 / 數量 / **編隊**」，所以本輪讓 `spawnFan` 的隻數吃 rank（+0 / +1 / +2）。
+   **出怪表本身（哪一欄、生什麼）一個位元組都沒動** —— 動的只有「這一波有幾隻」。
+2. **「裸機不隨時間升 rank」是刻意加的門檻**（研究沒有這一條）。理由有二：① 研究 11 §13.2 的
+   「rank 的本意是難度跟著火力走」；② 讓 rank 0 的數字與 R3 完全相同，`test_stage1` 的 174 項
+   與關卡 1 的機器人基準（6455 / 0 死）都能原封不動當回歸基準。
+3. **手機的「編隊」鈕沒有加進 `engine/touch.js`**：那是共用檔，`tools/test_touch.py` 的 255 項
+   有「7 顆鍵互不重疊 / 不壓畫面」的逐鍵斷言，加第 8 顆會動到 star / demo 兩個入口的版面。
+   改成由 `games/cruiser/main.js` 自己建一顆 DOM 鈕（`#cr-optbtn`，只在觸控覆蓋層啟用時顯示，
+   直向放畫面與按鍵列之間、橫向放左側留白上方，`?optbtn=0` 可關）。`NES.Touch` 完全沒碰。
+4. **波動掛在能量表格 3 的「第二段」**，沒有新增第 7 格：HUD 的 6 格 × 5 欄已經佔滿欄 1..30，
+   加第 7 格要重排整列（會動到 `test_cruiser` 的 HUD 斷言）。做成「格 3 第一次 DOUBLE、
+   第二次升級 RIPPLE」既保留 R2 的 DOUBLE 手感，又對上沙羅曼蛇「格 3 = Ripple」的史實（§8）。
+5. **連戰的六隻強化版拿掉追蹤導彈、環形彈收斂到 ×0.7**：R3 的關卡 2 已經踩過同一個坑
+   （無強化復活時必死）。9 連戰裡死一次就是裸機打剩下的八隻，追蹤導彈等於死局。
+6. **連戰的雷射預告 30 → 48 幀、判定高度 6 → 4 px**（`cfg.warnFrames` / `cfg.beamH`，預設仍是
+   R3 的 30 / 6 ⇒ 關卡 1 / 6 的魔王一個數字都沒變）。理由：連戰後期速度常常是 5（3 px/幀），
+   三條光束之間 10 px 的縫對不準，實測連死。
+7. **`games/cruiser/test_cruiser.py` / `test_stages.py` 動了既有斷言**（授權內，兩個檔都在
+   `games/cruiser/**`）：關卡數 6 → 7、`CR.Bosses` 多一個 `rush`、「第 6 關破 → ENDING」改成
+   「第 7 關破 → ENDING → credits → scores → 第二輪」、復活後的 `power` 多一個 `ripple: false`。
+   **R2 / R3 的畫面文字（`STAGE CLEAR` / `PRESS START` / `SECRET!` / `C OR $ = CONTINUE` …）
+   一個字都沒改。**
+8. **機器人改了三處策略**（都附實測依據，寫在程式註解）：① 第 7 關的能量表政策（連戰時只花
+   願望清單當下要的那一格或 ≥ 格 4，否則永遠停在 SPEED / MISSILE）② 靜止雷射（`tight`）的成本
+   多一項「總共壓到幾幀」的 1/4 權重裁決項（原本只看「第一次接觸」⇒ 已經站在光束裡時「往外跑」
+   和「不動」同分，機器人不會逃）③ `tight` 威脅的安全邊界 0 → 1 px。**前六關的規則一字未改。**
+9. **`CR.STAGE_PAL[7]` 的第一版用了 `$0D`**（禁用色）導致整個關卡載入失敗，已改成 `$08/$18/$38`。
+   記一筆給後面的人：調色盤表改完一定要跑一次 `?stage=N` 的截圖，`$0D` 不會在 node --check 被抓到。
+
+### 4. 跨檔需求
+
+**給總控**
+1. **新檔 4 支要進版本戳**：`games/cruiser/{rank,bonus,credits,hiscore}.js`（`cruiser.html` 裡目前
+   沒有 `?v=` 戳記）。**commit 前請跑 `$PY tools/stamp.py`**。
+2. `README.md` / `index.html` 若有寫「星塵巡航艦：6 關」請改成 **7 關（第 7 關 = 魔王連戰）+ 第二輪**。
+3. `dist/星塵巡航艦.html` **本輪沒有重新產生**（任務卡禁止跑 build.py）；`build.py --check` 已 PASS，
+   內嵌檔數會從 22 變成 **26**。
+4. `localStorage` 多兩個鍵：`cruiser_scores`（前 10 名 JSON）、`cruiser_rank`（動態難度開關）。
+   既有的 `cruiser_hi` 不變。
+
+**給其他 agent**
+- `engine/` 完全沒動，`NES.Touch` 仍然是 7 顆鍵、`rects()` 仍然是 7 個 key。
+- `CR.Ship.K` 多一個 `RIPPLE: 4`；`ship.power` 多一個 `ripple` 欄位（任何逐欄比對 `power` 的
+  腳本都要加上它）。`GAME.state()` 多 12 個欄位（`rankDyn` / `rankState` / `optMode` /
+  `optModeName` / `bonus2` / `credits` / `hiscore` / `rush` …），既有欄位語意全部不變。
+- `CR.STAGE_COUNT` 從 6 變成 **7**；`CR.STAGES.length` 從 7 變成 **8**。
+
+### 5. 留給後續
+
+1. **第二輪的隱藏獎勵是重設的**（`startLoop` 會 `CR.Bonus.newGame()`）。若要做「二週目不同條件」，
+   `bonus.js` 的 `DEFS` 可以改成 `DEFS[loop][stage]`，成本約 20 行。
+2. **名單捲動固定 16 秒**（240 px / 0.25 px 幀），曲子 22.4 秒 ⇒ 名單停在 THE END 等約 2 秒後
+   自動收尾，音樂還會繼續到排行榜畫面被 `title` 蓋掉。若要「音樂播完才進排行榜」，
+   用 `CR.Audio.state().playing === false` 當條件即可（`ending` 當年也留過同一個 TODO）。
+3. **排行榜沒有「清除紀錄」的 UI**：`CR.HiScore.clear()` 只能從 console 叫。要做的話建議放在
+   標題畫面的排行榜畫面按住 SELECT 3 秒。
+4. **rank 目前完全不影響魔王**（研究 §7-4 的 FC 原作有「魔王移動速度 / 射擊間隔依 rank 查表」）。
+   `bosses.js` 的 `firePeriod` 乘上 `CR.Rank.periodMul()` 就能接上，但那會讓九連戰的平衡重來一次，
+   本輪刻意不碰。
+5. **波動（RIPPLE）目前沒有專屬音效**（沿用 `laser`）。要做的話 `song.js` 加一個 `ripple` 音效鍵
+   （p2 的短下滑 + 雜訊尾巴）成本約 10 行。
+6. **第 7 關沒有自己的關卡曲**（用 `boss_final`）。若要一首「連戰專用」的曲子，建議用 `boss_final`
+   的 pattern + 移調 / 換鼓型做變體，與 R3 留下的建議一致。
+
+## star-w3（R4，2026-10-08）
+
+2026-10-08 ｜ star-w3 agent（卡 F4-1）｜對象：`docs/R4_BRIEF.md` F4-1 —— 《星塵勇者》**世界 3「霧沼古樹」**
+（3-1 ~ 3-4、新敵 3 種 + 魔王、新機關 4 種、新曲 4 首、原創 CHR、`?level=3-1`、標題 SELECT 切 WORLD 3）。
+`engine/` 一行未改；`games/cruiser/**`、`games/mech/**` 一行未碰；W1 / W2 / W4 的程式與資料一行未改。
+
+### 1. 做了什麼
+
+**新檔（7 支，`games/star/`）**
+
+| 檔 | 內容 |
+|---|---|
+| `chr_w3.js` | W3 原創 CHR：背景 **34 磚**（苔泥地表 / 沼泥 / 倒木 / 濕木板 / 霧紋 / 浮葉平台 ×3 / 荊棘 / 蘆葦 / 垂藤 ×2 / 發光菇 / 螢光苔 / 樹根 / 垂根 / 樹皮紋 / 巨樹 ×2 / 遠樹剪影 ×3 / 霧海 ×2 / 朽木 / 樹幹內部 ×4 / 樹心 ×4）＋ 精靈 **64 磚**（沼蛙 / 荊棘藤 / 鬼火 / 樹心魔 32×32 兩姿勢 / 毒果 / 根刺 / 藤蔓繩段 + **16×16 握把** / 樹菇平台 4 款 / 螢火 / 孢子雲 2 幀）＋ 三個新主題調色盤 `swamp / grove / hollow` ＋ **同主題的暗區版** `ST.PAL_W3_DARK` |
+| `levels_w3.js` | 三主題註冊（`ST.LevelKit.addTheme`）＋ 3-1 ~ 3-4 四關純資料（floor RLE / ceil / objs / **caps / vines / spores / glooms** / items / spawns / boss） |
+| `objects_w3.js` | **包住 W2 的 `ST.Objects`**（init / reset / seek / update / draw / state / moverTops / hazardHit 各接一層）⇒ `objects_w2.js` 一行未改。四種新機關：藤蔓鞦韆 / 會縮的樹菇 / 孢子雲 / 螢火暗區 |
+| `enemies_w3.js` | 用 `ST.Enemies.register()` 登記 `leaper` / `thorn` / `wisp`（W1 / W2 敵人程式一行未動） |
+| `boss_w3.js` | `ST.BossW3` 樹心魔（介面同 `ST.Boss`）：32×32、5 血、三階段、**兩條打法** |
+| `song_w3.js` | 四首原創曲 `swamp / grove / hollow / boss3`（用 `ST.Audio.BUILD`） |
+| `test_w3.py` | **169 項**（見下） |
+
+**擴充的既有檔（全部只插入，沒有改既有行）**
+
+| 檔 | 改了什麼 |
+|---|---|
+| `main.js` | **插入 5 行**：① `LEVEL_ORDER.concat(['3-1'..'3-4']).sort()` + `WORLD_FIRST[3]`（標題 SELECT 的 WORLD 3 由 F4-2 已插入的 `toggleTitleWorld` 迴圈自動吃到）② `bossKind === 'treelord' ⇒ g.bossMod = ST.BossW3` ③ `ST.BossW3.reset()` ④ `bossSong`：world 3 ⇒ `boss3` ⑤ CHR：`ST.BG_W3` 併進 bg bank |
+| `star.html` | 插入 6 支新腳本（在 W4 之後、star-meta 之前） |
+| `tools/playthrough_star.py` | 插入 `LEVELS_W3` / `--w3`；`HAS_OBJ2` 的時間桶判斷加上「W3 的樹菇 / 孢子雲」（W1 / W2 的判斷值不變） |
+
+**四關（主題 / 長度 / 節奏）**
+
+| 關 | 主題 | 欄（畫面） | 檢查點 | 金幣 | 敵 | 新機關 |
+|---|---|---|---|---|---|---|
+| 3-1 | swamp 毒沼淺灘（開闊天空 + 霧帶 + 遠樹剪影） | 320（10） | 102、190 | 46 | 13 | 教學：樹菇 ×3 → 孢子雲 ×2 → 藤蔓 ×2 |
+| 3-2 | swamp 霧中蘆葦道 | 320（10） | 100、196 | 48 | 16 | **螢火暗區（140–230 欄）** + 樹菇 ×4 + 藤蔓 ×2 + 孢子雲 ×3 |
+| 3-3 | grove 古樹迴廊（樹幹內部、有天花板） | 288（9） | 100、180 | 41 | 15 | 藤蔓接力 ×3 + 樹菇連段 ×5 + 孢子雲 ×4 |
+| 3-4 | hollow 樹心空洞 | 256（8） | 100、172 | 40 | 13 | 荊棘藤走廊 + 樹菇 ×2 + **魔王房的藤蔓 ×2（= 第二打法）** + 孢子雲 ×3 + 魔王 |
+
+**四個新機關**（全部是關卡資料裡的物件，沒有任何一關的座標被硬編碼）
+
+| 機關 | 資料 | 行為 |
+|---|---|---|
+| 藤蔓鞦韆 vine | `level.vines[] = {c,r,len,range,period,phase}` | 擺角是**時間的純函式**（三角波 + 拋物線補償 y）⇒ 可預測可重現；**按住 ↑ 抓、按 A 放手**（−4.5 px/幀 ≈ 81 px 高，帶走藤蔓當下的水平速度）；放手後 20 幀是「藤蔓衝撞」窗口 |
+| 會縮的樹菇 cap | `level.caps[] = {c,r,w,period,on,phase}` | 單向平台，只在 `(t+phase)%period < on`（192 幀週期：在 128 / 不在 64）存在；**消失前 20 幀縮小預警**；**掛進 `ST.Objects.moverTops(t)`** ⇒ 通關機器人的兩步推演自動知道它何時在 |
+| 孢子雲 spore | `level.spores[] = {c,r,axis,range,period,phase}` | 會移動的危險（16×16），位置也是時間的純函式；**掛進 `ST.Objects.hazardHit(...)`** ⇒ 機器人會閃 |
+| 螢火暗區 gloom | `level.glooms[] = {c0,c1,flies}` | 主角走進欄區間 ⇒ 整組調色盤換成暗版（真機只是一次調色盤寫入）、螢火繞著主角當照明；**純視覺、不影響地形與可達性** |
+
+**每個機關都留了純地形的備援路線**（友善版）：樹菇與藤蔓**一律架在實地上方**（掉下來只是掉回地面），
+毒水坑 / 無底坑 ≤ 8 欄；`test_w3.py` ④ 會把樹菇全部拔掉再 BFS 一次，驗「不靠機關也走得到旗桿」。
+
+**新敵 3 種 + 魔王**
+`leaper` 沼蛙（每 110 幀朝主角躍一次，39 px 高 / 26 px 遠，躍起前 20 幀蹲低預警，**可踩**）／
+`thorn` 荊棘藤（150 幀循環：收起 90 幀**可踩** / 伸刺 60 幀**不可踩**，伸刺前 20 幀閃爍預警）／
+`wisp` 鬼火（無視地形、0.3125 px/幀飄向主角 + 正弦上下，**不可踩**；速度只有主角跑速的 1/8 ⇒ 一定跑得掉）。
+魔王 **樹心魔**：32×32、5 血、三階段（walk → slam 長根刺（預警 24 幀）→ [階段 2 起] spit 毒果 → open 樹心張開＝弱點窗口）。
+**兩條打法**：① 只有 open 時踩樹心才扣 1 格（其餘時間樹皮是護甲，踩上去只被彈開、不受傷也不扣血）⇒ 5 次；
+② **藤蔓衝撞**（抓魔王房的藤蔓、按 A 放手後 20 幀內撞上去）**一次扣 2 格、不必等 open** ⇒ 3 次。
+（第三條友善路線沿用 W1 / W2 慣例：魔王房盡頭有旗桿，繞過去也算過關。）
+
+**使用者回饋「道具 / 可互動物件放大一倍」（總控 2026-10-08 轉達）**：W3 自己的可互動精靈一律 2×——
+藤蔓**握把 16×16**（原本 8×16）、孢子雲 16×16、樹菇平台 16~32 px 寬、無敵星沿用 W2 的 16×16；
+繪製改走 F4-2 新加的 `NES.SH.OAM.add16`（缺席時退回兩次 `add`）。W3 關卡裡的 ? 磚 / 金幣是 W1 的**背景磚**，
+由 F4-3 統一改 2×（見下「跨檔需求」）。
+
+### 2. 驗證（數字表）
+
+| 項目 | 結果 |
+|---|---|
+| `games/star/test_w3.py` | **169 / 169 PASS**（新增） |
+| `games/star/test_w1.py` / `test_w2.py` / `test_star.py` / `test_w4.py` / `test_meta.py` | 全 PASS（一項未改） |
+| `bash tools/run_all.sh` | **總結：PASS**（node --check、全部 test_*.py、4 個 build --check、冒煙截圖、lint 抽查 8 張） |
+| CHR 容量 | W3 精靈分頁 `st_spr_w3` = **246 / 256 磚**（主角 66 + W1 世界 116 + W3 64）；bg bank **175 / 256 磚**；兩張精靈 bank 的前 182 磚**逐名同索引**（測試 ① 逐名比對 0 筆不符） |
+| lint | 四關隔離頁 + 真頁各一次：**全綠、同屏色 10~15 ≤ 25**、無非 64 色像素 |
+| 截圖 | `shots/agent_w3/` **3 張**（樹菇 / 螢火暗區 / 魔王房），每張都用 Read 看過 |
+
+**通關機器人**（`$PY tools/playthrough_star.py`）
+
+| 關 | cleared | frames | deaths | score |
+|---|---|---|---|---|
+| 3-1 | True | 1090 | **0** | 3100 |
+| 3-2 | True | 1160 | **0** | 5000 |
+| 3-3 | True | 899 | **0** | 3500 |
+| 3-4 | True | 1838 | **0** | 10100（打倒魔王） |
+
+`--all`（W1 回歸基準）**一幀不差**：1-1 1400/1、1-2 1070/0、1-3 1265/0、1-4 1385/1（與 R3 相同）。
+
+### 3. 偏離（與任務書不同的決定）
+
+1. **主題選「霧沼古樹」**（任務書建議之一），三個子主題 swamp / grove / hollow 與 W1 / W2 / W4 都不撞。
+2. **做了 4 個新機關（要求 ≥ 3）**，但**沒有沿用 W2 的升降板 / 間歇泉 / 蒸氣彈簧**：前兩者的精靈在 W2 的 CHR 分頁
+   （W3 用自己的分頁，塞不下也不該塞），蒸氣彈簧的第二幀磚名 `BG_SPRING1` 是全域的、不能換皮。
+   崩塌磚 `TILE.CRUMBLE` 則沿用並換皮成「朽木」（它只改名稱表、沒有精靈）。
+3. **`main.js` 插了 5 行而不是 1 行**：任務書寫「只 Edit 插入 WORLD 清單一行」，但世界 3 還需要
+   魔王模組切換、魔王重置、魔王曲、背景 CHR 合併各一行。**全部是插入、沒有改任何既有行**，
+   而且四行都緊貼 F4-2 的同款 W4 那一行（同樣式、好 review）。`star.html` 也插了 6 行 script（任務書沒列，但一定要）。
+4. **精靈 CHR 用 F4-2 的 `ST.SprBanks` 分頁器**（他們先做好了，`chr_w4.js` 的註解也寫明「W3 / W5 可共用」）：
+   `chr_w3.js` 用 `ST.SprBanks || (…)` 的同款工廠定義 + `register(3, 'st_spr_w3', SPR_W3)`，
+   載入順序無所謂（先載到的那份生效）。原本自己寫的切換器（`ST.CHR_W3.useW3/useBase`）已經拿掉。
+5. **W3 的機關欄位掛在 Level 實例上**：`levels_w1.js` 的 `Level` 只搬 `movers / geysers / items`（R3 契約），
+   本輪不改它，改在 `levels_w3.js` 註冊後把 `caps / vines / spores / glooms` 淺拷貝掛上去。
+6. **魔王曲轉接改走 main.js 的一行**（原本在 `song_w3.js` 包 `ST.Audio.play`，F4-2 已經把 `bossSong()` 改成可擴充的樣式，就跟著插一行，乾淨很多）。
+7. **「牆高 ≤ 3 列」是設計準則、測試驗的是 ≤ 8 列**（沿用 test_w2.py 的門檻＝靜止跳 64 px）：
+   浮在空中的 ? 磚 / 單向平台會讓「相鄰欄地板高差」算出 4~5，與地形牆無關。
+
+### 4. 跨檔需求（給總控 / 其他 agent）
+
+1. **`tools/stamp.py` 尚未跑**（任務書指定不跑）：`star.html` 新插入的 6 支腳本**沒有 `?v=` 戳記**。
+   **commit 前請跑 `$PY tools/stamp.py`**。
+2. 新檔 7 支要進版本控制：`games/star/{chr_w3,song_w3,enemies_w3,boss_w3,objects_w3,levels_w3}.js` ＋ `games/star/test_w3.py`。
+3. **給 F4-3 star-meta（道具 2× 的知會）**：W3 關卡裡的 **? 磚 / 金幣 / 磚塊是 W1 的背景磚**（`TILE.QBLOCK / COIN / BRICK`），
+   由你統一改 2×；我這邊已經配合：**每一處 ? 磚 / 金幣列與上下的平台至少隔 2 列**，
+   所以換成 16×16 圖示不會疊到地形。W3 自己的可互動精靈（藤蔓握把 / 孢子雲 / 樹菇 / 無敵星）**已經是 2×**。
+   另外 W3 的精靈在 `st_spr_w3` 分頁，若副武器（火球 / 飛鏢）要在 W3 用，請把它的磚也
+   `ST.SprBanks.register` 進每個世界的 bank，或放進 `ST.SPR_WORLD`（主 bank 還有 4 磚）。
+4. **給 F4-2 star-w4**：`NES.SH.OAM.add16` 很好用，`objects_w3.js` 的握把與孢子雲已經改走它；
+   `ST.SprBanks` 的工廠我用 `ST.SprBanks || (…)` 在 `chr_w3.js` 複寫了一份（兩邊同碼，載入順序無所謂）。
+   若你之後要改工廠行為，**兩個檔要一起改**（或總控把它抽成一支共用檔）。
+5. **`engine/` 沒有任何需求**；`docs/ENGINE_API.md` 不需要改（本輪沒有新增 engine API）。
+6. `README.md` / `index.html` 若有寫關數，《星塵勇者》現在是 **16 關 / 4 個世界**（W1+W2+W3+W4）。
+
+### 5. 留給後續
+
+1. **W5 以後的精靈分頁**：`st_spr_w3` 已用掉 246 / 256（只剩 10 磚），W5 要再開一張分頁
+   （`ST.SprBanks.register(5, …)`），作法照 chr_w3 / chr_w4。另外「主角 + W1 世界 = 182 磚」是每張分頁的固定成本，
+   之後若要省，可以把 W1 魔王（32 磚）拆出去，只在 1-4 的分頁裡帶。
+2. **藤蔓鞦韆目前是「抓住就吊在尖端」**，沒有做「盪的時候可以自己加擺幅（左右鍵施力）」——
+   那會讓位置不再是時間的純函式，通關機器人的推演就失效了。要做的話得先給機器人一個「藤蔓狀態」查詢。
+3. **通關機器人不會用藤蔓**（它不按 ↑）：W3 四關都是走純地形備援路線通的。
+   若之後要驗「藤蔓衝撞打魔王」那條路，得在 `playthrough_star.py` 加一個 vine 分支。
+4. **暗區只換調色盤**（真機做法），沒有做「螢火照到才顯形的隱藏平台」。有了 `glooms` 資料結構，
+   之後加 `reveal: [...]` 就能做。
+5. **孢子雲只有「碰到會受傷」**，沒有做「被踩 / 被副武器打散」。等 F4-3 的副武器上線後可以加。
+6. **3-4 的魔王房還沒有「藤蔓衝撞」的教學提示**：玩家不一定想得到第二條打法。
+   可以在魔王房入口放一行浮動字（main.js 有 `floatBanner`），或讓第一次踩護甲時閃一下藤蔓。
+
+## star-meta 追加：互動物件 / 道具圖示 2×（R4，2026-10-08，使用者回饋）
+
+2026-10-08 ｜ star-meta agent（F4-3）｜ 對象：使用者回饋
+「**星塵勇者整體圖示太小、人太大；圖示可以變大一倍，例如問號箱等等；怪物好像還好。**」
+總控指派：W1 / W2 全部互動物件與道具圖示放大 2×，主角與敵人尺寸不動。
+
+### 1. 做了什麼
+
+**先查清楚「小的是什麼」**：敵人（16×16）、無敵星（16×16）、主角（16×24）本來就是精靈；
+**真正只有 8×8 的是背景磚**——金幣 / ? 磚 / 用過的磚 / 磚塊 / 旗桿頂端。所以這一輪全部在背景層解決，
+**精靈 bank 一磚都沒加**（主 bank 已 252/256），背景 bank 218 → **232 / 256**。
+
+新檔 `games/star/icons2x.js`（241 行，`ST.Icons2x` + `ST.BG_ICON2X` 14 磚）：
+
+| 物件 | 放大後 | 長的方向 | 碰撞 |
+|---|---|---|---|
+| 金幣 | **16×16**（2×2 磚） | 上 + 右 | 完全不變（非固體）；**撿取範圍跟著放大**（碰到看得到的那一塊就撿得到） |
+| 旗桿頂端的球 | **16×16** | 上 + 右 | 完全不變 |
+| ? 磚 / 用過的磚 | **8×16**（1×2 磚） | 上 | 長出來的那一格 = **單向平台**（oneway） |
+| 磚塊 | **8×16**（兩層磚） | 上 | 同上 |
+
+**關鍵設計（為什麼可達性不會變）**：磚類長出來的上半格在主角的碰撞裡是 **oneway（單向平台）**——
+從下面頂得過去（頂磚仍然打在原本那一格）、從上面踩得到（站在視覺的頂端，不會「站進磚裡」）。
+單向平台**只會增加落腳點、不會擋住任何移動**，所以可達性**只增不減**。
+金幣 / 旗桿球是非固體，碰撞一個位元都沒動。
+
+**畫面怎麼長出來**：`scrTileAt(col,row)` 先問 `ST.Icons2x.nameAt()`——本格是圖示就畫左下塊，
+本格是空白就回頭看「下面 / 左邊 / 左下」有沒有圖示，是就畫對應的那一塊。**純函式、沒有狀態**，
+所以換關 / 捲動 / 撿走都不會殘留。**放不下（旁邊或上面不是空白）就自動退回原本的 8×8**
+（例如兩顆金幣貼在一起時，左邊那顆維持 1×1）。改一格地形時重畫 3×3（最多 9 byte，仍在 VBlank 預算內）。
+
+**調色盤**：延伸格所在的 16×16 屬性區塊若只剩圖示的延伸格，就跟著錨點那一格的調色盤組
+（一排 ? 磚會有多個錨點 ⇒ 全部同一組才套用）。圖本身是從既有 8×8 art 自動生成
+（金幣 / 球 = 像素 2 倍 + 修圓角；? 磚 / 用過的磚 = 框 + 圖樣置中；磚塊 = 兩層堆疊），
+所以 W2 礦坑 / W3 / W4 換主題配色時**顏色自動跟著對**。
+
+### 2. 驗證
+
+| 項目 | 結果 |
+|---|---|
+| `games/star/test_meta.py` | 150 → **182 / 182 PASS**（新增 32 項：規格表 / 14 磚合法 / 四塊方位 / 相鄰退回 1×1 / 上面有地形退回 / oneway 只長在延伸格 / 金幣延伸格非固體 / 友善撿取 / 真頁名稱表 / 撿走還原 / 頂磚上下兩塊一起換 / lint / `dev.icons2x(false)` 可關） |
+| `games/star/test_star.py` | **249 / 249 PASS**（一處斷言放寬，見 §4） |
+| `test_w1.py` / `test_w2.py` | 177 / 187 **全綠，未改一行** |
+| `tools/playthrough_star.py --all8` | **八關全 cleared、deaths 1/0/0/1/0/0/0/0（與 R3 基準相同）**；frames 1-1~1-4 與 2-3 / 2-4 **一幀不差**，2-1 1126 → 1152、2-2 1128 → 1129（單向平台多了落腳點，機器人選了略不同的路）；分數全面上升（大金幣比較好撿） |
+| `--map` / `--cheat` | 照舊全過 |
+| lint | 1-1 磚列 11 色 / 2-1 礦坑 11 色，**每線精靈 ≤ 8**（本輪一個精靈都沒加） |
+| 截圖 | 前後對照各 3 張：`shots/agent_meta/icon_before_{blocks,coins,w2}.png` ↔ `icon_after_{blocks,qb,w2}.png`，另 `shots/test_meta/icon2x_{blocks,w2}.png`。**全部 Read 看過** |
+
+### 3. 偏離（與指示不同的決定）
+
+1. **磚類是 8×16（1×2 格）不是 16×16（2×2 格）**：W1 / W2 的 ? 磚與磚塊**都排成水平連段**
+   （例如 1-1 的 `[磚][?][磚][?]`），往右長一定會撞到隔壁那一塊；往上長才有空間
+   （資料掃過：**每一個磚上方都是空白**）。要真的做成 16×16 方塊，得把關卡網格改成
+   16×16 metatile（連碰撞、可達性、機器人一起動）——寫進「留給後續」。
+   面積仍然是 2 倍，與金幣的 16×16 並排看起來比例一致（截圖已確認）。
+2. **沒有把磚的碰撞一起放大成 16 px 高**：那會讓天花板與磚之間的縫變窄，可能讓某些路線走不通
+   （指示要求「可達性不變」）。改用單向平台 ⇒ 只增不減。
+3. **沒有動敵人 / 無敵星 / 主角**（本來就是 16×16 / 16×24，指示也要求不動）。
+4. **沒有用 `NES.SH.OAM.add16/push16`**：互動磚全部在背景層做得到，用精靈反而會吃掉
+   「每線 8 精靈」的額度（一排四顆大金幣就是 8 個 OAM），且主精靈 bank 只剩 4 磚。
+5. **`ST.SprBanks` 沒有新增任何磚**，所以 W3 / W4 的 bank 也不受影響。
+
+### 4. 跨檔需求（給總控 / 其他 agent）
+
+**本輪對共用檔的改動**
+
+| 檔 | 處 | 內容 |
+|---|---|---|
+| `games/star/main.js` | `scrTileAt` | 先問 `ST.Icons2x.nameAt()`（插入 5 行） |
+| | `attrAt` | 延伸格的屬性跟著錨點（插入 14 行） |
+| | `kindAt` | 延伸格 = `oneway`（插入 5 行） |
+| | `writeTileArea`（新） | 改一格地形 → 重畫 3×3；`setTileCode` / `onLevelTileChange` 改呼叫它 |
+| | play 迴圈 | `metaIconTouch()`（大金幣的友善撿取） |
+| | `init` | 合併 `ST.BG_ICON2X`（14 磚） |
+| | `state` / `dev` | `icons2x` 旗標、`dev.icons2x(on)` / `dev.iconTouch()` |
+| `games/star/test_star.py` | ⑤「? 磚的名稱表磚同步換成 USED 的圖」 | 2× 之後畫的是 `I2_US_B`，斷言放寬成「`F_USED` **或** `I2_US_B`」（只動這一條，其餘 248 項未碰） |
+| `star.html` | 第 85 行 | `<script src="games/star/icons2x.js">`（排在 `password.js` 之前） |
+
+1. **W3 / W4（F4-1 / F4-2）自動吃到這個效果**：`ST.Icons2x` 是照**磚碼**（`ST.TILE.COIN` / `QBLOCK` /
+   `USED` / `BRICK` / `GOAL_TOP`）判斷，不是照主題，所以新世界的金幣 / ? 磚一樣會變 2×，
+   圖也會跟著主題調色盤。**新道具若要 2×**：在 `icons2x.js` 的 `build()` 加一筆
+   `SPEC[ST.TILE.XXX] = { w, h, names, oneway }` 即可（我這邊加，請在 PROGRESS 留言）。
+2. 想暫時關掉（除錯 / 對照截圖）：`GAME.dev.icons2x(false)`。
+3. **`tools/stamp.py` 仍未跑**（簡報指定不跑），`star.html` 新增的四支腳本都沒有 `?v=`。
+4. 新檔要進版控：`games/star/icons2x.js`。
+
+### 5. 留給後續
+
+1. **真正的 16×16 方塊要改成 metatile 網格**：關卡資料、碰撞、可達性 BFS、通關機器人要一起改，
+   建議當成 R5 的獨立任務（影響 W1~W4 全部關卡）。
+2. **其他 8×8 的互動磚還沒放大**：W2 的崩塌磚 / 彈簧 / 礦脈、尖刺、單向平台（`ST.TILE.CRUMBLE` /
+   `SPRING` / `ORE` / `SPIKE` / `PLATFORM`）——彈簧與崩塌磚同樣是「水平連段」，狀況與 ? 磚一樣；
+   尖刺放大會動到傷害判定，要先想清楚。
+3. **旗桿的桿身與旗子仍是 8×8**（只有頂端的球放大了）：旗子在 `(c+1, r+1)`，放大會跟球搶同一格。
+4. **機器人在 2-1 / 2-2 的路線變了**（多了單向平台這個落腳點）：frames +26 / +1。
+   若要回到「一幀不差」的回歸基準，得在機器人裡把 oneway 的新落腳點排除——但那等於不測新行為，
+   所以本輪選擇更新基準值。
+
+---
+
+## mech-r1（R4，2026-10-08）
+
+依 `docs/R4_BRIEF.md` 卡 **F4-5**：第三款新遊戲《星塵機甲》（洛克人 2 風格）**R1 完成**。
+規格來源 `docs/research/03_經典遊戲深度解析/03_洛克人2.md`（每一條手感 / 結構都在程式註解裡標章節），
+**名稱 / 美術 / 音樂 / 關卡全部原創**。全域 `MG`、入口 `mech.html`、資料夾 `games/mech/`。
+
+### 1. 做了什麼
+
+**新檔（10 支，4,837 行）**
+| 檔 | 行 | 內容 |
+|---|---|---|
+| `games/mech/chr_mech.js` | 430 | 主角 16×24 **8×8 精靈模式**（一姿勢 6 磚）：站 / 走 3 幀 / 跳 / 滑行 / 爬梯 2 幀 / 受傷；手臂砲、蓄力光環、三種彈、爆炸 4 幀、道具 5 種、**血條 5 階磚**、HUD 字型（沿用 `DEMO.FONT`）+ 選關面板磚。77 精靈磚 / 67 背景磚 |
+| `games/mech/chr_world.js` | 354 | 地形 20 磚（**兩關共用**，主題靠 `MG.THEMES` 換調色盤）、雜魚 4 種 × 2 幀 16×16、頭目 2 隻 × 2 幀 **32×32**、頭目彈 3 種。100 精靈磚 |
+| `games/mech/song.js` | 592 | **8 首原創曲 + 18 音效**，自帶 Builder（不依賴 star 的 song.js）⇒ `apu_render.py --game mech` 可離線渲染 |
+| `games/mech/weapons.js` | 236 | 彈池 / 能量 28 格 / **N×N 傷害表** / 蓄力兩段 / 武器清單（給暫停選單） |
+| `games/mech/hero.js` | 525 | 狀態機 + 物理（無加速度、放開 A 立刻停止上升、滑行、梯子、三連發、蓄力、受擊後退 + 無敵閃爍、尖刺即死） |
+| `games/mech/enemies.js` | 217 | 4 種雜魚（履帶兵 / 哨兵砲週期無敵 / 浮游眼正弦 / 跳彈獸定拍） |
+| `games/mech/bosses.js` | 273 | 霜棱機兵 FROST / 爆焰機兵 BLAZE：各 3~4 招 + 第二階段衝刺（附無敵），HP 28 |
+| `games/mech/levels.js` | 313 | 磚語意 20 種、**2 關 × 7 畫面**、消失磚純函式、選關 9 格表 |
+| `games/mech/main.js` | 1,034 | 模式機 / **畫面單位換房** / HUD（精靈）/ 武器選單 / 碰撞 / 一鍵密技 / `state()` + 32 個 `dev.*` 鉤子 |
+| `games/mech/test_mech.py` | 863 | **150 項**驗收（見下） |
+| `mech.html` / `tools/playthrough_mech.py` | 10.7 KB / 23.3 KB | 入口頁（engine 契約順序 + 9 支遊戲檔）/ 通關機器人 |
+
+**改檔（全部只 Edit 插入）**：`tools/build.py`（`mech.html → dist/星塵機甲.html`）、
+`tools/run_all.sh`（`build.py --check mech.html`）、`tools/shot.py`（docstring 的入口頁用法）、
+`README.md`（遊戲表 + 操作 + 秘技）、`index.html`（左側目錄最上方加「🎮 遊戲入口」四連結）、
+`docs/TASKS.md`（「R4 《星塵機甲》契約」整段）。**`engine/` 一行未改、另外兩款遊戲一行未改。**
+
+**三個技術重點**
+1. **畫面單位換房（研究 §③ / §⑧2）**：一個房間 = **剛好一張名稱表**（32×30 磚），相機永遠不動；
+   換房時才捲動，而且**每幀只補 1 欄 / 1 列**（水平 32 幀、垂直 30 幀，**單幀尖峰 45 byte**），
+   水平用 `ppu.mirroring('v') + scroll(x)`、垂直用 `ppu.mirroring('h') + scroll(0,y)` ——
+   **完全用既有 PPU API，engine 零改動**，而且四種方向（右 / 左 / 上 / 下）都能回頭。
+2. **HUD 用精靈、OAM 前 24 槽保留**（研究 §⑧4，洛克人的血條就是精靈）：
+   `SH.OAM(ppu, {reserve: 24})`，LIFE 7 格 + 武器能量 7 格 + 魔王血條 7 格直接寫 OAM 0..20
+   ⇒ **永遠不參與輪替、永遠不閃爍**；遊戲物件走 SH.OAM 的 21..63 與軟體 sprite cycling。
+3. **武器選單 = 暫停時整個畫面重繪**（研究 §⑧3「遊戲暫停 = PPU 可自由寫入的空檔」）：
+   重繪與還原那一幀把 VBlank 計帳 `mute`，其餘時間照常計帳 ⇒ 600 幀 0 次超支。
+
+### 2. 驗證數字表
+
+| 項目 | 結果 |
+|---|---|
+| `games/mech/test_mech.py` | **150 / 150 PASS** |
+| `tools/playthrough_mech.py --stage frost` | cleared **2302 幀 / 0 死 / 剩血 17** |
+| `tools/playthrough_mech.py --stage blaze` | cleared **1987 幀 / 0 死 / 剩血 15** |
+| `tools/playthrough_mech.py --all`（選關 → FROST → 選關 → BLAZE） | 兩關 cleared，**3821 幀（63.6 秒）/ 0 死**；第二關用剛拿到的 FROST SHOT（3 發倒） |
+| `tools/playthrough_mech.py --cheat` | **14 / 14 PASS**（鍵盤 C / `nes-cheat` / 30 幀防連按 / GAME OVER 一鍵續關 / SELECT 續關 / START 暫停凍結） |
+| `tools/apu_render.py --game mech --song select,stage1,stage2,boss` | **28 / 28 PASS**（無 NaN、峰值 ≤ 0.52、暫存器只在 $4000~$4017、只含五聲道成分） |
+| `tools/build.py --check --src mech.html` | PASS（內嵌 21 檔）；實際產出驗證 **407 KB**（寫到 scratchpad，**沒有碰 `dist/`**） |
+| `bash tools/run_all.sh` | **總結 PASS**（node --check 69 檔 + 18 支測試 + 4 個 build --check + 冒煙 + nes_lint 8 張 0 違規） |
+| lint / 預算 / 精靈 | 7 個畫面（選關 / 兩關 / 兩頭目 / 梯子房 / 滑行房）`__nes.lint()` 全綠（**7~13 色**）；600 幀 VBlank **0 次超支**、名稱表單幀尖峰 **45 byte**、OAM 256 byte；每線精靈尖峰 9（> 8 的由 PPU 丟棄並閃爍 = 研究 §⑧4 Capcom 的選擇） |
+| CHR 用量 | 精靈 **177 / 256**、背景 **87 / 256**（兩關共用結構磚、主題換調色盤，還有很大餘裕） |
+| 手機觸控 | `mobile_shot.py` iPhone 13 橫向 + Pixel 5 直向：搖桿 / A / B / SELECT / START / **★密技** / 全螢幕全在，`overlapping: false`，觸控輸入端對端有效 |
+
+**`test_mech.py` 的十三節（150 項）**：① 開機 / 模組 / CHR 容量 / 8×8 精靈模式 ② 選關畫面（9 格 / 游標 / START 進關）
+③ **手感**（無加速度 1.375 px/幀、放開即停、空中完全轉向、跳高 56 px ±1、滯空 42 幀 ±2、點按跳 < 1/4、
+跑跳距離、下墜上限 6、滑行 2.5 px/幀 × 26 幀 + 框高 16、受傷扣血 / 擊退 / 無敵 90 幀 ±2 / 硬直 16）
+④ 射擊（同屏 3 發、蓄力 30 / 60 幀兩段 = 2 / 3 傷、特殊武器耗能、能量歸零不能射）
+⑤ 梯子（抓梯對齊欄心、爬行、**爬梯可射擊**、A 鬆手落下、梯頂完整爬出站上地板）
+⑥ 尖刺 / 熔岩即死、消失磚週期純函式（120 / 72 / 16、B 群相位差 60）
+⑦ **四種換房**（右 / 左回頭 / 梯子上 / 掉洞下）+ 幀數 + 單幀 byte + 預算 + 敵人重生
+⑧ 武器選單（標題 / 凍結 / ↑↓ 跳過未解鎖 / B 用 E 罐 / 解除後房間還原 / E 罐上限 4）
+⑨ 頭目（HP 28 / 弱點 3 發倒 / 第二階段 / 傷害表 / 取得武器 / 關卡標記 CLEAR / 衝刺無敵 / 火柱安全角）
+⑩ 生命（中繼點 / 死亡回中繼點 / 復活滿武器能量 / GAME OVER / 道具 / 1UP）
+⑪ **兩關每一間房的可達性 BFS**（消失磚一律當成不存在）+ 坑 / 危險帶寬度 ≤ 6 格
+⑫ lint 7 張 / 600 幀預算 / OAM ⑬ 8 曲驗證 + 切曲時機 + 一鍵密技 + `NES.Touch` 在場。
+
+**機器人通關表**
+| 指令 | 結束 | 幀數 | 死亡 | 剩血 | 武器 |
+|---|---|---|---|---|---|
+| `--stage frost` | weaponget | 2302 | **0** | 17 | 機甲砲（28 發硬打） |
+| `--stage blaze` | weaponget | 1987 | **0** | 15 | 機甲砲 |
+| `--all` 第 1 關 | weaponget | 2302 | **0** | 17 | 機甲砲 |
+| `--all` 第 2 關 | weaponget | 1519 | **0** | 25 | **FROST SHOT（弱點 3 發倒）** |
+
+機器人是**純實力通關**（沒有用密技）：跳躍決策用與 `hero.js` 同一套常數的**前向模擬器**
+（試 8 個候選「按住 A 幀數」，挑真的能安全落地又有前進的那一個），
+梯子 / 掉洞照 `dev.route()` 的 `ladderCol` / `holeCol` 走，頭目戰站左側安全角 + 敵彈靠近就跳 +
+有弱點武器就**真的走一次暫停選單**切過去。**模擬器把消失磚一律當成不存在** ⇒ 機器人能通關
+就等於證明「主路線不靠節拍型平台」。
+
+截圖 `shots/agent_mech/`（收工留 3 張：選關 / 武器選單 / 手機直向），
+過程中另拍了關卡 1-D、2-E、兩個頭目房、iPhone 橫向共 7 張，每張都用 Read 看過、`--lint` 全 PASS。
+
+### 3. 偏離
+
+1. **精靈改用 8×8 模式**（另外兩款是 8×16）。理由：洛克人的血條是「左上角固定直條」，
+   8×8 下一格 = 一個 4 階磚、5 個磚做完整條；8×16 要「上下兩階的組合」共 25 種磚。
+   代價只有主角多用 2 個 OAM 槽（6 顆 vs 4 顆），**每條掃描線一樣是 2 顆**，不影響每線 8 精靈。
+2. **沒有做「畫面捲動中逐欄繪製敵人」**：研究 §③ 說敵人在畫面進入時生成。本作是
+   「換房動畫跑完才生成」（換房的 30~32 幀畫面上只有地形 + 主角），比原作乾淨，也讓換房的
+   VBlank 預算只花在名稱表上。
+3. **主角射擊姿勢用「手臂砲疊加精靈」**，不是另畫一整組射擊姿勢。省 48 個 CHR 磚，
+   代價是走路 + 射擊時手臂與身體的接縫比原作生硬。R2 若要補，改成每個姿勢各一張射擊版即可。
+4. **消失磚一律放在獎勵路線**（1-D 的 1UP、2-D 的武器能量），主路線不靠它。
+   這是刻意的友善版（對齊 travian 那邊訂的「原作反人性限制一律做友善版」），
+   也是機器人能 0 死的前提；研究 §⑩⑨ 要求的「先在安全處示範一次」在 1-D 的實心地板上方做了一塊。
+5. **頭目彈傷害從 3 調到 2、招式間隔 50/40 → 70/60**（第二階段 48/40）。
+   第一次調校時機器人在第一關頭目連死 4 次：主角只有 28 血、第一關又只有機甲砲（28 發才打得死），
+   原數值等於「必須完美閃避 10 個招式循環」。調完是 **0 死、剩血 17**，但仍然會被打中 3~4 次。
+6. **FROST 的跳躍改成「遠離主角」**（原本跳向主角）。跳到玩家頭上 + 落地震波 = 把玩家壓在角落必中，
+   同樣是友善版裁示。火柱固定在 x = 60 / 120 / 180 ⇒ **左右兩個角落永遠安全**。
+7. **`index.html` 的遊戲入口是直接 Edit 插進去的**，`tools/build_html.py` 重新編譯會沖掉（見下方跨檔需求）。
+8. **`dist/星塵機甲.html` 沒有產生**（簡報規定不 build）。只用 `--check` + 寫到 scratchpad 驗證過可產出。
+
+### 4. 跨檔需求
+
+**給總控**
+1. 新檔要進版本戳：`mech.html` 目前所有 script 都**沒有 `?v=` 戳記**，
+   commit 前請跑 `$PY tools/stamp.py`（需確認 stamp.py 有把 `mech.html` 列進去，R2c 寫的時候只有三個入口頁）。
+2. `dist/星塵機甲.html` 需要產一次：`$PY tools/build.py --src mech.html`（實測 407 KB / 內嵌 21 檔）。
+3. `index.html` 的「🎮 遊戲入口」區塊是手動插在 `<nav>` 裡的，**`tools/build_html.py` 重跑會沖掉**。
+   建議把那段搬進 `build_html.py` 的模板（4 行），之後重編就不會掉。
+4. `README.md` 的「研究狀態（2026-09-19）」那段還寫「R2 進行中」，R4 收完可以一起更新。
+
+**給 nes-touch agent（或下一個動 `engine/touch.js` 的人）** ——
+> **已完成（fix-r4 更正，qa-r4 P3-1）**：`mech.html` 其實**已經**加進 `tools/test_touch.py` 的 `PAGES`
+> （四頁），實測 **340 項**（255 + 85）全綠，不需要再派工。下面這段是本卡當時的原文，保留備查。
+
+~~`tools/test_touch.py` 目前只測 `game.html` / `star.html` / `cruiser.html` 三頁（255 項）。~~
+`mech.html` 的啟動段是**從 `star.html` 整段複製**的（`fit()` / `place()` / `NES_LAYOUT` / `nes-resize` /
+`?touch=` / safe-area 探針全部一致），實測 iPhone 13 橫向與 Pixel 5 直向版面正確、`overlapping: false`、
+觸控輸入端對端有效。~~**請把 `mech.html` 加進 `test_touch.py` 的頁面清單**（預計 +85 項），我沒有動那個檔。~~
+
+**給任何要擴《星塵機甲》的人（R2 入口）**
+- 選關畫面已經留好 8 格，`MG.SELECT` 改 `{slot, key, label, open}` 就會亮；
+  新關卡只要在 `games/mech/levels.js` 加一筆 `MG.LEVELS[key]`（`room({...})` 的列清單格式），
+  新頭目在 `games/mech/bosses.js` 的 `DEFS` 加一筆 + 在 `update()` 的 switch 加招式，
+  新武器在 `games/mech/weapons.js` 的 `DEFS` 加一筆並補 `MG.Weapons.DMG` 的那一列（N×N 表）。
+- `tools/playthrough_mech.py` 的 `SLOT` 字典與 `STAGES` 清單要同步加。
+
+### 5. 留給後續
+
+1. **還缺 6 關 + Wily 要塞**：研究 §③ 的完整結構是 8 關 + 6 關要塞。選關畫面、武器剋制環、
+   換房引擎都已經是 N 關通用的，**加關卡不需要動既有程式**（第 4 節有入口）。
+2. **密碼存檔沒做**（研究 §⑥ / §⑧6：5×5 = 25 bit 編 8 個頭目旗標 + E 罐數）。
+   `g.cleared` + `hero.tanks` 就是要編碼的全部狀態，做起來很小；star 那邊 F4-3 已經有一套密碼實作可借鑑。
+3. **沒有「武器 = 鑰匙」的開路用途**（研究 §⑥ Item-1/2/3、⑩⑥）。本輪兩支武器都只用來戰鬥；
+   建議 R2 加一支「升降板」類武器，並在關卡裡放只有它到得了的 E 罐。
+4. **分數 / 排行沒有**：洛克人本來就沒有分數，所以刻意不做；若要做請走 cruiser 的 localStorage 前 10 名寫法。
+5. **主角射擊姿勢**（見偏離 3）與**頭目受擊的「硬直 / 擊退」**目前都沒有，頭目被打只有閃白。
+6. **機器人的頭目戰還是會被打中 3~4 次**：目前只會「敵彈靠近就跳」。若之後把頭目調難，
+   建議先做「預測敵彈落點 + 選左右安全格」再調數值，比直接改招式安全。
+7. **`sentry` 哨兵砲的盾是疊加精靈**，角度固定；若要做成「盾會轉向」要再加 2 張磚。
+
+## qa-r4（R4，2026-10-08）
+
+2026-10-08 ｜ qa-r4 agent ｜對象：`docs/R4_BRIEF.md` 的 **F4-1 star-w3 / F4-2 star-w4 / F4-3 star-meta
+（含「圖示 2×」追加段）/ F4-4 cruiser-r4 / F4-5 mech-r1** 五張卡的**實玩驗收**。
+**沒有改任何 games / engine / tools 的程式**（簡報允許的「一行可修的 P1」沒有出現）。
+報告在 `docs/QA_REPORT.md` 新章 `# R4 qa-r4（2026-10-08）`。
+
+### 1. 做了什麼
+
+**七支自寫驗收腳本**（放 scratchpad，不進專案）：`levels.py`（W3/W4 八關 × 1500 幀 × 80 個 lint 取樣
++ 精靈 bank 來回切的逐像素比對）、`meta.py`~`meta5.py`（地圖 / 密碼 / 副武器 / 圖示 2× / 魔王兩打法，
+**全部用 `__nes.tap()` 真的按鍵**）、`cruiser.py` / `cruiser2.py`（九隻連戰 / rank / 波動 / 編隊 /
+七個隱藏獎勵 / 結局全流程）、`mech.py`（選關 / 14 間房 / 四向換房 / 兩頭目 / 武器選單 / 密技）、
+`stat.py`（16 關的 2× 圖示覆蓋率、九隻魔王逐像素互異）、`goal.py`（旗桿球退回 8×8 的逐格診斷）、
+`final.py`（機關純函式 / 守衛兩窗口 / 結局段 VBlank 追蹤）、`w41.py`（icons2x 對 4-1 機器人的 A/B）。
+
+**驗收覆蓋**：① W3/W4 八關 lint + 機關 + 新敵 + 魔王兩打法 + 備援旗桿 + bank 切換回歸
+② 世界地圖（UP/B、走格子、打勾、鎖住、道具屋買賣）／密碼（破關顯示 → 輸入 → 進度回復 → 壞碼拒絕）／
+副武器（取得 / 發射 / ↓+B 與 SELECT 切換 / 手感 ±0 / 護甲礦兵 2 發 / 一般敵 1 發 / 魔王免疫）
+③ 圖示 2×（`dev.icons2x(false)` 前後對照 + 幾何 + oneway + 落地位置 + 撿取範圍 + 16 關覆蓋率）
+④ 巡航艦 rank 升降 / `?rank=0` 回歸 / 波動 / 三種編隊（含手機「編隊」鈕實際點擊）/ 七關隱藏獎勵 /
+結局 → 名單 → 3 字母 → 排行 → 第二輪 ⑤ 機甲選關 / 每房 lint / 換房 / 頭目弱點 / 選單 / 密技
+⑥ 手機 iPhone 13 橫向三款入口 ⑦ 三位 agent 同時插 `main.js` / `star.html` 的衝突檢查。
+
+### 2. 驗證數字表
+
+| 項目 | 結果 |
+|---|---|
+| `bash tools/run_all.sh`（完整） | **總結 PASS，EXIT=0**（node --check 69 檔、19 支測試、4 個 build --check、冒煙截圖、nes_lint 8 張 0 違規） |
+| 測試逐支複跑 | **3,311 項 / 0 失敗**（apu 103・chr 91・core 108・ppu 144・shmup 168・**touch 340**・cruiser 303・**r4 115**・song 154・stage1 174・stages 218・demo 55・**mech 150**・**meta 182**・star 249・w1 177・w2 187・**w3 169**・**w4 224**） |
+| W3 / W4 八關還原標準 | 80 個取樣點：色數 **7~18 / 25**、非法像素 **0**、`budget.overFrames` **0**、OAM 合法、console error **0** |
+| 精靈 bank 切換 | 3-1→1-1→4-1→1-1→3-4→2-1→4-4→2-1：**1-1 / 2-1 與全新載入逐像素 md5 相同** |
+| 機器人 | `--w3` 1090/1130/899/1838 **全 0 死**；`--w4` 四關 cleared（**4-1 1388 幀 / 1 死**，見 P2-1）；cruiser `--chain` **ending / 47610 / 0 死 / 376650 / rank 7·6.1 / 連戰 9-9**；mech `--all` **2302 + 1519 幀 / 0 死** |
+| 圖示 2× 覆蓋率（16 關） | 金幣 **663/688**、? 磚 **97/97**、磚塊 **131/131**、**旗桿球 9/16** |
+| 圖示 2× 正確性 | 延伸格 `kindAt='oneway'`（金幣是 `none`）；自由落下 `foot=152` = 延伸格上緣 152（**差 0 px**）；撿取 `coins 0→1`；開關 icons2x 的 `maxSprLine` 都是 2 |
+| 九隻連戰魔王 | **9/9 畫面逐像素互異**、色數 13~15、每線精靈 ≤ 8、`overFrames=0` |
+| 機甲 | 14 間房 lint 全綠（8~14 色）、換房過場 **0 張壞幀 / 單幀 45 byte**、頭目 HP 28、弱點 ×10 |
+| 手機 | iPhone 13 橫向三款入口 `overlapping: false`；巡航艦「編隊」鈕實點兩下 **TRAIL → ORBIT** |
+| 缺陷 | **P1 0 個、P2 4 個、P3 6 個** |
+| 截圖 | `shots/agent_qa_r4/` **15 張**，每張都用 Read 看過 |
+
+### 3. 偏離（與任務書不同的決定）
+
+1. **沒有用 `git stash` 做 R3 基準對照**（簡報就說不行），改用 `GAME.dev.icons2x(false)` 前後比對 ——
+   而且這個方法額外抓到 **P2-1**（同一支機器人、同一個 seed，只差 icons2x 開關，4-1 就從 0 死變 1 死）。
+2. **mech-r1 中途加進驗收範圍**（總控 2026-10-08 追加），所以第 ④ 節是後補的，但覆蓋與其他四張卡同規格。
+3. **第 7 關九隻魔王的「身份不同」改用逐像素 md5 判定**：`GAME.state().rush` 只吐關卡標籤 `BOSS RUSH`
+   與 `far`（0..8），沒有逐隻的名字欄位 ⇒ 改拍九張圖比 hash（9/9 互異）。
+4. **結局流程沒有用 `--chain` 的 log 當證據**，而是在同一頁用機器人打到 ENDING 之後**自己按 START** 一路
+   走完 credits → entry → scores → 第二輪，這樣才量得到每一段的 `budget.overFrames`（P2-3 就是這樣抓到的）。
+5. **第一輪自寫腳本有 13 項「FAIL」是我自己的 API 誤用**（`tileAt` / `kindAt` 吃 col/row 不是像素、
+   `Icons2x.nameAt` 要帶 `tileAt` 與 `cols`、`SubWeapon.give` 吃數字 kind、cruiser 要先按 START 才離開標題）。
+   全部修正後重跑才算數，**缺陷表裡只留真的問題**；其中「`dev.giveSub` 吃字串會靜默失敗」被留成 P2-4。
+
+### 4. 跨檔需求（給總控 / 其他 agent）
+
+1. **`$PY tools/stamp.py` 還是沒跑**：`star.html` 新增的 **16 支**腳本、`cruiser.html` 的 4 支、
+   `mech.html` 的**全部**都沒有 `?v=` 戳記。`stamp.py` 的 `PAGES` 已經包含 `mech.html`（mech-r1 加的），
+   但它第 2 行的 docstring 還只寫三個入口頁，可以順手補。
+2. **`mech.html` 目前是 untracked**（`games/mech/**`、`tools/playthrough_mech.py` 也是），commit 前要 `git add`。
+3. **`dist/` 還是只有三個單檔**，缺 `星塵機甲.html`；另外三款的內嵌檔數都變了
+   （star +16、cruiser +4），commit 前建議三個都重產。
+4. **P2-1 要指派**：4-1 的「0 死」基準已被 icons2x 改掉，請 star-w4 或 star-meta 擇一處理（補落腳點或更新基準）。
+5. **P2-2 歸 star-meta**：`icons2x.js` 的 `fits()` 只接受 `TILE.EMPTY`，導致 7 / 16 關的旗桿球沒放大。
+   建議放寬成「`ST.solidKind(t) === 'none'` 且不是圖示錨點也可覆蓋」。
+6. **P2-3 歸 cruiser-r4**：`credits.js` 的 `skip()` 整批寫入沒包 `muteBudget`，是整局唯一一次 VBlank 超支。
+7. **P3-1**：mech-r1 的 PROGRESS 寫「`test_touch.py` 我沒動、請別人加 mech.html」，但實際上已經加了（255 → 340）。
+   請更正，免得總控重複派工。
+
+### 5. 留給後續
+
+1. **「每線 8 精靈」在 W3 / W4 開始常態超過**（峰值 10 / 11 / 10，W1 只有 6）。目前靠 PPU 輪替，
+   `lint.ok` 仍 true、符合真機，但玩家看得到閃爍。R5 若要再加世界，建議先訂一條「同列敵人數」的設計準則。
+2. **旗桿整體（桿身 / 旗子）還沒 2×**，只有頂端球放大（P3-6）。要做得先處理「旗子在 (c+1,r+1) 會跟球搶格」。
+3. **相鄰金幣會混出兩種大小**（P3-5，25 / 688）。最省事的解法是在關卡資料把相鄰金幣隔開一格。
+4. **沒有驗「機器人走藤蔓打魔王」那條路**（`playthrough_star` 不按 ↑，star-w3 自己也記了）：
+   本輪是用 `ST.BossW3` 的 `vineHits` / `stomps` / `bounces` 計數器在真的關卡裡驗證兩條打法成立。
+   要端對端驗，得先替機器人加 vine 分支。
+5. **密碼沒有跨「關掉瀏覽器再開」的持久性測試**（密碼本來就是靠玩家抄下來，不存 localStorage），
+   但 `cruiser_scores` / `cruiser_rank` 有存，建議 R5 加一條「清掉 localStorage 後行為仍正確」的回歸。
+6. **《星塵機甲》的手機觸控只驗了 iPhone 13 橫向**（mech-r1 自己驗過 Pixel 5 直向）；
+   `tools/mobile_shot.py` 的 `DIST` 字典還沒有 `mech.html` 的對應單檔名，`--dist` 開不起來。
+
+---
+
+## fix-r4（R4，2026-10-08）
+
+依 `docs/R4_BRIEF.md` 與 `docs/QA_REPORT.md` 新章 `# R4 qa-r4（2026-10-08）` 的缺陷表，
+修掉 **P2 四條 + P3 六條（共 10 條，全部）**。沒有 git / 沒有 stamp / 沒有 build（總控統一）。
+
+### 1. 做了什麼
+
+**P2-2 ＋ P3-5 ＋ P3-6 — 圖示 2× 的三個缺口（`games/star/icons2x.js`，使用者親自提的需求）**
+
+| 缺陷 | 修法 | 結果 |
+|---|---|---|
+| P2-2 旗桿頂端球只有 9 / 16 關變大 | `fits()` 從「只往 `TILE.EMPTY` 長」放寬成「空白**或**純背景紋白名單」：`VEIN / CAVEBG / MBG / CSEA_T / CSEA_B / STAR_S / STAR_B / STAR_T / RAIL`（`solidKind` 全是 `none`，而且是「貼在天空 / 岩層上的底紋」）。**看得出是東西**的 none 磚一律不蓋（雲 / 山 / 樹 / 草叢 / 火把 / 礦燈 / 齒輪 / 坑道支撐梁 / 結晶 / 旗桿本體 / 鎖鏈 / 斧頭） | 球 **16 / 16 關** |
+| P3-6 旗子仍 8×8，與球比例落差 | SPEC 加上「錨點位置」`ox / oy`：旗子也 16×16，但錨點在**左上**、往**下 + 右**長（往上那一格是球的右下塊，會搶格） | 旗子 **16 / 16 關** |
+| P3-5 相鄰金幣一大一小 | 新 `rowFits()`：**同一排**（同列、相鄰 ≤ 1 欄間隔 = 金幣弧線的排法）的同種圖示，要嘛全部放大、要嘛全部退回 | 16 關 **0 排**大小不一 |
+
+同時把 `attrOwners()` 一起放寬（判「這一格是不是被延伸格蓋住」而不是「是不是空白」），
+否則球長出來了、調色盤卻跟著岩層紋 ⇒ 顏色會錯。`ownerOf()` 的候選位移改成**由 SPEC 自動推出**
+（`cands()`），所以之後再加「錨點在別的角」的圖示不用再改幾何。
+
+**P2-1 — 4-1 機器人 1 死（根因不是關卡，是機器人）**
+A/B 追到真正的原因：**受擊硬直（`state === 'hurt'`）中按 A 是無效的**，但 `playthrough_star.py`
+把 A 一直按著 ⇒ 硬直結束後**不會再有按鍵邊緣**，那一次跳躍就這樣被吃掉，機器人「按著 A 走進坑裡」。
+`tools/playthrough_star.py` 改兩處：① 硬直中取消待發跳躍、放開 A、恢復後清決策快取重算；
+② `decide()` 不在硬直中做決策。**4-1 從 1388 幀 / 1 死 → 1197 幀 / 0 死**（icons2x 開著）。
+順手修了同一類的第二個 bug：**退後的路上動量還在往右**（SMB 要十幾幀才減速），
+「退到一半、前面的坑只剩幾幀就踏空」時再退就是走下去 ⇒ 前方踏空 ≤ 6 幀就放棄退、改走正常決策
+（1-1 原本在 x≈1267 這樣死一次，現在過得去）。
+
+**P2-3 — credits 快轉超支**：`games/cruiser/main.js` 匯出 `CR.muteBudget`（轉場模組共用），
+`credits.js` 的 `skip()` 把「一幀寫完剩下 60 列」包起來 ⇒ 與 main 其他 16 處轉場一致。
+
+**P2-4 — `dev.giveSub('fire')` 靜默失敗**：`subweapon.js` 加 `kindOf()` 正規化
+（吃 `'fire'` / `'DART'`，不分大小寫，也吃數字），`give()` 與 `main.js` 的 `dev.giveSub` 都走它。
+
+**P3-2 — W3 / W4 每線精靈峰值 ≤ 8（不靠輪替，全部用「改編排」）**
+先量清楚「是誰佔掉額度」：**魔王本體 32 px = 每線 4 顆**、**齒輪升降台 / 樹菇平台 w=4 = 4 顆**、
+主角 2 顆 —— 所以規則是「一條線上最多一個寬物件 + 一隻敵人」。據此改：
+
+| 關 | 改了什麼 |
+|---|---|
+| 4-1 / 4-2 / 4-4 | 橫走升降台 `r` 22→20 / 21→19 / 22→20（精靈帶抬離地面敵人那一帶；仍然跨得過原本那個坑） |
+| 4-3 | 兩座垂直升降台的行程分成上下兩段（c=102 下段 144..184、c=120 上段 80..128）⇒ 不再同線 |
+| 4-4 魔王 | 齊射改成**高低兩條車道**（差 16 px，兩條都還在主角 22 px 身體內 ⇒ 威脅不變），每線最多 2 發 |
+| 3-2 | 螢火暗區縮到「兩座 w=4 樹菇與藤蔓之間」（150..172）、螢火 3→2、c=196 樹菇 r16→19 |
+| 3-3 | c=118 樹菇 r20→18、c=212 樹菇 r17→19、col 168 的 wisp y 128→96 |
+| 3-4 | col 142 的 leaper 挪到 162（同屏地面敵 3→2） |
+| 3-4 魔王 | 根刺 stage2 3→2 / stage3 4→3，間距 `ROOT_GAP` 28→34（覆蓋寬度 112→102 px，幾乎不變） |
+
+**P3-3 道具屋殘留草地**：`drawShop()` 從列 6 就開始清（列 6..25 全黑底），列 4..5 的
+`WORLD n MAP` / `CLEAR nn/16` 留著。**P3-4 地圖 HUD**：地圖 / 密碼模式改用自己的上方 HUD
+（`hudMapStatic()`）—— SCORE / COIN / 命數照留，TIME 與 WORLD 兩欄清掉，原本 TIME 的位置
+改標 `WORLD MAP` / `PASSWORD`；`hudWrite()` 在這兩個模式跳過 time / world 兩欄。
+**P3-1 PROGRESS 說法**：mech-r1 的「請別人把 mech.html 加進 test_touch」改成「已完成」，
+cruiser-r4 的「touch 255」補上註腳（現在 340），`tools/test_touch.py` 的 docstring 也改成四個入口頁。
+
+### 2. 驗證數字表
+
+| 項目 | 結果 |
+|---|---|
+| `bash tools/run_all.sh`（完整） | **總結 PASS、EXIT=0**：node --check 69 檔、**19 支測試全綠**、4 個 `build --check`、冒煙截圖、`nes_lint` 抽查 8 張 0 違規 |
+| 新增回歸測試 | `test_meta.py` **182 → 205**（+23）、`test_w3.py` **169 → 186**（+17）、`test_w4.py` **224 → 241**（+17）、`cruiser/test_r4.py` **115 → 121**（+6）＝ **+63 項**，全綠 |
+| 既有測試未退步 | `test_star.py` 249 / `test_w1.py` 177 / `test_w2.py` 187 / `test_touch.py` **340** / `test_cruiser.py` 303 / `test_mech.py` 150 … 全 PASS（只改了 2 條 star-meta 自己的斷言，見偏離 1） |
+| 圖示 2×（16 關全掃） | 旗桿球 **9/16 → 16/16**、旗子 **0/16 → 16/16**、? 磚 97/97、磚塊 131/131、金幣 **657/688 但 0 排大小不一**（修前 663/688、7 排混兩種大小） |
+| 每線精靈峰值（機器人全程逐幀讀 OAM，可見條件同 `nes_lint`） | 修前 3-1 **7** / 3-2 **10** / 3-3 **9** / 3-4 **10** / 4-1 **8** / 4-2 **11** / 4-3 **10** / 4-4 **10**<br>修後 **7 / 8 / 8 / 8 / 8 / 8 / 8 / 8** ⇒ **八關全部 ≤ 8，不靠輪替** |
+| 機器人 `--w4`（icons2x 開著 = **R4 新基準**） | 4-1 **1197 / 0 死**、4-2 1075 / 0、4-3 1086 / 0、4-4 1578 / 0 ⇒ **四關 0 死** |
+| 機器人 `--w3` | 1090 / 1130 / 899 / 1782，**四關 0 死**（與修前同幀數，編排改動沒影響路線） |
+| 機器人 `--all8` | 八關全 cleared、deaths **1 / 0 / 0 / 0 / 0 / 0 / 0 / 0**（1-4 從 1 死 → **0 死**；1-1 仍 1 死，**修前修後都一樣、與 icons2x 無關**，見留給後續 1） |
+| 機器人 `--map` / `--cheat` | `--map` 進 1-2 **0 死**（LOCKED 提示 / 走格子 / 密碼都在）、`--cheat` **全部通過** |
+| 機器人 `playthrough_cruiser.py --chain` | **ending / 47610 幀 / 0 死 / 22 條命 / 376650 分 / rank 峰 7·均 6.1 / 連戰 9-9**（與 qa-r4 的數字一字不差） |
+| 機器人 `playthrough_mech.py --all` | frost **2302 / 0 死 / 剩血 17** + blaze **1519 / 0 死 / 剩血 25** = 3821 幀 |
+| P2-3 實測 | credits 按 START 快轉：`overFrames` **0**、`budget.peak` **0**（修前 1 / 960） |
+| lint | 旗桿 / 道具屋 / 地圖畫面各自 `__nes.lint()` 綠（3~12 色、每線精靈 ≤ 8） |
+| 截圖 | `shots/agent_fix_r4/`（收工留 3 張：`4-1_goal_off/on` = P2-2 前後對照、`map_after` = P3-4）；過程另拍 1-1 / 3-1 旗桿、2-4 金幣排、道具屋前後共 12 張，**每一張都用 Read 看過** |
+
+**新增測試在測什麼**（都放各自的 `test_*.py`，不另外開檔）：
+`test_meta.py` ④b / ⑥c：16 關球與旗子覆蓋率、旗子幾何（錨點左上）、**0 排金幣大小不一**、
+覆蓋率 ≥ 95%、「蓋得掉背景紋 / 蓋不掉草叢與地面」、蓋掉背景紋**不會**變成地形、`giveSub` 吃字串
+（含不認得的名字回 false、`kindOf` 正規化表）、地圖 HUD 沒有 TIME / 關號、店面列 6..9 清乾淨。
+`test_w3.py` ⑫ / `test_w4.py` ⑫：硬直中機器人放開 A、**4-1 與 4-4 / 3-2 與 3-4 機器人全程逐幀每線 ≤ 8 且 0 死通關**、
+以及可以長期守住的**編排規則**（同屏兩座升降台精靈帶不重疊 / 橫走升降台不壓地面敵人那一帶 /
+同屏兩座樹菇 `w` 相加 ≤ 6 或錯開 2 列 / 暗區裡沒有寬樹菇與藤蔓 / 螢火 ≤ 2 / 魔王根刺 ≤ 3）。
+`cruiser/test_r4.py` ⑤：快轉那一幀 `overFrames = 0` / `peak ≤ 160` + `CR.muteBudget` 真的匯出。
+
+### 3. 偏離（與任務書不同的決定）
+
+1. **`test_meta.py` 改了 2 條既有斷言**（其餘 180 條沒碰）：「2× 圖示新增 14 磚」→ **18 磚**（旗子四塊）、
+   「兩顆相鄰金幣**右邊那顆照樣 2×2**」→ **整排一起退回**（P3-5 要求的就是這個行為）。
+2. **P2-1 修在機器人、不是修關卡**。任務書給的兩個選項是「補落腳點」或「更新基準」，
+   但 A/B 追下去發現是機器人自己把跳躍按鍵邊緣浪費掉（硬直中按 A 無效）——
+   補落腳點等於拿關卡去遷就機器人的 bug。修機器人之後 4-1 **0 死**，關卡資料一個位元組沒動。
+3. **P3-5 選「整排退回」而不是「改關卡資料的金幣間距」**（任務書兩者都允許）：
+   改 `icons2x.js` 一處就對 16 關 + 以後的新世界都成立，而且不必動四個 `levels_*.js`
+   （那會動到別人卡的資料與金幣總數斷言）。代價是覆蓋率 663 → 657 / 688。
+4. **可覆蓋的背景紋用「白名單」而不是「所有 `kind === 'none'`」**（QA 建議的是後者）：
+   none 磚裡有雲 / 山 / 樹 / 草叢 / 火把 / 礦燈 / 齒輪 / 支撐梁 / 旗桿本體 / 斧頭這些
+   **看得出是東西**的圖，蓋掉會變成「畫壞了」。白名單只收「底紋」，而且多一道 `solidKind === 'none'` 保險。
+5. **P3-2 動到了別人卡的關卡資料與魔王參數**（`levels_w3/w4.js`、`boss_w3/w4.js`）：
+   任務書說「優先調整編排」，而每線 ≤ 8 的額度（魔王 4 + 主角 2 = 只剩 2）**不改編排就做不到**。
+   全部是數值微調（升降台 / 樹菇的列、暗區範圍、一隻敵人的欄位、根刺數與間距、齊射落點），
+   機關種類與數量、出怪表的「哪一欄生什麼」一個都沒動；`test_w3` / `test_w4`（含可達性 BFS）全綠。
+6. **W3 魔王根刺 4 → 3**（stage 3）、間距 28 → 34：覆蓋寬度 112 → 102 px，但確實比原本好閃一點點。
+   這是「每線 8 精靈」這條還原標準的代價，寫在這裡讓後面的人知道可以再調。
+7. **沒有做「崩塌磚 / 彈簧 / 尖刺也 2×」**（star-meta 的「留給後續 2」）：本輪只修缺陷表上的條目。
+
+### 4. 跨檔需求（給總控 / 其他 agent）
+
+1. **`$PY tools/stamp.py` 還是沒跑**（簡報規定不跑）：`star.html` 的 16 支、`cruiser.html` 的 4 支、
+   `mech.html` 全部都還沒有 `?v=`。`dist/` 三個入口也還沒重產（本輪改了 `games/star/*`、
+   `games/cruiser/{main,credits}.js`，四個單檔都會變）。
+2. **本輪改到的「別人的檔」**（都只改數值 / 插入，沒有改介面）：
+   `games/star/{icons2x,subweapon,main,worldmap,levels_w3,levels_w4,boss_w3,boss_w4}.js`、
+   `games/cruiser/{main,credits}.js`、`tools/playthrough_star.py`、`tools/test_touch.py`（只改 docstring）、
+   四支 `test_*.py`。**`engine/` 一行未改。**
+3. **`--w4` 的新基準是「icons2x 開著」**：4-1 1197 / 0 死、4-2 1075 / 0、4-3 1086 / 0、4-4 1578 / 0。
+   之後誰再動 W4 或 icons2x，請拿這組數字當回歸基準（`test_w4.py` ⑫ 已經把 4-1 / 4-4 鎖住）。
+4. **`icons2x.js` 之後要加新圖示**：`build()` 裡 `SPEC[code] = spec(w, h, key, names, oneway, kind, ox, oy)`，
+   `ox / oy` 預設是「錨點左下」；要蓋新的背景紋就把磚名加進 `COVER_NAMES`（只收底紋）。
+
+### 5. 留給後續
+
+1. **1-1 的那 1 死還在**（機器人，不是關卡）：修掉「退後時動量把自己送進坑裡」之後，
+   原本 x≈1267 那個坑過得去了，但機器人改在 **x≈2349（最後一段連續坑）** 起跳點選錯、跳短一次。
+   `--all8` 的 1-1 是 **1480 幀 / 1 死**（R3 / R4 baseline 都是 1 死，不是本輪造成的）。
+   要真的 0 死，建議給機器人加「連續坑要看兩步」（現在 `survivable()` 只看落點的下一跳）。
+2. **每線 ≤ 8 是「機器人路線上」量出來的**（與 qa-r4 同方法）：玩家走別的路線（例如刻意把三隻敵人
+   引到同一排）還是可能破 8。要再硬一點，得訂「同屏地面敵 ≤ 2」並寫成關卡資料的靜態檢查
+   （本輪已經把寬平台 / 暗區 / 魔王那幾條寫成 `test_w3` / `test_w4` 的靜態規則了）。
+3. **金幣還有 31 / 688 顆是 8×8**（整排一致，但整排是小的）：擋住的是旗桿本體 / 礦燈 / 齒輪 /
+   坑道支撐梁 / 地面。要全部放大就得動關卡資料（把那幾顆金幣往旁邊挪一格），屬於關卡卡的範圍。
+4. **旗桿的桿身仍是 8 px 寬**（球與旗子都 16×16 了）：真機的旗桿本來就是細的，所以本輪不動；
+   若要連桿身一起粗，得改成 16×16 metatile（star-meta「留給後續 1」已經記過）。
+5. **`dev.giveSub` 以外的 dev 介面沒有一起掃**：本輪只修 QA 點到的那一個。
+   建議 R5 讓 `dev.*` 凡是吃「種類」的都走同一套 `kindOf` 式正規化。
+6. **W3 / W4 的魔王戰沒有做「精靈輪替可視化」的回歸**：現在只保證峰值 ≤ 8；
+   若之後要加魔王的新招式，請先用 `test_w3` / `test_w4` ⑫ 的 `BOT_SPRLINE` 量一遍再合。

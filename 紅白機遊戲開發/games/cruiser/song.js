@@ -8,7 +8,7 @@
  *   CR.Audio.init(nes)          — 綁 driver、註冊全部音效（冪等）
  *   CR.Audio.play(key)          — key 見下面曲目表（CR.Audio.KEYS 是完整清單）：
  *                                 'title' | 'stage1'~'stage6' | 'boss' | 'boss_final' |
- *                                 'clear' / 'stageclear' | 'ending' | 'gameover' | 'extend'
+ *                                 'clear' / 'stageclear' | 'ending' | 'credits' | 'gameover' | 'extend'
  *   CR.Audio.stop()             — 停止音樂（音效不受影響；要一起停用 stopAll()）
  *   CR.Audio.sfx(name, opt)     — name 見 CR.Audio.PRIORITY；opt 轉給 driver.sfx（可覆寫 channels / priority）
  *   CR.Audio.tick(nes)          — **每幀呼叫一次，放在 game.update() 的最後**
@@ -41,6 +41,8 @@
  *   stage6      C 大調→C 小調         5     16      20   180    是   p1 p2(琶音) tri noi     26.6 s
  *   boss_final  A 小調 / 減七          4     16      16   225    是   p1+p2 交錯 tri noi      17.0 s
  *   ending      C 大調                7     16      13   128.6  否   p1 p2(和弦) tri noi     24.2 s
+ *   ─── R4（第 7 關魔王連戰 + 結局名單，cruiser-r4 agent；同樣全部原創）──────────────
+ *   credits     F 大調                6     16      14   150    否   p1 p2(和弦) tri noi     22.4 s
  *   stageclear  = clear 的別名（關卡過場號角沿用既有的 4 秒號角，stages agent 兩個鍵都能叫）
  *   （BPM = 3600 / (speed × 4)，一小節 16 row = 4 拍；stage4 是 3/4 拍，一小節 12 row = 3 拍）
  *   長度 = 小節 × rows × speed ÷ 60.0988 幀（NTSC）。
@@ -946,17 +948,73 @@
     };
   })();
 
+  /* ============================================ ⑭ credits「星塵之後」（R4）
+   * F 大調、150 BPM（speed 6）、14 小節 = **22.37 s**、**不循環**。
+   * 給第 7 關全破後的工作人員名單用（credits.js 捲 16 秒 + 停 2 秒 ⇒ 曲子比畫面稍長，
+   * 不會在名單還在捲的時候就沒聲音）。
+   * 編曲：p1 懷舊主旋律（fanfare 長音不衰）／ p2 和弦琶音墊 ／ tri 行進低音
+   *       ／ noi 輕鼓（最後兩小節退場，只留長音收尾）。全部原創。
+   */
+  var CRD_LEAD = flat([
+    'F-5 .   A-5 .   C-6 .   .   .   A-5 .   F-5 .   .   .   .   .  ',   //  1 F
+    'A#5 .   D-6 .   F-6 .   .   .   D-6 .   A#5 .   .   .   .   .  ',   //  2 Bb
+    'C-6 .   E-6 .   G-6 .   E-6 .   C-6 .   .   .   .   .   .   .  ',   //  3 C
+    'A-5 .   .   .   F-5 .   .   .   C-6 .   .   .   .   .   .   .  ',   //  4 F
+    'D-6 .   F-6 .   A-6 .   F-6 .   D-6 .   A-5 .   .   .   .   .  ',   //  5 Dm
+    'A#5 .   D-6 .   F-6 .   D-6 .   A#5 .   .   .   .   .   .   .  ',   //  6 Bb
+    'C-6 .   E-6 .   G-6 .   .   .   E-6 .   C-6 .   .   .   .   .  ',   //  7 C
+    'F-6 .   .   .   C-6 .   A-5 .   F-5 .   .   .   .   .   .   .  ',   //  8 F
+    'A-5 .   C-6 .   E-6 .   C-6 .   A-5 .   .   .   .   .   .   .  ',   //  9 Am
+    'A#5 .   .   .   D-6 .   .   .   F-6 .   D-6 .   A#5 .   .   .  ',   // 10 Bb
+    'C-6 .   .   .   E-6 .   .   .   G-6 .   .   .   E-6 .   C-6 .  ',   // 11 C
+    'D-6 .   .   .   F-6 .   .   .   A-6 .   .   .   F-6 .   D-6 .  ',   // 12 Dm
+    'A#5 .   C-6 .   D-6 .   E-6 .   F-6 .   .   .   .   .   .   .  ',   // 13 Bb -> C
+    'F-6 .   .   .   .   .   .   .   .   .   .   .   .   .   .   .  '    // 14 F 長音收尾
+  ]);
+  var CRD_WALK = 'R .  5 .  O .  5 .  R .  5 .  O .  5 .';
+  var CRD_HOLD = 'R .  .  .  O .  .  .  R .  .  .  .  .  .  .';
+  var CRD_ROOTS = ['F-2', 'A#2', 'C-3', 'F-2', 'D-3', 'A#2', 'C-3', 'F-2',
+    'A-2', 'A#2', 'C-3', 'D-3', 'A#2', 'F-2'];
+  var CRD_BASS = (function () {
+    var out = [], i;
+    for (i = 0; i < CRD_ROOTS.length; i++) out.push(bassBar(CRD_ROOTS[i], i >= 12 ? CRD_HOLD : CRD_WALK));
+    return out;
+  })();
+  var F3Mc = ['F-3', MAJ3], Bb3Mc = ['A#3', MAJ3], C4Mc = ['C-4', MAJ3];
+  var D3mc = ['D-3', MIN3], A2mc = ['A-2', MIN3];
+  var CRD_CH = [ch2(F3Mc), ch2(Bb3Mc), ch2(C4Mc), ch2(F3Mc), ch2(D3mc), ch2(Bb3Mc), ch2(C4Mc),
+    ch2(F3Mc), ch2(A2mc), ch2(Bb3Mc), ch2(C4Mc), ch2(D3mc), ch2(Bb3Mc, C4Mc), ch2(F3Mc)];
+
+  var CREDITS = (function () {
+    var lead = slice(rows(CRD_LEAD, { inst: 'fanfare', vol: 14, duty: 1 }), BAR);
+    var pad = arpBars(CRD_CH, BAR, { inst: 'pad', vol: 9, duty: 0 });
+    var drums = [], i;
+    for (i = 0; i < 14; i++) {
+      if (i === 0) drums.push(map(BAR, { 0: CY(12), 8: H(5), 12: S(10) }));
+      else if (i >= 12) drums.push(map(BAR, { 0: CY(11) }));          // 最後兩小節：只有一擊銅鈸
+      else if (i % 4 === 3) drums.push(DRUM_F);
+      else drums.push((i % 2) ? DRUM_B : DRUM_A);
+    }
+    var t = assemble({ p1: lead, p2: pad, tri: CRD_BASS, noi: drums }, 14);
+    return {
+      name: '星塵巡航艦 CREDITS「星塵之後」', speed: 6, rows: BAR, loop: 0,
+      instruments: INST, patterns: t.patterns, order: t.order
+    };
+  })();
+
   var SONGS = {
     title: TITLE, stage1: STAGE1, boss: BOSS, clear: CLEAR, gameover: GAMEOVER, extend: EXTEND,
     // R3：6 關擴充
     stage2: STAGE2, stage3: STAGE3, stage4: STAGE4, stage5: STAGE5, stage6: STAGE6,
     boss_final: BOSS_FINAL, ending: ENDING,
+    // R4：第 7 關全破的工作人員名單曲
+    credits: CREDITS,
     stageclear: CLEAR              // 別名：關卡過場號角就是既有的 clear（4.0 s 夠用，不另外寫一首）
   };
   var LOOPED = {
     title: true, stage1: true, boss: true, clear: false, gameover: false, extend: false,
     stage2: true, stage3: true, stage4: true, stage5: true, stage6: true,
-    boss_final: true, ending: false, stageclear: false
+    boss_final: true, ending: false, credits: false, stageclear: false
   };
 
   /* ================================================================= 音效 */

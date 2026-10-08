@@ -5,6 +5,7 @@
   $PY tools/playthrough_star.py --level 1-1
   $PY tools/playthrough_star.py --level 1-4 --seed 7 --max-frames 30000
   $PY tools/playthrough_star.py --all            # 依序跑 1-1..1-4（缺席的關自動略過）
+  $PY tools/playthrough_star.py --w3             # 依序跑 3-1..3-4（R4 世界 3「霧沼古樹」）
   $PY tools/playthrough_star.py --level test     # main.js 的內建測試關（驗證機器人本身）
   $PY tools/playthrough_star.py --cheat          # 不通關，改驗一鍵密技（暫停 SELECT / GAME OVER SELECT）
 
@@ -34,6 +35,8 @@ from playwright.sync_api import sync_playwright
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 LEVELS = ['1-1', '1-2', '1-3', '1-4']
 LEVELS_W2 = ['2-1', '2-2', '2-3', '2-4']            # R3 star-w2
+LEVELS_W4 = ['4-1', '4-2', '4-3', '4-4']            # R4 star-w4
+LEVELS_W3 = ['3-1', '3-2', '3-3', '3-4']            # R4 star-w3
 
 BOT_JS = r"""
 (opt) => {
@@ -56,12 +59,22 @@ BOT_JS = r"""
   const HAS_OBJ2 = (function () {
     if (!HAS_OBJ || !d.objects) return false;
     const o = d.objects();
-    return !!(o && ((o.movers && o.movers.length) || (o.geysers && o.geysers.length)));
+    // R4 star-w3：W3 的會縮樹菇（掛進 moverTops）與孢子雲（掛進 hazardAt）也是時間的純函式
+    const w3 = o && o.w3;
+    return !!(o && ((o.movers && o.movers.length) || (o.geysers && o.geysers.length)
+      || (w3 && ((w3.caps && w3.caps.length) || (w3.spores && w3.spores.length)))));
   })();
+  // R4 star-w4：世界 4 的機關（輸送帶 / 雷射柵欄 / 齒輪升降台）。
+  //   d.liftTops(t)   第 t 幀所有齒輪升降台的 {x0, x1, top}
+  //   d.laserAt(...)  第 t 幀該矩形是否碰到雷射
+  //   d.convAt(x,row) 腳下那一列的輸送帶速度（1/256 px/幀；位置的純函式，與時間無關）
+  const HAS_O4 = !!(d.obj4Now && d.liftTops && d.laserAt && d.convAt && d.objects4 &&
+    (function () { const o = d.objects4(); return !!(o && (o.lifts.length || o.lasers.length || o.belts.length)); })());
   window.__botSim = function (hold, x0, y0, vx0, noB) {
     const FX = NES.FX, SMB = FX.SMB;
     const W = 12, H = 22, MAXF = hold ? 220 : LOOK, MAXFALL = FX.v88(4, 0);
     const T0 = HAS_OBJ ? d.objNow() : 0;
+    const T4 = HAS_O4 ? d.obj4Now() : 0;
     const px = FX.Vec(x0), py = FX.Vec(y0), vx = FX.Acc(vx0), vy = FX.Acc(0);
     const js = SMB.jumpState(vy);
     let onGround = (hold === 0);
@@ -93,10 +106,8 @@ BOT_JS = r"""
       }
       return false;
     }
-    // 升降板：只從上方擋（同 ST.Objects.ride 的條件）
-    function moverTop(x, feet, prevFeet, t) {
-      if (!HAS_OBJ) return -1;
-      const list = d.moverTops(t);
+    // 升降板 / 齒輪升降台：只從上方擋（同 ST.Objects.ride / ST.ObjectsW4.ride 的條件）
+    function scanTops(list, x, feet, prevFeet) {
       for (let i = 0; i < list.length; i++) {
         const m = list[i];
         if (x + W <= m.x0 || x >= m.x1) continue;
@@ -106,6 +117,12 @@ BOT_JS = r"""
         return m.top;
       }
       return -1;
+    }
+    function moverTop(x, feet, prevFeet, f2) {
+      let best = -1;
+      if (HAS_OBJ) best = scanTops(d.moverTops(T0 + f2 + 1), x, feet, prevFeet);
+      if (best < 0 && HAS_O4) best = scanTops(d.liftTops(T4 + f2 + 1), x, feet, prevFeet);
+      return best;
     }
     let f = 0, air = 0, x = x0, y = y0, firstAir = -1, onMover = false;
     while (f < MAXF) {
@@ -123,7 +140,7 @@ BOT_JS = r"""
         if (foot(x, frow2, prevFeet) || foot(x + W - 1, frow2, prevFeet)) {
           y = (frow2 << 3) - H; FX.vsetPx(py, y); FX.aset(vy, 0); onGround = true; onMover = false;
         } else {
-          const mt = moverTop(x, y + H, prevFeet, T0 + f + 1);
+          const mt = moverTop(x, y + H, prevFeet, f);
           if (mt >= 0) { y = mt - H; FX.vsetPx(py, y); FX.aset(vy, 0); onGround = true; onMover = true; }
           else onGround = false;
         }
@@ -134,12 +151,20 @@ BOT_JS = r"""
           y = ((hrow2 + 1) << 3); FX.vsetPx(py, y); FX.aset(vy, 0);
         }
       }
+      // R4 star-w4：站在輸送帶上會被帶著走（位置的純函式；踩在升降台上時不吃帶子，同遊戲）
+      if (onGround && !onMover && HAS_O4) {
+        const cv = d.convAt(x + 6, (y + H) >> 3);
+        if (cv) { FX.vadd(px, cv); x = FX.floorPx(px.sub); }
+      }
       f++;
       if (!onGround) { air++; if (firstAir < 0) firstAir = f; }
       if (y > 240) return { ok: false, why: 'pit', x: x, y: y, f: f, dx: x - x0, firstAir: firstAir };
       if (hurtAt(x, y)) return { ok: false, why: 'hurt', x: x, y: y, f: f, dx: x - x0, firstAir: firstAir };
       if (HAS_OBJ && d.hazardAt(x, y, W, H, T0 + f + 1)) {
         return { ok: false, why: 'geyser', x: x, y: y, f: f, dx: x - x0, firstAir: firstAir };
+      }
+      if (HAS_O4 && d.laserAt(x, y, W, H, T4 + f + 1)) {
+        return { ok: false, why: 'laser', x: x, y: y, f: f, dx: x - x0, firstAir: firstAir };
       }
       if (hold > 0 && onGround && air > 2) return { ok: true, x: x, y: y, f: f, dx: x - x0, vx: vx.v, onMover: onMover };
     }
@@ -171,7 +196,7 @@ BOT_JS = r"""
       }
     }
     // ② 「完全不跳」往前看 60 幀：能安全前進 ≥ 80 px 就不用跳
-    const tk = HAS_OBJ2 ? (':' + (((d.objNow() % 960) >> 5))) : '';
+    const tk = (HAS_OBJ2 || HAS_O4) ? (':' + (((d.objNow() % 960) >> 5)) + ':' + (HAS_O4 ? ((d.obj4Now() % 960) >> 5) : 0)) : '';
     const key = (s.x >> 1) + ':' + (s.y >> 1) + ':' + (s.vx >> 5) + ':' + (b.loose > 0 ? 1 : 0) + ':' + b.warnT + (b.longBias ? 'L' : '') + tk;
     const hit = b.cache[key];
     if (hit !== undefined) return hit;
@@ -275,7 +300,22 @@ BOT_JS = r"""
       if (s.mode === 'title') { __nes.tap('start', 1); b.frames++; continue; }
       if (s.mode === 'dead') { __nes.step(1); b.frames++; continue; }
 
+      // fix-r4（qa-r4 P2-1）：受擊硬直（state === 'hurt'）中按 A 是**無效的**，
+      // 而且會把「起跳需要的按鍵邊緣」浪費掉 —— A 一直按著，硬直結束後不會再觸發跳躍，
+      // 機器人就這樣「按著 A 走進坑裡」（4-1 的那 1 死）。
+      // ⇒ 硬直中一律取消待發的跳躍、放開 A，恢復後重新決策（那時 warn 更小，照樣會跳）。
+      if (s.state === 'hurt') { b.jump = 0; b.hurtWait = 1; }
+      else if (b.hurtWait) { b.hurtWait = 0; b.cache = {}; }
+
       let mask = 0;
+      // fix-r4（qa-r4 P2-1 同一類）：退後的路上**動量還在往右**（SMB 的減速要十幾幀），
+      // 所以「退到一半，前面那個坑已經只剩幾幀就踏空」是會發生的 —— 這時候再退就是走下去。
+      // ⇒ 前方踏空 ≤ 6 幀就立刻放棄退、改走正常決策（那時 warn 很小，一定會挑跳法）。
+      // 1-1 的那 1 死就是這樣：f540 決定退 18 幀，f542 起明明已經有安全跳法，卻一路滑進坑裡。
+      if (b.back > 0 && s.onGround) {
+        const rb = window.__botSim(0, s.x, s.y, s.vx);
+        if (!rb.ok && rb.firstAir >= 0 && rb.firstAir <= 6) { b.back = 0; b.loose = 180; b.cache = {}; }
+      }
       if (b.back > 0) {
         // 卡住 → 往左退一段再試。退的時候絕對不能退進後面的坑裡。
         const frow = (s.y + (s.crouch ? 14 : 22)) >> 3;
@@ -327,7 +367,7 @@ BOT_JS = r"""
       }
       if (b.back === 0) {
         mask = BTN.RIGHT | ((b.jump > 0 && b.jumpNoB) ? 0 : BTN.B);
-        if (s.onGround && b.jump === 0) {
+        if (s.onGround && b.jump === 0 && s.state !== 'hurt') {   // fix-r4：硬直中不決策（按 A 無效）
           const h = decide(s, b);
           if (b.wantBack) { b.wantBack = 0; b.back = 18; }
           else if (h) { b.jump = (h < 0) ? -h : h; b.jumpNoB = (h < 0); }
@@ -569,6 +609,68 @@ def run_cheat(page, url, level, out):
     return 1 if bad else 0
 
 
+# ============================================================ R4 star-meta：--map
+# 「從標題走世界地圖 → 挑一關 → 通關」整條流程（F4-3）。
+#   標題 B → 世界地圖 → 往右撞到鎖住的節點 → 通關 1-1 後重開地圖 → 往左走一格再往右走回來
+#   （驗走格子動畫真的在跑）→ 按 A 進 1-2 → 交給原本的通關機器人把它打完。
+JS_MAP = r"""
+() => {
+  const S = () => window.GAME.state();
+  const B = NES.Input.BTN;
+  const tap = (b) => { NES.Input.inject(b, 1); __nes.step(1); NES.Input.inject(0, 1); __nes.step(1); };
+  const out = { steps: 0 };
+  tap(B.B);                                   // 標題 → 世界地圖
+  out.mode = S().mode;
+  out.world = GAME.dev.meta().map ? GAME.dev.meta().map.world : 0;
+  tap(B.RIGHT);                               // 1-1 還沒過 ⇒ 右邊鎖住
+  out.lockedMsg = GAME.dev.meta().map.msg;
+  GAME.dev.clearLevel('1-1');                 // 假裝 1-1 已通關（地圖解鎖規則的輸入）
+  GAME.dev.openMap(1);
+  __nes.step(1);
+  out.at0 = GAME.dev.meta().map.at;           // 游標自動落在 1-2
+  tap(B.LEFT);                                // 往左走一格（動畫）
+  out.walking = GAME.dev.meta().map.walking;
+  for (let i = 0; i < 120 && GAME.dev.meta().map.walking; i++) __nes.step(1);
+  out.at1 = GAME.dev.meta().map.at;
+  tap(B.RIGHT);                               // 再走回來
+  for (let i = 0; i < 120 && GAME.dev.meta().map.walking; i++) __nes.step(1);
+  out.at2 = GAME.dev.meta().map.at;
+  out.steps = GAME.dev.meta().map.steps;
+  out.node = GAME.dev.meta().map.node;
+  tap(B.A);                                   // 進關卡
+  out.mode2 = S().mode;
+  out.level = S().level;
+  out.cleared = GAME.dev.meta().cleared;
+  out.password = S().password;
+  return out;
+}
+"""
+
+
+def run_map(page, url, seed, max_frames, verbose, lives):
+    """從標題走地圖進關卡，再用原本的機器人通關。回傳 (走地圖的結果, 通關結果)。"""
+    page.goto(url)                                  # 不帶 ?level ⇒ 停在標題
+    page.wait_for_function('() => !!window.__nes && !!window.GAME && !!window.GAME.dev')
+    page.evaluate('() => __nes.step(2)')
+    m = page.evaluate(JS_MAP)
+    if m.get('mode') != 'map' or m.get('mode2') != 'play':
+        return m, None
+    if lives:
+        page.evaluate('(n) => window.GAME.dev.setLives(n)', lives)
+    page.evaluate(BOT_JS, {'seed': seed, 'maxFrames': max_frames})
+    b = None
+    while True:
+        b = page.evaluate('(n) => window.__botStep(n)', 2000)
+        if b.get('done'):
+            break
+        if verbose:
+            print('  ... frames=%d deaths=%d' % (b['frames'], b['deaths']))
+    d = b['done']
+    d['frames'] = b['frames']
+    d['deaths'] = b['deaths']
+    return m, d
+
+
 def run_level(page, url, level, seed, max_frames, verbose, lives):
     page.goto(url + '&level=' + level)
     page.wait_for_function('() => !!window.__nes && !!window.GAME && !!window.GAME.dev')
@@ -599,6 +701,10 @@ def main():
     ap.add_argument('--all', action='store_true', help='依序跑 1-1..1-4（W1 回歸）')
     ap.add_argument('--w2', action='store_true', help='依序跑 2-1..2-4（R3 世界 2）')
     ap.add_argument('--all8', action='store_true', help='依序跑 1-1..2-4（八關）')
+    ap.add_argument('--map', action='store_true',
+                    help='R4 star-meta：從標題進世界地圖、走格子到某一關，再把那一關打通')
+    ap.add_argument('--w4', action='store_true', help='依序跑 4-1..4-4（R4 世界 4）')
+    ap.add_argument('--w3', action='store_true', help='依序跑 3-1..3-4（R4 世界 3）')
     ap.add_argument('--seed', type=int, default=1)
     ap.add_argument('--max-frames', type=int, default=20000)
     ap.add_argument('--lives', type=int, default=60, help='給機器人幾條命（死亡數照實回報）')
@@ -628,8 +734,34 @@ def main():
             browser.close()
         return rc
 
+    if a.map:
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch()
+            page = browser.new_page()
+            errs = []
+            page.on('pageerror', lambda e: errs.append(str(e)))
+            m, d = run_map(page, url, a.seed, a.max_frames, a.verbose, a.lives)
+            browser.close()
+        print('地圖：mode=%s world=%s 鎖住提示=%s 游標 %s→%s→%s 走了 %s 步 節點=%s'
+              % (m.get('mode'), m.get('world'), m.get('lockedMsg'), m.get('at0'), m.get('at1'),
+                 m.get('at2'), m.get('steps'), (m.get('node') or {}).get('id')))
+        if d is None:
+            print('地圖流程失敗（沒進到關卡）')
+            return 1
+        print('進到 %s：cleared=%s frames=%d deaths=%d  密碼=%s'
+              % (m.get('level'), d['cleared'], d['frames'], d['deaths'], m.get('password')))
+        bad = 0 if (d['cleared'] and m.get('steps', 0) >= 2 and m.get('lockedMsg') == 'LOCKED') else 1
+        if errs:
+            print('PAGE ERRORS:', errs[:3])
+            bad = 1
+        return bad
+
     if a.all8:
         todo = LEVELS + LEVELS_W2
+    elif a.w4:
+        todo = LEVELS_W4
+    elif a.w3:
+        todo = LEVELS_W3
     elif a.w2:
         todo = LEVELS_W2
     elif a.all:
@@ -646,7 +778,7 @@ def main():
             has = page.evaluate if False else None
             r = run_level(page, url, lv, a.seed, a.max_frames, a.verbose, a.lives)
             if r is None:
-                if a.all or a.w2 or a.all8:
+                if a.all or a.w2 or a.all8 or a.w4 or a.w3:
                     print('%-4s SKIP（關卡尚未就緒）' % lv)
                     continue
                 bad = 1

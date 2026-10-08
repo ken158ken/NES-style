@@ -74,6 +74,7 @@ echo "== ③ 打包檢查 build.py --check =="
 run "build.py --check game.html" "$PY" tools/build.py --check --src game.html
 run "build.py --check star.html" "$PY" tools/build.py --check --src star.html
 run "build.py --check cruiser.html" "$PY" tools/build.py --check --src cruiser.html
+run "build.py --check mech.html" "$PY" tools/build.py --check --src mech.html
 
 if [ "$QUICK" = 0 ]; then
   echo "== ④ 冒煙截圖 shot.py =="

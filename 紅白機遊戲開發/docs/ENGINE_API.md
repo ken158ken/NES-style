@@ -569,6 +569,8 @@ nes_lint 5/5、apu 8/8、music 6/6、nes 2/2）；10 檔語法全 OK、載入全
 |---|---|
 | `begin()` | 開始收集這一幀（清空 `n / dropped / skipped`） |
 | `add(s)` | 收集一個 `{x, y, tile, pal, flipH, flipV, behind, prio}`（**可以重複使用同一個物件**）；回傳是否收下 |
+| `add16(s)` | **16×16 精靈便利版**（R4）：`{x, y, tileL, tileR \| tiles:[L,R], pal, prio, flipH, flipV, behind}`，回傳**實際收下的塊數 0..2** |
+| `push16(x, y, tileL, tileR, pal, prio, flags)` | `add16` 的低階版（不配置物件），`flags` 同 `push` |
 | `push(x, y, tile, pal, prio, flags)` | 低階版（`flags` bit0 flipH / bit1 flipV / bit2 behind），完全不配置物件 |
 | `end()` | 依 `prio` 穩定排序後寫進 OAM `reserve..63`，回傳實際寫入數 |
 | `used` / `dropped` / `skipped` / `n` / `capacity` / `frames` | 本幀寫入 / 被丟棄 / 越界略過 / 收集數 / 可用槽數 / 已跑幀數 |
@@ -580,6 +582,25 @@ nes_lint 5/5、apu 8/8、music 6/6、nes 2/2）；10 檔語法全 OK、載入全
 - `y >= 240`、`y < -margin`、`x >= 256`、`x < -margin`（`margin` 預設 16）的在 `add()` 就**略過並計 `skipped`**，不佔槽。
 - 沒用到的槽會寫成 `y = 240` 隱藏（`hideUnused: false` 可關）。
 - `reserve: n` 保留 OAM 前 n 槽給遊戲自己寫（例如固定的船），本模組從第 n 槽開始寫。
+
+#### `add16` / `push16` — 16×16 精靈（R4 star-w4 新增）
+
+8×16 精靈模式下，一個 16×16 角色 = **左右兩個 8×16**。`add16` 把這兩塊一次收進來，
+並且**自己處理水平翻轉**：
+
+> `flipH` 時必須「兩塊各自翻 **且** 左右對調」。只翻不調會把左右半邊接反
+> （R3 的 `games/star/enemies.js` 就是這樣畫錯過一次），所以這條規則收進引擎層。
+
+```js
+oam.add16({ x: e.x - cam, y: e.y, tiles: art[frame], pal: 3, prio: 3, flipH: e.dir > 0 });
+// ≡ 不翻：(x, tileL) + (x+8, tileR)；翻：(x, tileR|flipH) + (x+8, tileL|flipH)
+```
+
+- 兩塊共用同一個 `y / pal / prio / flipV / behind`；`prio` 相同 ⇒ 輪替時兩塊一起走，不會半邊閃掉。
+- 越界規則與 `add()` 完全相同（逐塊判定）：16×16 卡在右邊界時只收下左塊，回傳 `1`；
+  整個都在畫面外回傳 `0` 並計 `skipped`。
+- `flipV` 在 8×16 模式下是「每塊各自上下翻」，對 16×16（上下各一塊 8×16 的左右兩欄）直接套用即可。
+- **既有的 `add()` / `push()` 行為一行未改**（`tools/test_shmup.py` 157 → 168 項，新增 11 項）。
 
 ### 15.5 `NES.SH.Scroller(ppu, {nt: 2, cols, tileAt, attrAt, row0, rows, ahead, maxCols, mirror})`
 
@@ -646,7 +667,7 @@ oam.end();                                                 // 排序 + 輪替 + 
 4. **`aim()` / `vel()` 預設會 new 一個物件**：每幀會跑很多次的地方請傳 `out` 重複使用。
 5. **相機瞬移**（換關 / 檢查點復活）要呼叫 `Scroller.reset(camX)` + `Spawner.seek(col)` + `Pool.freeAll()`，不要只改 `camX`。
 6. 角度 0 是**右**、64 是**下**。敵人「往左飛」= 角度 128。
-7. 測試：`tools/test_shmup.py`（157 項，含 `indexFrame` 實測兩幀聯集畫齊 12 顆、600 幀預算不超支）。
+7. 測試：`tools/test_shmup.py`（**168 項**，含 `indexFrame` 實測兩幀聯集畫齊 12 顆、600 幀預算不超支、`add16` / `push16` 的左右對調 11 項）。
 
 ---
 

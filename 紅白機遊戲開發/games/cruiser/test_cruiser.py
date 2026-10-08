@@ -463,7 +463,8 @@ def test_death(page):
     ok('復活：模式回 play', af['mode'] == 'play', af['mode'])
     ok('復活：剩餘船 −1（3 → 2）', af['lives'] == 2, af['lives'])
     ok('復活：強化全部歸零', af['speed'] == 1 and af['gauge'] == 0 and
-       af['power'] == {'missile': False, 'double': False, 'laser': False, 'option': 0, 'shield': 0}, af['power'])
+       af['power'] == {'missile': False, 'double': False, 'laser': False, 'ripple': False,
+                       'option': 0, 'shield': 0}, af['power'])
     near('復活：無敵 90 幀（已跑掉幾幀）', af['invul'], 80, 90, af['invul'])
     ok('復活：回到檢查點（camX 從 1500 退回 ≤ 1500 的檢查點）', af['camX'] <= 1500 and af['camX'] < 1500, af['camX'])
     ok('復活：alive = true', af['alive'] is True, af)
@@ -1336,10 +1337,10 @@ def test_r3(page):
     print('[15 R3 擴關：關卡切換 / ENDING / 第二輪 / ?stage= / 密技跨關有效]')
     g = fresh(page)
     ok('state() 有 stageNo / loop / stageCount 欄位',
-       g['stageNo'] == 1 and g['loop'] == 0 and g['stageCount'] == 6,
+       g['stageNo'] == 1 and g['loop'] == 0 and g['stageCount'] == 7,
        (g['stageNo'], g['loop'], g['stageCount']))
     ok('state().stage 有 index / name / count / camMax',
-       g['stage']['index'] == 1 and g['stage']['count'] == 6 and g['stage']['camMax'] == 2816,
+       g['stage']['index'] == 1 and g['stage']['count'] == 7 and g['stage']['camMax'] == 2816,
        g['stage'])
     ok('開局 HUD 顯示 ST1', g['hud'].split('|')[0].rstrip().endswith('ST1'), g['hud'].split('|')[0])
     ok('曲目 key 解析：關卡 1 = stage1（song.js 缺 stage2~6 時會退回 stage1）',
@@ -1348,7 +1349,7 @@ def test_r3(page):
     # ---- 曲目 key 解析（song agent 平行開發：缺席就退回既有曲，兩邊獨立可測）----
     r = page.evaluate(r"""() => {
       const out = {};
-      for (let n = 1; n <= 6; n++) { CR.stage.load(n); const g = GAME.state(); out[n] = [g.song, g.bossSongKey]; }
+      for (let n = 1; n <= 7; n++) { CR.stage.load(n); const g = GAME.state(); out[n] = [g.song, g.bossSongKey]; }
       CR.stage.load(1);
       return { out: out, keys: (window.CR.SONGS ? Object.keys(CR.SONGS) : []) };
     }""")
@@ -1356,9 +1357,12 @@ def test_r3(page):
         want = 'stage%d' % n if ('stage%d' % n) in r['keys'] else 'stage1'
         ok('關卡 %d 曲目 key 解析 = %s' % (n, want), r['out'][str(n)][0] == want, r['out'][str(n)])
     wantb = 'boss_final' if 'boss_final' in r['keys'] else 'boss'
-    ok('關卡 6 魔王曲 key = %s（缺席退回 boss）' % wantb, r['out']['6'][1] == wantb, r['out']['6'])
-    ok('關卡 1~5 魔王曲 key = boss',
-       all(r['out'][str(n)][1] == 'boss' for n in range(1, 6)), r['out'])
+    # R4：最終關變成第 7 關（魔王連戰）⇒ boss_final 跟著往後移一關
+    ok('關卡 7（魔王連戰）魔王曲 key = %s（缺席退回 boss）' % wantb, r['out']['7'][1] == wantb, r['out']['7'])
+    ok('關卡 7 關卡曲 key = boss_final（連戰沒有關卡曲）',
+       r['out']['7'][0] == ('boss_final' if 'boss_final' in r['keys'] else 'stage1'), r['out']['7'])
+    ok('關卡 1~6 魔王曲 key = boss',
+       all(r['out'][str(n)][1] == 'boss' for n in range(1, 7)), r['out'])
 
     # ---- 過關 → 下一關（關卡 2）----
     r = page.evaluate(r"""() => {
@@ -1388,30 +1392,38 @@ def test_r3(page):
     ok('切關後 HUD 改成 ST2', r['hud'].split('|')[0].rstrip().endswith('ST2'), r['hud'].split('|')[0])
     ok('切關不清命數 / 分數', r['lives'] >= 1 and r['sc1'] >= r['sc0'], (r['lives'], r['sc0'], r['sc1']))
 
-    # ---- 第 6 關破 → ENDING → 第二輪 ----
+    # ---- R4：第 7 關（魔王連戰）破 → ENDING → 工作人員名單 → 排行榜 → 第二輪 ----
     r = page.evaluate(r"""() => {
       CR.g.mode = 'play';
       const s = CR.stage;
-      s.load(6); s.restart(s.CAM_MAX);
+      s.load(7); s.restart(s.CAM_MAX);
       CR.ship.invul = 1 << 28; CR.ship.lives = 9;
-      for (let i = 0; i < 5000; i++) {
+      for (let i = 0; i < 20000; i++) {
         __nes.step(1);
         s.enemies.each(e => { if (e.boss && e.alive) e.hit(9); });
         if (GAME.state().mode === 'stageclear') break;
       }
-      NES.Input.inject(NES.Input.BTN.START, 1); __nes.step(1); NES.Input.inject(0, 1); __nes.step(3);
-      const a = GAME.state();
+      function tap() { NES.Input.inject(NES.Input.BTN.START, 1); __nes.step(1);
+                       NES.Input.inject(0, 1); __nes.step(3); return GAME.state(); }
+      const a = tap();
       const txt = [9, 11, 15].map(r2 => CR.screenText(r2).trim());
-      NES.Input.inject(NES.Input.BTN.START, 1); __nes.step(1); NES.Input.inject(0, 1); __nes.step(3);
+      const c = tap();                       // ENDING -> 工作人員名單
+      let guard = 0;
+      while (GAME.state().mode === 'credits' && guard++ < 40) tap();
+      const modes = [];
+      guard = 0;
+      while (GAME.state().mode !== 'play' && guard++ < 40) { modes.push(GAME.state().mode); tap(); }
       const b = GAME.state();
-      return { mode: a.mode, txt: txt, endings: a.endings,
+      return { mode: a.mode, txt: txt, endings: a.endings, credits: c.mode, modes: modes,
                mode2: b.mode, st: b.stage.index, loop: b.loop, hud: b.hud };
     }""")
-    ok('打掉第 6 關魔王 + START → ENDING 模式', r['mode'] == 'ending', r['mode'])
+    ok('打掉第 7 關（魔王連戰）+ START → ENDING 模式', r['mode'] == 'ending', r['mode'])
     ok('ENDING 畫面：CONGRATULATIONS / ALL STAGE CLEAR / PRESS START',
        'CONGRATULATIONS' in r['txt'][0] and 'ALL STAGE CLEAR' in r['txt'][1] and
        'PRESS START' in r['txt'][2], r['txt'])
-    ok('ENDING 按 START → 第二輪從關卡 1 開始（loop = 1）',
+    ok('ENDING 按 START → 工作人員名單（credits）', r['credits'] == 'credits', r['credits'])
+    ok('名單之後經過排行榜畫面（scores）', 'scores' in r['modes'], r['modes'])
+    ok('排行榜按 START → 第二輪從關卡 1 開始（loop = 1）',
        r['mode2'] == 'play' and r['st'] == 1 and r['loop'] == 1, r)
     ok('第二輪 HUD 回到 ST1', r['hud'].split('|')[0].rstrip().endswith('ST1'), r['hud'].split('|')[0])
 

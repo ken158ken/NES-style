@@ -471,6 +471,8 @@ JS_QBLOCK = r"""
   out.after = d.tileAt(QC, QR);
   out.nt = d.ntTileAt(QC, QR);
   out.ntUsed = ST.bgBank.has('F_USED') ? ST.bgBank.index('F_USED') : -1;
+  // R4 star-meta（F4-3）：互動磚圖示 2× 之後，? 磚 / USED 畫的是 8×16 的下半塊 I2_US_B
+  out.ntUsed2x = (ST.bgBank.has('I2_US_B') && ST.Icons2x && ST.Icons2x.enabled) ? ST.bgBank.index('I2_US_B') : -1;
   out.bumps = a1.bumps; out.coins = a1.coins - b.coins; out.score = a1.score - b.score;
   out.pops = a1.pops;
   // BRICK：頂撞但不變 USED
@@ -516,8 +518,9 @@ def test_items(page):
     ok('頂到 ? 磚（bumps > 0）', Q['bumps'] > 0, Q['bumps'])
     ok('? 磚變成 USED', Q['after'] == (5 if Q['before'] == 4 else Q['after']) and Q['after'] != Q['before'],
        '%s → %s' % (Q['before'], Q['after']))
-    ok('? 磚的名稱表磚同步換成 USED 的圖', Q['nt'] == Q['ntUsed'] or Q['ntUsed'] < 0,
-       'nt=%s used=%s' % (Q['nt'], Q['ntUsed']))
+    ok('? 磚的名稱表磚同步換成 USED 的圖（2× 圖示時是 I2_US_B）',
+       Q['nt'] == Q['ntUsed'] or Q['nt'] == Q.get('ntUsed2x') or Q['ntUsed'] < 0,
+       'nt=%s used=%s used2x=%s' % (Q['nt'], Q['ntUsed'], Q.get('ntUsed2x')))
     ok('? 磚頂出金幣（coins +1、分數 +200）', Q['coins'] == 1 and Q['score'] == 200,
        'coins=%s score=%s' % (Q['coins'], Q['score']))
     ok('? 磚頂出金幣粒子（pops > 0）', Q['pops'] > 0, Q['pops'])
@@ -890,7 +893,8 @@ JS_WIN = r"""
 (opt) => {
   const S = () => window.GAME.state();
   const d = GAME.dev;
-  const B = (window.ST && ST.BossW2 && S().level === '2-4') ? ST.BossW2 : ST.Boss;
+  // R4：魔王模組由 main.js 依 level.bossKind 決定（1-4 鐵鎚王 / 2-4 熔心巨像 / 4-4 核心守護者）
+  const B = (GAME.dev.g && GAME.dev.g().bossMod) || ST.Boss;
   d.setScore(12345);
   d.warp(opt.col * 8); __nes.step(4);
   let n = 0;
@@ -945,8 +949,16 @@ def test_banner(page):
     if not page.evaluate("() => !!(window.ST && ST.LEVELS && ST.LEVELS['1-4'] && ST.Boss)"):
         ok('star-world 的 1-4 / 魔王尚未就緒（SKIP 破關畫面）', True, 'skipped')
         return
-    hasW2 = page.evaluate("() => !!(window.ST && ST.LEVELS && ST.LEVELS['2-4'] && ST.BossW2)")
-    last, lastCol, lastWorld = ('2-4', 215, 2) if hasW2 else ('1-4', 240, 1)
+    # R4：最後一關 = `LEVEL_ORDER` 裡真的存在的最後一關（W2 上線是 2-4、W4 上線是 4-4…）。
+    # 魔王房的「站上去開打」欄位各關不同，所以查表；表裡沒有就退回 1-4。
+    BOSS_COL = {'1-4': 240, '2-4': 215, '3-4': 215, '4-4': 215}
+    last = page.evaluate("""() => {
+      const ids = ['4-4', '3-4', '2-4', '1-4'];
+      for (const id of ids) if (window.ST && ST.LEVELS && ST.LEVELS[id]) return id;
+      return '1-4';
+    }""")
+    lastCol = BOSS_COL.get(last, 240)
+    lastWorld = int(last.split('-')[0])
     fresh(page, last)
     W = page.evaluate(JS_WIN, {'col': lastCol})
     ok('打倒最後一關（%s）的魔王 → 結算 → won = true 的 gameover' % last,
@@ -957,7 +969,7 @@ def test_banner(page):
     ok('破關畫面寫最終分數', W['l3'] == 'SCORE ' + str(W['score']).rjust(6, '0'),
        '%s / score=%s' % (W['l3'], W['score']))
     ok('破關畫面寫 PRESS START', W['l4'] == 'PRESS START', W['l4'])
-    ok('indexFrame 逐像素：WORLD 1 CLEAR 有 ≥ 80 個白色像素', W['white1'] >= 80, W['white1'])
+    ok('indexFrame 逐像素：WORLD %d CLEAR 有 ≥ 80 個白色像素' % lastWorld, W['white1'] >= 80, W['white1'])
     ok('indexFrame 逐像素：PRESS START 有 ≥ 60 個白色像素', W['white4'] >= 60, W['white4'])
 
 

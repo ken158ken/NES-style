@@ -174,6 +174,7 @@
   var scroller = null, spawner = null, table = null;
   var camVec = FX.Vec(0);
   var frames = 0, updates = 0, pendingJump = null, pendingBoss = 0, pendingStage = 0;
+  var pendingRush = 0;                                      // R4：`?rush=N`（第 7 關連戰第 N 隻）
   var capsuleSeq = 0;
   var shipPrev = { x: 0, y: 0, has: false }, shipV = { vx: 0, vy: 0 };
   var api = null;                                            // stages.js 的出怪小工具
@@ -377,7 +378,9 @@
     var camx = parseInt(q.get('camx') || '', 10);
     var bs = parseInt(q.get('boss') || '', 10);
     var sg = parseInt(q.get('stage') || '', 10);
+    var ru = parseInt(q.get('rush') || '', 10);
     if (!isNaN(sg) && sg >= 1 && sg <= STAGE_COUNT) pendingStage = sg;
+    if (!isNaN(ru) && ru >= 1) { pendingJump = -1; pendingRush = ru; }   // R4：第 7 關連戰第 n 隻
     if (!isNaN(camx)) pendingJump = camx;
     if (!isNaN(bs) && bs >= 1) { pendingJump = -1; pendingBoss = bs; }    // -1 = 該關的 CAM_MAX
   }
@@ -433,6 +436,8 @@
     if (CR.Boss && typeof CR.Boss.despawn === 'function') CR.Boss.despawn();
     var nb = (CR.Bosses && CR.Bosses[def.boss]) || CR.Bosses.core;
     CR.Boss = nb;
+    // R4：魔王連戰（第 7 關）換關時把「打到第幾隻」的進度清掉（同一關內才接關）
+    if (nb && typeof nb.resetProgress === 'function') nb.resetProgress();
 
     if (ppu0) {
       muteBudget(ppu0, function () { CR.CHR_WORLD.applyStagePalette(ppu0, n); });
@@ -602,12 +607,16 @@
 
     // ?stage= / ?camx= / ?boss= 除錯跳關（等 main 走完 title → play 的初始化再套用）
     if ((pendingJump !== null || pendingStage) && updates >= 2) {
-      var j = pendingJump, bs = pendingBoss, sg = pendingStage;
-      pendingJump = null; pendingBoss = 0; pendingStage = 0;
+      var j = pendingJump, bs = pendingBoss, sg = pendingStage, ru = pendingRush;
+      pendingJump = null; pendingBoss = 0; pendingStage = 0; pendingRush = 0;
       if (sg && sg !== stage.index) load(sg);
       if (j !== null) restart(j < 0 ? CAM_MAX : j);
       if (bs >= 1) { stage.bossActive = true; CR.Boss.spawn(); CR.Boss.force(bs); }
+      if (ru >= 1 && CR.Boss.setIndex) { stage.bossActive = true; CR.Boss.setIndex(ru - 1); }
     }
+
+    // R4：rank 動態難度（每幀從裝備 + 存活時間重算；rank.js 缺席就跳過）
+    if (CR.Rank && CR.Rank.update) CR.Rank.update();
 
     stepShipVel();
 
@@ -705,7 +714,8 @@
       bossActive: stage.bossActive, cleared: stage.cleared, escapeT: stage.escapeT,
       boss: CR.Boss.state(), events: spawner ? spawner.index : 0,
       score: stage.pendingScore, scrollBytes: scroller ? scroller.bytes : 0,
-      rank: CR.Enemies.rank()
+      rank: CR.Enemies.rank(),
+      rankState: (CR.Rank && CR.Rank.state) ? CR.Rank.state() : null
     };
   };
 

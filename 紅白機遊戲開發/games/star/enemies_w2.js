@@ -26,6 +26,9 @@
   var BAT_VY = FX.v88(0, 192);             // 0.75 px/幀 俯衝
   var BAT_FLUT = 6;                        // 平飛後上下拍翅 ±6 px
   var ARM_VX = SMB.enemySlow;              // 0.5 px/幀
+  // R4 star-meta（F4-3）：護甲礦兵的**第二解法**＝副武器。甲厚 ⇒ 要 2 發才倒
+  // （研究 04 §2「必須用別的手段處理的敵人」；R3「留給後續」第 4 條收掉）
+  var ARM_SUB_HITS = 2;
   var SPIT_PERIOD = 100;                   // 每 100 幀吐一顆
   var SPIT_RANGE = 152;                    // 主角在 152 px 內才吐
   var FIRE_VX = FX.v88(1, 64);             // 1.25 px/幀
@@ -92,7 +95,9 @@
   /* ---------------------------------------------------------------- armor */
   E.register('armor', {
     w: 14, h: 15, stompable: false, score: 300, pal: 3,
+    subHits: ARM_SUB_HITS,                 // F4-3：ST.SubWeapon 讀這個決定要幾發
     setup: function (e, opt) {
+      e.subHp = ARM_SUB_HITS;              // F4-3：每次出場重設（池子回收不會殘留上一隻的血）
       e.dir = opt.dir === undefined ? -1 : (opt.dir < 0 ? -1 : 1);
       e.edge = opt.edge === undefined ? true : !!opt.edge;   // 預設坑邊不掉（不會自己走進熔岩）
       FX.aset(e.vx, e.dir * ARM_VX);
@@ -174,7 +179,7 @@
     KINDS: ['bat', 'armor', 'spitter', 'fire'],
     CONST: {
       BAT_WAKE: BAT_WAKE, BAT_VX: BAT_VX, BAT_VY: BAT_VY, BAT_FLUT: BAT_FLUT,
-      ARM_VX: ARM_VX, SPIT_PERIOD: SPIT_PERIOD, SPIT_RANGE: SPIT_RANGE,
+      ARM_VX: ARM_VX, ARM_SUB_HITS: ARM_SUB_HITS, SPIT_PERIOD: SPIT_PERIOD, SPIT_RANGE: SPIT_RANGE,
       FIRE_VX: FIRE_VX, FIRE_VY: FIRE_VY, FIRE_G: FIRE_G
     }
   };

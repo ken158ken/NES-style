@@ -288,6 +288,60 @@ TESTS_JS = r"""
   oam.end();
   ok('OAM: 空的一幀會把 64 槽全部藏起來', ppu.getSprite(0).y === 240 && ppu.getSprite(63).y === 240);
 
+  // ---- R4 star-w4：16×16 便利 add（add16 / push16；flipH 會左右對調）----
+  ppu = mkPpu(); oam = SH.OAM(ppu, {});
+  oam.begin();
+  ok('OAM16: add16 收下兩塊（回傳 2）',
+     oam.add16({ x: 40, y: 50, tileL: 20, tileR: 22, pal: 1, prio: 2 }) === 2 && oam.n === 2, oam.n);
+  oam.end();
+  ok('OAM16: 不翻轉時左塊在 x、右塊在 x+8、磚序 L,R',
+     ppu.getSprite(0).tile === 20 && ppu.getSprite(0).x === 40 &&
+     ppu.getSprite(1).tile === 22 && ppu.getSprite(1).x === 48,
+     [ppu.getSprite(0).tile, ppu.getSprite(0).x, ppu.getSprite(1).tile, ppu.getSprite(1).x].join(','));
+  ok('OAM16: 兩塊共用同一個 y / pal / prio',
+     ppu.getSprite(0).y === 50 && ppu.getSprite(1).y === 50 &&
+     ppu.getSprite(0).pal === 1 && ppu.getSprite(1).pal === 1);
+  ppu = mkPpu(); oam = SH.OAM(ppu, {});
+  oam.begin();
+  oam.add16({ x: 40, y: 50, tileL: 20, tileR: 22, pal: 0, prio: 0, flipH: true });
+  oam.end();
+  ok('OAM16: flipH ⇒ 兩塊各自翻 **且** 左右對調（x=40 放 tileR）',
+     ppu.getSprite(0).tile === 22 && ppu.getSprite(0).x === 40 &&
+     ppu.getSprite(1).tile === 20 && ppu.getSprite(1).x === 48,
+     [ppu.getSprite(0).tile, ppu.getSprite(1).tile].join(','));
+  ok('OAM16: flipH 兩塊都帶 flipH 旗標',
+     ppu.getSprite(0).flipH === true && ppu.getSprite(1).flipH === true);
+  ppu = mkPpu(); oam = SH.OAM(ppu, {});
+  oam.begin();
+  oam.add16({ x: 60, y: 70, tiles: [31, 33], pal: 2, prio: 1, flipV: true, behind: true });
+  oam.end();
+  ok('OAM16: 吃 tiles:[L,R] 陣列寫法',
+     ppu.getSprite(0).tile === 31 && ppu.getSprite(1).tile === 33);
+  ok('OAM16: flipV / behind 兩塊都套用',
+     ppu.getSprite(0).flipV === true && ppu.getSprite(1).flipV === true &&
+     ppu.getSprite(0).behind === true && ppu.getSprite(1).behind === true);
+  ppu = mkPpu(); oam = SH.OAM(ppu, {});
+  oam.begin();
+  ok('OAM16: 右塊越界時只收下左塊（回 1）',
+     oam.add16({ x: 252, y: 10, tileL: 1, tileR: 3, pal: 0, prio: 0 }) === 1 &&
+     oam.n === 1 && oam.skipped === 1, 'n=' + oam.n + ' skipped=' + oam.skipped);
+  ok('OAM16: 整個 16×16 都越界時回 0',
+     oam.add16({ x: 60, y: 250, tileL: 1, tileR: 3, pal: 0, prio: 0 }) === 0 && oam.n === 1);
+  oam.end();
+  ppu = mkPpu(); oam = SH.OAM(ppu, {});
+  oam.begin();
+  oam.push16(8, 16, 40, 42, 3, 2, 1);          // flags bit0 = flipH
+  oam.end();
+  ok('OAM16: push16（低階版）同樣會左右對調',
+     ppu.getSprite(0).tile === 42 && ppu.getSprite(1).tile === 40 &&
+     ppu.getSprite(0).flipH === true && ppu.getSprite(0).pal === 3);
+  ok('OAM16: add16 不影響既有 add 的行為',
+     (() => { ppu = mkPpu(); oam = SH.OAM(ppu, {});
+       oam.begin(); oam.add(S(10, 20, 5, 0)); oam.add16({ x: 30, y: 20, tileL: 7, tileR: 9, prio: 1 });
+       const w = oam.end();
+       return w === 3 && ppu.getSprite(0).tile === 5 && ppu.getSprite(1).tile === 7 && ppu.getSprite(2).tile === 9;
+     })());
+
   // OAM DMA 預算
   const tm = NES.Timing.create({});
   const ppuB = mkPpu();

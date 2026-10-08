@@ -137,15 +137,40 @@
   var ctx = null;          // stage 注入的介面
   var tmpV = { vx: 0, vy: 0, a: 0 };   // aim 的重複使用物件（每幀零配置）
 
+  // R4：rank 改由 CR.Rank（rank.js）算（火力 + 存活時間 + 輪數 - 死亡罰，0..7）；
+  //      rank.js 缺席或被 `?rank=0` 關掉時退回 R3 的「裝備 rank 0..3」。
   function rank() {
+    if (CR.Rank && typeof CR.Rank.value === 'function') return CR.Rank.value() | 0;
     var s = CR.ship;
     if (s && typeof s.rank === 'function') { var r = s.rank() | 0; return r < 0 ? 0 : (r > 3 ? 3 : r); }
     return 0;
   }
-  // 基礎速度 x 每關倍率（params.bulletScale）x rank 倍率（rank >= 2 -> x1.25）
+  function rankBulletMul() {
+    if (CR.Rank && typeof CR.Rank.bulletMul === 'function') return CR.Rank.bulletMul() | 0;
+    return (rank() >= 2) ? 320 : 256;
+  }
+  function rankPeriodMul() {
+    if (CR.Rank && typeof CR.Rank.periodMul === 'function') return CR.Rank.periodMul() | 0;
+    return 256;
+  }
+  function rankShotsN() {
+    if (CR.Rank && typeof CR.Rank.shotsN === 'function') return CR.Rank.shotsN() | 0;
+    return 1;
+  }
+  function rankLead() {
+    if (CR.Rank && typeof CR.Rank.lead === 'function') return !!CR.Rank.lead();
+    return rank() >= 3;
+  }
+  // 基礎速度 x 每關倍率（params.bulletScale）x rank 倍率（rank 0/1 = 1.000、rank 2 = 1.25…）
   function bulletSpeed() {
     var v = (BULLET_BASE * getParams().bulletScale) >> 8;
-    return (rank() >= 2) ? ((v * 5) >> 2) : v;
+    return (v * rankBulletMul()) >> 8;
+  }
+  // R4：實際的開火週期 = 關卡週期（turretPeriod，數字不變）x rank 週期倍率
+  //     **turretPeriod() 本身一個數字都沒動**（test_stage1 的 90 / 130 斷言靠它）。
+  function firePeriod(base) {
+    var p = ((base | 0) * rankPeriodMul()) >> 8;
+    return p < 24 ? 24 : p;
   }
 
   /* ---------------------------------------------------------- 編隊記帳 */
@@ -315,7 +340,10 @@
   // 編隊：n 隻蛇行小蜂，相位錯開；第 3 隻（index 2）是標記個體，全滅時在它的死亡位置掉膠囊
   function spawnFan(x, y, opt) {
     opt = opt || {};
-    var n = opt.n || 5, made = [], i, grp = nextGrp++;
+    // R4：rank >= 4 的編隊多 1 隻、rank >= 6 多 2 隻（研究 §7-4 的界線是「不改生成事件」，
+    //      哪一欄生 fan 永遠不變，只有這一波的隻數會變；池滿就少生，NES 風）
+    var n = (opt.n || 5) + ((CR.Rank && CR.Rank.fanPlus) ? (CR.Rank.fanPlus() | 0) : 0);
+    var made = [], i, grp = nextGrp++;
     groups[grp] = { left: 0, dropped: false, dropX: x, dropY: y, total: n, id: grp };
     for (i = 0; i < n; i++) {
       var e = spawn('fan', x + i * 12, y, { grp: grp, marked: (i === 2), phase: (i * 20) & 255 });
@@ -335,14 +363,23 @@
     if (!sh || sh.alive === false) return null;
     if (e.x < -16 || e.x > 272) return null;
     var tx = sh.x + (sh.w >> 1), ty = sh.y + (sh.h >> 1);
-    if (rank() >= 3) {                                     // rank 3：預判射擊
+    if (rankLead()) {                                      // rank >= 3：預判射擊
       var v = ctx.shipVel();
       tx += (v.vx * LEAD_FRAMES) >> 4;                     // shipVel 以 1/16 px/幀 回報
       ty += (v.vy * LEAD_FRAMES) >> 4;
       tx = SH.clamp(tx, 0, 255); ty = SH.clamp(ty, 0, GAME_H - 1);
     }
     SH.aim(e.x + 6, e.y + 6, tx, ty, bulletSpeed(), tmpV);
-    return ctx.fire(e.x + 6, e.y + 6, tmpV.vx, tmpV.vy);
+    // R4：rank >= 5 一次 2 發（±8 度）、rank >= 7 一次 3 發（±10 度）。rank 0..4 完全照 R3。
+    var n = rankShotsN(), b0 = ctx.fire(e.x + 6, e.y + 6, tmpV.vx, tmpV.vy);
+    if (n > 1) {
+      var a0 = SH.atan2(ty - (e.y + 6), tx - (e.x + 6)), d = (n >= 3) ? 10 : 8, k;
+      for (k = 1; k < n; k++) {
+        SH.vel((a0 + ((k & 1) ? d : -d) * ((k + 1) >> 1)) & 255, bulletSpeed(), tmpV);
+        ctx.fire(e.x + 6, e.y + 6, tmpV.vx, tmpV.vy);
+      }
+    }
+    return b0;
   }
 
   // R3：新敵人的瞄準射擊（中心點依 size 算，8x8 與 16x16 都正確）
@@ -387,7 +424,7 @@
 
     } else if (e.kind === 'turret') {
       e.x = e.wx - ctx.stage.camX;                         // 貼地形：隨捲動往左
-      if (--e.fireT <= 0) { e.fireT = e.period || TURRET_PERIOD; turretFire(e); }
+      if (--e.fireT <= 0) { e.fireT = firePeriod(e.period || TURRET_PERIOD); turretFire(e); }
 
     } else if (e.kind === 'zig') {
       FX.vadd(e.xs, e.vx);
@@ -420,11 +457,11 @@
       e.x = e.wx - ctx.stage.camX;
       var cc = e.wx >> 3;
       e.y = e.flipV ? (ctx.stage.ceilAt(cc) * 8) : (GAME_H - ctx.stage.floorAt(cc) * 8 - 8);
-      if (--e.fireT <= 0) { e.fireT = e.period; aimedFire(e); }
+      if (--e.fireT <= 0) { e.fireT = firePeriod(e.period); aimedFire(e); }
 
     } else if (e.kind === 'moai') {                        // 石像：張嘴吐 6 顆環狀彈
       e.x = e.wx - ctx.stage.camX;
-      if (--e.fireT <= 0) { e.fireT = e.period; spread(e, MOAI_RING_N, 112, 8, RING_SPEED); }
+      if (--e.fireT <= 0) { e.fireT = firePeriod(e.period); spread(e, MOAI_RING_N, 112, 8, RING_SPEED); }
 
     } else if (e.kind === 'mouth') {                       // 石像的嘴：跟著本體
       if (e.link && e.link.alive) { e.x = e.link.x + 1; e.y = e.link.y + 4; }
@@ -467,7 +504,7 @@
 
     } else if (e.kind === 'turret4') {                     // 四方砲台：上下左右各 1 發
       e.x = e.wx - ctx.stage.camX;
-      if (--e.fireT <= 0) { e.fireT = e.period; spread(e, TUR4_N, (e.t >> 4) & 63, 64, bulletSpeed()); }
+      if (--e.fireT <= 0) { e.fireT = firePeriod(e.period); spread(e, TUR4_N, (e.t >> 4) & 63, 64, bulletSpeed()); }
     }
 
     // 離開畫面（或砲台被捲走）→ 回收，不計分、不算「編隊全滅」
@@ -691,7 +728,10 @@
     ROCK_VX: ROCK_VX,
     FAN_AMP: FAN_AMP,
     bulletSpeed: bulletSpeed,
+    firePeriod: firePeriod,
     rank: rank,
+    rankBulletMul: rankBulletMul, rankPeriodMul: rankPeriodMul,
+    rankShotsN: rankShotsN, rankLead: rankLead,
     make: make,
     init: function (c) { ctx = c; resetGroups(); },
     reset: resetGroups,

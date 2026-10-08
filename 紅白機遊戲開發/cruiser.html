@@ -43,24 +43,29 @@
 <script src="engine/nes_lint.js?v=230e6bcf"></script>
 <script src="engine/apu.js?v=5e88b263"></script>
 <script src="engine/music.js?v=17d7aefa"></script>
-<script src="engine/shmup.js?v=3c03a5a1"></script>
+<script src="engine/shmup.js?v=27ccc395"></script>
 <script src="engine/touch.js?v=144579cd"></script>
 <script src="engine/nes.js?v=4bed9ffa"></script>
 
 <!-- ===== 遊戲：games/cruiser「星塵巡航艦」（R2 宇宙巡航艦風格橫向射擊）=====
      載入順序：chr_ship（ship agent 精靈磚 0..127 + HUD）→ chr_world（stage agent 敵人磚 128..255 + 地形）
-     → song（audio）→ ship → stage1 / enemies / boss（stage）→ main（ship agent，最後一檔設 window.GAME）。
+     → song（audio）→ rank（R4 動態難度）→ ship → stage1 / enemies / boss（stage）
+     → bonus / credits / hiscore（R4 隱藏獎勵 / 結局名單 / 排行榜）→ main（最後一檔設 window.GAME）。
      新增檔案請同時加到這裡，tools/build.py --src cruiser.html 會自動內嵌。 -->
-<script src="games/cruiser/chr_ship.js?v=5a9a091e"></script>
-<script src="games/cruiser/chr_world.js?v=445029bb"></script>
-<script src="games/cruiser/song.js?v=54ae0711"></script>
-<script src="games/cruiser/ship.js?v=05a77894"></script>
-<script src="games/cruiser/enemies.js?v=b5b09829"></script>
+<script src="games/cruiser/chr_ship.js?v=3ddacb6a"></script>
+<script src="games/cruiser/chr_world.js?v=94c5597e"></script>
+<script src="games/cruiser/song.js?v=71ee390b"></script>
+<script src="games/cruiser/rank.js?v=5c8bb1cc"></script>
+<script src="games/cruiser/ship.js?v=73f82eb0"></script>
+<script src="games/cruiser/enemies.js?v=92fb06b8"></script>
 <script src="games/cruiser/boss.js?v=a791a26d"></script>
-<script src="games/cruiser/bosses.js?v=05428c2b"></script>
-<script src="games/cruiser/stages.js?v=88426166"></script>
-<script src="games/cruiser/stage_runtime.js?v=8e73f7d4"></script>
-<script src="games/cruiser/main.js?v=48c16611"></script>
+<script src="games/cruiser/bosses.js?v=bef8ac95"></script>
+<script src="games/cruiser/stages.js?v=81ad6b0d"></script>
+<script src="games/cruiser/stage_runtime.js?v=f7f321c8"></script>
+<script src="games/cruiser/bonus.js?v=23502c71"></script>
+<script src="games/cruiser/credits.js?v=f97b0c81"></script>
+<script src="games/cruiser/hiscore.js?v=d9dbb503"></script>
+<script src="games/cruiser/main.js?v=0e3a1f5b"></script>
 
 <script>
 // ---- 啟動：桌機整數放大置中 / 手機小數倍貼齊、鍵盤焦點、F 全螢幕、觸控覆蓋層版面 ----

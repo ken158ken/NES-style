@@ -80,15 +80,17 @@ def test_data(page):
         return { count: CR.STAGE_COUNT, len: CR.STAGES.length,
                  load: typeof CR.stage.load, index: CR.stage.index,
                  setLoop: typeof CR.stage.setLoop, loop: CR.stage.loop,
-                 keys: Object.keys(CR.Bosses).filter(function(k){ return k !== 'make'; }).sort() };
+                 keys: Object.keys(CR.Bosses).filter(function(k){
+                   return typeof CR.Bosses[k] === 'object' && CR.Bosses[k] && CR.Bosses[k].spawn; }).sort() };
     """)
-    eq('CR.STAGE_COUNT = 6', r['count'], 6)
-    eq('CR.STAGES 長度 7（index 0 空著）', r['len'], 7)
+    eq('CR.STAGE_COUNT = 7（R4 加了第 7 關魔王連戰）', r['count'], 7)
+    eq('CR.STAGES 長度 8（index 0 空著）', r['len'], 8)
     eq('CR.stage.load 是 function', r['load'], 'function')
     eq('CR.stage.setLoop 是 function', r['setLoop'], 'function')
     eq('開機載入關卡 1', r['index'], 1)
     eq('開機 loop = 0（第 1 輪）', r['loop'], 0)
-    eq('CR.Bosses 登記 6 隻魔王', r['keys'], ['bio', 'brain', 'core', 'eye', 'mirror', 'twin'])
+    eq('CR.Bosses 登記 6 隻魔王 + R4 的魔王連戰', r['keys'],
+       ['bio', 'brain', 'core', 'eye', 'mirror', 'rush', 'twin'])
 
     for n, (name, boss, cols, cam, minfree, music) in EXPECT.items():
         d = ev(page, """
@@ -445,10 +447,10 @@ def test_flow(page):
 
     r = ev(page, """
         CR.g.mode = 'play';
-        var s = CR.stage; s.load(6); s.restart(s.CAM_MAX);
+        var s = CR.stage; s.load(7); s.restart(s.CAM_MAX);
         CR.ship.invul = 1 << 28; CR.ship.lives = 9;
         var i;
-        for (i = 0; i < 5000; i++) {
+        for (i = 0; i < 20000; i++) {
           __nes.step(1);
           s.enemies.each(function (e) { if (e.boss && e.alive) e.hit(9); });
           if (window.GAME.state().mode === 'stageclear') break;
@@ -459,20 +461,26 @@ def test_flow(page):
         var msg = [9, 11, 13, 15].map(function (r2) { return CR.screenText(r2).trim(); });
         return { mode: g1.mode, msg: msg, endings: g1.endings, loop: g1.loop };
     """)
-    eq('打掉第 6 關魔王 + START → ENDING 畫面', r['mode'], 'ending')
+    eq('打掉第 7 關（魔王連戰）+ START → ENDING 畫面', r['mode'], 'ending')
     ok('ENDING 有 CONGRATULATIONS / ALL STAGE CLEAR / PRESS START',
        'CONGRATULATIONS' in r['msg'][0] and 'ALL STAGE CLEAR' in r['msg'][1] and 'PRESS START' in r['msg'][3],
        r['msg'])
     shot(page, SHOTS / 'flow_ending.png')
 
+    # R4：ENDING → 工作人員名單 → （上榜才有的）名字輸入 → 排行榜 → 第二輪
     r = ev(page, """
         var B = NES.Input.BTN;
-        NES.Input.inject(B.START, 1); __nes.step(1); NES.Input.inject(0, 1); __nes.step(4);
+        function tap() { NES.Input.inject(B.START, 1); __nes.step(1);
+                         NES.Input.inject(0, 1); __nes.step(4); return window.GAME.state().mode; }
+        var modes = [], guard = 0;
+        while (window.GAME.state().mode !== 'play' && guard++ < 60) { modes.push(tap()); }
         var g = window.GAME.state();
         return { mode: g.mode, stage: g.stage.index, loop: g.loop, sloop: g.stage.loop,
-                 scale: CR.stage.params.bulletScale, camX: g.camX, hud: g.hud };
+                 modes: modes, scale: CR.stage.params.bulletScale, camX: g.camX, hud: g.hud };
     """)
-    eq('ENDING 按 START → 第二輪從關卡 1 開始', r['stage'], 1)
+    ok('ENDING → credits（工作人員名單）→ scores（排行榜）', 'credits' in r['modes'] and 'scores' in r['modes'],
+       r['modes'])
+    eq('一路 START → 第二輪從關卡 1 開始', r['stage'], 1)
     eq('第二輪 loop = 1', r['loop'], 1)
     eq('CR.stage.loop 同步 = 1', r['sloop'], 1)
     ok('第二輪關卡 1 的敵彈倍率比第一輪高（%d > 256）' % r['scale'], r['scale'] > 256, r['scale'])

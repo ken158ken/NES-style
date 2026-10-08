@@ -53,6 +53,8 @@
       inv: 0, coins: 0, lives: 3, score: 0, power: 0,
       // R3 star-w2：無敵星（熔岩 / 尖刺 / 火柱 / 坑都不致命，撞到敵人直接打倒）
       star: 0, stars: 0, onMover: null, pitSaves: 0,
+      // R4 star-meta（F4-3）：副武器（0 無 / 1 火球 / 2 飛鏢）、擁有位元、彈藥、連發冷卻
+      sub: 0, subOwned: 0, subAmmo: 0, subCool: 0, subShots: 0,
       // --- 內部（定點數）---
       px: FX.Vec(0), py: FX.Vec(0), vxA: FX.Acc(0), vyA: FX.Acc(0),
       jumpS: null,
@@ -76,6 +78,8 @@
     h.anim = 0; h.animTimer = 0;
     h.inv = 0; h.hurtTimer = 0; h.deadTimer = 0; h.deadDone = false; h.dropThru = 0;
     h.star = 0; h.onMover = null;
+    h.subCool = 0;                                 // R4 star-meta（F4-3）：副武器的連發冷卻歸零
+                                                   // （sub / subOwned / subAmmo 跨關 + 跨死亡保留）
     h.prevFeet = (y | 0) + H;
     h.jumpApexSub = h.py.sub; h.jumpStartSub = h.py.sub;
     sync(h);
@@ -221,6 +225,18 @@
     var aHeld = !hurting && input.held(BTN.A);
     var aPress = !hurting && input.pressed(BTN.A);
     var dir = (right ? 1 : 0) - (left ? 1 : 0);
+
+    /* R4 star-meta（F4-3）插入：副武器 hook
+     *   B **按下的瞬間** = 發射（按住 B 仍然是跑 ⇒ 跑步 / 跳躍手感一幀不差，
+     *   研究 03/02「SMB3 的 B 鍵就是跑 + 丟共用」）；↓ + B 或 SELECT = 切換。
+     *   真正的邏輯全在 games/star/subweapon.js，本檔只傳三個布林值。 */
+    if (ST.SubWeapon && ST.SubWeapon.heroStep) {
+      ST.SubWeapon.heroStep(h, g, {
+        down: down,
+        bPress: !hurting && input.pressed(BTN.B),
+        selectPress: !hurting && input.pressed(BTN.SELECT)
+      });
+    }
 
     if (h.dropThru > 0) h.dropThru--;
 

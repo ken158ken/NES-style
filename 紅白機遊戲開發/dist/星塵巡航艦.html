@@ -4013,6 +4013,24 @@
     return this.push(s.x, s.y, s.tile, s.pal, s.prio,
       (s.flipH ? 1 : 0) | (s.flipV ? 2 : 0) | (s.behind ? 4 : 0));
   };
+  /* R4 star-w4：16×16 精靈（8×16 模式下 = 左右兩個 8×16）的便利 add。
+   * **水平翻轉時必須「兩塊各自翻 + 左右對調」**，只翻不調會把左右半邊接反
+   * （R3 的 games/star/enemies.js 曾因此畫錯），所以由本層統一處理。
+   * 低階版 `push16(x, y, tileL, tileR, pal, prio, flags)`；flags bit0 flipH / bit1 flipV / bit2 behind。
+   * 回傳**實際收下的塊數**（0..2）：越界的那一塊照 `add()` 的規則略過並計 `skipped`。 */
+  OAM.prototype.push16 = function (x, y, tileL, tileR, pal, prio, flags) {
+    var fl = (flags & 1) !== 0;
+    var a = this.push(x, y, fl ? tileR : tileL, pal, prio, flags);
+    var b = this.push(x + 8, y, fl ? tileL : tileR, pal, prio, flags);
+    return (a ? 1 : 0) + (b ? 1 : 0);
+  };
+  /** 加入一個 16×16 精靈 `{x, y, tileL, tileR | tiles:[L,R], pal, flipH, flipV, behind, prio}`。 */
+  OAM.prototype.add16 = function (s) {
+    var tl = s.tileL, tr = s.tileR;
+    if (s.tiles) { tl = s.tiles[0]; tr = s.tiles[1]; }
+    return this.push16(s.x, s.y, tl, tr, s.pal, s.prio,
+      (s.flipH ? 1 : 0) | (s.flipV ? 2 : 0) | (s.behind ? 4 : 0));
+  };
   /** 排序 + 輪替 + 寫進 OAM；回傳實際寫入的精靈數（其餘計入 `dropped`）。 */
   OAM.prototype.end = function () {
     var n = this.n, cnt = this._cnt, gs = this._gs, gl = this._gl, ord = this._ord, pr = this._pr;
@@ -5472,7 +5490,8 @@
 
 <!-- ===== 遊戲：games/cruiser「星塵巡航艦」（R2 宇宙巡航艦風格橫向射擊）=====
      載入順序：chr_ship（ship agent 精靈磚 0..127 + HUD）→ chr_world（stage agent 敵人磚 128..255 + 地形）
-     → song（audio）→ ship → stage1 / enemies / boss（stage）→ main（ship agent，最後一檔設 window.GAME）。
+     → song（audio）→ rank（R4 動態難度）→ ship → stage1 / enemies / boss（stage）
+     → bonus / credits / hiscore（R4 隱藏獎勵 / 結局名單 / 排行榜）→ main（最後一檔設 window.GAME）。
      新增檔案請同時加到這裡，tools/build.py --src cruiser.html 會自動內嵌。 -->
 <script>/* games/cruiser/chr_ship.js */
 /*
@@ -5541,6 +5560,12 @@
   var LASER_H = ['........', '.....2..', '222223..', '3333332.', '3333332.', '222223..', '.....2..', '........'];
   var MISSILE0 = ['........', '........', '...222..', '.1222223', '.1222223', '...222..', '........', '........'];
   var MISSILE1 = ['........', '........', '...222..', '11222223', '11222223', '...222..', '........', '........'];
+  /* R4 新裝備「波動（ripple）」：會往上下擴張的能量環。
+     RIPPLE_M = 環的中段（可垂直重複）、RIPPLE_T = 上端弧（下端用 flipV）、
+     RIPPLE_1 = 剛發射時的單格小環。調色盤 1（紅 / 黃 / 白）。 */
+  var RIPPLE_1 = ['........', '..3223..', '.32..23.', '.2....2.', '.2....2.', '.32..23.', '..3223..', '........'];
+  var RIPPLE_T = ['...33...', '..3223..', '.32..23.', '32....23', '2......2', '2......2', '2......2', '3......3'];
+  var RIPPLE_M = ['2......2', '3......3', '2......2', '3......3', '3......3', '2......2', '3......3', '2......2'];
 
   /* ================================================== 精靈：爆炸 16×16 四幀 */
   var EXP0 = [
@@ -5590,6 +5615,7 @@
   put(SPR, 'S_BULLET', BULLET); put(SPR, 'S_BULLET_D', BULLET_D);
   put(SPR, 'S_LASER', LASER); put(SPR, 'S_LASER_H', LASER_H);
   put(SPR, 'S_MISSILE0', MISSILE0); put(SPR, 'S_MISSILE1', MISSILE1);
+  put(SPR, 'S_RIPPLE1', RIPPLE_1); put(SPR, 'S_RIPPLE_T', RIPPLE_T); put(SPR, 'S_RIPPLE_M', RIPPLE_M);
   var exps = [e0, e1, e2, e3], fi, pi, PART = ['TL', 'TR', 'BL', 'BR'];
   for (fi = 0; fi < 4; fi++) for (pi = 0; pi < 4; pi++) put(SPR, 'S_EXP' + fi + '_' + PART[pi], exps[fi][pi]);
   put(SPR, 'S_CAP_R0', CAP_R0); put(SPR, 'S_CAP_R1', CAP_R1); put(SPR, 'S_CAP_B', CAP_B);
@@ -6786,7 +6812,10 @@
     5: { bg1: [0x03, 0x13, 0x23], bg2: [0x09, 0x19, 0x29], bg3: [0x04, 0x14, 0x34],
          spr2: [0x0F, 0x2A, 0x3A], spr3: [0x0F, 0x14, 0x34] },      // 生物洞窟（紫 / 綠）
     6: { bg1: [0x01, 0x11, 0x31], bg2: [0x02, 0x12, 0x32], bg3: [0x0C, 0x1C, 0x3C],
-         spr2: [0x0F, 0x12, 0x32], spr3: [0x0F, 0x16, 0x36] }       // 敵母艦（鋼藍 / 青綠核心室）
+         spr2: [0x0F, 0x12, 0x32], spr3: [0x0F, 0x16, 0x36] },      // 敵母艦（鋼藍 / 青綠核心室）
+    // R4 第 7 關「魔王連戰」：深紫連戰室 + 金色魔王（全作唯一用到金黃 $28/$38 的背景組）
+    7: { bg1: [0x03, 0x13, 0x23], bg2: [0x04, 0x14, 0x24], bg3: [0x08, 0x18, 0x38],
+         spr2: [0x0F, 0x28, 0x38], spr3: [0x0F, 0x14, 0x34] }
   };
 
   CR.CHR_WORLD = {
@@ -6841,7 +6870,7 @@
  *   CR.Audio.init(nes)          — 綁 driver、註冊全部音效（冪等）
  *   CR.Audio.play(key)          — key 見下面曲目表（CR.Audio.KEYS 是完整清單）：
  *                                 'title' | 'stage1'~'stage6' | 'boss' | 'boss_final' |
- *                                 'clear' / 'stageclear' | 'ending' | 'gameover' | 'extend'
+ *                                 'clear' / 'stageclear' | 'ending' | 'credits' | 'gameover' | 'extend'
  *   CR.Audio.stop()             — 停止音樂（音效不受影響；要一起停用 stopAll()）
  *   CR.Audio.sfx(name, opt)     — name 見 CR.Audio.PRIORITY；opt 轉給 driver.sfx（可覆寫 channels / priority）
  *   CR.Audio.tick(nes)          — **每幀呼叫一次，放在 game.update() 的最後**
@@ -6874,6 +6903,8 @@
  *   stage6      C 大調→C 小調         5     16      20   180    是   p1 p2(琶音) tri noi     26.6 s
  *   boss_final  A 小調 / 減七          4     16      16   225    是   p1+p2 交錯 tri noi      17.0 s
  *   ending      C 大調                7     16      13   128.6  否   p1 p2(和弦) tri noi     24.2 s
+ *   ─── R4（第 7 關魔王連戰 + 結局名單，cruiser-r4 agent；同樣全部原創）──────────────
+ *   credits     F 大調                6     16      14   150    否   p1 p2(和弦) tri noi     22.4 s
  *   stageclear  = clear 的別名（關卡過場號角沿用既有的 4 秒號角，stages agent 兩個鍵都能叫）
  *   （BPM = 3600 / (speed × 4)，一小節 16 row = 4 拍；stage4 是 3/4 拍，一小節 12 row = 3 拍）
  *   長度 = 小節 × rows × speed ÷ 60.0988 幀（NTSC）。
@@ -7779,17 +7810,73 @@
     };
   })();
 
+  /* ============================================ ⑭ credits「星塵之後」（R4）
+   * F 大調、150 BPM（speed 6）、14 小節 = **22.37 s**、**不循環**。
+   * 給第 7 關全破後的工作人員名單用（credits.js 捲 16 秒 + 停 2 秒 ⇒ 曲子比畫面稍長，
+   * 不會在名單還在捲的時候就沒聲音）。
+   * 編曲：p1 懷舊主旋律（fanfare 長音不衰）／ p2 和弦琶音墊 ／ tri 行進低音
+   *       ／ noi 輕鼓（最後兩小節退場，只留長音收尾）。全部原創。
+   */
+  var CRD_LEAD = flat([
+    'F-5 .   A-5 .   C-6 .   .   .   A-5 .   F-5 .   .   .   .   .  ',   //  1 F
+    'A#5 .   D-6 .   F-6 .   .   .   D-6 .   A#5 .   .   .   .   .  ',   //  2 Bb
+    'C-6 .   E-6 .   G-6 .   E-6 .   C-6 .   .   .   .   .   .   .  ',   //  3 C
+    'A-5 .   .   .   F-5 .   .   .   C-6 .   .   .   .   .   .   .  ',   //  4 F
+    'D-6 .   F-6 .   A-6 .   F-6 .   D-6 .   A-5 .   .   .   .   .  ',   //  5 Dm
+    'A#5 .   D-6 .   F-6 .   D-6 .   A#5 .   .   .   .   .   .   .  ',   //  6 Bb
+    'C-6 .   E-6 .   G-6 .   .   .   E-6 .   C-6 .   .   .   .   .  ',   //  7 C
+    'F-6 .   .   .   C-6 .   A-5 .   F-5 .   .   .   .   .   .   .  ',   //  8 F
+    'A-5 .   C-6 .   E-6 .   C-6 .   A-5 .   .   .   .   .   .   .  ',   //  9 Am
+    'A#5 .   .   .   D-6 .   .   .   F-6 .   D-6 .   A#5 .   .   .  ',   // 10 Bb
+    'C-6 .   .   .   E-6 .   .   .   G-6 .   .   .   E-6 .   C-6 .  ',   // 11 C
+    'D-6 .   .   .   F-6 .   .   .   A-6 .   .   .   F-6 .   D-6 .  ',   // 12 Dm
+    'A#5 .   C-6 .   D-6 .   E-6 .   F-6 .   .   .   .   .   .   .  ',   // 13 Bb -> C
+    'F-6 .   .   .   .   .   .   .   .   .   .   .   .   .   .   .  '    // 14 F 長音收尾
+  ]);
+  var CRD_WALK = 'R .  5 .  O .  5 .  R .  5 .  O .  5 .';
+  var CRD_HOLD = 'R .  .  .  O .  .  .  R .  .  .  .  .  .  .';
+  var CRD_ROOTS = ['F-2', 'A#2', 'C-3', 'F-2', 'D-3', 'A#2', 'C-3', 'F-2',
+    'A-2', 'A#2', 'C-3', 'D-3', 'A#2', 'F-2'];
+  var CRD_BASS = (function () {
+    var out = [], i;
+    for (i = 0; i < CRD_ROOTS.length; i++) out.push(bassBar(CRD_ROOTS[i], i >= 12 ? CRD_HOLD : CRD_WALK));
+    return out;
+  })();
+  var F3Mc = ['F-3', MAJ3], Bb3Mc = ['A#3', MAJ3], C4Mc = ['C-4', MAJ3];
+  var D3mc = ['D-3', MIN3], A2mc = ['A-2', MIN3];
+  var CRD_CH = [ch2(F3Mc), ch2(Bb3Mc), ch2(C4Mc), ch2(F3Mc), ch2(D3mc), ch2(Bb3Mc), ch2(C4Mc),
+    ch2(F3Mc), ch2(A2mc), ch2(Bb3Mc), ch2(C4Mc), ch2(D3mc), ch2(Bb3Mc, C4Mc), ch2(F3Mc)];
+
+  var CREDITS = (function () {
+    var lead = slice(rows(CRD_LEAD, { inst: 'fanfare', vol: 14, duty: 1 }), BAR);
+    var pad = arpBars(CRD_CH, BAR, { inst: 'pad', vol: 9, duty: 0 });
+    var drums = [], i;
+    for (i = 0; i < 14; i++) {
+      if (i === 0) drums.push(map(BAR, { 0: CY(12), 8: H(5), 12: S(10) }));
+      else if (i >= 12) drums.push(map(BAR, { 0: CY(11) }));          // 最後兩小節：只有一擊銅鈸
+      else if (i % 4 === 3) drums.push(DRUM_F);
+      else drums.push((i % 2) ? DRUM_B : DRUM_A);
+    }
+    var t = assemble({ p1: lead, p2: pad, tri: CRD_BASS, noi: drums }, 14);
+    return {
+      name: '星塵巡航艦 CREDITS「星塵之後」', speed: 6, rows: BAR, loop: 0,
+      instruments: INST, patterns: t.patterns, order: t.order
+    };
+  })();
+
   var SONGS = {
     title: TITLE, stage1: STAGE1, boss: BOSS, clear: CLEAR, gameover: GAMEOVER, extend: EXTEND,
     // R3：6 關擴充
     stage2: STAGE2, stage3: STAGE3, stage4: STAGE4, stage5: STAGE5, stage6: STAGE6,
     boss_final: BOSS_FINAL, ending: ENDING,
+    // R4：第 7 關全破的工作人員名單曲
+    credits: CREDITS,
     stageclear: CLEAR              // 別名：關卡過場號角就是既有的 clear（4.0 s 夠用，不另外寫一首）
   };
   var LOOPED = {
     title: true, stage1: true, boss: true, clear: false, gameover: false, extend: false,
     stage2: true, stage3: true, stage4: true, stage5: true, stage6: true,
-    boss_final: true, ending: false, stageclear: false
+    boss_final: true, ending: false, credits: false, stageclear: false
   };
 
   /* ================================================================= 音效 */
@@ -7998,6 +8085,178 @@
 })();
 
 </script>
+<script>/* games/cruiser/rank.js */
+/*
+ * games/cruiser/rank.js — 《星塵巡航艦》R4：rank 動態難度（CR.Rank）
+ * ---------------------------------------------------------------------------
+ * 擁有者：cruiser-r4 agent（R4）｜ 零相依（只讀 CR.ship / CR.stage，缺席也不會 throw）
+ * 研究依據：docs/research/03_經典遊戲深度解析/16_宇宙巡航艦_沙羅曼蛇.md §7-4（rank `$17`）、
+ *           §7-5（loop `$1A`）、docs/research/11_橫向射擊設計與技術.md §13（動態難度 rank）。
+ *
+ * ── 公式（每幀從頭重算，沒有累加器 ⇒ 不會漂移、死亡自動掉下來）──────────────
+ *   equip  = (LASER | DOUBLE | RIPPLE ? 1 : 0) + Option 數 + (護盾 ? 1 : 0) + (SPEED >= 4 ? 1 : 0)
+ *   surv   = equip >= 1 ? min(3, floor(存活幀 / 1200)) : 0      // **裸機不會隨時間變難**
+ *   loopB  = min(4, loop × 2)                                   // 第二輪 rank 起點更高（§7-5）
+ *   pen    = 死亡當下設 3，之後每存活 600 幀回補 1（Gradius IV 的「死亡降 rank」修正）
+ *   rank   = clamp(0, 7, equip + surv + loopB − pen)
+ *
+ * 「裸機不隨時間變難」是刻意的（研究 11 §13.2「Gradius 症候群」）：rank 的本意是
+ *   「難度跟著火力走」，玩家剛死完一無所有時不該被加壓。副作用是 R3 的既有測試
+ *   （砲台週期 90 / 130、敵彈 2.0 px/幀）在裸機狀態下**數字一字不變**。
+ *
+ * ── rank 改什麼（研究 §7-4：只改「敵人怎麼打」，不改「敵人是誰」）────────────
+ *   | rank | 敵彈速倍率 | 砲台週期倍率 | 瞄準砲台一次幾發 | fan 編隊 +n | 預判 |
+ *   |---|---|---|---|---|---|
+ *   | 0 | 1.000 | 1.000 | 1 | 0 | — |
+ *   | 1 | 1.000 | 1.000 | 1 | 0 | — |
+ *   | 2 | 1.250 | 1.000 | 1 | 0 | — |
+ *   | 3 | 1.250 | 0.938 | 1 | 0 | ✓ |
+ *   | 4 | 1.313 | 0.875 | 1 | +1 | ✓ |
+ *   | 5 | 1.313 | 0.813 | 2（扇形 ±8） | +1 | ✓ |
+ *   | 6 | 1.375 | 0.750 | 2 | +2 | ✓ |
+ *   | 7 | 1.438 | 0.688 | 3（扇形 ±10） | +2 | ✓ |
+ *   rank 0 / 1 的倍率全部是 1.000 ⇒ 開局與復活後的手感與 R3 完全相同。
+ *   **出怪表（哪一欄生什麼）永遠不變**，只有「同一波 fan 的隻數」會多 1~2 隻（任務卡 ①
+ *   明文要求 rank 影響編隊；研究的界線是「不改生成事件」，欄位與種類本輪一個都沒動）。
+ *
+ * ── 設定可關 ────────────────────────────────────────────────────────────────
+ *   `?rank=0` 或 `CR.Rank.setEnabled(false)` ⇒ 退回 R3 行為（rank = CR.ship.rank()，
+ *   只有「>= 2 敵彈 ×1.25 / >= 3 預判」兩道門檻，週期 / 發數 / 編隊都不動）。
+ *   設定存進 `localStorage.cruiser_rank`（讀不到就用預設 true）。
+ */
+(function () {
+  'use strict';
+  var CR = window.CR = window.CR || {};
+
+  var MAX = 7;
+  var UP_FRAMES = 1200;                 // 存活 20 秒 +1
+  var UP_CAP = 3;
+  var LOOP_STEP = 2, LOOP_CAP = 4;
+  var DEATH_PEN = 3, PEN_RECOVER = 600; // 死亡罰 3，每存活 10 秒回補 1
+  var SPEED_RANK_AT = 4;                // SPEED >= 4 算 1 點火力
+
+  // 8.8 倍率表（256 = 1.000）
+  var BULLET_MUL = [256, 256, 320, 320, 336, 336, 352, 368];
+  var PERIOD_MUL = [256, 256, 256, 240, 224, 208, 192, 176];
+  var SHOTS_N = [1, 1, 1, 1, 1, 2, 2, 3];       // 瞄準砲台一次幾發
+  var FAN_PLUS = [0, 0, 0, 0, 1, 1, 2, 2];      // fan 編隊隻數加成
+  var LEAD_AT = 3;                              // rank >= 3 預判射擊（R3 既有門檻）
+  var KEY = 'cruiser_rank';
+
+  function clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
+
+  var S = {
+    enabled: true, cur: 0, equip: 0, surv: 0, loopB: 0, pen: 0,
+    alive: 0, loop: 0, deaths: 0, peak: 0, frames: 0
+  };
+
+  function loadPref() {
+    try {
+      var v = window.localStorage.getItem(KEY);
+      if (v === '0' || v === 'off' || v === 'false') return false;
+      return true;
+    } catch (e) { return true; }
+  }
+  function savePref(on) {
+    try { window.localStorage.setItem(KEY, on ? '1' : '0'); } catch (e) { }
+  }
+  (function queryPref() {
+    S.enabled = loadPref();
+    try {
+      var q = new window.URLSearchParams(window.location.search);
+      var r = q.get('rank');
+      if (r === '0' || r === 'off') S.enabled = false;
+      else if (r === '1' || r === 'on') S.enabled = true;
+    } catch (e) { /* about:blank */ }
+  })();
+
+  function shipRank() {                 // R3 的裝備 rank（0..4），關掉動態難度時就用它
+    var s = CR.ship;
+    if (s && typeof s.rank === 'function') { var r = s.rank() | 0; return clamp(r, 0, 3); }
+    return 0;
+  }
+
+  function equipOf() {
+    var s = CR.ship;
+    if (!s || !s.power) return 0;
+    var p = s.power;
+    var main = (p.laser || p.double || p.ripple) ? 1 : 0;
+    return main + (p.option | 0) + (p.shield > 0 ? 1 : 0) + ((s.speed | 0) >= SPEED_RANK_AT ? 1 : 0);
+  }
+
+  function recompute() {
+    S.equip = equipOf();
+    S.surv = (S.equip >= 1) ? Math.min(UP_CAP, (S.alive / UP_FRAMES) | 0) : 0;
+    S.loopB = Math.min(LOOP_CAP, S.loop * LOOP_STEP);
+    S.cur = clamp(S.equip + S.surv + S.loopB - S.pen, 0, MAX);
+    if (S.cur > S.peak) S.peak = S.cur;
+    return S.cur;
+  }
+
+  var R = {
+    MAX: MAX, UP_FRAMES: UP_FRAMES, UP_CAP: UP_CAP,
+    LOOP_STEP: LOOP_STEP, LOOP_CAP: LOOP_CAP,
+    DEATH_PEN: DEATH_PEN, PEN_RECOVER: PEN_RECOVER, LEAD_AT: LEAD_AT,
+    BULLET_MUL: BULLET_MUL, PERIOD_MUL: PERIOD_MUL, SHOTS_N: SHOTS_N, FAN_PLUS: FAN_PLUS,
+    KEY: KEY,
+
+    // 每幀一次（stage_runtime.update 的開頭呼叫；只在 play 推進）
+    update: function () {
+      S.frames++;
+      var s = CR.ship;
+      if (s && s.alive !== false) {
+        S.alive++;
+        if (S.pen > 0 && (S.alive % PEN_RECOVER) === 0) S.pen--;
+      }
+      return recompute();
+    },
+    // 死亡：存活計時歸零 + 罰 3（裝備本來就會被 ship.reset(true) 清掉）
+    onDeath: function () {
+      S.deaths++; S.alive = 0; S.pen = DEATH_PEN;
+      return recompute();
+    },
+    // 新一局 / 過關 / 換輪
+    reset: function (hard) {
+      S.alive = 0; S.pen = 0;
+      if (hard) { S.deaths = 0; S.peak = 0; S.loop = 0; S.frames = 0; }
+      return recompute();
+    },
+    setLoop: function (n) { S.loop = Math.max(0, n | 0); return recompute(); },
+    loop: function () { return S.loop; },
+
+    value: function () { return S.enabled ? recompute() : shipRank(); },
+    legacy: shipRank,
+    enabled: function () { return !!S.enabled; },
+    setEnabled: function (on, persist) {
+      S.enabled = !!on;
+      if (persist !== false) savePref(S.enabled);
+      return S.enabled;
+    },
+    toggle: function () { return R.setEnabled(!S.enabled); },
+
+    // ---- 效果查詢（enemies.js / stages 用）----
+    bulletMul: function () { var r = R.value(); return S.enabled ? BULLET_MUL[r] : (r >= 2 ? 320 : 256); },
+    periodMul: function () { return S.enabled ? PERIOD_MUL[R.value()] : 256; },
+    shotsN: function () { return S.enabled ? SHOTS_N[R.value()] : 1; },
+    fanPlus: function () { return S.enabled ? FAN_PLUS[R.value()] : 0; },
+    lead: function () { return R.value() >= LEAD_AT; },
+
+    state: function () {
+      recompute();
+      return {
+        enabled: !!S.enabled, rank: R.value(), dyn: S.cur, equip: S.equip, surv: S.surv,
+        loopBonus: S.loopB, penalty: S.pen, alive: S.alive, deaths: S.deaths,
+        peak: S.peak, loop: S.loop,
+        bulletMul: R.bulletMul(), periodMul: R.periodMul(), shots: R.shotsN(),
+        fanPlus: R.fanPlus(), lead: R.lead()
+      };
+    }
+  };
+
+  CR.Rank = R;
+})();
+
+</script>
 <script>/* games/cruiser/ship.js */
 /*
  * games/cruiser/ship.js — 《星塵巡航艦》自機 / 武器 / 選項 / 能量表 / 爆炸特效
@@ -8065,6 +8324,11 @@
   var MAX_SPEED = 5;
 
   var SHOT_V = FX.v88(7, 0);                            // [源] 標準彈 7 px/幀
+  // R4 新裝備「波動（ripple）」—— 研究 11 §14.1 / 16 §8：沙羅曼蛇用 Ripple 取代 DOUBLE，
+  // 「會擴張的能量環，遠處比近處好打」。本作：5 px/幀、每 6 幀長高一節（8 → 24 px），
+  // 不貫通（命中即消失）、傷害 1，與 DOUBLE / LASER 互斥。能量表格 3 第二次按 B 由 DOUBLE 升級而來。
+  var RIPPLE_V = FX.v88(5, 0);
+  var RIPPLE_GROW = 6, RIPPLE_MAX_SEG = 3, RIPPLE_SEG = 8;
   var LASER_V = FX.v88(12, 0);                          // [源] 雷射 12 px/幀
   var DIAG_VX = FX.v88(4, 0), DIAG_VY = -FX.v88(4, 0);  // [源] DOUBLE (+4, −4)
   var MIS_FLY_VX = FX.v88(0, 128), MIS_FLY_VY = FX.v88(2, 0);   // [源] 空中 (+0.5, +2)
@@ -8090,7 +8354,12 @@
   var CLEAR_CAPSULE_EVERY = 16;                         // [源] 每第 16 顆 = 清屏
   var HI_KEY = 'cruiser_hi';
 
-  var K = { SHOT: 0, DIAG: 1, LASER: 2, MISSILE: 3 };
+  var K = { SHOT: 0, DIAG: 1, LASER: 2, MISSILE: 3, RIPPLE: 4 };
+  // R4：Option 編隊（SELECT 循環）—— 0 跟隨（R2 原行為）/ 1 固定 / 2 旋轉
+  var OPT_MODE = { TRAIL: 0, FIXED: 1, ORBIT: 2 };
+  var OPT_MODE_NAME = ['TRAIL', 'FIXED', 'ORBIT'];
+  var OPT_FIXED_DX = [-24, -44];        // 固定編隊：船後方兩個定點
+  var OPT_ORBIT_R = 22, OPT_ORBIT_STEP = 3;   // 旋轉編隊：半徑 22 px、每幀 3/256 圈（約 85 幀一圈）
   var GAUGE_MAX = 6;
   var GAUGE_NAME = ['', 'SPEED', 'MISSILE', 'DOUBLE', 'LASER', 'OPTION', '?'];
   // QA R2 P2-1：5 字標籤 6 格相連會擠成 `SPEEDMISSLDOUBL…`；改成 4 欄一格（3 字 + 1 空欄），
@@ -8144,7 +8413,7 @@
       // ---- 契約欄位 ----
       x: 0, y: 0, w: BOX_W, h: BOX_H,
       alive: true, speed: 1,
-      power: { missile: false, double: false, laser: false, option: 0, shield: 0 },
+      power: { missile: false, double: false, laser: false, ripple: false, option: 0, shield: 0 },
       gauge: 0, shots: [], options: [],
       invul: 0, lives: START_LIVES, score: 0, hi: loadHi(),
       // ---- 內部 ----
@@ -8155,7 +8424,9 @@
       deathTimer: 0, deathDone: false, debris: [],
       frames: 0, anim: 0, optAnim: 0,
       extendAt: EXTEND_EVERY, shotId: 1,
-      capsules: 0, deaths: 0, fired: 0
+      capsules: 0, deaths: 0, fired: 0,
+      // R4：Option 編隊模式（玩家偏好，死亡 / 過關都不重設）
+      optMode: OPT_MODE.TRAIL, optSwitches: 0, optT: 0
     };
     for (i = 0; i < SHOTS + MISSILES; i++) s.shots.push(newShot());
     for (i = 0; i < DEBRIS; i++) s.debris.push({ alive: false, px: FX.Vec(0), py: FX.Vec(0), vx: 0, vy: 0, t: 0, tile: 0, x: 0, y: 0 });
@@ -8179,6 +8450,7 @@
       if (hard) {
         s.speed = 1; s.gauge = 0;
         s.power.missile = false; s.power.double = false; s.power.laser = false;
+        s.power.ripple = false;
         s.power.option = 0; s.power.shield = 0;
       }
       s.place(SPAWN_X, SPAWN_Y);
@@ -8192,13 +8464,44 @@
 
     /* ------------------------------------------------------ Option 位置 */
     // [源] 沒有 Option 時兩個槽仍每幀更新座標（撿到當下就位）
+    // R4：三種編隊 —— TRAIL（[源] 位置歷史環，R2 原行為）/ FIXED（船後定點）/ ORBIT（繞船旋轉）
+    function trig(fn, a) {
+      var SH = NES.SH;
+      if (SH && SH[fn]) return SH[fn](a & 255);
+      return Math.round(256 * (fn === 'sin' ? Math.sin(a * Math.PI / 128) : Math.cos(a * Math.PI / 128)));
+    }
     s.syncOptions = function () {
-      for (var j = 0; j < MAX_OPTION; j++) {
-        var o = s.options[j];
+      var mode = s.optMode | 0, j, o, h, a;
+      for (j = 0; j < MAX_OPTION; j++) {
+        o = s.options[j];
         o.on = j < s.power.option;
-        var h = (s.head - OPT_LAG[j]) % RING; if (h < 0) h += RING;
-        o.x = s.ring[h * 2]; o.y = s.ring[h * 2 + 1];
+        if (mode === OPT_MODE.FIXED) {
+          o.x = clamp(s.sx + OPT_FIXED_DX[j], -8, 248);
+          o.y = s.sy;
+        } else if (mode === OPT_MODE.ORBIT) {
+          a = (s.optT * OPT_ORBIT_STEP + j * 128) & 255;
+          o.x = clamp(s.sx + ((trig('cos', a) * OPT_ORBIT_R) >> 8), -8, 248);
+          o.y = clamp(s.sy + ((trig('sin', a) * OPT_ORBIT_R) >> 8), -8, 200);
+        } else {
+          h = (s.head - OPT_LAG[j]) % RING; if (h < 0) h += RING;
+          o.x = s.ring[h * 2]; o.y = s.ring[h * 2 + 1];
+        }
       }
+    };
+    s.optModeName = function () { return OPT_MODE_NAME[s.optMode | 0] || 'TRAIL'; };
+    // SELECT（遊戲進行中）/ 手機「編隊」鍵 → 循環切換；回傳新的模式名稱
+    s.cycleOptMode = function () {
+      s.optMode = ((s.optMode | 0) + 1) % OPT_MODE_NAME.length;
+      s.optSwitches++;
+      s.syncOptions();
+      return s.optModeName();
+    };
+    s.setOptMode = function (m) {
+      if (typeof m === 'string') m = OPT_MODE_NAME.indexOf(m.toUpperCase());
+      if (m < 0 || m === undefined || m === null) return s.optModeName();
+      s.optMode = (m | 0) % OPT_MODE_NAME.length;
+      s.syncOptions();
+      return s.optModeName();
     };
 
     /* ------------------------------------------------------------ 移動 */
@@ -8261,6 +8564,7 @@
       t.vx = vx; t.vy = vy; t.x = x | 0; t.y = y | 0;
       t.w = 4; t.h = 4; t.dmg = DMG_SHOT; t.len = 1; t.crawl = false; t.anim = 0;
       if (kind === K.LASER) { t.w = LASER_STEP; t.h = 4; }
+      if (kind === K.RIPPLE) { t.w = RIPPLE_SEG; t.h = RIPPLE_SEG; t.len = 1; }
       if (kind === K.MISSILE) { t.dmg = DMG_MISSILE; }
       return t;
     }
@@ -8272,6 +8576,9 @@
         if (free > 0) {
           if (s.power.laser) {
             spawn(K.LASER, src, ox + 16, oy + 2, LASER_V, 0); made++;
+            if (src === 0) sfx('laser');
+          } else if (s.power.ripple) {
+            spawn(K.RIPPLE, src, ox + 14, oy + 2, RIPPLE_V, 0); made++;
             if (src === 0) sfx('laser');
           } else {
             spawn(K.SHOT, src, ox + 14, oy + 2, SHOT_V, 0); made++;
@@ -8323,8 +8630,13 @@
       switch (sel) {
         case 1: if (s.speed < MAX_SPEED) { s.speed++; got = 'SPEED'; } break;
         case 2: if (!s.power.missile) { s.power.missile = true; got = 'MISSILE'; } break;
-        case 3: if (!s.power.double) { s.power.double = true; s.power.laser = false; got = 'DOUBLE'; } break;
-        case 4: if (!s.power.laser) { s.power.laser = true; s.power.double = false; got = 'LASER'; } break;
+        // R4：格 3 兩段式 —— 還沒有 DOUBLE → DOUBLE；已經有 DOUBLE → 升級成 RIPPLE（波動）。
+        //     （沙羅曼蛇的格 3 就是 Ripple；兩段式讓舊玩家的 DOUBLE 手感原封不動還留著）
+        case 3:
+          if (!s.power.double && !s.power.ripple) { s.power.double = true; s.power.laser = false; got = 'DOUBLE'; }
+          else if (s.power.double) { s.power.double = false; s.power.ripple = true; s.power.laser = false; got = 'RIPPLE'; }
+          break;
+        case 4: if (!s.power.laser) { s.power.laser = true; s.power.double = false; s.power.ripple = false; got = 'LASER'; } break;
         case 5: if (s.power.option < MAX_OPTION) { s.power.option++; got = 'OPTION'; } break;
         case 6: if (s.power.shield <= 0) { s.power.shield = SHIELD_HP; got = 'SHIELD'; } break;
       }
@@ -8369,7 +8681,8 @@
 
     // [源] rank = (主武器) + Option 數 + (護盾)，0..4；死亡自動歸 0（強化清空）
     s.rank = function () {
-      return ((s.power.laser || s.power.double) ? 1 : 0) + s.power.option + (s.power.shield > 0 ? 1 : 0);
+      return ((s.power.laser || s.power.double || s.power.ripple) ? 1 : 0) +
+        s.power.option + (s.power.shield > 0 ? 1 : 0);
     };
 
     /* ----------------------------------------------------- 每幀：子彈 */
@@ -8384,6 +8697,17 @@
           t.x = head - t.len * LASER_STEP;               // 碰撞框 = 整條光束（貫通）
           t.y = FX.floorPx(t.py.sub);
           t.w = t.len * LASER_STEP; t.h = 4;
+          if (t.x > KILL_X) t.alive = false;
+          continue;
+        }
+        if (t.kind === K.RIPPLE) {                       // 波動：往右飛 + 每 6 幀長高一節
+          FX.vadd(t.px, t.vx);
+          t.anim++;
+          if (t.len < RIPPLE_MAX_SEG && (t.anim % RIPPLE_GROW) === 0) t.len++;
+          var cy = FX.floorPx(t.py.sub) + 2;
+          t.h = t.len * RIPPLE_SEG; t.w = RIPPLE_SEG;
+          t.x = FX.floorPx(t.px.sub);
+          t.y = cy - (t.h >> 1);
           if (t.x > KILL_X) t.alive = false;
           continue;
         }
@@ -8443,6 +8767,7 @@
       s.frames++;
       s.anim = (s.frames >> 2) & 1;
       s.optAnim = ((s.frames / OPT_ANIM) | 0) & 1;       // [源] 2 張、每 8 幀、自由跑
+      if (s.optMode === OPT_MODE.ORBIT) s.optT++;        // R4：旋轉編隊的相位（只有旋轉模式才走）
       var ev = '';
 
       if (s.alive) {
@@ -8489,7 +8814,8 @@
         alive: s.alive, speed: s.speed, speedPx: s.speedPx(),
         gauge: s.gauge, gaugeName: s.gaugeName(),
         power: { missile: s.power.missile, double: s.power.double, laser: s.power.laser,
-          option: s.power.option, shield: s.power.shield },
+          ripple: s.power.ripple, option: s.power.option, shield: s.power.shield },
+        optMode: s.optMode | 0, optModeName: s.optModeName(), optSwitches: s.optSwitches | 0,
         rank: s.rank(), options: opts, shots: list, shotCount: list.length,
         timers: [s.emit[0].timer, s.emit[1].timer, s.emit[2].timer],
         invul: s.invul, lives: s.lives, score: s.score, hi: s.hi,
@@ -8504,6 +8830,9 @@
 
   CR.Ship = {
     create: create, K: K, KIND: K,
+    OPT_MODE: OPT_MODE, OPT_MODE_NAME: OPT_MODE_NAME,
+    OPT_FIXED_DX: OPT_FIXED_DX, OPT_ORBIT_R: OPT_ORBIT_R, OPT_ORBIT_STEP: OPT_ORBIT_STEP,
+    RIPPLE_V: RIPPLE_V, RIPPLE_GROW: RIPPLE_GROW, RIPPLE_MAX_SEG: RIPPLE_MAX_SEG, RIPPLE_SEG: RIPPLE_SEG,
     SPEED_PX: SPEED_PX, SPEED_V: SPEED_V, MAX_SPEED: MAX_SPEED,
     SHIP_W: SHIP_W, SHIP_H: SHIP_H, BOX_DX: BOX_DX, BOX_DY: BOX_DY, BOX_W: BOX_W, BOX_H: BOX_H,
     PLAY: PLAY, SPAWN_X: SPAWN_X, SPAWN_Y: SPAWN_Y,
@@ -8661,15 +8990,40 @@
   var ctx = null;          // stage 注入的介面
   var tmpV = { vx: 0, vy: 0, a: 0 };   // aim 的重複使用物件（每幀零配置）
 
+  // R4：rank 改由 CR.Rank（rank.js）算（火力 + 存活時間 + 輪數 - 死亡罰，0..7）；
+  //      rank.js 缺席或被 `?rank=0` 關掉時退回 R3 的「裝備 rank 0..3」。
   function rank() {
+    if (CR.Rank && typeof CR.Rank.value === 'function') return CR.Rank.value() | 0;
     var s = CR.ship;
     if (s && typeof s.rank === 'function') { var r = s.rank() | 0; return r < 0 ? 0 : (r > 3 ? 3 : r); }
     return 0;
   }
-  // 基礎速度 x 每關倍率（params.bulletScale）x rank 倍率（rank >= 2 -> x1.25）
+  function rankBulletMul() {
+    if (CR.Rank && typeof CR.Rank.bulletMul === 'function') return CR.Rank.bulletMul() | 0;
+    return (rank() >= 2) ? 320 : 256;
+  }
+  function rankPeriodMul() {
+    if (CR.Rank && typeof CR.Rank.periodMul === 'function') return CR.Rank.periodMul() | 0;
+    return 256;
+  }
+  function rankShotsN() {
+    if (CR.Rank && typeof CR.Rank.shotsN === 'function') return CR.Rank.shotsN() | 0;
+    return 1;
+  }
+  function rankLead() {
+    if (CR.Rank && typeof CR.Rank.lead === 'function') return !!CR.Rank.lead();
+    return rank() >= 3;
+  }
+  // 基礎速度 x 每關倍率（params.bulletScale）x rank 倍率（rank 0/1 = 1.000、rank 2 = 1.25…）
   function bulletSpeed() {
     var v = (BULLET_BASE * getParams().bulletScale) >> 8;
-    return (rank() >= 2) ? ((v * 5) >> 2) : v;
+    return (v * rankBulletMul()) >> 8;
+  }
+  // R4：實際的開火週期 = 關卡週期（turretPeriod，數字不變）x rank 週期倍率
+  //     **turretPeriod() 本身一個數字都沒動**（test_stage1 的 90 / 130 斷言靠它）。
+  function firePeriod(base) {
+    var p = ((base | 0) * rankPeriodMul()) >> 8;
+    return p < 24 ? 24 : p;
   }
 
   /* ---------------------------------------------------------- 編隊記帳 */
@@ -8839,7 +9193,10 @@
   // 編隊：n 隻蛇行小蜂，相位錯開；第 3 隻（index 2）是標記個體，全滅時在它的死亡位置掉膠囊
   function spawnFan(x, y, opt) {
     opt = opt || {};
-    var n = opt.n || 5, made = [], i, grp = nextGrp++;
+    // R4：rank >= 4 的編隊多 1 隻、rank >= 6 多 2 隻（研究 §7-4 的界線是「不改生成事件」，
+    //      哪一欄生 fan 永遠不變，只有這一波的隻數會變；池滿就少生，NES 風）
+    var n = (opt.n || 5) + ((CR.Rank && CR.Rank.fanPlus) ? (CR.Rank.fanPlus() | 0) : 0);
+    var made = [], i, grp = nextGrp++;
     groups[grp] = { left: 0, dropped: false, dropX: x, dropY: y, total: n, id: grp };
     for (i = 0; i < n; i++) {
       var e = spawn('fan', x + i * 12, y, { grp: grp, marked: (i === 2), phase: (i * 20) & 255 });
@@ -8859,14 +9216,23 @@
     if (!sh || sh.alive === false) return null;
     if (e.x < -16 || e.x > 272) return null;
     var tx = sh.x + (sh.w >> 1), ty = sh.y + (sh.h >> 1);
-    if (rank() >= 3) {                                     // rank 3：預判射擊
+    if (rankLead()) {                                      // rank >= 3：預判射擊
       var v = ctx.shipVel();
       tx += (v.vx * LEAD_FRAMES) >> 4;                     // shipVel 以 1/16 px/幀 回報
       ty += (v.vy * LEAD_FRAMES) >> 4;
       tx = SH.clamp(tx, 0, 255); ty = SH.clamp(ty, 0, GAME_H - 1);
     }
     SH.aim(e.x + 6, e.y + 6, tx, ty, bulletSpeed(), tmpV);
-    return ctx.fire(e.x + 6, e.y + 6, tmpV.vx, tmpV.vy);
+    // R4：rank >= 5 一次 2 發（±8 度）、rank >= 7 一次 3 發（±10 度）。rank 0..4 完全照 R3。
+    var n = rankShotsN(), b0 = ctx.fire(e.x + 6, e.y + 6, tmpV.vx, tmpV.vy);
+    if (n > 1) {
+      var a0 = SH.atan2(ty - (e.y + 6), tx - (e.x + 6)), d = (n >= 3) ? 10 : 8, k;
+      for (k = 1; k < n; k++) {
+        SH.vel((a0 + ((k & 1) ? d : -d) * ((k + 1) >> 1)) & 255, bulletSpeed(), tmpV);
+        ctx.fire(e.x + 6, e.y + 6, tmpV.vx, tmpV.vy);
+      }
+    }
+    return b0;
   }
 
   // R3：新敵人的瞄準射擊（中心點依 size 算，8x8 與 16x16 都正確）
@@ -8911,7 +9277,7 @@
 
     } else if (e.kind === 'turret') {
       e.x = e.wx - ctx.stage.camX;                         // 貼地形：隨捲動往左
-      if (--e.fireT <= 0) { e.fireT = e.period || TURRET_PERIOD; turretFire(e); }
+      if (--e.fireT <= 0) { e.fireT = firePeriod(e.period || TURRET_PERIOD); turretFire(e); }
 
     } else if (e.kind === 'zig') {
       FX.vadd(e.xs, e.vx);
@@ -8944,11 +9310,11 @@
       e.x = e.wx - ctx.stage.camX;
       var cc = e.wx >> 3;
       e.y = e.flipV ? (ctx.stage.ceilAt(cc) * 8) : (GAME_H - ctx.stage.floorAt(cc) * 8 - 8);
-      if (--e.fireT <= 0) { e.fireT = e.period; aimedFire(e); }
+      if (--e.fireT <= 0) { e.fireT = firePeriod(e.period); aimedFire(e); }
 
     } else if (e.kind === 'moai') {                        // 石像：張嘴吐 6 顆環狀彈
       e.x = e.wx - ctx.stage.camX;
-      if (--e.fireT <= 0) { e.fireT = e.period; spread(e, MOAI_RING_N, 112, 8, RING_SPEED); }
+      if (--e.fireT <= 0) { e.fireT = firePeriod(e.period); spread(e, MOAI_RING_N, 112, 8, RING_SPEED); }
 
     } else if (e.kind === 'mouth') {                       // 石像的嘴：跟著本體
       if (e.link && e.link.alive) { e.x = e.link.x + 1; e.y = e.link.y + 4; }
@@ -8991,7 +9357,7 @@
 
     } else if (e.kind === 'turret4') {                     // 四方砲台：上下左右各 1 發
       e.x = e.wx - ctx.stage.camX;
-      if (--e.fireT <= 0) { e.fireT = e.period; spread(e, TUR4_N, (e.t >> 4) & 63, 64, bulletSpeed()); }
+      if (--e.fireT <= 0) { e.fireT = firePeriod(e.period); spread(e, TUR4_N, (e.t >> 4) & 63, 64, bulletSpeed()); }
     }
 
     // 離開畫面（或砲台被捲走）→ 回收，不計分、不算「編隊全滅」
@@ -9215,7 +9581,10 @@
     ROCK_VX: ROCK_VX,
     FAN_AMP: FAN_AMP,
     bulletSpeed: bulletSpeed,
+    firePeriod: firePeriod,
     rank: rank,
+    rankBulletMul: rankBulletMul, rankPeriodMul: rankPeriodMul,
+    rankShotsN: rankShotsN, rankLead: rankLead,
     make: make,
     init: function (c) { ctx = c; resetGroups(); },
     reset: resetGroups,
@@ -9709,13 +10078,18 @@
   var DEATH_FRAMES = 90;
   var GAME_H = 208;
 
+  var CFGS = {};                                           // R4：key -> cfg（魔王連戰要照設定複製）
+
   /* ====================================================== 參數化魔王機 */
   function makeBoss(cfg) {
+    if (cfg.key && !CFGS[cfg.key]) CFGS[cfg.key] = cfg;
     var HOME_X = cfg.homeX === undefined ? 176 : cfg.homeX;
     var HOME_Y = cfg.homeY === undefined ? 72 : cfg.homeY;
     var ENTER_V = -FX.v88(1, 85);
     var OPEN_FRAMES = cfg.openFrames || 60, SHUT_FRAMES = cfg.shutFrames || 90;
-    var WARN_FRAMES = 30, BEAM_FRAMES = 60, COOL_FRAMES = 60;
+    // R4：WARN_FRAMES 可由 cfg 調（魔王連戰把預告拉長到 48 幀 —— 一局要連吃兩次三連雷射，
+    //      30 幀的預告在速度 5 下只夠移動 90 px，常常只差 1 px 被掃到）
+    var WARN_FRAMES = cfg.warnFrames || 30, BEAM_FRAMES = 60, COOL_FRAMES = 60;
     var LASER_OFF = cfg.laserOff || [8, 24, 40];
     var PLATES = cfg.plates || [];
     var CORES = cfg.cores || [];
@@ -9727,6 +10101,9 @@
     var RING_N = cfg.ringN || 8;
     var FIRE_P = cfg.firePeriod || 100;
     var ESCAPE_FRAMES = cfg.escape || 0;
+    // R4：雷射判定高度可調（預設 6 = R3 行為）。魔王連戰用 4 ⇒ 三條光束之間的縫從 10 px
+    //     變成 12 px —— 連戰後期自機速度常常是 5（3 px/幀），10 px 的縫對不準（實測連死）。
+    var BEAM_H = cfg.beamH || 6;
     var TOTAL_HP = PLATES.length * PLATE_HP;
     for (var ci = 0; ci < CORES.length; ci++) TOTAL_HP += CORES[ci].hp;
 
@@ -9902,7 +10279,9 @@
       }
     }
     function armLaser() {
-      for (var i = 0; i < 3; i++) B.laserBullets[i] = ctx.bigBullet(0, B.y + LASER_OFF[i] + 1, B.x, 6);
+      for (var i = 0; i < 3; i++) {
+        B.laserBullets[i] = ctx.bigBullet(0, B.y + LASER_OFF[i] + 2, B.x, BEAM_H);
+      }
     }
 
     /* ---------------------------------------------------- 艦體背景 */
@@ -10083,6 +10462,7 @@
       W: cfg.w, H: cfg.h, HOME_X: HOME_X, HOME_Y: HOME_Y,
       PLATE_HP: PLATE_HP, TOTAL_HP: TOTAL_HP, ENTER_FRAMES: ENTER_FRAMES,
       OPEN_FRAMES: OPEN_FRAMES, SHUT_FRAMES: SHUT_FRAMES, DEATH_FRAMES: DEATH_FRAMES,
+      WARN_FRAMES: WARN_FRAMES, BEAM_H: BEAM_H,
       ESCAPE_FRAMES: ESCAPE_FRAMES, RING_N: RING_N, LASER_OFF: LASER_OFF,
       HULL_MAPS: cfg.hull, hasLaser: !!cfg.laser,
       init: function (c) { ctx = c; B = null; },
@@ -10227,6 +10607,246 @@
   });
 
   CR.Bosses.make = makeBoss;
+  CR.Bosses.CFGS = CFGS;
+
+  /* ======================================================================
+   * R4：第 7 關「魔王連戰」—— 六隻強化版依序上場 + 原創真最終魔王三形態
+   * ----------------------------------------------------------------------
+   * 研究 16 §7-2 的 FC 第 7 關是「要塞連續戰」；本作把它做成**真正的 boss rush**：
+   *   ① 關卡 1~6 的六隻魔王強化版（血量 ×0.75 讓節奏不拖，射速 ×0.9 更兇；
+   *      關卡 6 的「脫出倒數」拿掉 —— 倒數留給真正的最後一隻）
+   *   ② 原創真最終魔王「OMEGA」三形態：
+   *      I  核心之眼（雙殼 + 單核）→ II 雙核絞盤（無殼 / 兩核同時打）
+   *      → III 星塵終焉（四殼 + 大核 + 三連雷射 + **脫出倒數 420 幀**）
+   * 每一隻之間有 90 幀的空檔（喘息 + 看得清楚誰上場）。
+   *
+   * **友善版（延續專案方針）**：死在第 n 隻不會從第 1 隻重打 ——
+   * `far`（打到的最遠進度）在同一關內保留，復活後直接接關（`resume: false` 可關掉）。
+   */
+  function boost(cfg, o) {
+    o = o || {};
+    var hpMul = o.hp === undefined ? 0.75 : o.hp;
+    var perMul = o.period === undefined ? 0.9 : o.period;
+    var out = {}, k;
+    for (k in cfg) if (cfg.hasOwnProperty(k)) out[k] = cfg[k];
+    out.key = cfg.key + '2';
+    out.plateHp = Math.max(2, Math.round((cfg.plateHp || 4) * hpMul));
+    out.cores = [];
+    for (var i = 0; i < (cfg.cores || []).length; i++) {
+      var c = cfg.cores[i], c2 = {}, kk;
+      for (kk in c) if (c.hasOwnProperty(kk)) c2[kk] = c[kk];
+      c2.hp = Math.max(3, Math.round(c.hp * hpMul));
+      out.cores.push(c2);
+    }
+    out.firePeriod = Math.max(40, Math.round((cfg.firePeriod || 100) * perMul));
+    if (cfg.p3Period) out.p3Period = Math.max(36, Math.round(cfg.p3Period * perMul));
+    out.phase3At = Math.max(2, Math.round((cfg.phase3At || 4) * hpMul));
+    out.escape = 0;                                        // 倒數只留給 OMEGA III
+    out.warnFrames = 48;                                   // 連戰版的雷射預告拉長
+    out.beamH = 4;                                         // 連戰版的雷射判定變薄（縫 10 -> 12 px）
+    out.ringN = Math.max(6, Math.round((cfg.ringN || 8) * 0.7));       // 環形彈顆數也收斂
+    out.coreScore = o.coreScore === undefined ? 8000 : o.coreScore;
+    // 連戰版拿掉追蹤導彈（R3 的關卡 2 已經踩過這個坑）：連戰裡死一次就是裸機打剩下的，
+    // 追蹤導彈 + 裸機 = 必死；環形彈 / 扇形彈靠閃避就過得去。
+    if (cfg.attacks) {
+      out.attacks = {};
+      for (var ph in cfg.attacks) {
+        if (!cfg.attacks.hasOwnProperty(ph)) continue;
+        out.attacks[ph] = cfg.attacks[ph]
+          .filter(function (a) { return a !== 'homing'; })
+          .map(function (a) { return a === 'ring12' ? 'ring' : a; });   // 12 發環 -> 8 發
+        if (!out.attacks[ph].length) out.attacks[ph] = ['aim'];
+      }
+    }
+    if (o.name) out.name = o.name;
+    return out;
+  }
+
+  // 關卡 1 的「核心要塞」是 boss.js 手寫的（不是參數化機）⇒ 連戰用一份等價設定重現它
+  var CFG_CORE2 = {
+    key: 'core_r', name: 'CORE FORTRESS', w: 48, h: 48,
+    plates: [[0, 0], [32, 0], [0, 32], [32, 32]], plateHp: 4,
+    cores: [{ dx: 16, dy: 16, hp: 8, tiles: 'CORE0', tiles1: 'CORE1' }],
+    phase3At: 3, openFrames: 60, shutFrames: 90, firePeriod: 100, p3Period: 70,
+    ringN: 8, laser: true, coreScore: 8000, warnFrames: 48, beamH: 4,
+    hull: {
+      1: hullOf('HULL', 'HULLR', 'VENT', 'HULLC'),
+      2: hullOf('HULLR', 'VENT', 'HULL', 'GRID'),
+      3: hullOf('GRID', 'VENT', 'HULLR', 'GRID')
+    }
+  };
+
+  /* ---- 原創真最終魔王 OMEGA 三形態 ---- */
+  var CFG_OMEGA1 = {
+    key: 'omega1', name: 'OMEGA I', w: 48, h: 48,
+    plates: [[0, 8], [0, 24]], plateHp: 5,
+    cores: [{ dx: 16, dy: 16, hp: 10, tiles: 'EYE0', tiles1: 'EYE1' }],
+    phase3At: 4, openFrames: 56, shutFrames: 70, firePeriod: 80, p3Period: 54,
+    ringN: 10, coreScore: 15000,
+    attacks: { p1: ['aim', 'fan'], p2: ['ring', 'aim'], p3: ['ring12', 'fan', 'aim'] },
+    hull: {
+      1: hullOf('HULL', 'CIRC', 'CORE2', 'HULLC'),
+      2: hullOf('CIRC', 'CORE2', 'VENT', 'GRID'),
+      3: hullOf('GRID', 'CORE2', 'CIRC', 'GRID')
+    }
+  };
+  var CFG_OMEGA2 = {
+    key: 'omega2', name: 'OMEGA II', w: 48, h: 48,
+    plates: [], cores: [
+      { dx: 8, dy: 2, hp: 9, tiles: 'BRAIN0', tiles1: 'BRAIN1' },
+      { dx: 8, dy: 30, hp: 9, tiles: 'BRAIN0', tiles1: 'BRAIN1' }
+    ],
+    phase3At: 8, openFrames: 64, shutFrames: 64, firePeriod: 90, p3Period: 64,
+    ringN: 10, coreScore: 15000,
+    p3Period2: 0,
+    attacks: { p2: ['ring', 'split', 'aim'], p3: ['ring12', 'fan', 'split'] },
+    hull: {
+      1: hullOf('CIRC', 'HULLR', 'CORE2', 'HULL'),
+      2: hullOf('CORE2', 'CIRC', 'VENT', 'GRID'),
+      3: hullOf('GRID', 'CIRC', 'CORE2', 'GRID')
+    }
+  };
+  var CFG_OMEGA3 = {
+    key: 'omega3', name: 'OMEGA III', w: 48, h: 48,
+    plates: [[0, 0], [32, 0], [0, 32], [32, 32]], plateHp: 5,
+    cores: [{ dx: 16, dy: 16, hp: 18, tiles: 'BRAIN0', tiles1: 'BRAIN1' }],
+    phase3At: 7, openFrames: 60, shutFrames: 66, firePeriod: 72,
+    ringN: 12, laser: true, escape: 420, coreScore: 50000, warnFrames: 48, beamH: 4,
+    // 真最終形態也不放追蹤導彈：三連雷射 + 12 發環形彈已經是全作最高壓
+    attacks: { p1: ['aim', 'fan'], p2: ['ring', 'aim'], p3: ['ring12', 'fan', 'aim'] },
+    hull: {
+      1: hullOf('CORE2', 'CIRC', 'HULLR', 'HULL'),
+      2: hullOf('CIRC', 'CORE2', 'GRID', 'VENT'),
+      3: hullOf('GRID', 'CORE2', 'CIRC', 'GRID')
+    }
+  };
+
+  var CAP_PER_BOSS = 4;                                    // 每打掉一隻掉幾顆膠囊（友善版）
+  var CAP_ON_RESUME = 4;                                   // 死亡後接關時的「重整包」膠囊
+  function makeRush(cfg) {
+    var LIST = cfg.list, GAP = cfg.gap === undefined ? 90 : cfg.gap;
+    var ctx = null, wrap = null, subs = [], idx = 0, far = 0;
+    var active = false, dead = false, gapT = 0, kills = 0;
+    var TOTAL = 0;
+
+    function initSubs(c) {
+      ctx = c;
+      wrap = {};
+      for (var k in c) if (c.hasOwnProperty(k)) wrap[k] = c[k];
+      wrap.onCleared = subCleared;
+      subs = []; TOTAL = 0;
+      for (var i = 0; i < LIST.length; i++) {
+        var b = makeBoss(LIST[i]);
+        b.init(wrap);
+        subs.push(b);
+        TOTAL += b.TOTAL_HP;
+      }
+      R.TOTAL_HP = TOTAL;
+      R.COUNT = subs.length;
+    }
+    function subCleared() {
+      kills++;
+      if (idx + 1 >= subs.length) {                        // 全部打完 ⇒ 關卡 clear
+        active = false; dead = true;
+        if (ctx) ctx.onCleared();
+        return;
+      }
+      idx++;
+      if (idx > far) far = idx;
+      gapT = GAP;
+      // **友善版**：連戰室裡不會再有雜魚掉膠囊 ⇒ 每打掉一隻就掉 3 顆（＋被打死的人也補得回來）。
+      // 不給這條回血路，死一次就等於「裸機打剩下的八隻」＝ 研究 §7-3 的「Gradius 症候群」。
+      if (ctx && ctx.dropCapsule) {
+        for (var i = 0; i < CAP_PER_BOSS; i++) ctx.dropCapsule(200 - i * 10, 48 + i * 48);
+      }
+    }
+
+    function spawn() {
+      active = true; dead = false; gapT = 0;
+      idx = (cfg.resume === false) ? 0 : far;
+      // 友善版：死亡後接關（far > 0）給一份「重整包」，不然是裸機打剩下的八隻
+      if (far > 0 && ctx && ctx.dropCapsule) {
+        for (var i = 0; i < CAP_ON_RESUME; i++) ctx.dropCapsule(248 - i * 12, 40 + i * 40);
+      }
+      subs[idx].spawn();
+      return subs[idx].raw();
+    }
+    function update() {
+      if (!active) return;
+      if (gapT > 0) {
+        gapT--;
+        if (gapT <= 0 && active) subs[idx].spawn();
+        return;
+      }
+      subs[idx].update();
+    }
+    function draw(oam, frame) { if (active && gapT <= 0) subs[idx].draw(oam, frame); }
+    function despawn() {
+      for (var i = 0; i < subs.length; i++) subs[i].despawn();
+      active = false; gapT = 0;
+    }
+
+    var R = {
+      key: cfg.key, NAME: cfg.name, W: 48, H: 48,
+      HOME_X: 176, HOME_Y: 72, GAP: GAP,
+      TOTAL_HP: 0, COUNT: LIST.length, LASER_OFF: [8, 24, 40],
+      ENTER_FRAMES: ENTER_FRAMES, DEATH_FRAMES: DEATH_FRAMES,
+      ESCAPE_FRAMES: CFG_OMEGA3.escape,
+      isRush: true,
+      init: initSubs,
+      spawn: spawn, update: update, draw: draw, despawn: despawn,
+      active: function () { return !!active; },
+      raw: function () { return subs[idx] ? subs[idx].raw() : null; },
+      totalHp: function () {
+        var s2 = subs[idx] ? subs[idx].totalHp() : 0, i;
+        for (i = idx + 1; i < subs.length; i++) s2 += subs[i].TOTAL_HP;
+        return s2;
+      },
+      force: function (ph) { return subs[idx] ? subs[idx].force(ph) : null; },
+      // 除錯 / 測試：直接跳到連戰的第 i 隻（0 起）
+      setIndex: function (i) {
+        i = Math.max(0, Math.min(subs.length - 1, i | 0));
+        despawn();
+        idx = i; far = i; active = true; dead = false; gapT = 0;
+        subs[idx].spawn();
+        return idx;
+      },
+      index: function () { return idx; },
+      resetProgress: function () { far = 0; idx = 0; kills = 0; dead = false; return R; },
+      subs: function () { return subs; },
+      names: function () { var a = [], i; for (i = 0; i < LIST.length; i++) a.push(LIST[i].name); return a; },
+      state: function () {
+        var st = subs[idx] ? subs[idx].state() : { active: false, phase: -1 };
+        st.active = !!active && (gapT <= 0) && st.active;
+        st.rush = true;
+        st.index = idx; st.count = subs.length; st.far = far; st.gapT = gapT;
+        st.kills = kills; st.sub = LIST[idx] ? LIST[idx].name : '';
+        st.form = (idx >= 6) ? (idx - 5) : 0;              // 真最終魔王的形態 1..3
+        st.key = cfg.key;
+        st.name = cfg.name;
+        st.totalHp = R.totalHp();
+        if (!st.escapeT) st.escapeT = 0;
+        return st;
+      }
+    };
+    return R;
+  }
+
+  CR.Bosses.rush = makeRush({
+    key: 'rush', name: 'BOSS RUSH', gap: 150,
+    list: [
+      boost(CFGS.eye, { name: 'EYE FORTRESS' }),
+      boost(CFGS.twin, { name: 'TWIN MOAI' }),
+      boost(CFGS.mirror, { name: 'MIRROR CORE' }),
+      boost(CFGS.bio, { name: 'BIO CORE' }),
+      boost(CFGS.brain, { name: 'MOTHER BRAIN' }),
+      boost(CFG_CORE2, { name: 'CORE FORTRESS' }),
+      CFG_OMEGA1, CFG_OMEGA2, CFG_OMEGA3
+    ]
+  });
+  CR.Bosses.makeRush = makeRush;
+  CR.Bosses.CAP_PER_BOSS = CAP_PER_BOSS;
+  CR.Bosses.boost = boost;
 })();
 
 </script>
@@ -10260,6 +10880,7 @@
  * | 4 | 1.15 | 104 | 12 | 17 列 | 2688 |
  * | 5 | 1.20 |  96 | 13 | 17 列 | 2944 |
  * | 6 | 1.30 |  88 | 14 | 16 列 | 3072 |
+ * | 7 | 1.35 |  84 | 14 | 20 列 | 1024 |（R4 魔王連戰：補給接近段 + 9 隻魔王）
  * 第二輪（loop）再由 runtime 乘 LOOP_SCALE（彈速 +8% / 週期 -8% 每輪，各有上下限）。
  *
  * ── 檢查點安全規則（fix2 訂的，六關通用；runtime 會**自動過濾**違規事件）──
@@ -10655,17 +11276,47 @@
     }
   };
 
+  /* ==================================================== 關卡 7：魔王連戰（R4） */
+  // 研究 16 §7-2：FC 原作的第 7 關就是「要塞連續戰」。本作做成真正的 boss rush：
+  //   128 欄的接近段（純空戰補給、**零固定砲**、13 波膠囊）→ 欄 128 起整片是連戰室
+  //   → 相機到底（camX 1024）魔王進場 = `CR.Bosses.rush`（六隻強化版 + OMEGA 三形態）。
+  // 長度只有 1024 px（前六關是 2560~3072）：連戰本身就有 9 隻魔王（約 6000 幀），
+  // 接近段只負責「把能量表餵滿」，再長就只是耗時間。
+  var S7 = {
+    index: 7, key: 'rush', name: 'BOSS RUSH', music: 'boss_final', boss: 'rush',
+    cols: 160, minFree: 20, bossCol0: 128, airEnd: 96,
+    terrain: [
+      [128, 0, 0],                                          // 接近段：純星空（零地形 = 零撞死）
+      [32, 2, 2]                                            // 連戰室（上下各 2 列，通道 22 列）
+    ],
+    tiles: tiles({ wall2: 'CIRC', pipeH: 'CIRC', bossBg: 'CORE2' }),
+    bigRocks: [],
+    params: { bulletScale: 345, period: 84, easyPeriod: 84, easyCol0: -1, easyCol1: -1, maxAlive: 14 },
+    speedZones: null,
+    theme: function (at, A) {
+      // 接近段只放補給（fan 編隊 + 紅色單體），**不放任何固定砲**：
+      // 連戰前一定要讓玩家把能量表湊滿（SPEED×2 + MISSILE + LASER + OPTION×2 = 11 顆），
+      // 不然 9 隻魔王純粹是處刑 —— 機器人實測：只有 4 顆膠囊時 6 死 GAME OVER。
+      at(100, A.fan(80));
+      at(106, A.zigs([64, 128], 0));
+      at(112, A.fan(104));
+      at(118, A.redzig(96));
+      at(124, A.fan(72));
+      at(130, A.redzig(112));
+    }
+  };
+
   /* ==================================================== 匯出 */
-  var LIST = [null, S1, S2, S3, S4, S5, S6];
+  var LIST = [null, S1, S2, S3, S4, S5, S6, S7];
   CR.STAGES = LIST;
-  CR.STAGE_COUNT = 6;
+  CR.STAGE_COUNT = 7;
   CR.StageData = {
     SPEED_DEFAULT: SPEED_DEFAULT, SPEED_SLOW: SPEED_SLOW,
     GUN_KINDS: GUN_KINDS,
     makeApi: makeApi,
     buildWaves: buildWaves,
     get: function (n) { return LIST[n] || LIST[1]; },
-    count: 6
+    count: 7
   };
 })();
 
@@ -10847,6 +11498,7 @@
   var scroller = null, spawner = null, table = null;
   var camVec = FX.Vec(0);
   var frames = 0, updates = 0, pendingJump = null, pendingBoss = 0, pendingStage = 0;
+  var pendingRush = 0;                                      // R4：`?rush=N`（第 7 關連戰第 N 隻）
   var capsuleSeq = 0;
   var shipPrev = { x: 0, y: 0, has: false }, shipV = { vx: 0, vy: 0 };
   var api = null;                                            // stages.js 的出怪小工具
@@ -11050,7 +11702,9 @@
     var camx = parseInt(q.get('camx') || '', 10);
     var bs = parseInt(q.get('boss') || '', 10);
     var sg = parseInt(q.get('stage') || '', 10);
+    var ru = parseInt(q.get('rush') || '', 10);
     if (!isNaN(sg) && sg >= 1 && sg <= STAGE_COUNT) pendingStage = sg;
+    if (!isNaN(ru) && ru >= 1) { pendingJump = -1; pendingRush = ru; }   // R4：第 7 關連戰第 n 隻
     if (!isNaN(camx)) pendingJump = camx;
     if (!isNaN(bs) && bs >= 1) { pendingJump = -1; pendingBoss = bs; }    // -1 = 該關的 CAM_MAX
   }
@@ -11106,6 +11760,8 @@
     if (CR.Boss && typeof CR.Boss.despawn === 'function') CR.Boss.despawn();
     var nb = (CR.Bosses && CR.Bosses[def.boss]) || CR.Bosses.core;
     CR.Boss = nb;
+    // R4：魔王連戰（第 7 關）換關時把「打到第幾隻」的進度清掉（同一關內才接關）
+    if (nb && typeof nb.resetProgress === 'function') nb.resetProgress();
 
     if (ppu0) {
       muteBudget(ppu0, function () { CR.CHR_WORLD.applyStagePalette(ppu0, n); });
@@ -11275,12 +11931,16 @@
 
     // ?stage= / ?camx= / ?boss= 除錯跳關（等 main 走完 title → play 的初始化再套用）
     if ((pendingJump !== null || pendingStage) && updates >= 2) {
-      var j = pendingJump, bs = pendingBoss, sg = pendingStage;
-      pendingJump = null; pendingBoss = 0; pendingStage = 0;
+      var j = pendingJump, bs = pendingBoss, sg = pendingStage, ru = pendingRush;
+      pendingJump = null; pendingBoss = 0; pendingStage = 0; pendingRush = 0;
       if (sg && sg !== stage.index) load(sg);
       if (j !== null) restart(j < 0 ? CAM_MAX : j);
       if (bs >= 1) { stage.bossActive = true; CR.Boss.spawn(); CR.Boss.force(bs); }
+      if (ru >= 1 && CR.Boss.setIndex) { stage.bossActive = true; CR.Boss.setIndex(ru - 1); }
     }
+
+    // R4：rank 動態難度（每幀從裝備 + 存活時間重算；rank.js 缺席就跳過）
+    if (CR.Rank && CR.Rank.update) CR.Rank.update();
 
     stepShipVel();
 
@@ -11378,11 +12038,508 @@
       bossActive: stage.bossActive, cleared: stage.cleared, escapeT: stage.escapeT,
       boss: CR.Boss.state(), events: spawner ? spawner.index : 0,
       score: stage.pendingScore, scrollBytes: scroller ? scroller.bytes : 0,
-      rank: CR.Enemies.rank()
+      rank: CR.Enemies.rank(),
+      rankState: (CR.Rank && CR.Rank.state) ? CR.Rank.state() : null
     };
   };
 
   CR.stage = stage;
+})();
+
+</script>
+<script>/* games/cruiser/bonus.js */
+/*
+ * games/cruiser/bonus.js — 《星塵巡航艦》R4：每關 1 個隱藏獎勵（CR.Bonus）
+ * ---------------------------------------------------------------------------
+ * 擁有者：cruiser-r4 agent（R4）｜ 只讀 CR.ship / CR.stage，缺席不致命
+ * 研究依據：docs/research/03_經典遊戲深度解析/16_宇宙巡航艦_沙羅曼蛇.md §9-2
+ *   [源] FC Gradius 的隱藏要素就是兩類：**打掉特定一組敵人**（4 個艙門 / 10 尊摩艾）
+ *   與**飛到特定位置**（前四關各兩處「飛過去就拿到」的 5000 分 / 1UP 點）。
+ *   本檔照這兩類各做一半，條件全部原創，獎勵只有兩種：**1UP** 或 **全消彈**。
+ *
+ * ── 七關的條件表（state().bonus 會回報進度，`?bonus=1` 之類的除錯旗標不需要）────
+ * | 關 | 類型 | 條件 | 獎勵 |
+ * |---|---|---|---|
+ * | 1 | 位置 | 空戰段（欄 8..150）待在**畫面上緣帶**（y 16..44）連續 20 幀**不開火** | 1UP |
+ * | 2 | 擊殺 | 打掉 **4 隻貼牆爬行砲（crawl）** | 全消彈 |
+ * | 3 | 擊殺 | 打掉 **4 尊石像**（打嘴 = 打掉整隻，研究 §9-2 的「10 尊摩艾」致敬） | 1UP |
+ * | 4 | 位置 | 減速區（欄 176..240）待在**畫面下緣帶**（y 150..184）連續 20 幀不開火 | 全消彈 |
+ * | 5 | 擊殺 | 打掉 **3 根觸手（tent）** | 1UP |
+ * | 6 | 擊殺 | 打掉 **5 座四方砲台（turret4）** | 全消彈 |
+ * | 7 | 位置 | 魔王連戰開打前待在**畫面正中央**（x 96..160 / y 88..120）連續 20 幀不開火 | 1UP |
+ *
+ * 位置類一律要求「**不開火**」（`ship.fired` 20 幀沒有增加）＝ 原作「飛過去就拿到」的
+ * 現代化版本：玩家必須刻意放手，不可能在亂按 A 的狀態下誤觸。
+ * 一局之內每關**只能拿 1 次**（`found`）；第二輪（loop+1）由 main 的 newGame / startLoop 重設。
+ */
+(function () {
+  'use strict';
+  var CR = window.CR = window.CR || {};
+
+  var HOLD_FRAMES = 20;
+  var SCORE = 5000;                      // 隱藏獎勵一律附帶 5000 分（研究 §9-2 的 5000 分點）
+  var MAX_LIVES = 9;                     // HUD 只有一位數
+
+  // rect = 螢幕座標的允許區（船的碰撞框要整個在裡面）
+  var DEFS = {
+    1: { kind: 'hold', col0: 8, col1: 150, rect: { x: 12, y: 16, w: 140, h: 30 }, reward: '1up', label: 'TOP LANE' },
+    2: { kind: 'kill', target: 'crawl', n: 4, reward: 'clear', label: 'CRAWLER HUNT' },
+    3: { kind: 'kill', target: 'mouth', n: 4, reward: '1up', label: 'MOAI HUNT' },
+    4: { kind: 'hold', col0: 176, col1: 240, rect: { x: 12, y: 148, w: 140, h: 38 }, reward: 'clear', label: 'LOW LANE' },
+    5: { kind: 'kill', target: 'tent', n: 3, reward: '1up', label: 'TENTACLE HUNT' },
+    6: { kind: 'kill', target: 'turret4', n: 5, reward: 'clear', label: 'QUAD GUN HUNT' },
+    7: { kind: 'hold', col0: 2, col1: 60, rect: { x: 96, y: 86, w: 64, h: 36 }, reward: '1up', label: 'DEAD CENTER' }
+  };
+
+  var found = {}, kills = {}, holdT = 0, lastFired = 0, lastEvent = '', awards = 0, lastStage = 0;
+
+  function def(n) { return DEFS[n | 0] || null; }
+  function stage() { return CR.stage || null; }
+
+  function sfx(name) { try { if (CR.Audio && CR.Audio.sfx) CR.Audio.sfx(name); } catch (e) { } }
+
+  function inRect(ship, r) {
+    var x = ship.x | 0, y = ship.y | 0, w = ship.w | 0, h = ship.h | 0;
+    return x >= r.x && y >= r.y && (x + w) <= (r.x + r.w) && (y + h) <= (r.y + r.h);
+  }
+
+  // 實際發獎（1UP 給命、clear 清掉畫面上的雜魚）；分數交給 main 的 addScore
+  function award(n, d) {
+    found[n] = true; awards++;
+    lastEvent = d.reward;
+    var ship = CR.ship, st = stage();
+    if (d.reward === '1up') {
+      if (ship && ship.lives < MAX_LIVES) ship.lives++;
+      sfx('extend');
+    } else {
+      if (st && typeof st.clearScreen === 'function') { try { st.clearScreen(); } catch (e) { } }
+      sfx('capsule');
+    }
+    if (ship && typeof ship.addScore === 'function') ship.addScore(SCORE);
+    return d.reward;
+  }
+
+  var B = {
+    DEFS: DEFS, HOLD_FRAMES: HOLD_FRAMES, SCORE: SCORE,
+
+    newGame: function () {
+      found = {}; kills = {}; holdT = 0; awards = 0; lastEvent = ''; lastStage = 0;
+      return B;
+    },
+    // 換關 / 復活：進度計數歸零（found 保留 ⇒ 一局每關只拿一次）
+    reset: function (n) {
+      kills = {}; holdT = 0; lastEvent = '';
+      lastStage = n | 0;
+      var s = CR.ship;
+      lastFired = s ? (s.fired | 0) : 0;
+      return B;
+    },
+    // main.js 的 hitEnemy 在敵人死亡時呼叫
+    onKill: function (e) {
+      if (!e || !e.kind) return;
+      kills[e.kind] = (kills[e.kind] | 0) + 1;
+    },
+
+    // 每幀（只在 play 模式）；回傳 '' / '1up' / 'clear'
+    update: function () {
+      var st = stage(), ship = CR.ship;
+      if (!st || !ship) return '';
+      var n = st.index | 0, d = def(n);
+      if (n !== lastStage) B.reset(n);
+      if (!d || found[n]) { lastFired = ship.fired | 0; return ''; }
+      if (ship.alive === false) { holdT = 0; lastFired = ship.fired | 0; return ''; }
+
+      if (d.kind === 'kill') {
+        if ((kills[d.target] | 0) >= d.n) return award(n, d);
+        return '';
+      }
+      // 位置類：欄範圍 + 區塊內 + 20 幀沒有新的發射
+      var col = st.camX >> 3;
+      var okCol = (col >= d.col0 && col <= d.col1);
+      // 「不開火」= 這 20 幀沒有新的發射 **而且畫面上沒有自機彈**。
+      // 只看 `fired` 不夠：自動連射的間隔剛好是 20~23 幀（ship.js 的槽位凍結機制），
+      // 一直按著 A 也會湊出 20 幀的空窗 ⇒ 機器人會「不小心」拿到隱藏獎勵（實測過）。
+      var quiet = ((ship.fired | 0) === lastFired) &&
+        (typeof ship.countAlive !== 'function' || ship.countAlive() === 0);
+      lastFired = ship.fired | 0;
+      if (okCol && quiet && inRect(ship, d.rect)) {
+        holdT++;
+        if (holdT >= HOLD_FRAMES) { holdT = 0; return award(n, d); }
+      } else {
+        holdT = 0;
+      }
+      return '';
+    },
+
+    progress: function () {
+      var st = stage(), n = st ? (st.index | 0) : 0, d = def(n);
+      if (!d) return { stage: n, kind: '', have: 0, need: 0 };
+      if (d.kind === 'kill') return { stage: n, kind: 'kill', target: d.target, have: kills[d.target] | 0, need: d.n };
+      return { stage: n, kind: 'hold', have: holdT, need: HOLD_FRAMES };
+    },
+    found: function (n) { return n === undefined ? found : !!found[n | 0]; },
+    state: function () {
+      var p = B.progress(), k = [], key;
+      for (key in found) if (found.hasOwnProperty(key)) k.push(key | 0);
+      k.sort(function (a, b) { return a - b; });
+      return {
+        awards: awards, last: lastEvent, found: k,
+        kind: p.kind, have: p.have, need: p.need, target: p.target || '',
+        label: (def(p.stage) || {}).label || '', reward: (def(p.stage) || {}).reward || ''
+      };
+    }
+  };
+
+  CR.Bonus = B;
+})();
+
+</script>
+<script>/* games/cruiser/credits.js */
+/*
+ * games/cruiser/credits.js — 《星塵巡航艦》R4：結局工作人員名單捲動（CR.Credits）
+ * ---------------------------------------------------------------------------
+ * 擁有者：cruiser-r4 agent（R4）｜ 依賴：engine/ppu.js（名稱表 + 垂直捲動）
+ *
+ * ── 怎麼做到「真機式」垂直捲動 ────────────────────────────────────────────────
+ *   `engine/ppu.js` 的 `_bgLine` 對 world y 取 `% 480`，再用 `y >= 240 → ntRow ^= 1`；
+ *   本作是**垂直鏡像（mirroring('v')，左右兩張不同）**⇒ ntRow 不改實體名稱表
+ *   ⇒ **垂直捲動每 240 px 繞一圈，剛好是 30 列的環形緩衝**。
+ *   所以名單就是真機的標準作法：
+ *     ① 進場時把 30 列一次寫滿（rendering 關閉 ⇒ budget.mute）
+ *     ② 之後每幀 y += 1/4 px；**每跨過 8 px 寫 1 列**（32 byte，遠低於 160 byte 預算）
+ *        寫的那一列是「即將從下緣捲進來」的 (k+29) % 30 —— 寫的那一瞬間它落在
+ *        掃描線 232..239（**overscan 裁掉的 8 線**）⇒ 玩家看不到寫入過程，不會撕裂。
+ *     ③ 捲到最後一屏（y = (N-30) × 8）就停住，畫面停在 THE END。
+ *   捲動期間 **`ppu.split(null)`**（HUD 收起來 ⇒ 列 26..29 讓給名單當內容列），
+ *   `ppu.scroll(0, y, 0)` 只用名稱表 0。離場由 main.js 還原 split / HUD / 地形。
+ *
+ * 名單內容全部原創，**沒有真人姓名**（職稱 + 本專案自創的組名）。
+ */
+(function () {
+  'use strict';
+  var CR = window.CR = window.CR || {};
+
+  var ROWS_NT = 30;                      // 名稱表列數（= 垂直繞一圈 240 px）
+  var VIEW_ROWS = 30;
+  var SPEED_NUM = 1, SPEED_DEN = 4;      // 1/4 px/幀（240 px ≈ 960 幀 ≈ 16 秒）
+  var TOTAL_ROWS = 60;                   // 名單總列數（含前後留白）
+
+  var LINES = [
+    'STARDUST CRUISER', '', 'ALL STAGES CLEAR', '', '',
+    '- STAFF -', '',
+    'GAME DESIGN', 'STARDUST TEAM', '',
+    'PROGRAM', 'NES CORE ENGINE', '',
+    'GRAPHICS', 'CHR WORKSHOP', '',
+    'MUSIC AND SOUND', '2A03 AUDIO LAB', '',
+    'STAGE DESIGN', 'SEVEN WORLDS CREW', '',
+    'BOSS DESIGN', 'CORE FORTRESS CREW', '',
+    'BALANCE AND QA', 'PLAYTHROUGH ROBOT', '', '',
+    'NO ROM WAS USED', 'ALL ART IS ORIGINAL', '', '',
+    'SPECIAL THANKS', 'ALL 8 BIT FANS', '', '',
+    'THANK YOU FOR PLAYING', '',
+    'THE END'
+  ];
+
+  // 讓 'THE END' 落在最後一屏的中央（世界列 44 ⇒ 最後一屏 30..59 的第 14 列）
+  function buildSeq() {
+    var endAt = 44, lead = Math.max(2, endAt - (LINES.length - 1)), out = [], i;
+    for (i = 0; i < lead; i++) out.push('');
+    for (i = 0; i < LINES.length; i++) out.push(LINES[i]);
+    while (out.length < TOTAL_ROWS) out.push('');
+    return out.slice(0, Math.max(TOTAL_ROWS, out.length));
+  }
+  var SEQ = buildSeq();
+  var STOP_Y = Math.max(0, (SEQ.length - VIEW_ROWS) * 8);
+
+  var ppu0 = null, y = 0, frac = 0, nextRow = 0, running = false, done = false, holdT = 0;
+
+  function blankTile() {
+    var B = CR.BGTILE || {};
+    return (B.H_SP === undefined) ? 0 : B.H_SP;
+  }
+  function tileOf(ch) {
+    var B = CR.BGTILE || {}, n = CR.tileNameFor ? CR.tileNameFor(ch) : 'H_SP';
+    return (B[n] === undefined) ? blankTile() : B[n];
+  }
+  function centerCol(text) {
+    var c = 16 - ((text.length + 1) >> 1);
+    return c < 0 ? 0 : c;
+  }
+  // 把世界列 wr 的內容寫進名稱表列 wr % 30（只寫名稱表 0；scroll x = 0 ⇒ 只看得到它）
+  function writeRow(wr) {
+    if (!ppu0) return 0;
+    var r = ((wr % ROWS_NT) + ROWS_NT) % ROWS_NT;
+    var text = (wr >= 0 && wr < SEQ.length) ? SEQ[wr] : '';
+    var col = text ? centerCol(text) : 0, c, bytes = 0;
+    for (c = 0; c < 32; c++) {
+      var ch = (text && c >= col && c < col + text.length) ? text.charAt(c - col) : ' ';
+      ppu0.setTile(0, c, r, ch === ' ' ? blankTile() : tileOf(ch));
+      bytes++;
+    }
+    return bytes;
+  }
+
+  var C = {
+    LINES: LINES, SEQ: SEQ, STOP_Y: STOP_Y, ROWS_NT: ROWS_NT,
+    SPEED: SPEED_NUM / SPEED_DEN,
+    // 預估長度（幀）：捲到底 + 停 2 秒
+    FRAMES: STOP_Y * SPEED_DEN / SPEED_NUM + 120,
+
+    start: function (ppu) {
+      ppu0 = ppu || ppu0;
+      y = 0; frac = 0; done = false; running = true; holdT = 0;
+      if (!ppu0) return C;
+      var r;
+      for (r = 0; r < ROWS_NT; r++) writeRow(r);
+      ppu0.fillAttr(0, 0, 0, 16, 15, 0);        // 整張屬性 = 調色盤 0（白字）
+      ppu0.fillAttr(1, 0, 0, 16, 15, 0);
+      nextRow = ROWS_NT;                         // 下一個要寫的世界列
+      return C;
+    },
+
+    // 每幀一次；回傳 true = 名單已經捲到底（main 可以收尾了）
+    update: function () {
+      if (!running) return done;
+      if (y < STOP_Y) {
+        frac += SPEED_NUM;
+        while (frac >= SPEED_DEN) {
+          frac -= SPEED_DEN;
+          y++;
+          if ((y & 7) === 0) {                   // 跨過 8 px ⇒ 補一列（在下緣 overscan 裡）
+            writeRow(nextRow);
+            nextRow++;
+          }
+        }
+        if (y >= STOP_Y) y = STOP_Y;
+      } else {
+        holdT++;
+        if (holdT >= 120) done = true;
+      }
+      return done;
+    },
+
+    // 每幀 draw 時套用（取代 main 的 scroll / split）
+    apply: function (ppu) {
+      var p = ppu || ppu0;
+      if (!p) return;
+      p.scroll(0, y | 0, 0);
+      p.split(null);
+    },
+    stop: function () { running = false; return C; },
+    skip: function () {                          // START 快轉到最後一屏
+      if (!running) return C;
+      // fix-r4（qa-r4 P2-3）：剩下的列（最多 60 列 = 960 byte）是一幀寫完的**轉場**，
+      // 跟 main 其他 16 處轉場一樣要把 VBlank 計帳 mute 起來 —— 不包的話這是整局唯一一次超支。
+      var mute = CR.muteBudget;
+      if (mute) mute(true);
+      while (nextRow < SEQ.length) { writeRow(nextRow); nextRow++; }
+      if (mute) mute(false);
+      y = STOP_Y; frac = 0; holdT = 120; done = true;
+      return C;
+    },
+    done: function () { return done; },
+    y: function () { return y | 0; },
+    state: function () {
+      return { running: running, done: done, y: y | 0, stopY: STOP_Y, row: y >> 3,
+        nextRow: nextRow, rows: SEQ.length, hold: holdT };
+    },
+    rowText: function (r) {                      // 測試用：讀名稱表上第 r 列的字
+      if (!ppu0) return '';
+      var out = '', c, t, REV = CR.BGREV || null;
+      for (c = 0; c < 32; c++) {
+        t = ppu0.getTile(0, c, ((r % ROWS_NT) + ROWS_NT) % ROWS_NT);
+        out += (REV && REV[t] !== undefined) ? REV[t] : '?';
+      }
+      return out.replace(/\s+$/, '');
+    }
+  };
+
+  CR.Credits = C;
+})();
+
+</script>
+<script>/* games/cruiser/hiscore.js */
+/*
+ * games/cruiser/hiscore.js — 《星塵巡航艦》R4：分數排行榜（CR.HiScore）
+ * ---------------------------------------------------------------------------
+ * 擁有者：cruiser-r4 agent（R4）
+ * 前 10 名存 `localStorage.cruiser_scores`（JSON）；名字是**紅白機風的 3 字母**
+ *   （A..Z 加一個 `.`），↑↓ 換字母、←→ 移游標、A / START 確定。
+ *
+ * 真機其實是存在卡帶的電池 SRAM 裡（研究 02「電池」欄）；瀏覽器用 localStorage 等價，
+ * 讀不到 / 壞掉就退回預設榜（下表），**永遠不會 throw**（私密視窗、關掉 cookie 都能玩）。
+ *
+ * 預設榜（原創，數字刻意訂高：讓隨手一局不會污染榜單，也讓既有測試的 GAME OVER
+ *   流程維持「按 START 直接回標題」—— 沒上榜就不會跳名字輸入）：
+ *   ACE 200000 / NES 180000 / CRU 160000 / OPT 140000 / LSR 120000 /
+ *   RPL 100000 / FAN  80000 / MOA  60000 / BIO  40000 / CRS  20000
+ */
+(function () {
+  'use strict';
+  var CR = window.CR = window.CR || {};
+
+  var KEY = 'cruiser_scores';
+  var TOP = 10;
+  var NAME_LEN = 3;
+  var LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ.';
+  var MAX_SCORE = 9999999;
+
+  var DEFAULTS = [
+    { n: 'ACE', s: 200000, st: 7, l: 1 }, { n: 'NES', s: 180000, st: 6, l: 1 },
+    { n: 'CRU', s: 160000, st: 6, l: 0 }, { n: 'OPT', s: 140000, st: 5, l: 0 },
+    { n: 'LSR', s: 120000, st: 5, l: 0 }, { n: 'RPL', s: 100000, st: 4, l: 0 },
+    { n: 'FAN', s: 80000, st: 4, l: 0 }, { n: 'MOA', s: 60000, st: 3, l: 0 },
+    { n: 'BIO', s: 40000, st: 2, l: 0 }, { n: 'CRS', s: 20000, st: 1, l: 0 }
+  ];
+
+  function defaults() {
+    var out = [], i;
+    for (i = 0; i < DEFAULTS.length; i++) {
+      out.push({ n: DEFAULTS[i].n, s: DEFAULTS[i].s, st: DEFAULTS[i].st, l: DEFAULTS[i].l });
+    }
+    return out;
+  }
+
+  function cleanName(v) {
+    var s = String(v === undefined || v === null ? '' : v).toUpperCase(), out = '', i, c;
+    for (i = 0; i < s.length && out.length < NAME_LEN; i++) {
+      c = s.charAt(i);
+      if (LETTERS.indexOf(c) >= 0) out += c;
+    }
+    while (out.length < NAME_LEN) out += '.';
+    return out;
+  }
+
+  function sanitize(list) {
+    var out = [], i, e, s;
+    if (!list || typeof list.length !== 'number') return defaults();
+    for (i = 0; i < list.length && out.length < TOP; i++) {
+      e = list[i];
+      if (!e) continue;
+      s = parseInt(e.s, 10);
+      if (!isFinite(s) || s < 0) continue;
+      out.push({ n: cleanName(e.n), s: Math.min(MAX_SCORE, s | 0), st: (e.st | 0) || 1, l: (e.l | 0) || 0 });
+    }
+    if (!out.length) return defaults();
+    out.sort(function (a, b) { return b.s - a.s; });
+    while (out.length < TOP) out.push({ n: '...', s: 0, st: 1, l: 0 });
+    return out.slice(0, TOP);
+  }
+
+  var table = null;
+
+  function load() {
+    if (table) return table;
+    var raw = null;
+    try { raw = window.localStorage.getItem(KEY); } catch (e) { raw = null; }
+    if (!raw) { table = defaults(); return table; }
+    try { table = sanitize(JSON.parse(raw)); } catch (e2) { table = defaults(); }
+    return table;
+  }
+  function save() {
+    try { window.localStorage.setItem(KEY, JSON.stringify(table || defaults())); } catch (e) { }
+    return table;
+  }
+
+  function rankOf(score) {                 // 0..TOP-1 = 第幾名；-1 = 沒上榜
+    var t = load(), i;
+    score = score | 0;
+    for (i = 0; i < t.length; i++) if (score > t[i].s) return i;
+    return -1;
+  }
+  function insert(name, score, st, loop) {
+    var t = load(), r = rankOf(score);
+    if (r < 0) return -1;
+    t.splice(r, 0, { n: cleanName(name), s: Math.min(MAX_SCORE, score | 0), st: (st | 0) || 1, l: loop | 0 });
+    while (t.length > TOP) t.pop();
+    save();
+    return r;
+  }
+
+  function pad0(v, w) { var s = String(v | 0); while (s.length < w) s = '0' + s; return s; }
+  function pad2(v) { return pad0(v, 2); }
+
+  /* ---------------------------------------------- 排行榜畫面（drawMsg 的行物件） */
+  function tableLines(markIdx) {
+    var t = load(), out = [{ row: 2, col: 10, text: 'HIGH SCORES' }], i, e, mk;
+    for (i = 0; i < t.length; i++) {
+      e = t[i];
+      mk = (i === markIdx) ? '>' : ' ';
+      out.push({
+        row: 5 + i * 2, col: 5,
+        text: mk + pad2(i + 1) + ' ' + e.n + ' ' + pad0(e.s, 7) + ' ST' + (e.st | 0)
+      });
+    }
+    return out;
+  }
+
+  /* ---------------------------------------------- 名字輸入（3 字母） */
+  var entry = { active: false, chars: [0, 0, 0], pos: 0, score: 0, st: 1, loop: 0, rank: -1, blink: 0 };
+
+  function begin(score, st, loop) {
+    entry.active = true;
+    entry.chars = [0, 0, 0]; entry.pos = 0; entry.blink = 0;
+    entry.score = score | 0; entry.st = (st | 0) || 1; entry.loop = loop | 0;
+    entry.rank = rankOf(score);
+    return entry.rank;
+  }
+  function name() {
+    var s = '', i;
+    for (i = 0; i < NAME_LEN; i++) s += LETTERS.charAt(entry.chars[i] % LETTERS.length);
+    return s;
+  }
+  function bump(d) {
+    var n = LETTERS.length;
+    entry.chars[entry.pos] = ((entry.chars[entry.pos] + (d | 0)) % n + n) % n;
+    return name();
+  }
+  function move(d) {
+    entry.pos = ((entry.pos + (d | 0)) % NAME_LEN + NAME_LEN) % NAME_LEN;
+    return entry.pos;
+  }
+  function commit() {
+    var r = insert(name(), entry.score, entry.st, entry.loop);
+    entry.active = false;
+    entry.rank = r;
+    return r;
+  }
+  function entryLines() {
+    var nm = name(), spaced = nm.charAt(0) + ' ' + nm.charAt(1) + ' ' + nm.charAt(2);
+    var caret = '     ';
+    caret = (entry.pos === 0 ? '-' : ' ') + ' ' + (entry.pos === 1 ? '-' : ' ') + ' ' + (entry.pos === 2 ? '-' : ' ');
+    return [
+      { row: 6, col: 9, text: 'NEW RECORD' },
+      { row: 8, col: 8, text: 'RANK ' + pad2((entry.rank < 0 ? 0 : entry.rank) + 1) +
+        '  ST' + (entry.st | 0) },
+      { row: 10, col: 8, text: 'SCORE ' + pad0(entry.score, 7) },
+      { row: 14, col: 13, text: spaced },
+      { row: 15, col: 13, text: caret },
+      { row: 19, col: 5, text: 'UP DOWN = LETTER' },
+      { row: 21, col: 5, text: 'LEFT RIGHT = MOVE' },
+      { row: 23, col: 6, text: 'A OR START = OK' }
+    ];
+  }
+
+  CR.HiScore = {
+    KEY: KEY, TOP: TOP, NAME_LEN: NAME_LEN, LETTERS: LETTERS, DEFAULTS: DEFAULTS,
+    load: load, list: function () { return load().slice(); }, save: save,
+    reload: function () { table = null; return load(); },
+    clear: function () { table = defaults(); save(); return table; },
+    rankOf: rankOf, qualifies: function (s) { return rankOf(s) >= 0; }, insert: insert,
+    tableLines: tableLines,
+    begin: begin, name: name, bump: bump, move: move, commit: commit,
+    entryLines: entryLines, cleanName: cleanName,
+    entry: function () {
+      return { active: entry.active, pos: entry.pos, name: name(), score: entry.score,
+        rank: entry.rank, st: entry.st, loop: entry.loop };
+    },
+    state: function () {
+      var t = load();
+      return { top: t.length, best: t[0] ? t[0].s : 0, last: t[t.length - 1] ? t[t.length - 1].s : 0,
+        names: t.map(function (e) { return e.n; }),
+        scores: t.map(function (e) { return e.s; }), entry: CR.HiScore.entry() };
+    }
+  };
 })();
 
 </script>
@@ -11578,6 +12735,7 @@
     REV[B.H_GL] = '['; REV[B.H_GM] = '-'; REV[B.H_GR] = ']';
     REV[B.H_GLON] = '<'; REV[B.H_GMON] = '='; REV[B.H_GRON] = '>';
     REV[B.H_SHIP] = '^';
+    CR.BGREV = REV;                    // R4：credits.js 讀名稱表上的字（測試用）
   }
 
   function pad0(n, w) { var s = String(n | 0); while (s.length < w) s = '0' + s; return s; }
@@ -11602,7 +12760,7 @@
     ppu.setTile(0, c + 4, r, on ? B.H_GRON : B.H_GR);
   }
 
-  var hud = { score: null, hi: null, lives: null, gauge: -1, stage: null };
+  var hud = { score: null, hi: null, lives: null, gauge: -1, stage: null, opt: null };
   var hudOn = true;                  // P3-1：標題畫面不掛能量表 HUD
 
   // HUD 三列（+ 裁掉的列 29）整個清空；hudOn = false 時 draw 也不會再同步
@@ -11627,7 +12785,9 @@
       gaugeCell(ppu, i, false);
     }
     writeText(ppu, 29, r0, 'ST1');                         // R3：關卡編號（hudSync 會改）
+    writeText(ppu, 24, r0, 'T');                           // R4：Option 編隊（T 跟隨 / F 固定 / O 旋轉）
     hud.score = null; hud.hi = null; hud.lives = null; hud.gauge = 0; hud.stage = 'ST1';
+    hud.opt = 'T';
     hudOn = true;
   }
 
@@ -11647,6 +12807,11 @@
     var stg = st();                                        // R3：關卡編號（每關只寫 1 格）
     var sn = 'ST' + Math.max(1, Math.min(9, (stg && stg.index) || 1));
     if (sn !== hud.stage) { writeDiff(ppu, 29, r0, sn, hud.stage); hud.stage = sn; }
+    // R4：Option 編隊的一個字（欄 24 本來是空的；SELECT 切換時才重寫 1 格）
+    // 注意：hudSync 收到的是**船物件**（不是 state()），optModeName 在這裡是 function。
+    var nm = (typeof s.optModeName === 'function') ? s.optModeName() : (s.optModeName || 'TRAIL');
+    var om = String(nm).charAt(0) || 'T';
+    if (om !== hud.opt) { ppu.setTile(0, 24, r0, bgTileOf(om)); hud.opt = om; }
   }
 
   function hudString(ppu) {
@@ -11782,7 +12947,10 @@
     // fix4：一鍵密技（SELECT）。selectUsed = 這一次暫停已經用過（防連按重複觸發）
     selectUsed: false, selectSecrets: 0, selectContinues: 0,
     // fix5：真·一鍵（鍵盤 C / 觸控 ★密技 / nes-cheat 事件），不必先暫停
-    cheatReq: false, cheatCool: 0, cheats: 0, cheatContinues: 0, lastCheat: ''
+    cheatReq: false, cheatCool: 0, cheats: 0, cheatContinues: 0, lastCheat: '',
+    // R4：結局名單 / 名字輸入 / 排行榜 / 隱藏獎勵 / Option 編隊
+    noteText: '', afterScores: 'title', entryRank: -1, scoreMark: -1,
+    creditFrames: 0, bonuses: 0, lastBonus2: '', optSwitch: 0
   };
   CR.g = g;
 
@@ -11790,6 +12958,9 @@
     var b = g.nes && g.nes.timing && g.nes.timing.budget;
     if (b) b.mute = !!on;
   }
+  // fix-r4（qa-r4 P2-3）：轉場模組（credits 的 START 快轉）也要能宣告「這是畫面關閉的轉場幀」，
+  // 不然一次寫 960 byte 名稱表會被計成 VBlank 超支（本來只有 main 自己這 16 處轉場包得到）。
+  CR.muteBudget = muteBudget;
 
   function st() { return CR.stage || null; }
   function call(obj, fn, a, b2) {
@@ -11973,6 +13144,109 @@
     return true;
   }
 
+  /* ============================================ R4：整片清場（換成靜態畫面用）
+   * entry / scores 是**全畫面靜態選單**：先把遊戲區 26 列（兩張名稱表）清成空白磚，
+   * 再用 drawMsg 寫字。1664 byte 遠超 VBlank 預算 ⇒ 一律包在 muteBudget 裡
+   * （＝真機「關閉 rendering 重建畫面」，與 stage.restart 的 Scroller.reset 同一個手法）。
+   */
+  function clearPlayArea(ppu) {
+    var i;
+    for (i = 0; i < PLAY_ROWS; i++) {
+      ppu.fillTiles(0, 0, i, 32, 1, B.H_SP);
+      ppu.fillTiles(1, 0, i, 32, 1, B.H_SP);
+    }
+    ppu.fillAttr(0, 0, 0, 16, 13, 0);
+    ppu.fillAttr(1, 0, 0, 16, 13, 0);
+    msgCells.length = 0;
+  }
+
+  // R4：遊戲進行中的一行提示（Option 編隊 / 隱藏獎勵），沿用 SECRET! 的 msgCells + 倒數機制
+  function showNote(text, row) {
+    g.noteText = text;
+    muteBudget(true);
+    restorePlayMsg();
+    drawMsg(g.ppu, [{ row: row === undefined ? 17 : row, col: Math.max(0, 16 - ((text.length + 1) >> 1)), text: text }], 0);
+    muteBudget(false);
+    g.secretMsg = 60;
+  }
+
+  /* ============================================ R4：Option 編隊切換（SELECT / 手機鈕）
+   * 研究 16 §4：原作的 Option 只有「沿軌跡跟隨」一種。本作加兩種編隊：
+   *   TRAIL 跟隨（原作行為，預設）/ FIXED 固定（船後方兩個定點）/ ORBIT 旋轉（繞船 22 px）
+   * 入口：遊戲進行中按 **SELECT**（暫停中的 SELECT 仍然是密技，語意不衝突）、
+   *       手機多一顆 **「編隊」** 鈕（本檔自己建的 DOM 鈕，不碰 engine/touch.js 的七顆鍵）。
+   */
+  function cycleOption() {
+    if (!g.ship || !g.ship.cycleOptMode) return '';
+    var nm = g.ship.cycleOptMode();
+    g.optSwitch++;
+    showNote('OPTION ' + nm, 17);
+    call(CR.Audio, 'sfx', 'capsule');
+    return nm;
+  }
+  CR.cycleOption = cycleOption;
+  CR.optionMode = function () { return g.ship ? g.ship.optModeName() : ''; };
+
+  // 手機「編隊」鈕：只有觸控覆蓋層在用的時候才顯示；`?optbtn=0` 可關掉。
+  // 位置算法刻意避開 NES.Touch 的七顆鍵與畫面：直向放「畫面下緣與按鍵列之間」的空白帶、
+  // 橫向放「左側留白的上方」。engine/touch.js 一個字都沒改（它的 rects() 仍然是 7 顆）。
+  var optBtn = null, optBtnOn = true;
+  (function buildOptButton() {
+    if (typeof document === 'undefined' || !document.body) return;
+    try {
+      var q = new window.URLSearchParams(window.location.search);
+      if (q.get('optbtn') === '0') optBtnOn = false;
+    } catch (e) { }
+    var el = document.createElement('div');
+    el.id = 'cr-optbtn';
+    el.setAttribute('data-cr', 'option');
+    el.textContent = '編隊';
+    el.style.cssText = 'position:fixed;z-index:9;display:none;box-sizing:border-box;' +
+      'align-items:center;justify-content:center;text-align:center;' +
+      'background:#1f6f9c;border:3px solid #0b2c40;border-radius:999px;color:#dff3ff;' +
+      'font:600 13px/1 system-ui,sans-serif;touch-action:none;user-select:none;' +
+      '-webkit-user-select:none;opacity:.78;';
+    el.addEventListener('pointerdown', function (ev) {
+      if (ev && ev.preventDefault) ev.preventDefault();
+      el.style.opacity = '1';
+      cycleOption();
+      window.setTimeout(function () { el.style.opacity = '.78'; }, 160);
+    }, false);
+    document.body.appendChild(el);
+    optBtn = el;
+    function place() {
+      if (!optBtn) return;
+      var T2 = window.NES && window.NES.Touch;
+      var L = window.NES_LAYOUT || null;
+      var on = optBtnOn && !!(T2 && T2.active && T2.active()) && !!L;
+      if (!on) { optBtn.style.display = 'none'; return; }
+      var R2 = {}, k, top = 1e9;
+      try { R2 = T2.rects() || {}; } catch (e2) { R2 = {}; }
+      for (k in R2) if (R2.hasOwnProperty(k) && R2[k] && R2[k].y < top) top = R2[k].y;
+      var w = 64, h = 34, x, y;
+      if (L.portrait) {
+        var band0 = L.y + L.h, band1 = (top < 1e9 ? top : L.vh);
+        x = (L.vw - w) / 2;
+        y = band0 + (band1 - band0 - h) / 2;
+        if (band1 - band0 < h + 6) y = band0 + 2;
+      } else {
+        x = Math.max(4, (L.x - w) / 2);
+        y = Math.max(4, ((top < 1e9 ? top : L.vh) - h) / 2 - 40);
+      }
+      optBtn.style.display = 'flex';
+      optBtn.style.left = Math.round(x) + 'px';
+      optBtn.style.top = Math.round(Math.max(0, y)) + 'px';
+      optBtn.style.width = w + 'px';
+      optBtn.style.height = h + 'px';
+    }
+    window.addEventListener('nes-resize', place, false);
+    window.addEventListener('resize', place, false);
+    window.setTimeout(place, 0);
+    window.setTimeout(place, 200);
+    CR.optButton = function () { return { el: optBtn, on: optBtnOn, place: place }; };
+    CR.setOptButton = function (b) { optBtnOn = !!b; place(); return optBtnOn; };
+  })();
+
   function pauseGame() {
     muteBudget(true); restorePlayMsg(); drawMsg(g.ppu, PAUSE, 0); muteBudget(false);
     g.paused = true; g.secretMsg = 0;
@@ -12002,6 +13276,7 @@
     g.mode = 'play'; g.paused = false; g.bossOn = false;
     g.secretLeft = 1; g.secretMsg = 0; g.continues++;
     g.selectUsed = false; g.cheatCool = 0;
+    call(CR.Rank, 'reset');              // R4：續關 = 重新開始累積 rank（罰分歸零）
     hud.score = null; hud.hi = null; hud.lives = null; hud.gauge = -1; hud.stage = null;
     if (CR.Audio && CR.Audio.play) call(CR.Audio, 'play', stageSong());
   }
@@ -12024,6 +13299,12 @@
     g.continues = 0; g.continueCam = 0; g.lastCode = '';
     g.selectUsed = false; g.selectSecrets = 0; g.selectContinues = 0;
     g.cheatReq = false; g.cheatCool = 0; g.cheats = 0; g.cheatContinues = 0; g.lastCheat = '';
+    // R4：rank / 隱藏獎勵 / 排行榜旗標重設
+    g.bonuses = 0; g.lastBonus2 = ''; g.noteText = ''; g.afterScores = 'title';
+    g.entryRank = -1; g.scoreMark = -1; g.creditFrames = 0;
+    call(CR.Rank, 'reset', true);
+    call(CR.Rank, 'setLoop', 0);
+    if (CR.Bonus && CR.Bonus.newGame) CR.Bonus.newGame();
     konamiClear();
     hud.score = null; hud.hi = null; hud.lives = null; hud.gauge = -1; hud.stage = null;
     if (CR.Audio && CR.Audio.play) call(CR.Audio, 'play', stageSong());
@@ -12096,6 +13377,8 @@
     muteBudget(true);
     clearMsg(ppu);
     call(st(), 'setLoop', g.loop);
+    call(CR.Rank, 'setLoop', g.loop);               // R4：第二輪 rank 起點更高（研究 §7-5）
+    if (CR.Bonus && CR.Bonus.newGame) CR.Bonus.newGame();
     call(st(), 'load', 1);
     hudStatic(ppu);
     muteBudget(false);
@@ -12104,6 +13387,53 @@
     g.mode = 'play'; g.paused = false; g.bossOn = false; g.stageNo = 1; g.escSec = 0;
     hud.score = null; hud.hi = null; hud.lives = null; hud.gauge = -1; hud.stage = null;
     if (CR.Audio && CR.Audio.play) call(CR.Audio, 'play', stageSong());
+  }
+
+  /* ---------------------------------------- R4：結局名單 → 名字輸入 → 排行榜 */
+  function toCredits() {
+    var ppu = g.ppu;
+    muteBudget(true);
+    clearMsg(ppu);
+    hudHide(ppu);                        // 名單要用到列 26..29（split 關掉 ⇒ 30 列全是內容）
+    if (CR.Credits && CR.Credits.start) CR.Credits.start(ppu);
+    muteBudget(false);
+    g.mode = 'credits'; g.paused = false; g.secretMsg = 0; g.creditFrames = 0;
+    if (CR.Audio && CR.Audio.play) call(CR.Audio, 'play', songKey('credits', 'ending'));
+  }
+  function drawEntry(ppu) {
+    if (!CR.HiScore) return;
+    muteBudget(true);
+    drawMsg(ppu, CR.HiScore.entryLines(), 0);
+    muteBudget(false);
+  }
+  function toScores(mark) {
+    var ppu = g.ppu, lines = [];
+    if (CR.HiScore && CR.HiScore.tableLines) lines = CR.HiScore.tableLines(mark === undefined ? -1 : mark);
+    lines = lines.concat([{ row: 25, col: 10, text: 'PRESS START' }]);
+    muteBudget(true);
+    clearPlayArea(ppu);
+    hudHide(ppu);
+    drawMsg(ppu, lines, 0);
+    muteBudget(false);
+    g.mode = 'scores'; g.paused = false; g.secretMsg = 0; g.scoreMark = (mark === undefined) ? -1 : mark;
+    if (CR.Audio && CR.Audio.play && g.afterScores !== 'title') call(CR.Audio, 'play', 'title');
+  }
+  // 上榜 → 3 字母輸入；沒上榜就直接看榜
+  function toEntry() {
+    var ppu = g.ppu, r = -1;
+    if (CR.HiScore && CR.HiScore.begin) r = CR.HiScore.begin(g.ship.score, (st() && st().index) || 1, g.loop);
+    if (r < 0) { toScores(-1); return false; }
+    muteBudget(true);
+    clearPlayArea(ppu);
+    hudHide(ppu);
+    muteBudget(false);
+    drawEntry(ppu);
+    g.mode = 'entry'; g.paused = false; g.secretMsg = 0; g.entryRank = r;
+    return true;
+  }
+  function leaveScores() {
+    if (g.afterScores === 'loop') startLoop();
+    else toTitle();
   }
 
   /* -------------------------------------------------------------- 碰撞 */
@@ -12125,6 +13455,7 @@
     else { e.hp = (e.hp === undefined ? 1 : e.hp) - dmg; if (e.hp <= 0) e.alive = false; }
     if (e.alive === false) {
       g.kills++;
+      if (CR.Bonus && CR.Bonus.onKill) CR.Bonus.onKill(e);     // R4：隱藏獎勵的擊殺統計
       // stage 自己記分 + 自己畫爆炸（`CR.stage.takeScore()` 在場即代表）⇒ 這裡不要重複加
       if (!stageScores()) {
         g.ship.addScore(e.score || 100);
@@ -12249,9 +13580,15 @@
   }
 
   /* ================================================================ draw */
+  // R4：這些畫面不該有船 / 選項 / 自機彈（新增 credits / entry / scores 三個）
+  function noShip() {
+    var m = g.mode;
+    return m === 'title' || m === 'gameover' || m === 'ending' ||
+      m === 'credits' || m === 'entry' || m === 'scores';
+  }
   function drawShip(oam) {
     var s2 = g.ship;
-    if (g.mode === 'title' || g.mode === 'gameover' || g.mode === 'ending') return;   // 標題 / GAME OVER / ENDING 不畫船
+    if (noShip()) return;              // 標題 / GAME OVER / ENDING / 名單 / 排行榜不畫船
     if (!s2.alive) return;
     if (s2.blink()) return;                  // 無敵閃爍
     var a = s2.anim;
@@ -12266,7 +13603,7 @@
 
   function drawOptions(oam) {
     var s2 = g.ship, i;
-    if (g.mode === 'title' || g.mode === 'gameover' || g.mode === 'ending') return;
+    if (noShip()) return;
     if (!s2.alive) return;
     for (i = 0; i < s2.options.length; i++) {
       var o = s2.options[i];
@@ -12284,6 +13621,17 @@
         for (j = 0; j < t.len; j++) {
           var last = (j === t.len - 1);
           oam.add({ x: t.x + j * 8, y: t.y - 2, tile: last ? T.S_LASER_H : T.S_LASER, pal: 1, prio: 1 });
+        }
+      } else if (t.kind === CR.Ship.K.RIPPLE) {
+        // 波動：上端弧 / 中段 / 下端弧（下端 = 上端 flipV）—— len 1 時只有一顆小環
+        if (t.len <= 1) {
+          oam.add({ x: t.x, y: t.y, tile: T.S_RIPPLE1, pal: 1, prio: 1 });
+        } else {
+          for (j = 0; j < t.len; j++) {
+            var tl = (j === 0) ? T.S_RIPPLE_T : ((j === t.len - 1) ? T.S_RIPPLE_T : T.S_RIPPLE_M);
+            oam.add({ x: t.x, y: t.y + j * 8, tile: tl, pal: 1, prio: 1,
+              flipV: (j === t.len - 1) });
+          }
         }
       } else if (t.kind === CR.Ship.K.DIAG) {
         oam.add({ x: t.x - 2, y: t.y - 2, tile: T.S_BULLET_D, pal: 1, prio: 1 });
@@ -12374,20 +13722,55 @@
       }
 
       if (g.mode === 'title') {
-        if (input.pressed(BTN.START) || input.pressed(BTN.A)) toPlay();
+        // R4：SELECT = 看分數排行榜（START / A 照舊開始遊戲）
+        if (input.pressed(BTN.SELECT)) { g.afterScores = 'title'; toScores(-1); }
+        else if (input.pressed(BTN.START) || input.pressed(BTN.A)) toPlay();
+      } else if (g.mode === 'credits') {
+        // R4：工作人員名單捲動（START / A 快轉；捲完 2 秒自動收尾）
+        g.creditFrames++;
+        var cdone = false;
+        if (CR.Credits && CR.Credits.update) cdone = !!CR.Credits.update();
+        if (input.pressed(BTN.START) || input.pressed(BTN.A)) {
+          if (CR.Credits && CR.Credits.done && !CR.Credits.done()) { CR.Credits.skip(); }
+          else cdone = true;
+        }
+        if (cdone) {
+          if (CR.Credits && CR.Credits.stop) CR.Credits.stop();
+          g.afterScores = 'loop';
+          toEntry();
+        }
+      } else if (g.mode === 'entry') {
+        // R4：3 字母名字輸入（↑↓ 換字母、←→ 移游標、A / START 確定）
+        var chg = false;
+        if (input.pressed(BTN.UP)) { call(CR.HiScore, 'bump', 1); chg = true; }
+        else if (input.pressed(BTN.DOWN)) { call(CR.HiScore, 'bump', -1); chg = true; }
+        else if (input.pressed(BTN.RIGHT)) { call(CR.HiScore, 'move', 1); chg = true; }
+        else if (input.pressed(BTN.LEFT)) { call(CR.HiScore, 'move', -1); chg = true; }
+        if (chg) drawEntry(g.ppu);
+        if (input.pressed(BTN.A) || input.pressed(BTN.START)) {
+          var rk = call(CR.HiScore, 'commit');
+          toScores(typeof rk === 'number' ? rk : -1);
+        }
+      } else if (g.mode === 'scores') {
+        if (input.pressed(BTN.START) || input.pressed(BTN.A)) leaveScores();
       } else if (g.mode === 'gameover') {
         // [源] §9-1：GAME OVER 畫面的 Konami 指令 = 3 條命續關（分數保留）；START 才是回標題
         // fix4：**SELECT = 一鍵續關**（同樣效果、不限次數），Konami 序列照舊保留
         konamiPush(input);
         if (input.pressed(BTN.SELECT)) { konamiClear(); g.selectContinues++; continueGame(); }
         else if (konamiHit()) { konamiClear(); continueGame(); }
-        else if (input.pressed(BTN.START)) toTitle();
+        else if (input.pressed(BTN.START)) {
+          // R4：分數有上榜 -> 先輸入 3 字母名字；沒上榜維持舊行為（直接回標題）
+          g.afterScores = 'title';
+          if (CR.HiScore && CR.HiScore.qualifies && CR.HiScore.qualifies(g.ship.score)) toEntry();
+          else toTitle();
+        }
       } else if (g.mode === 'stageclear') {
         // R3：START = 進入下一關（第 6 關破 -> ENDING）。以前是回標題，擴關後改成接關。
         if (input.pressed(BTN.START) || input.pressed(BTN.A)) nextStage();
       } else if (g.mode === 'ending') {
-        // R3：全破畫面 -> START 進第二輪（loop+1，難度加成；分數 / 強化保留）
-        if (input.pressed(BTN.START) || input.pressed(BTN.A)) startLoop();
+        // R4：全破畫面 -> START 進「工作人員名單」（名單結束 -> 名字輸入 -> 排行榜 -> 第二輪）
+        if (input.pressed(BTN.START) || input.pressed(BTN.A)) toCredits();
       } else if (g.paused) {
         // 暫停中：遊戲完全凍結，只收 SELECT（fix4 一鍵密技）、Konami 指令與 START（研究 §7-3「暫停」）
         if (input.pressed(BTN.SELECT)) trySelectSecret();
@@ -12402,6 +13785,8 @@
         pauseGame();
       } else {
         g.playFrames++;
+        // R4：遊戲進行中 SELECT = 切 Option 編隊（固定 / 跟隨 / 旋轉）；暫停中的 SELECT 仍是密技
+        if (g.mode === 'play' && input.pressed(BTN.SELECT)) cycleOption();
         var ev = g.ship.update(g);                  // 船 / 選項 / 自機彈
         if (g.mode === 'play') {
           call(st(), 'update', g);                  // 關卡：捲動 / 出怪 / 敵彈 / 膠囊
@@ -12412,7 +13797,15 @@
           collide();                                // 碰撞 + 撿膠囊
           drainScore();                             // 收 stage 記的分（EXTEND / HI 一併處理）
           escapeMsg();                              // R3：最終魔王的「脫出倒數」文字
-          if (!g.ship.alive) g.mode = 'dead';
+          // R4：隱藏獎勵（每關 1 個；bonus.js 判定條件並發獎，這裡只負責演出）
+          if (CR.Bonus && CR.Bonus.update) {
+            var bev = CR.Bonus.update();
+            if (bev) {
+              g.bonuses++; g.lastBonus2 = bev;
+              showNote(bev === '1up' ? 'BONUS 1UP!' : 'BONUS CLEAR!', 9);
+            }
+          }
+          if (!g.ship.alive) { call(CR.Rank, 'onDeath'); g.mode = 'dead'; }
           else if (st() && st().cleared) toStageClear();
         } else if (g.mode === 'dead') {
           if (ev === 'deathdone') { respawn(); if (g.mode === 'dead') g.mode = 'play'; }
@@ -12424,10 +13817,22 @@
 
     draw: function (nes) {
       var ppu = nes.ppu;
+      // R4：工作人員名單自己管捲動（垂直捲動 + 關掉 split），畫面上沒有任何精靈
+      if (g.mode === 'credits') {
+        if (CR.Credits && CR.Credits.apply) CR.Credits.apply(ppu);
+        g.oam.begin(); g.oam.end();
+        return;
+      }
       if (hudOn) hudSync(ppu, g.ship);
       // engine 契約異動①：Scroller 不碰 ppu.scroll / split，捲動由遊戲自己設（% 512，不是 & 255）
       ppu.scroll(((camX() % 512) + 512) % 512, 0, 0);
       ppu.split(SPLIT_LINE, { x: 0, y: SPLIT_LINE, nt: 0 });
+
+      // R4：名字輸入 / 排行榜是靜態選單 ⇒ OAM 全清（不然會留下膠囊 / 爆炸的殘影）
+      if (g.mode === 'entry' || g.mode === 'scores') {
+        g.oam.begin(); g.oam.end();
+        return;
+      }
 
       var oam = g.oam;
       oam.begin();
@@ -12448,7 +13853,7 @@
         mode: g.mode, frame: g.frames, playFrames: g.playFrames,
         x: s2.x, y: s2.y, bx: s2.bx, by: s2.by,
         alive: s2.alive, speed: s2.speed, speedPx: s2.speedPx,
-        gauge: s2.gauge, gaugeName: s2.gaugeName, power: s2.power, rank: s2.rank,
+        gauge: s2.gauge, gaugeName: s2.gaugeName, power: s2.power,
         options: s2.options, shots: s2.shots, shotCount: s2.shotCount, timers: s2.timers,
         capsules: s2.capsules, ringSteps: s2.ringSteps, moved: s2.moved,
         invul: s2.invul, lives: s2.lives, score: s2.score, hi: s2.hi,
@@ -12484,6 +13889,20 @@
         // fix5：一鍵密技
         cheats: g.cheats | 0, cheatContinues: g.cheatContinues | 0,
         cheatCool: g.cheatCool | 0, lastCheat: g.lastCheat || '',
+        // ---------------- R4 ----------------
+        rank: s2.rank,                                  // 裝備 rank（R3 語意，0..4）
+        rankDyn: (CR.Rank && CR.Rank.value) ? CR.Rank.value() : s2.rank,
+        rankState: (CR.Rank && CR.Rank.state) ? CR.Rank.state() : null,
+        optMode: s2.optMode, optModeName: s2.optModeName, optSwitches: s2.optSwitches,
+        optSwitch: g.optSwitch | 0,
+        bonus2: (CR.Bonus && CR.Bonus.state) ? CR.Bonus.state() : null,
+        bonuses: g.bonuses | 0, lastBonus2: g.lastBonus2 || '',
+        note: g.noteText || '',
+        credits: (CR.Credits && CR.Credits.state) ? CR.Credits.state() : null,
+        creditFrames: g.creditFrames | 0,
+        hiscore: (CR.HiScore && CR.HiScore.state) ? CR.HiScore.state() : null,
+        entryRank: g.entryRank | 0, scoreMark: g.scoreMark | 0, afterScores: g.afterScores,
+        rush: (stg && stg.bossActive && CR.Boss && CR.Boss.isRush && CR.Boss.state) ? CR.Boss.state() : null,
         lastEvent: g.lastEvent
       };
     }

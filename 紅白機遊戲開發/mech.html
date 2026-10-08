@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>星塵機甲（NES 核心引擎）</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="theme-color" content="#000000">
+<style>
+  /* 手機：100dvh（避開 iOS 動態工具列）、不捲動 / 不縮放 / 不選字 / 不長按選單 */
+  html, body {
+    margin: 0; padding: 0; background: #000; height: 100%; height: 100dvh; overflow: hidden;
+    touch-action: none; overscroll-behavior: none;
+    -webkit-user-select: none; user-select: none;
+    -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
+  }
+  body { display: block; }
+  /* 桌機整數倍放大、手機小數倍（backing store 仍是整數，CSS 縮到目標尺寸）；一律無平滑 */
+  canvas#nes {
+    position: absolute; background: #000; outline: none; touch-action: none;
+    image-rendering: pixelated; image-rendering: crisp-edges;
+  }
+  /* 除錯 / 提示列（?debug=1 或缺模組時才顯示） */
+  #hint {
+    position: absolute; left: 0; bottom: 0; right: 0; margin: 0; padding: 2px 6px;
+    font: 12px/1.5 monospace; color: #6a6a6a; background: #000; white-space: pre; display: none;
+  }
+</style>
+</head>
+<body>
+<canvas id="nes" tabindex="0"></canvas>
+<pre id="hint"></pre>
+
+<!-- ===== engine（契約載入順序；缺檔不致命，nes.js 會用 stub 頂替） ===== -->
+<script src="engine/palette.js?v=c8345ef2"></script>
+<script src="engine/fixed.js?v=4b0721a0"></script>
+<script src="engine/input.js?v=2038ad30"></script>
+<script src="engine/cpu_timing.js?v=3ea1808b"></script>
+<script src="engine/chr.js?v=967299de"></script>
+<script src="engine/ppu.js?v=e2bb80b9"></script>
+<script src="engine/nes_lint.js?v=230e6bcf"></script>
+<script src="engine/apu.js?v=5e88b263"></script>
+<script src="engine/music.js?v=17d7aefa"></script>
+<script src="engine/shmup.js?v=27ccc395"></script>
+<script src="engine/touch.js?v=144579cd"></script>
+<script src="engine/nes.js?v=4bed9ffa"></script>
+
+<!-- ===== 遊戲：games/mech「星塵機甲」（R4 洛克人 2 風格動作射擊）=====
+     載入順序：chr_mech（主角精靈 + HUD 字型 + 面板磚）→ chr_world（地形 / 雜魚 / 兩頭目磚 + 主題調色盤）
+     → song（8 曲 + 18 音效，自帶建構工具 ⇒ apu_render.py --game mech 可離線渲染）
+     → weapons（彈池 / 能量 / 傷害表）→ hero（狀態機：走 / 跳 / 滑行 / 蓄力 / 梯子）
+     → enemies（4 種雜魚）→ bosses（霜棱機兵 / 爆焰機兵）→ levels（磚語意 + 2 關 × 7 畫面 + 選關表）
+     → main（最後一檔設 window.GAME）。 -->
+<script src="games/mech/chr_mech.js?v=d1123680"></script>
+<script src="games/mech/chr_world.js?v=13f01139"></script>
+<script src="games/mech/song.js?v=19fdece5"></script>
+<script src="games/mech/weapons.js?v=f72c2534"></script>
+<script src="games/mech/hero.js?v=d40df210"></script>
+<script src="games/mech/enemies.js?v=27b91f36"></script>
+<script src="games/mech/bosses.js?v=c3808d8f"></script>
+<script src="games/mech/levels.js?v=1d5c1ade"></script>
+<script src="games/mech/main.js?v=019247ba"></script>
+
+<script>
+// ---- 啟動：桌機整數放大置中 / 手機小數倍貼齊、鍵盤焦點、F 全螢幕、觸控覆蓋層版面 ----
+(function () {
+  var W = 256, H = 224;                 // 顯示尺寸（PPU 內部 240 列，裁上下各 8）
+  var canvas = document.getElementById('nes');
+  var hint = document.getElementById('hint');
+  var q = new URLSearchParams(location.search);
+  var debug = q.get('debug') === '1';
+  var forced = parseInt(q.get('scale') || '0', 10) || 0;   // ?scale=1 供截圖工具用（＝維持桌機整數倍行為）
+  // 橫向手機：左右各留 110px 給觸控按鍵；平板（短邊 ≥ 500）各留 170px
+  var RESERVE_PHONE = 220, RESERVE_TABLET = 340;
+
+  // ---- safe-area 探針（讀 env(safe-area-inset-*) 的實際 px；不支援就全 0） ----
+  var probe = null;
+  function safeArea() {
+    var z = { t: 0, r: 0, b: 0, l: 0 };
+    try {
+      if (!probe) {
+        if (!document.body) return z;
+        probe = document.createElement('div');
+        probe.id = 'nes-safe-probe';
+        probe.style.cssText = 'position:fixed;left:0;top:0;width:0;height:0;visibility:hidden;pointer-events:none;' +
+          'padding-top:env(safe-area-inset-top,0px);padding-right:env(safe-area-inset-right,0px);' +
+          'padding-bottom:env(safe-area-inset-bottom,0px);padding-left:env(safe-area-inset-left,0px);';
+        document.body.appendChild(probe);
+      }
+      var cs = getComputedStyle(probe);
+      z.t = parseFloat(cs.paddingTop) || 0; z.r = parseFloat(cs.paddingRight) || 0;
+      z.b = parseFloat(cs.paddingBottom) || 0; z.l = parseFloat(cs.paddingLeft) || 0;
+    } catch (e) { }
+    return z;
+  }
+  function isTouch() {
+    try { return (navigator.maxTouchPoints | 0) > 0 || ('ontouchstart' in window); } catch (e) { return false; }
+  }
+  function viewport() {
+    var vv = window.visualViewport;
+    return { w: (vv && vv.width) || window.innerWidth || 320, h: (vv && vv.height) || window.innerHeight || 480 };
+  }
+
+  // fit() → {s 顯示倍率（可小數）, back backing store 倍率（整數）, mobile, portrait, sa, vw, vh}
+  function fit() {
+    var v = viewport(), sa = safeArea();
+    var vw = v.w, vh = v.h;
+    var portrait = vh >= vw;
+    var mobile = !forced && (isTouch() || Math.min(vw, vh) < 600);
+    var full = Math.min(vw / W, vh / H);        // 完整塞進視窗的最大倍率
+    var s;
+    if (forced) {
+      s = forced;                               // ?scale=N：完全照舊（截圖工具可重現）
+    } else if (mobile) {
+      if (portrait) {
+        s = vw / W;                             // 直向：寬度填滿、貼上方（下面整片給按鍵）
+        var maxH = Math.max(1, vh - sa.t);
+        if (H * s > maxH) s = maxH / H;
+      } else {
+        // 橫向：高度填滿為主，左右各留出按鍵空間；留不出來（小視窗）就整個塞滿
+        var reserve = (Math.min(vw, vh) >= 500 ? RESERVE_TABLET : RESERVE_PHONE) + sa.l + sa.r;
+        var side = Math.min(vh / H, (vw - reserve) / W);
+        s = (side > 0 && side >= full * 0.6) ? side : full;
+      }
+    } else {
+      s = Math.max(1, Math.floor(full));        // 桌機：維持整數倍
+    }
+    s = Math.max(0.5, s);
+    // backing store 一律整數（nes.setScale 只改 backing store 且只收整數，QA R1 P2-1）；
+    // 小數倍時 backing 取 ceil（畫得比顯示大一點），再用 CSS 縮到目標尺寸 + pixelated。
+    var back = forced ? forced : Math.max(1, Math.min(4, Math.ceil(s - 0.0001)));
+    return { s: s, back: back, mobile: mobile, portrait: portrait, sa: sa, vw: vw, vh: vh };
+  }
+
+  function place(f) {
+    var cw = W * f.s, ch = H * f.s;
+    if (f.mobile) { cw = Math.round(cw * 2) / 2; ch = Math.round(ch * 2) / 2; }
+    else { cw = Math.round(cw); ch = Math.round(ch); }
+    var x = (f.vw - cw) / 2, y = (f.vh - ch) / 2;
+    if (f.mobile && f.portrait) y = f.sa.t;                 // 直向貼上方
+    if (f.mobile) { x = Math.round(x * 2) / 2; y = Math.round(y * 2) / 2; }
+    else { x = Math.floor(x); y = Math.floor(y); }
+    canvas.style.width = cw + 'px'; canvas.style.height = ch + 'px';
+    canvas.style.left = x + 'px'; canvas.style.top = y + 'px';
+    // 觸控覆蓋層（engine/touch.js）靠這份版面資訊排版
+    window.NES_LAYOUT = {
+      x: x, y: y, w: cw, h: ch, scale: f.s, back: f.back,
+      portrait: f.portrait, mobile: f.mobile, safe: f.sa, vw: f.vw, vh: f.vh
+    };
+    try { window.dispatchEvent(new Event('nes-resize')); } catch (e) { }
+  }
+
+  if (!window.NES || typeof NES.boot !== 'function') {
+    hint.style.display = 'block';
+    hint.textContent = 'engine/nes.js 未載入';
+    return;
+  }
+
+  var f = fit();
+  var game = window.GAME || NES.game || null;
+  var nes = NES.boot({ canvas: canvas, game: game, scale: f.back });
+  place(f);
+
+  function apply() {
+    var g = fit();
+    if (g.back !== nes.scale) nes.setScale(g.back);
+    place(g);
+  }
+  function applySoon() { apply(); setTimeout(apply, 120); }   // iOS 旋轉 / 工具列收合後尺寸會延遲 ⇒ 二次觸發
+  window.addEventListener('resize', apply);
+  window.addEventListener('orientationchange', applySoon);
+  if (window.visualViewport && window.visualViewport.addEventListener) {
+    window.visualViewport.addEventListener('resize', applySoon);
+  }
+  // 切到背景 / 鎖螢幕：一定要把按鍵放掉，不然回來會卡住一個方向
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) return;
+    try { if (NES.Touch && NES.Touch.releaseAll) NES.Touch.releaseAll(); } catch (e) { }
+    try { if (NES.Input && NES.Input.inject) NES.Input.inject(0, 0); } catch (e) { }
+  });
+
+  // 鍵盤焦點：canvas 可聚焦，點畫面或載入完成都聚焦；方向鍵 / 空白鍵不捲頁
+  function focus() { try { canvas.focus({ preventScroll: true }); } catch (e) { canvas.focus(); } }
+  focus();
+  window.addEventListener('pointerdown', focus);
+  window.addEventListener('keydown', function (e) {
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].indexOf(e.code) >= 0) e.preventDefault();
+    // F = 全螢幕切換（不佔用遊戲按鍵；瀏覽器拒絕時安靜失敗）
+    if (e.code === 'KeyF' && !e.ctrlKey && !e.altKey && !e.metaKey) {
+      e.preventDefault();
+      try {
+        if (!document.fullscreenElement) {
+          var p = document.documentElement.requestFullscreen && document.documentElement.requestFullscreen();
+          if (p && p.catch) p.catch(function () { });
+        } else {
+          var q2 = document.exitFullscreen && document.exitFullscreen();
+          if (q2 && q2.catch) q2.catch(function () { });
+        }
+      } catch (err) { }
+    }
+  });
+  document.addEventListener('fullscreenchange', function () { setTimeout(apply, 60); });
+
+  // ?touch=1 / ?touch=0：強制顯示 / 隱藏觸控按鍵（桌機截圖與測試用）
+  try {
+    var tq = q.get('touch');
+    if (tq === '1' && NES.Touch && NES.Touch.show) NES.Touch.show();
+    else if (tq === '0' && NES.Touch && NES.Touch.hide) NES.Touch.hide();
+  } catch (e) { }
+
+  // 缺模組 / debug 時在底部列出狀態（正式遊玩畫面不顯示）
+  if (debug || (nes.missing && nes.missing.length)) {
+    hint.style.display = 'block';
+    hint.textContent = 'NES ' + NES.VERSION + ' scale=' + nes.scale
+      + (nes.missing && nes.missing.length ? '  缺: ' + nes.missing.join(' ') : '  模組齊全')
+      + (game ? '' : '  (無 game，空畫面)')
+      + (debug ? '  __nes 可用' : '');
+  }
+  window.nes = nes;
+})();
+</script>
+</body>
+</html>

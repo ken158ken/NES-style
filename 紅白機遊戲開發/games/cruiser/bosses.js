@@ -35,13 +35,18 @@
   var DEATH_FRAMES = 90;
   var GAME_H = 208;
 
+  var CFGS = {};                                           // R4：key -> cfg（魔王連戰要照設定複製）
+
   /* ====================================================== 參數化魔王機 */
   function makeBoss(cfg) {
+    if (cfg.key && !CFGS[cfg.key]) CFGS[cfg.key] = cfg;
     var HOME_X = cfg.homeX === undefined ? 176 : cfg.homeX;
     var HOME_Y = cfg.homeY === undefined ? 72 : cfg.homeY;
     var ENTER_V = -FX.v88(1, 85);
     var OPEN_FRAMES = cfg.openFrames || 60, SHUT_FRAMES = cfg.shutFrames || 90;
-    var WARN_FRAMES = 30, BEAM_FRAMES = 60, COOL_FRAMES = 60;
+    // R4：WARN_FRAMES 可由 cfg 調（魔王連戰把預告拉長到 48 幀 —— 一局要連吃兩次三連雷射，
+    //      30 幀的預告在速度 5 下只夠移動 90 px，常常只差 1 px 被掃到）
+    var WARN_FRAMES = cfg.warnFrames || 30, BEAM_FRAMES = 60, COOL_FRAMES = 60;
     var LASER_OFF = cfg.laserOff || [8, 24, 40];
     var PLATES = cfg.plates || [];
     var CORES = cfg.cores || [];
@@ -53,6 +58,9 @@
     var RING_N = cfg.ringN || 8;
     var FIRE_P = cfg.firePeriod || 100;
     var ESCAPE_FRAMES = cfg.escape || 0;
+    // R4：雷射判定高度可調（預設 6 = R3 行為）。魔王連戰用 4 ⇒ 三條光束之間的縫從 10 px
+    //     變成 12 px —— 連戰後期自機速度常常是 5（3 px/幀），10 px 的縫對不準（實測連死）。
+    var BEAM_H = cfg.beamH || 6;
     var TOTAL_HP = PLATES.length * PLATE_HP;
     for (var ci = 0; ci < CORES.length; ci++) TOTAL_HP += CORES[ci].hp;
 
@@ -228,7 +236,9 @@
       }
     }
     function armLaser() {
-      for (var i = 0; i < 3; i++) B.laserBullets[i] = ctx.bigBullet(0, B.y + LASER_OFF[i] + 1, B.x, 6);
+      for (var i = 0; i < 3; i++) {
+        B.laserBullets[i] = ctx.bigBullet(0, B.y + LASER_OFF[i] + 2, B.x, BEAM_H);
+      }
     }
 
     /* ---------------------------------------------------- 艦體背景 */
@@ -409,6 +419,7 @@
       W: cfg.w, H: cfg.h, HOME_X: HOME_X, HOME_Y: HOME_Y,
       PLATE_HP: PLATE_HP, TOTAL_HP: TOTAL_HP, ENTER_FRAMES: ENTER_FRAMES,
       OPEN_FRAMES: OPEN_FRAMES, SHUT_FRAMES: SHUT_FRAMES, DEATH_FRAMES: DEATH_FRAMES,
+      WARN_FRAMES: WARN_FRAMES, BEAM_H: BEAM_H,
       ESCAPE_FRAMES: ESCAPE_FRAMES, RING_N: RING_N, LASER_OFF: LASER_OFF,
       HULL_MAPS: cfg.hull, hasLaser: !!cfg.laser,
       init: function (c) { ctx = c; B = null; },
@@ -553,4 +564,244 @@
   });
 
   CR.Bosses.make = makeBoss;
+  CR.Bosses.CFGS = CFGS;
+
+  /* ======================================================================
+   * R4：第 7 關「魔王連戰」—— 六隻強化版依序上場 + 原創真最終魔王三形態
+   * ----------------------------------------------------------------------
+   * 研究 16 §7-2 的 FC 第 7 關是「要塞連續戰」；本作把它做成**真正的 boss rush**：
+   *   ① 關卡 1~6 的六隻魔王強化版（血量 ×0.75 讓節奏不拖，射速 ×0.9 更兇；
+   *      關卡 6 的「脫出倒數」拿掉 —— 倒數留給真正的最後一隻）
+   *   ② 原創真最終魔王「OMEGA」三形態：
+   *      I  核心之眼（雙殼 + 單核）→ II 雙核絞盤（無殼 / 兩核同時打）
+   *      → III 星塵終焉（四殼 + 大核 + 三連雷射 + **脫出倒數 420 幀**）
+   * 每一隻之間有 90 幀的空檔（喘息 + 看得清楚誰上場）。
+   *
+   * **友善版（延續專案方針）**：死在第 n 隻不會從第 1 隻重打 ——
+   * `far`（打到的最遠進度）在同一關內保留，復活後直接接關（`resume: false` 可關掉）。
+   */
+  function boost(cfg, o) {
+    o = o || {};
+    var hpMul = o.hp === undefined ? 0.75 : o.hp;
+    var perMul = o.period === undefined ? 0.9 : o.period;
+    var out = {}, k;
+    for (k in cfg) if (cfg.hasOwnProperty(k)) out[k] = cfg[k];
+    out.key = cfg.key + '2';
+    out.plateHp = Math.max(2, Math.round((cfg.plateHp || 4) * hpMul));
+    out.cores = [];
+    for (var i = 0; i < (cfg.cores || []).length; i++) {
+      var c = cfg.cores[i], c2 = {}, kk;
+      for (kk in c) if (c.hasOwnProperty(kk)) c2[kk] = c[kk];
+      c2.hp = Math.max(3, Math.round(c.hp * hpMul));
+      out.cores.push(c2);
+    }
+    out.firePeriod = Math.max(40, Math.round((cfg.firePeriod || 100) * perMul));
+    if (cfg.p3Period) out.p3Period = Math.max(36, Math.round(cfg.p3Period * perMul));
+    out.phase3At = Math.max(2, Math.round((cfg.phase3At || 4) * hpMul));
+    out.escape = 0;                                        // 倒數只留給 OMEGA III
+    out.warnFrames = 48;                                   // 連戰版的雷射預告拉長
+    out.beamH = 4;                                         // 連戰版的雷射判定變薄（縫 10 -> 12 px）
+    out.ringN = Math.max(6, Math.round((cfg.ringN || 8) * 0.7));       // 環形彈顆數也收斂
+    out.coreScore = o.coreScore === undefined ? 8000 : o.coreScore;
+    // 連戰版拿掉追蹤導彈（R3 的關卡 2 已經踩過這個坑）：連戰裡死一次就是裸機打剩下的，
+    // 追蹤導彈 + 裸機 = 必死；環形彈 / 扇形彈靠閃避就過得去。
+    if (cfg.attacks) {
+      out.attacks = {};
+      for (var ph in cfg.attacks) {
+        if (!cfg.attacks.hasOwnProperty(ph)) continue;
+        out.attacks[ph] = cfg.attacks[ph]
+          .filter(function (a) { return a !== 'homing'; })
+          .map(function (a) { return a === 'ring12' ? 'ring' : a; });   // 12 發環 -> 8 發
+        if (!out.attacks[ph].length) out.attacks[ph] = ['aim'];
+      }
+    }
+    if (o.name) out.name = o.name;
+    return out;
+  }
+
+  // 關卡 1 的「核心要塞」是 boss.js 手寫的（不是參數化機）⇒ 連戰用一份等價設定重現它
+  var CFG_CORE2 = {
+    key: 'core_r', name: 'CORE FORTRESS', w: 48, h: 48,
+    plates: [[0, 0], [32, 0], [0, 32], [32, 32]], plateHp: 4,
+    cores: [{ dx: 16, dy: 16, hp: 8, tiles: 'CORE0', tiles1: 'CORE1' }],
+    phase3At: 3, openFrames: 60, shutFrames: 90, firePeriod: 100, p3Period: 70,
+    ringN: 8, laser: true, coreScore: 8000, warnFrames: 48, beamH: 4,
+    hull: {
+      1: hullOf('HULL', 'HULLR', 'VENT', 'HULLC'),
+      2: hullOf('HULLR', 'VENT', 'HULL', 'GRID'),
+      3: hullOf('GRID', 'VENT', 'HULLR', 'GRID')
+    }
+  };
+
+  /* ---- 原創真最終魔王 OMEGA 三形態 ---- */
+  var CFG_OMEGA1 = {
+    key: 'omega1', name: 'OMEGA I', w: 48, h: 48,
+    plates: [[0, 8], [0, 24]], plateHp: 5,
+    cores: [{ dx: 16, dy: 16, hp: 10, tiles: 'EYE0', tiles1: 'EYE1' }],
+    phase3At: 4, openFrames: 56, shutFrames: 70, firePeriod: 80, p3Period: 54,
+    ringN: 10, coreScore: 15000,
+    attacks: { p1: ['aim', 'fan'], p2: ['ring', 'aim'], p3: ['ring12', 'fan', 'aim'] },
+    hull: {
+      1: hullOf('HULL', 'CIRC', 'CORE2', 'HULLC'),
+      2: hullOf('CIRC', 'CORE2', 'VENT', 'GRID'),
+      3: hullOf('GRID', 'CORE2', 'CIRC', 'GRID')
+    }
+  };
+  var CFG_OMEGA2 = {
+    key: 'omega2', name: 'OMEGA II', w: 48, h: 48,
+    plates: [], cores: [
+      { dx: 8, dy: 2, hp: 9, tiles: 'BRAIN0', tiles1: 'BRAIN1' },
+      { dx: 8, dy: 30, hp: 9, tiles: 'BRAIN0', tiles1: 'BRAIN1' }
+    ],
+    phase3At: 8, openFrames: 64, shutFrames: 64, firePeriod: 90, p3Period: 64,
+    ringN: 10, coreScore: 15000,
+    p3Period2: 0,
+    attacks: { p2: ['ring', 'split', 'aim'], p3: ['ring12', 'fan', 'split'] },
+    hull: {
+      1: hullOf('CIRC', 'HULLR', 'CORE2', 'HULL'),
+      2: hullOf('CORE2', 'CIRC', 'VENT', 'GRID'),
+      3: hullOf('GRID', 'CIRC', 'CORE2', 'GRID')
+    }
+  };
+  var CFG_OMEGA3 = {
+    key: 'omega3', name: 'OMEGA III', w: 48, h: 48,
+    plates: [[0, 0], [32, 0], [0, 32], [32, 32]], plateHp: 5,
+    cores: [{ dx: 16, dy: 16, hp: 18, tiles: 'BRAIN0', tiles1: 'BRAIN1' }],
+    phase3At: 7, openFrames: 60, shutFrames: 66, firePeriod: 72,
+    ringN: 12, laser: true, escape: 420, coreScore: 50000, warnFrames: 48, beamH: 4,
+    // 真最終形態也不放追蹤導彈：三連雷射 + 12 發環形彈已經是全作最高壓
+    attacks: { p1: ['aim', 'fan'], p2: ['ring', 'aim'], p3: ['ring12', 'fan', 'aim'] },
+    hull: {
+      1: hullOf('CORE2', 'CIRC', 'HULLR', 'HULL'),
+      2: hullOf('CIRC', 'CORE2', 'GRID', 'VENT'),
+      3: hullOf('GRID', 'CORE2', 'CIRC', 'GRID')
+    }
+  };
+
+  var CAP_PER_BOSS = 4;                                    // 每打掉一隻掉幾顆膠囊（友善版）
+  var CAP_ON_RESUME = 4;                                   // 死亡後接關時的「重整包」膠囊
+  function makeRush(cfg) {
+    var LIST = cfg.list, GAP = cfg.gap === undefined ? 90 : cfg.gap;
+    var ctx = null, wrap = null, subs = [], idx = 0, far = 0;
+    var active = false, dead = false, gapT = 0, kills = 0;
+    var TOTAL = 0;
+
+    function initSubs(c) {
+      ctx = c;
+      wrap = {};
+      for (var k in c) if (c.hasOwnProperty(k)) wrap[k] = c[k];
+      wrap.onCleared = subCleared;
+      subs = []; TOTAL = 0;
+      for (var i = 0; i < LIST.length; i++) {
+        var b = makeBoss(LIST[i]);
+        b.init(wrap);
+        subs.push(b);
+        TOTAL += b.TOTAL_HP;
+      }
+      R.TOTAL_HP = TOTAL;
+      R.COUNT = subs.length;
+    }
+    function subCleared() {
+      kills++;
+      if (idx + 1 >= subs.length) {                        // 全部打完 ⇒ 關卡 clear
+        active = false; dead = true;
+        if (ctx) ctx.onCleared();
+        return;
+      }
+      idx++;
+      if (idx > far) far = idx;
+      gapT = GAP;
+      // **友善版**：連戰室裡不會再有雜魚掉膠囊 ⇒ 每打掉一隻就掉 3 顆（＋被打死的人也補得回來）。
+      // 不給這條回血路，死一次就等於「裸機打剩下的八隻」＝ 研究 §7-3 的「Gradius 症候群」。
+      if (ctx && ctx.dropCapsule) {
+        for (var i = 0; i < CAP_PER_BOSS; i++) ctx.dropCapsule(200 - i * 10, 48 + i * 48);
+      }
+    }
+
+    function spawn() {
+      active = true; dead = false; gapT = 0;
+      idx = (cfg.resume === false) ? 0 : far;
+      // 友善版：死亡後接關（far > 0）給一份「重整包」，不然是裸機打剩下的八隻
+      if (far > 0 && ctx && ctx.dropCapsule) {
+        for (var i = 0; i < CAP_ON_RESUME; i++) ctx.dropCapsule(248 - i * 12, 40 + i * 40);
+      }
+      subs[idx].spawn();
+      return subs[idx].raw();
+    }
+    function update() {
+      if (!active) return;
+      if (gapT > 0) {
+        gapT--;
+        if (gapT <= 0 && active) subs[idx].spawn();
+        return;
+      }
+      subs[idx].update();
+    }
+    function draw(oam, frame) { if (active && gapT <= 0) subs[idx].draw(oam, frame); }
+    function despawn() {
+      for (var i = 0; i < subs.length; i++) subs[i].despawn();
+      active = false; gapT = 0;
+    }
+
+    var R = {
+      key: cfg.key, NAME: cfg.name, W: 48, H: 48,
+      HOME_X: 176, HOME_Y: 72, GAP: GAP,
+      TOTAL_HP: 0, COUNT: LIST.length, LASER_OFF: [8, 24, 40],
+      ENTER_FRAMES: ENTER_FRAMES, DEATH_FRAMES: DEATH_FRAMES,
+      ESCAPE_FRAMES: CFG_OMEGA3.escape,
+      isRush: true,
+      init: initSubs,
+      spawn: spawn, update: update, draw: draw, despawn: despawn,
+      active: function () { return !!active; },
+      raw: function () { return subs[idx] ? subs[idx].raw() : null; },
+      totalHp: function () {
+        var s2 = subs[idx] ? subs[idx].totalHp() : 0, i;
+        for (i = idx + 1; i < subs.length; i++) s2 += subs[i].TOTAL_HP;
+        return s2;
+      },
+      force: function (ph) { return subs[idx] ? subs[idx].force(ph) : null; },
+      // 除錯 / 測試：直接跳到連戰的第 i 隻（0 起）
+      setIndex: function (i) {
+        i = Math.max(0, Math.min(subs.length - 1, i | 0));
+        despawn();
+        idx = i; far = i; active = true; dead = false; gapT = 0;
+        subs[idx].spawn();
+        return idx;
+      },
+      index: function () { return idx; },
+      resetProgress: function () { far = 0; idx = 0; kills = 0; dead = false; return R; },
+      subs: function () { return subs; },
+      names: function () { var a = [], i; for (i = 0; i < LIST.length; i++) a.push(LIST[i].name); return a; },
+      state: function () {
+        var st = subs[idx] ? subs[idx].state() : { active: false, phase: -1 };
+        st.active = !!active && (gapT <= 0) && st.active;
+        st.rush = true;
+        st.index = idx; st.count = subs.length; st.far = far; st.gapT = gapT;
+        st.kills = kills; st.sub = LIST[idx] ? LIST[idx].name : '';
+        st.form = (idx >= 6) ? (idx - 5) : 0;              // 真最終魔王的形態 1..3
+        st.key = cfg.key;
+        st.name = cfg.name;
+        st.totalHp = R.totalHp();
+        if (!st.escapeT) st.escapeT = 0;
+        return st;
+      }
+    };
+    return R;
+  }
+
+  CR.Bosses.rush = makeRush({
+    key: 'rush', name: 'BOSS RUSH', gap: 150,
+    list: [
+      boost(CFGS.eye, { name: 'EYE FORTRESS' }),
+      boost(CFGS.twin, { name: 'TWIN MOAI' }),
+      boost(CFGS.mirror, { name: 'MIRROR CORE' }),
+      boost(CFGS.bio, { name: 'BIO CORE' }),
+      boost(CFGS.brain, { name: 'MOTHER BRAIN' }),
+      boost(CFG_CORE2, { name: 'CORE FORTRESS' }),
+      CFG_OMEGA1, CFG_OMEGA2, CFG_OMEGA3
+    ]
+  });
+  CR.Bosses.makeRush = makeRush;
+  CR.Bosses.CAP_PER_BOSS = CAP_PER_BOSS;
+  CR.Bosses.boost = boost;
 })();

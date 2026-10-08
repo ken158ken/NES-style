@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""tools/test_touch.py — engine/touch.js（NES.Touch）與三個入口頁手機版面的自動測試
-（agent: nes-touch, R2）
+"""tools/test_touch.py — engine/touch.js（NES.Touch）與**四個**入口頁手機版面的自動測試
+（agent: nes-touch, R2；R4 mech-r1 把 mech.html 加進 PAGES ⇒ 255 → 340 項）
 
 用法：
     ../卡比之星/.venv/bin/python tools/test_touch.py [--only cruiser] [--headed]
 
 作法：Playwright 以「真的手機裝置描述」（觸控 / 手機 UA / DPR）開 game.html / star.html /
-cruiser.html，用 CDP Input.dispatchTouchEvent 打真的觸控事件，再用 __nes.step() 推幀。
+cruiser.html / mech.html，用 CDP Input.dispatchTouchEvent 打真的觸控事件，再用 __nes.step() 推幀。
 
-涵蓋（三頁 × iPhone 13 橫向 / Pixel 5 直向 = 6 組；另加桌機 1280×800 三頁）：
+涵蓋（四頁 × iPhone 13 橫向 / Pixel 5 直向 = 8 組；另加桌機 1280×800 四頁）：
   版面：覆蓋層自動顯示、七顆按鍵齊全（fix5 多了 ★密技）、按鍵矩形不與畫面交集、不出界、overlapping=false、
         backing store 整數、CSS 尺寸 = 256×顯示倍率、手機是小數倍、
         直向畫面貼上方 / 橫向兩側各留 ≥110px（平板 170px）
@@ -28,7 +28,7 @@ import sys
 from playwright.sync_api import sync_playwright
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-PAGES = ['game.html', 'star.html', 'cruiser.html']
+PAGES = ['game.html', 'star.html', 'cruiser.html', 'mech.html']
 # (裝置, 是否橫向, 標籤)
 DEVS = [('iPhone 13', True, 'iPhone13橫'), ('Pixel 5', False, 'Pixel5直')]
 KEYS = ('dpad', 'a', 'b', 'select', 'start', 'cheat', 'fs')      # fix5：第 7 顆 ★密技
@@ -154,6 +154,18 @@ def run_mobile(p, page_name, device, landscape, label, results):
         t.up(0)
         pg.evaluate('()=>__nes.step(12)')
         mode = pg.evaluate('()=>__nes.state().mode')
+        # mech.html（R4）：標題 START → 選關 → START → READY 倒數 → play；其他兩款一步到 play。
+        for _ in range(3):
+            if mode == 'play':
+                break
+            if mode == 'select':
+                t.down(0, st['cx'], st['cy']); pg.evaluate('()=>__nes.step(3)'); t.up(0)
+                pg.evaluate('()=>__nes.step(12)')
+            elif mode == 'ready':
+                pg.evaluate('()=>__nes.step(120)')
+            else:
+                break
+            mode = pg.evaluate('()=>__nes.state().mode')
         ok('觸控 START → 進入遊戲（mode=play）', mode == 'play', 'mode=%s' % mode)
 
         x0 = pg.evaluate('()=>__nes.state().x')

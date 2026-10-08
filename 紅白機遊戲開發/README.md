@@ -10,9 +10,11 @@
 |---|---|---|---|---|
 | 《星塵勇者》 | 橫向平台動作 | 超級瑪利歐 1 / 3 手感常數 | `star.html` | https://ken158ken.github.io/NES-style/紅白機遊戲開發/star.html |
 | 《星塵巡航艦》 | 橫向射擊 | 宇宙巡航艦（Gradius）能量表 / Option | `cruiser.html` | https://ken158ken.github.io/NES-style/紅白機遊戲開發/cruiser.html |
+| 《星塵機甲》 | 選關 + 武器剋制動作射擊 | 洛克人 2 的選關 / 弱點環 / 畫面單位捲動 | `mech.html` | https://ken158ken.github.io/NES-style/紅白機遊戲開發/mech.html |
 | 《星塵測試室》 | 引擎測試房 | — | `game.html` | https://ken158ken.github.io/NES-style/紅白機遊戲開發/game.html |
 操作：方向鍵 / WASD、Z = A、X = B、Enter = START、Shift = SELECT、F 全螢幕；手機有觸控搖桿。單檔版在 `dist/`。
-秘技（一鍵）：兩款都是 **遊戲中按 C 鍵（電腦）或手把上的紫色「★密技」鍵（手機）**，不必暫停，立刻補強（巡航艦：SPEED / MISSILE / 2 OPTION / 護盾；勇者：命補到 9 + 無敵 20 秒），**GAME OVER 畫面按同一鍵直接 3 條命續關**，皆不限次數。另保留 START 暫停 → SELECT 的兩步版。巡航艦另保留考據自原作的指令：暫停中輸入 ↑↑↓↓←→←→BA（也接受 ↑↑↓↓←←→→AB / ABAB），一場一次、打掉魔王多一次；GAME OVER 輸入同指令續關。
+《星塵機甲》操作：← → 走、A 跳（按住跳更高、放開立刻停止上升）、↓ + A 滑行、B 射擊（按住蓄力）、↑ ↓ 爬梯、**START = 武器選單**（↑ ↓ 換武器、B 用 E 罐）；8 格選關畫面本輪開放 FROST PLANT 與 BLAZE FURNACE 兩關，打倒機器人頭目會取得牠的武器，拿去打另一關的頭目 3 發就倒（武器剋制環）。
+秘技（一鍵）：三款都是 **遊戲中按 C 鍵（電腦）或手把上的紫色「★密技」鍵（手機）**，不必暫停，立刻補強（巡航艦：SPEED / MISSILE / 2 OPTION / 護盾；勇者：命補到 9 + 無敵 20 秒；機甲：命補到 9 + 血 / E 罐全滿 + 全武器解鎖 + 無敵 20 秒），**GAME OVER 畫面按同一鍵直接 3 條命續關**，皆不限次數。另保留 START 暫停 → SELECT 的兩步版。巡航艦另保留考據自原作的指令：暫停中輸入 ↑↑↓↓←→←→BA（也接受 ↑↑↓↓←←→→AB / ABAB），一場一次、打掉魔王多一次；GAME OVER 輸入同指令續關。
 
 ## 目錄
 - `docs/research/` — 研究文件（Markdown，繁體中文，附來源網址）

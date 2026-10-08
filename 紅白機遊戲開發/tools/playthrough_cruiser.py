@@ -33,6 +33,7 @@ from playwright.sync_api import sync_playwright
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent   # tools/ 版（原 tools/playthrough_cruiser.py）
 OUT = ROOT / 'shots' / 'play_cruiser'
+CR_STAGES = 7                                           # R4：第 7 關「魔王連戰」
 
 BOT_JS = r"""
 () => {
@@ -86,11 +87,15 @@ BOT_JS = r"""
     lastMove: [0, 0],
     // R3：--assist（密技輔助）與跨關統計
     assist: false, cheats: 0, stages: [], lastStage: 1, stageF0: 0,
+    // R4：rank 峰值 / 隱藏獎勵 / 魔王連戰進度
+    rankPeak: 0, rankSum: 0, rankN: 0, bonuses: 0, rushMax: 0,
     dbg: false, dbgCost: [], dbgHist: [],
     tick() {
       const s = CR.ship, st = CR.stage, g = window.GAME.state();
       let mask = 0;
-      if (g.mode === 'title' || g.mode === 'gameover' || g.mode === 'stageclear' || g.mode === 'ending') {
+      // R4：新增 credits（工作人員名單）/ entry（名字輸入）/ scores（排行榜）三個畫面也是按 START 過
+      if (g.mode === 'title' || g.mode === 'gameover' || g.mode === 'stageclear' ||
+          g.mode === 'ending' || g.mode === 'credits' || g.mode === 'entry' || g.mode === 'scores') {
         if ((this.frames & 7) === 0) mask |= BTN.START;
         NESg.Input.inject(mask, 1); window.__nes.step(1); this.frames++;
         return g.mode;
@@ -187,6 +192,7 @@ BOT_JS = r"""
         const cost0 = cost;
         for (const t of threats) {
           let px = nx0, py = ny0;
+          let touch = 0, first = 0;
           for (let f = 1; f <= THR_H; f++) {
             if (f <= hold) {
               px = Math.max(8, Math.min(240, px + m[0] * spd));
@@ -194,11 +200,19 @@ BOT_JS = r"""
             }
             const tx = t.x + t.vx * f, ty = t.y + t.vy * f;
             if (tx + t.w < -8 || tx > 264) break;
-            const bx = px + BOX_DX, by = py + BOX_DY, pd = t.tight ? 0 : 4;
+            const bx = px + BOX_DX, by = py + BOX_DY, pd = t.tight ? 1 : 4;
             if (aabb(bx - pd, by - pd, BOX_W + pd * 2, BOX_H + pd * 2, tx, ty, t.w, t.h)) {
-              cost += t.wt * (THR_H + 2 - f); break;
+              if (!first) first = f;
+              // R4：靜止的三連雷射（tight）**額外**累計「總共壓到幾幀」當作同分時的裁決項。
+              //   只有「第一次接觸」計價時，已經站在光束裡的那一幀所有候選都是 f = 1、成本相同
+              //   ⇒ 機器人不會往外跑，必死（實測第 7 關連戰連死 6 次）。
+              //   權重只有 1/4：**沒有接觸的候選兩項都是 0**，所以 R3 既有的選擇完全不受影響。
+              if (t.tight) { touch++; continue; }
+              break;
             }
           }
+          if (first) cost += t.wt * (THR_H + 2 - first);
+          if (t.tight && touch) cost += (t.wt >> 2) * touch;
           // 近距離額外懲罰（避免貼著敵人）；魔王部位除外 —— 它不會動，貼著它才打得到
           if (!t.boss) {
             const dx = (t.x + t.w / 2) - (nx0 + BOX_DX + BOX_W / 2);
@@ -257,7 +271,17 @@ BOT_JS = r"""
       // 魔王戰不會再掉膠囊 ⇒ 手上有幾格就花幾格（4 = LASER 貫穿 / 5 = OPTION / 6 = 護盾），
       // 不然會像 qa2 那樣抱著 gauge 4 等一顆永遠不會出現的膠囊，用單發彈磨 24 血
       // fix3：魔王戰不會再掉膠囊 ⇒ 手上有幾格就立刻花掉（1 SPEED / 3 DOUBLE 都比抱著不用好）
-      if (st.bossActive && g.gauge >= 1) want = g.gauge;
+      // R4：第 7 關是 9 隻魔王的連戰，膠囊只從「打掉一隻」掉下來 ⇒ 不能像前六關那樣
+      //     「手上有幾格就花幾格」（永遠停在 SPEED / MISSILE，拿不到貫通的 LASER，
+      //     實測在第 5 隻 MOTHER BRAIN 連死 6 次 GAME OVER）。
+      //     規則：連戰時**只花願望清單當下要的那一格，或 >= 格 4（LASER / OPTION / 護盾）**。
+      //     前六關的規則一字不改（＝ R3 的通關數字完全可重現）。
+      if (st.bossActive && g.gauge >= 1) {
+        want = ((g.stage.index | 0) === 7)
+          ? ((g.gauge >= 4) ? g.gauge
+            : ((this.wish.length && g.gauge === this.wish[0]) ? g.gauge : -1))
+          : g.gauge;
+      }
       if (want >= 0 && g.gauge === want && (this.frames & 1) === 1) {
         mask |= BTN.B;
         if (this.wish.length && this.wish[0] === want) this.wish.shift();
@@ -291,6 +315,13 @@ BOT_JS = r"""
       this.wasAlive = s.alive;
       const g2 = window.GAME.state();
       this.lastLives = g2.lives;
+      // R4 取樣：rank（動態難度）/ 隱藏獎勵 / 魔王連戰打到第幾隻
+      if (g2.rankState) {
+        this.rankSum += g2.rankState.rank; this.rankN++;
+        if (g2.rankState.rank > this.rankPeak) this.rankPeak = g2.rankState.rank;
+      }
+      if (g2.bonuses > this.bonuses) this.bonuses = g2.bonuses;
+      if (g2.rush && (g2.rush.index + 1) > this.rushMax) this.rushMax = g2.rush.index + 1;
       return g2.mode;
     },
     run(n) {
@@ -594,6 +625,11 @@ def play(page, q, tag, args, chain=False):
         'cleared': bool(g['stage']['cleared']), 'stage': g['stage'].get('index', 1),
         'log': page.evaluate("()=>__bot.log"), 'stages': page.evaluate("()=>__bot.stages"),
         'cheats': page.evaluate("()=>__bot.cheats"),
+        'rankPeak': page.evaluate("()=>__bot.rankPeak"),
+        'rankAvg': page.evaluate("()=>__bot.rankN ? Math.round(__bot.rankSum / __bot.rankN * 10) / 10 : 0"),
+        'bonuses': page.evaluate("()=>__bot.bonuses"),
+        'rush': page.evaluate("()=>__bot.rushMax"),
+        'optMode': g.get('optModeName', ''),
     }
     shot(page, OUT / 'bot' / ('%s_end.png' % tag))
     return out
@@ -603,13 +639,15 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--camx', type=int, default=None)
     ap.add_argument('--boss', type=int, default=None)
-    ap.add_argument('--stage', type=int, default=None, help='R3：從第 N 關開始（1..6）')
-    ap.add_argument('--all', action='store_true', help='R3：六關逐關各跑一次，最後印通關表')
+    ap.add_argument('--stage', type=int, default=None, help='R3/R4：從第 N 關開始（1..7）')
+    ap.add_argument('--all', action='store_true', help='R3/R4：七關逐關各跑一次，最後印通關表')
+    ap.add_argument('--norank', action='store_true',
+                    help='R4：`?rank=0` 關掉動態難度（回到 R3 行為），用來做 A/B 對照')
     ap.add_argument('--chain', action='store_true',
                     help='R3：不在過關時停下，一路打到 ENDING（驗證關卡串接 / 第二輪）')
     ap.add_argument('--assist', action='store_true',
                     help='R3：每 120 幀按一次一鍵密技（驗「通路存在」；不用這個就是純實力通關）')
-    ap.add_argument('--max-frames', type=int, default=30000)
+    ap.add_argument('--max-frames', type=int, default=60000)
     ap.add_argument('--tag', default='')
     ap.add_argument('--shots', action='store_true', help='每 1200 幀截一張')
     ap.add_argument('--konami', '--cheat', dest='konami', action='store_true',
@@ -632,11 +670,11 @@ def main():
             br.close()
             return rc
 
-        base = '?debug=1&scale=1&mute=1'
+        base = '?debug=1&scale=1&mute=1' + ('&rank=0' if args.norank else '')
         rows = []
         rc = 0
         if args.all:
-            for n in range(1, 7):
+            for n in range(1, CR_STAGES + 1):
                 q = base + '&stage=%d' % n
                 tag = (args.tag + '_' if args.tag else '') + 'stage%d' % n
                 print('\n======== 關卡 %d（%s）========' % (n, 'assist' if args.assist else '實力'))
@@ -660,11 +698,13 @@ def main():
             rc = 0 if (r['cleared'] or r['done'] == 'ending') else 1
 
         print('\n==== 機器人結果%s ====' % ('（--assist 密技輔助）' if args.assist else '（純實力）'))
-        print('%-10s %-10s %8s %7s %6s %9s %8s' % ('段落', '結束', '幀數', '死亡', '剩船', '分數', 'camX'))
+        print('%-10s %-10s %8s %7s %6s %9s %10s %5s %5s' %
+              ('段落', '結束', '幀數', '死亡', '剩船', '分數', 'camX', 'rank', '連戰'))
         for r in rows:
-            print('%-10s %-10s %8d %7d %6d %9d %5d/%d' %
+            print('%-10s %-10s %8d %7d %6d %9d %5d/%-4d %2d/%-2s %5d' %
                   (r['tag'], r['done'], r['frames'], r['deaths'], r['lives'],
-                   r['score'], r['camX'], r['camMax']))
+                   r['score'], r['camX'], r['camMax'],
+                   r.get('rankPeak', 0), r.get('rankAvg', 0), r.get('rush', 0)))
             if r['log']:
                 print('   死亡紀錄 =', json.dumps(r['log'], ensure_ascii=False)[:400])
         if errs:

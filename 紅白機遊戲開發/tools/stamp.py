@@ -5,7 +5,7 @@
 """
 import hashlib, pathlib, re, sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-PAGES = ['game.html', 'star.html', 'cruiser.html']
+PAGES = ['game.html', 'star.html', 'cruiser.html', 'mech.html']
 check = '--check' in sys.argv
 changed = 0
 for name in PAGES:

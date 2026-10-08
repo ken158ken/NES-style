@@ -189,6 +189,7 @@
     REV[B.H_GL] = '['; REV[B.H_GM] = '-'; REV[B.H_GR] = ']';
     REV[B.H_GLON] = '<'; REV[B.H_GMON] = '='; REV[B.H_GRON] = '>';
     REV[B.H_SHIP] = '^';
+    CR.BGREV = REV;                    // R4：credits.js 讀名稱表上的字（測試用）
   }
 
   function pad0(n, w) { var s = String(n | 0); while (s.length < w) s = '0' + s; return s; }
@@ -213,7 +214,7 @@
     ppu.setTile(0, c + 4, r, on ? B.H_GRON : B.H_GR);
   }
 
-  var hud = { score: null, hi: null, lives: null, gauge: -1, stage: null };
+  var hud = { score: null, hi: null, lives: null, gauge: -1, stage: null, opt: null };
   var hudOn = true;                  // P3-1：標題畫面不掛能量表 HUD
 
   // HUD 三列（+ 裁掉的列 29）整個清空；hudOn = false 時 draw 也不會再同步
@@ -238,7 +239,9 @@
       gaugeCell(ppu, i, false);
     }
     writeText(ppu, 29, r0, 'ST1');                         // R3：關卡編號（hudSync 會改）
+    writeText(ppu, 24, r0, 'T');                           // R4：Option 編隊（T 跟隨 / F 固定 / O 旋轉）
     hud.score = null; hud.hi = null; hud.lives = null; hud.gauge = 0; hud.stage = 'ST1';
+    hud.opt = 'T';
     hudOn = true;
   }
 
@@ -258,6 +261,11 @@
     var stg = st();                                        // R3：關卡編號（每關只寫 1 格）
     var sn = 'ST' + Math.max(1, Math.min(9, (stg && stg.index) || 1));
     if (sn !== hud.stage) { writeDiff(ppu, 29, r0, sn, hud.stage); hud.stage = sn; }
+    // R4：Option 編隊的一個字（欄 24 本來是空的；SELECT 切換時才重寫 1 格）
+    // 注意：hudSync 收到的是**船物件**（不是 state()），optModeName 在這裡是 function。
+    var nm = (typeof s.optModeName === 'function') ? s.optModeName() : (s.optModeName || 'TRAIL');
+    var om = String(nm).charAt(0) || 'T';
+    if (om !== hud.opt) { ppu.setTile(0, 24, r0, bgTileOf(om)); hud.opt = om; }
   }
 
   function hudString(ppu) {
@@ -393,7 +401,10 @@
     // fix4：一鍵密技（SELECT）。selectUsed = 這一次暫停已經用過（防連按重複觸發）
     selectUsed: false, selectSecrets: 0, selectContinues: 0,
     // fix5：真·一鍵（鍵盤 C / 觸控 ★密技 / nes-cheat 事件），不必先暫停
-    cheatReq: false, cheatCool: 0, cheats: 0, cheatContinues: 0, lastCheat: ''
+    cheatReq: false, cheatCool: 0, cheats: 0, cheatContinues: 0, lastCheat: '',
+    // R4：結局名單 / 名字輸入 / 排行榜 / 隱藏獎勵 / Option 編隊
+    noteText: '', afterScores: 'title', entryRank: -1, scoreMark: -1,
+    creditFrames: 0, bonuses: 0, lastBonus2: '', optSwitch: 0
   };
   CR.g = g;
 
@@ -401,6 +412,9 @@
     var b = g.nes && g.nes.timing && g.nes.timing.budget;
     if (b) b.mute = !!on;
   }
+  // fix-r4（qa-r4 P2-3）：轉場模組（credits 的 START 快轉）也要能宣告「這是畫面關閉的轉場幀」，
+  // 不然一次寫 960 byte 名稱表會被計成 VBlank 超支（本來只有 main 自己這 16 處轉場包得到）。
+  CR.muteBudget = muteBudget;
 
   function st() { return CR.stage || null; }
   function call(obj, fn, a, b2) {
@@ -584,6 +598,109 @@
     return true;
   }
 
+  /* ============================================ R4：整片清場（換成靜態畫面用）
+   * entry / scores 是**全畫面靜態選單**：先把遊戲區 26 列（兩張名稱表）清成空白磚，
+   * 再用 drawMsg 寫字。1664 byte 遠超 VBlank 預算 ⇒ 一律包在 muteBudget 裡
+   * （＝真機「關閉 rendering 重建畫面」，與 stage.restart 的 Scroller.reset 同一個手法）。
+   */
+  function clearPlayArea(ppu) {
+    var i;
+    for (i = 0; i < PLAY_ROWS; i++) {
+      ppu.fillTiles(0, 0, i, 32, 1, B.H_SP);
+      ppu.fillTiles(1, 0, i, 32, 1, B.H_SP);
+    }
+    ppu.fillAttr(0, 0, 0, 16, 13, 0);
+    ppu.fillAttr(1, 0, 0, 16, 13, 0);
+    msgCells.length = 0;
+  }
+
+  // R4：遊戲進行中的一行提示（Option 編隊 / 隱藏獎勵），沿用 SECRET! 的 msgCells + 倒數機制
+  function showNote(text, row) {
+    g.noteText = text;
+    muteBudget(true);
+    restorePlayMsg();
+    drawMsg(g.ppu, [{ row: row === undefined ? 17 : row, col: Math.max(0, 16 - ((text.length + 1) >> 1)), text: text }], 0);
+    muteBudget(false);
+    g.secretMsg = 60;
+  }
+
+  /* ============================================ R4：Option 編隊切換（SELECT / 手機鈕）
+   * 研究 16 §4：原作的 Option 只有「沿軌跡跟隨」一種。本作加兩種編隊：
+   *   TRAIL 跟隨（原作行為，預設）/ FIXED 固定（船後方兩個定點）/ ORBIT 旋轉（繞船 22 px）
+   * 入口：遊戲進行中按 **SELECT**（暫停中的 SELECT 仍然是密技，語意不衝突）、
+   *       手機多一顆 **「編隊」** 鈕（本檔自己建的 DOM 鈕，不碰 engine/touch.js 的七顆鍵）。
+   */
+  function cycleOption() {
+    if (!g.ship || !g.ship.cycleOptMode) return '';
+    var nm = g.ship.cycleOptMode();
+    g.optSwitch++;
+    showNote('OPTION ' + nm, 17);
+    call(CR.Audio, 'sfx', 'capsule');
+    return nm;
+  }
+  CR.cycleOption = cycleOption;
+  CR.optionMode = function () { return g.ship ? g.ship.optModeName() : ''; };
+
+  // 手機「編隊」鈕：只有觸控覆蓋層在用的時候才顯示；`?optbtn=0` 可關掉。
+  // 位置算法刻意避開 NES.Touch 的七顆鍵與畫面：直向放「畫面下緣與按鍵列之間」的空白帶、
+  // 橫向放「左側留白的上方」。engine/touch.js 一個字都沒改（它的 rects() 仍然是 7 顆）。
+  var optBtn = null, optBtnOn = true;
+  (function buildOptButton() {
+    if (typeof document === 'undefined' || !document.body) return;
+    try {
+      var q = new window.URLSearchParams(window.location.search);
+      if (q.get('optbtn') === '0') optBtnOn = false;
+    } catch (e) { }
+    var el = document.createElement('div');
+    el.id = 'cr-optbtn';
+    el.setAttribute('data-cr', 'option');
+    el.textContent = '編隊';
+    el.style.cssText = 'position:fixed;z-index:9;display:none;box-sizing:border-box;' +
+      'align-items:center;justify-content:center;text-align:center;' +
+      'background:#1f6f9c;border:3px solid #0b2c40;border-radius:999px;color:#dff3ff;' +
+      'font:600 13px/1 system-ui,sans-serif;touch-action:none;user-select:none;' +
+      '-webkit-user-select:none;opacity:.78;';
+    el.addEventListener('pointerdown', function (ev) {
+      if (ev && ev.preventDefault) ev.preventDefault();
+      el.style.opacity = '1';
+      cycleOption();
+      window.setTimeout(function () { el.style.opacity = '.78'; }, 160);
+    }, false);
+    document.body.appendChild(el);
+    optBtn = el;
+    function place() {
+      if (!optBtn) return;
+      var T2 = window.NES && window.NES.Touch;
+      var L = window.NES_LAYOUT || null;
+      var on = optBtnOn && !!(T2 && T2.active && T2.active()) && !!L;
+      if (!on) { optBtn.style.display = 'none'; return; }
+      var R2 = {}, k, top = 1e9;
+      try { R2 = T2.rects() || {}; } catch (e2) { R2 = {}; }
+      for (k in R2) if (R2.hasOwnProperty(k) && R2[k] && R2[k].y < top) top = R2[k].y;
+      var w = 64, h = 34, x, y;
+      if (L.portrait) {
+        var band0 = L.y + L.h, band1 = (top < 1e9 ? top : L.vh);
+        x = (L.vw - w) / 2;
+        y = band0 + (band1 - band0 - h) / 2;
+        if (band1 - band0 < h + 6) y = band0 + 2;
+      } else {
+        x = Math.max(4, (L.x - w) / 2);
+        y = Math.max(4, ((top < 1e9 ? top : L.vh) - h) / 2 - 40);
+      }
+      optBtn.style.display = 'flex';
+      optBtn.style.left = Math.round(x) + 'px';
+      optBtn.style.top = Math.round(Math.max(0, y)) + 'px';
+      optBtn.style.width = w + 'px';
+      optBtn.style.height = h + 'px';
+    }
+    window.addEventListener('nes-resize', place, false);
+    window.addEventListener('resize', place, false);
+    window.setTimeout(place, 0);
+    window.setTimeout(place, 200);
+    CR.optButton = function () { return { el: optBtn, on: optBtnOn, place: place }; };
+    CR.setOptButton = function (b) { optBtnOn = !!b; place(); return optBtnOn; };
+  })();
+
   function pauseGame() {
     muteBudget(true); restorePlayMsg(); drawMsg(g.ppu, PAUSE, 0); muteBudget(false);
     g.paused = true; g.secretMsg = 0;
@@ -613,6 +730,7 @@
     g.mode = 'play'; g.paused = false; g.bossOn = false;
     g.secretLeft = 1; g.secretMsg = 0; g.continues++;
     g.selectUsed = false; g.cheatCool = 0;
+    call(CR.Rank, 'reset');              // R4：續關 = 重新開始累積 rank（罰分歸零）
     hud.score = null; hud.hi = null; hud.lives = null; hud.gauge = -1; hud.stage = null;
     if (CR.Audio && CR.Audio.play) call(CR.Audio, 'play', stageSong());
   }
@@ -635,6 +753,12 @@
     g.continues = 0; g.continueCam = 0; g.lastCode = '';
     g.selectUsed = false; g.selectSecrets = 0; g.selectContinues = 0;
     g.cheatReq = false; g.cheatCool = 0; g.cheats = 0; g.cheatContinues = 0; g.lastCheat = '';
+    // R4：rank / 隱藏獎勵 / 排行榜旗標重設
+    g.bonuses = 0; g.lastBonus2 = ''; g.noteText = ''; g.afterScores = 'title';
+    g.entryRank = -1; g.scoreMark = -1; g.creditFrames = 0;
+    call(CR.Rank, 'reset', true);
+    call(CR.Rank, 'setLoop', 0);
+    if (CR.Bonus && CR.Bonus.newGame) CR.Bonus.newGame();
     konamiClear();
     hud.score = null; hud.hi = null; hud.lives = null; hud.gauge = -1; hud.stage = null;
     if (CR.Audio && CR.Audio.play) call(CR.Audio, 'play', stageSong());
@@ -707,6 +831,8 @@
     muteBudget(true);
     clearMsg(ppu);
     call(st(), 'setLoop', g.loop);
+    call(CR.Rank, 'setLoop', g.loop);               // R4：第二輪 rank 起點更高（研究 §7-5）
+    if (CR.Bonus && CR.Bonus.newGame) CR.Bonus.newGame();
     call(st(), 'load', 1);
     hudStatic(ppu);
     muteBudget(false);
@@ -715,6 +841,53 @@
     g.mode = 'play'; g.paused = false; g.bossOn = false; g.stageNo = 1; g.escSec = 0;
     hud.score = null; hud.hi = null; hud.lives = null; hud.gauge = -1; hud.stage = null;
     if (CR.Audio && CR.Audio.play) call(CR.Audio, 'play', stageSong());
+  }
+
+  /* ---------------------------------------- R4：結局名單 → 名字輸入 → 排行榜 */
+  function toCredits() {
+    var ppu = g.ppu;
+    muteBudget(true);
+    clearMsg(ppu);
+    hudHide(ppu);                        // 名單要用到列 26..29（split 關掉 ⇒ 30 列全是內容）
+    if (CR.Credits && CR.Credits.start) CR.Credits.start(ppu);
+    muteBudget(false);
+    g.mode = 'credits'; g.paused = false; g.secretMsg = 0; g.creditFrames = 0;
+    if (CR.Audio && CR.Audio.play) call(CR.Audio, 'play', songKey('credits', 'ending'));
+  }
+  function drawEntry(ppu) {
+    if (!CR.HiScore) return;
+    muteBudget(true);
+    drawMsg(ppu, CR.HiScore.entryLines(), 0);
+    muteBudget(false);
+  }
+  function toScores(mark) {
+    var ppu = g.ppu, lines = [];
+    if (CR.HiScore && CR.HiScore.tableLines) lines = CR.HiScore.tableLines(mark === undefined ? -1 : mark);
+    lines = lines.concat([{ row: 25, col: 10, text: 'PRESS START' }]);
+    muteBudget(true);
+    clearPlayArea(ppu);
+    hudHide(ppu);
+    drawMsg(ppu, lines, 0);
+    muteBudget(false);
+    g.mode = 'scores'; g.paused = false; g.secretMsg = 0; g.scoreMark = (mark === undefined) ? -1 : mark;
+    if (CR.Audio && CR.Audio.play && g.afterScores !== 'title') call(CR.Audio, 'play', 'title');
+  }
+  // 上榜 → 3 字母輸入；沒上榜就直接看榜
+  function toEntry() {
+    var ppu = g.ppu, r = -1;
+    if (CR.HiScore && CR.HiScore.begin) r = CR.HiScore.begin(g.ship.score, (st() && st().index) || 1, g.loop);
+    if (r < 0) { toScores(-1); return false; }
+    muteBudget(true);
+    clearPlayArea(ppu);
+    hudHide(ppu);
+    muteBudget(false);
+    drawEntry(ppu);
+    g.mode = 'entry'; g.paused = false; g.secretMsg = 0; g.entryRank = r;
+    return true;
+  }
+  function leaveScores() {
+    if (g.afterScores === 'loop') startLoop();
+    else toTitle();
   }
 
   /* -------------------------------------------------------------- 碰撞 */
@@ -736,6 +909,7 @@
     else { e.hp = (e.hp === undefined ? 1 : e.hp) - dmg; if (e.hp <= 0) e.alive = false; }
     if (e.alive === false) {
       g.kills++;
+      if (CR.Bonus && CR.Bonus.onKill) CR.Bonus.onKill(e);     // R4：隱藏獎勵的擊殺統計
       // stage 自己記分 + 自己畫爆炸（`CR.stage.takeScore()` 在場即代表）⇒ 這裡不要重複加
       if (!stageScores()) {
         g.ship.addScore(e.score || 100);
@@ -860,9 +1034,15 @@
   }
 
   /* ================================================================ draw */
+  // R4：這些畫面不該有船 / 選項 / 自機彈（新增 credits / entry / scores 三個）
+  function noShip() {
+    var m = g.mode;
+    return m === 'title' || m === 'gameover' || m === 'ending' ||
+      m === 'credits' || m === 'entry' || m === 'scores';
+  }
   function drawShip(oam) {
     var s2 = g.ship;
-    if (g.mode === 'title' || g.mode === 'gameover' || g.mode === 'ending') return;   // 標題 / GAME OVER / ENDING 不畫船
+    if (noShip()) return;              // 標題 / GAME OVER / ENDING / 名單 / 排行榜不畫船
     if (!s2.alive) return;
     if (s2.blink()) return;                  // 無敵閃爍
     var a = s2.anim;
@@ -877,7 +1057,7 @@
 
   function drawOptions(oam) {
     var s2 = g.ship, i;
-    if (g.mode === 'title' || g.mode === 'gameover' || g.mode === 'ending') return;
+    if (noShip()) return;
     if (!s2.alive) return;
     for (i = 0; i < s2.options.length; i++) {
       var o = s2.options[i];
@@ -895,6 +1075,17 @@
         for (j = 0; j < t.len; j++) {
           var last = (j === t.len - 1);
           oam.add({ x: t.x + j * 8, y: t.y - 2, tile: last ? T.S_LASER_H : T.S_LASER, pal: 1, prio: 1 });
+        }
+      } else if (t.kind === CR.Ship.K.RIPPLE) {
+        // 波動：上端弧 / 中段 / 下端弧（下端 = 上端 flipV）—— len 1 時只有一顆小環
+        if (t.len <= 1) {
+          oam.add({ x: t.x, y: t.y, tile: T.S_RIPPLE1, pal: 1, prio: 1 });
+        } else {
+          for (j = 0; j < t.len; j++) {
+            var tl = (j === 0) ? T.S_RIPPLE_T : ((j === t.len - 1) ? T.S_RIPPLE_T : T.S_RIPPLE_M);
+            oam.add({ x: t.x, y: t.y + j * 8, tile: tl, pal: 1, prio: 1,
+              flipV: (j === t.len - 1) });
+          }
         }
       } else if (t.kind === CR.Ship.K.DIAG) {
         oam.add({ x: t.x - 2, y: t.y - 2, tile: T.S_BULLET_D, pal: 1, prio: 1 });
@@ -985,20 +1176,55 @@
       }
 
       if (g.mode === 'title') {
-        if (input.pressed(BTN.START) || input.pressed(BTN.A)) toPlay();
+        // R4：SELECT = 看分數排行榜（START / A 照舊開始遊戲）
+        if (input.pressed(BTN.SELECT)) { g.afterScores = 'title'; toScores(-1); }
+        else if (input.pressed(BTN.START) || input.pressed(BTN.A)) toPlay();
+      } else if (g.mode === 'credits') {
+        // R4：工作人員名單捲動（START / A 快轉；捲完 2 秒自動收尾）
+        g.creditFrames++;
+        var cdone = false;
+        if (CR.Credits && CR.Credits.update) cdone = !!CR.Credits.update();
+        if (input.pressed(BTN.START) || input.pressed(BTN.A)) {
+          if (CR.Credits && CR.Credits.done && !CR.Credits.done()) { CR.Credits.skip(); }
+          else cdone = true;
+        }
+        if (cdone) {
+          if (CR.Credits && CR.Credits.stop) CR.Credits.stop();
+          g.afterScores = 'loop';
+          toEntry();
+        }
+      } else if (g.mode === 'entry') {
+        // R4：3 字母名字輸入（↑↓ 換字母、←→ 移游標、A / START 確定）
+        var chg = false;
+        if (input.pressed(BTN.UP)) { call(CR.HiScore, 'bump', 1); chg = true; }
+        else if (input.pressed(BTN.DOWN)) { call(CR.HiScore, 'bump', -1); chg = true; }
+        else if (input.pressed(BTN.RIGHT)) { call(CR.HiScore, 'move', 1); chg = true; }
+        else if (input.pressed(BTN.LEFT)) { call(CR.HiScore, 'move', -1); chg = true; }
+        if (chg) drawEntry(g.ppu);
+        if (input.pressed(BTN.A) || input.pressed(BTN.START)) {
+          var rk = call(CR.HiScore, 'commit');
+          toScores(typeof rk === 'number' ? rk : -1);
+        }
+      } else if (g.mode === 'scores') {
+        if (input.pressed(BTN.START) || input.pressed(BTN.A)) leaveScores();
       } else if (g.mode === 'gameover') {
         // [源] §9-1：GAME OVER 畫面的 Konami 指令 = 3 條命續關（分數保留）；START 才是回標題
         // fix4：**SELECT = 一鍵續關**（同樣效果、不限次數），Konami 序列照舊保留
         konamiPush(input);
         if (input.pressed(BTN.SELECT)) { konamiClear(); g.selectContinues++; continueGame(); }
         else if (konamiHit()) { konamiClear(); continueGame(); }
-        else if (input.pressed(BTN.START)) toTitle();
+        else if (input.pressed(BTN.START)) {
+          // R4：分數有上榜 -> 先輸入 3 字母名字；沒上榜維持舊行為（直接回標題）
+          g.afterScores = 'title';
+          if (CR.HiScore && CR.HiScore.qualifies && CR.HiScore.qualifies(g.ship.score)) toEntry();
+          else toTitle();
+        }
       } else if (g.mode === 'stageclear') {
         // R3：START = 進入下一關（第 6 關破 -> ENDING）。以前是回標題，擴關後改成接關。
         if (input.pressed(BTN.START) || input.pressed(BTN.A)) nextStage();
       } else if (g.mode === 'ending') {
-        // R3：全破畫面 -> START 進第二輪（loop+1，難度加成；分數 / 強化保留）
-        if (input.pressed(BTN.START) || input.pressed(BTN.A)) startLoop();
+        // R4：全破畫面 -> START 進「工作人員名單」（名單結束 -> 名字輸入 -> 排行榜 -> 第二輪）
+        if (input.pressed(BTN.START) || input.pressed(BTN.A)) toCredits();
       } else if (g.paused) {
         // 暫停中：遊戲完全凍結，只收 SELECT（fix4 一鍵密技）、Konami 指令與 START（研究 §7-3「暫停」）
         if (input.pressed(BTN.SELECT)) trySelectSecret();
@@ -1013,6 +1239,8 @@
         pauseGame();
       } else {
         g.playFrames++;
+        // R4：遊戲進行中 SELECT = 切 Option 編隊（固定 / 跟隨 / 旋轉）；暫停中的 SELECT 仍是密技
+        if (g.mode === 'play' && input.pressed(BTN.SELECT)) cycleOption();
         var ev = g.ship.update(g);                  // 船 / 選項 / 自機彈
         if (g.mode === 'play') {
           call(st(), 'update', g);                  // 關卡：捲動 / 出怪 / 敵彈 / 膠囊
@@ -1023,7 +1251,15 @@
           collide();                                // 碰撞 + 撿膠囊
           drainScore();                             // 收 stage 記的分（EXTEND / HI 一併處理）
           escapeMsg();                              // R3：最終魔王的「脫出倒數」文字
-          if (!g.ship.alive) g.mode = 'dead';
+          // R4：隱藏獎勵（每關 1 個；bonus.js 判定條件並發獎，這裡只負責演出）
+          if (CR.Bonus && CR.Bonus.update) {
+            var bev = CR.Bonus.update();
+            if (bev) {
+              g.bonuses++; g.lastBonus2 = bev;
+              showNote(bev === '1up' ? 'BONUS 1UP!' : 'BONUS CLEAR!', 9);
+            }
+          }
+          if (!g.ship.alive) { call(CR.Rank, 'onDeath'); g.mode = 'dead'; }
           else if (st() && st().cleared) toStageClear();
         } else if (g.mode === 'dead') {
           if (ev === 'deathdone') { respawn(); if (g.mode === 'dead') g.mode = 'play'; }
@@ -1035,10 +1271,22 @@
 
     draw: function (nes) {
       var ppu = nes.ppu;
+      // R4：工作人員名單自己管捲動（垂直捲動 + 關掉 split），畫面上沒有任何精靈
+      if (g.mode === 'credits') {
+        if (CR.Credits && CR.Credits.apply) CR.Credits.apply(ppu);
+        g.oam.begin(); g.oam.end();
+        return;
+      }
       if (hudOn) hudSync(ppu, g.ship);
       // engine 契約異動①：Scroller 不碰 ppu.scroll / split，捲動由遊戲自己設（% 512，不是 & 255）
       ppu.scroll(((camX() % 512) + 512) % 512, 0, 0);
       ppu.split(SPLIT_LINE, { x: 0, y: SPLIT_LINE, nt: 0 });
+
+      // R4：名字輸入 / 排行榜是靜態選單 ⇒ OAM 全清（不然會留下膠囊 / 爆炸的殘影）
+      if (g.mode === 'entry' || g.mode === 'scores') {
+        g.oam.begin(); g.oam.end();
+        return;
+      }
 
       var oam = g.oam;
       oam.begin();
@@ -1059,7 +1307,7 @@
         mode: g.mode, frame: g.frames, playFrames: g.playFrames,
         x: s2.x, y: s2.y, bx: s2.bx, by: s2.by,
         alive: s2.alive, speed: s2.speed, speedPx: s2.speedPx,
-        gauge: s2.gauge, gaugeName: s2.gaugeName, power: s2.power, rank: s2.rank,
+        gauge: s2.gauge, gaugeName: s2.gaugeName, power: s2.power,
         options: s2.options, shots: s2.shots, shotCount: s2.shotCount, timers: s2.timers,
         capsules: s2.capsules, ringSteps: s2.ringSteps, moved: s2.moved,
         invul: s2.invul, lives: s2.lives, score: s2.score, hi: s2.hi,
@@ -1095,6 +1343,20 @@
         // fix5：一鍵密技
         cheats: g.cheats | 0, cheatContinues: g.cheatContinues | 0,
         cheatCool: g.cheatCool | 0, lastCheat: g.lastCheat || '',
+        // ---------------- R4 ----------------
+        rank: s2.rank,                                  // 裝備 rank（R3 語意，0..4）
+        rankDyn: (CR.Rank && CR.Rank.value) ? CR.Rank.value() : s2.rank,
+        rankState: (CR.Rank && CR.Rank.state) ? CR.Rank.state() : null,
+        optMode: s2.optMode, optModeName: s2.optModeName, optSwitches: s2.optSwitches,
+        optSwitch: g.optSwitch | 0,
+        bonus2: (CR.Bonus && CR.Bonus.state) ? CR.Bonus.state() : null,
+        bonuses: g.bonuses | 0, lastBonus2: g.lastBonus2 || '',
+        note: g.noteText || '',
+        credits: (CR.Credits && CR.Credits.state) ? CR.Credits.state() : null,
+        creditFrames: g.creditFrames | 0,
+        hiscore: (CR.HiScore && CR.HiScore.state) ? CR.HiScore.state() : null,
+        entryRank: g.entryRank | 0, scoreMark: g.scoreMark | 0, afterScores: g.afterScores,
+        rush: (stg && stg.bossActive && CR.Boss && CR.Boss.isRush && CR.Boss.state) ? CR.Boss.state() : null,
         lastEvent: g.lastEvent
       };
     }

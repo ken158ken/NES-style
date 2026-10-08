@@ -27,13 +27,14 @@ ENGINE_ORDER = ['palette.js', 'fixed.js', 'input.js', 'cpu_timing.js', 'chr.js',
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--out', default='')
-    ap.add_argument('--src', default='game.html', help='入口頁（game.html = 星塵測試室 demo；star.html = 星塵勇者；cruiser.html = 星塵巡航艦）')
+    ap.add_argument('--src', default='game.html', help='入口頁（game.html = 星塵測試室 demo；star.html = 星塵勇者；cruiser.html = 星塵巡航艦；mech.html = 星塵機甲）')
     ap.add_argument('--check', action='store_true', help='只檢查不寫檔')
     a = ap.parse_args()
     global SRC
     SRC = ROOT / a.src
     if not a.out:
-        a.out = {'cruiser.html': 'dist/星塵巡航艦.html', 'star.html': 'dist/星塵勇者.html'}.get(a.src, 'dist/星塵測試室.html')
+        a.out = {'cruiser.html': 'dist/星塵巡航艦.html', 'star.html': 'dist/星塵勇者.html',
+                 'mech.html': 'dist/星塵機甲.html'}.get(a.src, 'dist/星塵測試室.html')
 
     html = SRC.read_text(encoding='utf-8')
     found, missing, order = [], [], []

@@ -39,6 +39,14 @@
   var SCROLL_AHEAD = 34;
   var LEVEL_ORDER = ['1-1', '1-2', '1-3', '1-4', '2-1', '2-2', '2-3', '2-4'];
   var WORLD_FIRST = { 1: '1-1', 2: '2-1' };   // 標題畫面的世界選擇（R3 star-w2）
+  /* R4 star-w4：世界 4「機械要塞」。只插入兩行 —— `levelList()` 會過濾掉 ST.LEVELS 沒有的關，
+   * 所以 levels_w4.js 缺席時行為與 R3 完全相同；`.sort()` 讓後續世界（W3 / W5…）插進來時
+   * 順序自動正確（'1-1' < '2-1' < '3-1' < '4-1'）。 */
+  LEVEL_ORDER = LEVEL_ORDER.concat(['4-1', '4-2', '4-3', '4-4']).sort();
+  WORLD_FIRST[4] = '4-1';
+  /* R4 star-w3：世界 3「霧沼古樹」。同樣只插入兩行（levels_w3.js 缺席時行為不變）。 */
+  LEVEL_ORDER = LEVEL_ORDER.concat(['3-1', '3-2', '3-3', '3-4']).sort();
+  WORLD_FIRST[3] = '3-1';
   var POLE_VY = 3;                            // 旗桿下滑 3 px/幀（R3：補上 W1 留下的演出）
   var POLE_WALK = 24;                         // 下滑到底後往右走 24 幀進城
   var STAR_SCORE = 1000;                      // 撿到無敵星的分數
@@ -206,7 +214,9 @@
       floatBanner: null, floatCam: 0,
       // R3 star-w2
       bossMod: null, pole: null, titleWorld: 1, starMusic: false, objInit: false,
-      lastSfx: null, colWrites: 0
+      lastSfx: null, colWrites: 0,
+      // R4 star-meta（F4-3）：通關位元 / 地圖游標 / 最後一次用過的密碼
+      clearedMask: 0, mapAt: -1, lastCode: ''
     };
   }
 
@@ -231,12 +241,34 @@
     } else {
       g.over[col * 32 + row] = t;
     }
-    if (ppu0) writeOneTile(col, row);
+    if (ppu0) writeTileArea(col, row);
   }
-  function kindAt(col, row) { return ST.solidKind(tileAt(col, row)); }
+  function kindAt(col, row) {
+    // F4-3：2× 磚塊長出來的上半格是**單向平台**（下面頂得過去、上面踩得到 ⇒ 不會站進磚裡）
+    if (ST.Icons2x && ST.Icons2x.enabled) {
+      var k2 = ST.Icons2x.kindAt(col, row, tileAt, g.cols);
+      if (k2) return k2;
+    }
+    return ST.solidKind(tileAt(col, row));
+  }
   function isLava(t) { return t === ST.TILE.LAVA; }
   function attrAt(c16, r16) {
     if (!g.lv.attrAt) return 1;
+    // F4-3：整個 16×16 區塊只剩「2× 圖示的延伸格」時，調色盤跟著圖示錨點那一格
+    // （一排 ? 磚 / 磚塊會有好幾個錨點 ⇒ 全部同一組才套用，不然維持關卡原值）
+    if (ST.Icons2x && ST.Icons2x.enabled && ST.Icons2x.attrOwners) {
+      var own = ST.Icons2x.attrOwners(c16, r16, tileAt, g.cols), i2, b2, same = null;
+      if (own) {
+        for (i2 = 0; i2 < own.length; i2++) {
+          b2 = g.lv.attrAt(own[i2].col >> 1, own[i2].row >> 1);
+          if (b2 === undefined || b2 === null) { same = null; break; }
+          b2 = b2 & 3;
+          if (same === null) same = b2;
+          else if (same !== b2) { same = null; break; }
+        }
+        if (same !== null) return same;
+      }
+    }
     var a = g.lv.attrAt(c16, r16);
     return (a === undefined || a === null) ? 1 : (a & 3);
   }
@@ -280,6 +312,12 @@
   //   ③ 本檔的後備表（`ST.BG_FALLBACK`，內建測試關用）
   function scrTileAt(col, row) {
     var lv = g.lv, ov = g.over[col * 32 + row], v;
+    // F4-3（使用者回饋 2026-10-08）：互動物件 / 道具圖示 2× —— 金幣 / 旗桿球 16×16、
+    // ? 磚 / 磚塊 8×16；地形仍是單格，放不下就自動退回原本的 8×8（games/star/icons2x.js）
+    if (ST.Icons2x && ST.Icons2x.enabled) {
+      var i2 = ST.Icons2x.nameAt(col, row, tileAt, g.cols);
+      if (i2) return bgIndex(i2);
+    }
     if (ov === undefined && lv && typeof lv.chrAt === 'function') {
       try { v = lv.chrAt(col, row); } catch (e) { v = undefined; }
       if (typeof v === 'number') return v & 255;
@@ -293,6 +331,19 @@
     if (row < TOP_ROW || row >= ROWS) return;
     var ntc = col & (NT_WINDOW - 1);
     ppu0.setTile((ntc >> 5) & 1, ntc & 31, row, scrTileAt(col, row));
+  }
+  // F4-3：2× 圖示會跨到右邊 / 上面那一格 ⇒ 改一格地形要連鄰居一起重畫（最多 9 byte）
+  function writeTileArea(col, row) {
+    if (!(ST.Icons2x && ST.Icons2x.enabled)) { writeOneTile(col, row); return 1; }
+    var dc, dr, n = 0;
+    for (dc = -1; dc <= 1; dc++) {
+      for (dr = -1; dr <= 1; dr++) {
+        if (col + dc < 0 || (g.cols && col + dc >= g.cols)) continue;
+        writeOneTile(col + dc, row + dr);
+        n++;
+      }
+    }
+    return n;
   }
 
   // 第 col 欄「最底層地面」的站立 y：從關卡底部往上找連續 solid 的頂端
@@ -333,6 +384,8 @@
     g.pole = null;
     g.starMusic = false;
     g.bossMod = (lv.bossKind === 'colossus' && ST.BossW2) ? ST.BossW2 : ST.Boss;
+    if (lv.bossKind === 'guardian' && ST.BossW4) g.bossMod = ST.BossW4;    // R4 star-w4
+    if (lv.bossKind === 'treelord' && ST.BossW3) g.bossMod = ST.BossW3;    // R4 star-w3
     ST.ActiveBoss = g.bossMod;               // enemies.js 的 each() 要知道現在是哪一隻魔王
     g.floatBanner = null; g.secretMsg = 0;   // fix5：換關整片重畫 ⇒ 浮動疊字記錄作廢
     g.pops.length = 0;
@@ -346,6 +399,9 @@
     if (!keepStats) { /* 分數 / 命 / 金幣跨關保留 */ }
 
     applyPalettes(ppu0, lv);
+    // R4 star-w4：精靈圖樣表只有 256 磚，R3 結束時已用掉 252 ⇒ 世界 4 走「每個世界一張
+    // 精靈 bank」的真機做法（CHR bank switching）。缺席 / 非 W4 時指回主 bank，行為不變。
+    if (ST.SprBanks && typeof ST.SprBanks.apply === 'function') { try { ST.SprBanks.apply(lv); } catch (e) { } }
     makeScroller();
     g.camX = clampCam(h.x - CAM_R);
     g.camMin = 0;
@@ -355,18 +411,26 @@
     if (ST.Enemies && typeof ST.Enemies.init === 'function') { try { ST.Enemies.init(lv, { solidAt: g.solidAt }); } catch (e) { } }
     if (ST.Boss && typeof ST.Boss.reset === 'function' && g.bossMod !== ST.Boss) { try { ST.Boss.reset(); } catch (e) { } }
     if (ST.BossW2 && typeof ST.BossW2.reset === 'function' && g.bossMod !== ST.BossW2) { try { ST.BossW2.reset(); } catch (e) { } }
+    if (ST.BossW4 && typeof ST.BossW4.reset === 'function' && g.bossMod !== ST.BossW4) { try { ST.BossW4.reset(); } catch (e) { } }
+    if (ST.BossW3 && typeof ST.BossW3.reset === 'function' && g.bossMod !== ST.BossW3) { try { ST.BossW3.reset(); } catch (e) { } }
     if (g.bossMod && typeof g.bossMod.init === 'function') { try { g.bossMod.init(lv); } catch (e) { } }
     // R3 star-w2：關卡機關（升降板 / 崩塌磚 / 彈簧 / 間歇泉 / 道具）
     if (typeof lv.setTile === 'function') lv.onTileChange = onLevelTileChange;
     if (ST.Objects && typeof ST.Objects.init === 'function') {
       try { ST.Objects.init(lv, { setTile: objSetTile }); g.objInit = true; } catch (e) { g.objInit = false; }
     }
+    // R4 star-w4：世界 4 的機關（輸送帶 / 雷射柵欄 / 齒輪升降台）
+    if (ST.ObjectsW4 && typeof ST.ObjectsW4.init === 'function') {
+      try { ST.ObjectsW4.init(lv, { setTile: objSetTile }); g.obj4Init = true; } catch (e) { g.obj4Init = false; }
+    }
+    // F4-3 插入：副武器的每關初始化（清彈 + 算出本關的「指定 ? 磚」= 隱藏道具）
+    if (ST.SubWeapon && typeof ST.SubWeapon.initLevel === 'function') { try { ST.SubWeapon.initLevel(g); } catch (e) { } }
     g.hudDirty = true;
     audio('play', levelSong(lv));
   }
 
   // 關卡自己改了一格地形（ST.Objects 的崩塌磚）⇒ 只重寫那一格名稱表（1 byte）
-  function onLevelTileChange(col, row) { if (ppu0) writeOneTile(col, row); }
+  function onLevelTileChange(col, row) { if (ppu0) writeTileArea(col, row); }
   function objSetTile(col, row, code) {
     if (!g.lv || typeof g.lv.setTile !== 'function') return false;
     g.lv.setTile(col, row, code);      // onTileChange 會把那一格寫進名稱表
@@ -387,7 +451,11 @@
     return k;
   }
   function levelSong(lv) { return songKey(lv && (lv.music || themeOf(lv)), 'ground'); }
-  function bossSong(lv) { return songKey(worldOf(lv) === 2 ? 'boss2' : 'boss', 'boss'); }
+  function bossSong(lv) {
+    if (worldOf(lv) === 4) return songKey('boss4', 'boss');        // R4 star-w4
+    if (worldOf(lv) === 3) return songKey('boss3', 'boss');        // R4 star-w3
+    return songKey(worldOf(lv) === 2 ? 'boss2' : 'boss', 'boss');
+  }
 
   function applyPalettes(ppu, lv) {
     var th = THEMES[themeOf(lv)] || THEMES.ground;
@@ -478,6 +546,27 @@
 
   function hudReset() { g.hud = {}; }
 
+  /* fix-r4（qa-r4 P3-4）：世界地圖 / 密碼畫面原本**沿用遊戲中的 HUD**，於是地圖上會印
+   * 沒有意義的 `TIME 300`，以及跟下排 `LEVEL 1-3` 互相矛盾的 `WORLD 1-1`。
+   * 這兩個模式改用自己的上方 HUD：SCORE / COIN / 命數照留（都是地圖上真的有意義的數字），
+   * TIME 與 WORLD 兩欄整格清掉，原本 TIME 的位置改標目前畫面（WORLD MAP / PASSWORD）。
+   * 世界編號與通關數由 `worldmap.js` 的列 4（`WORLD n MAP` / `CLEAR nn/16`）負責。 */
+  function hudMapMode() { return g.mode === 'map' || g.mode === 'password'; }
+  function hudMapStatic(ppu) {
+    var r, i, s;
+    for (r = 0; r < TOP_ROW; r++) ppu.fillTiles(0, 0, r, 32, 1, bgIndex('SP'));
+    ppu.fillAttr(0, 0, 0, 16, 2, 0);
+    for (i = 0; i < HUD_STATIC.length; i++) {
+      s = HUD_STATIC[i];
+      if (s.text === 'TIME' || s.text === 'WORLD') continue;
+      writeText(ppu, 0, s.col, s.row, s.text);
+    }
+    writeText(ppu, 0, 16, 1, (g.mode === 'password') ? 'PASSWORD' : 'WORLD MAP');
+    hudReset();
+    hudWrite(ppu, true);
+    return true;
+  }
+
   function hudValue(key) {
     var h = g.hero;
     switch (key) {
@@ -495,6 +584,8 @@
     var i, j, f, val, old, n = 0;
     for (i = 0; i < HUD_FIELDS.length; i++) {
       f = HUD_FIELDS[i];
+      // fix-r4（P3-4）：地圖 / 密碼畫面沒有 TIME，WORLD 也不該印關號
+      if (hudMapMode() && (f.key === 'time' || f.key === 'world')) continue;
       val = hudValue(f.key);
       old = g.hud[f.key];
       if (!force && old === val) continue;
@@ -516,11 +607,13 @@
 
   // R3 star-w2：標題有了「世界選擇」（SELECT 切 WORLD 1 / 2 ＝ PLAN §4 的世界地圖簡版）
   function titleLines(world) {
+    // R4 star-meta（F4-3）：world = 0 是「PASSWORD」選項（SELECT 輪到它，START 進輸入畫面）
     return [
       { row: 9, col: 9, text: 'STARDUST HERO' },
-      { row: 11, col: 11, text: 'WORLD ' + (world || 1) },
+      { row: 11, col: 11, text: (world === 0) ? 'PASSWORD' : ('WORLD ' + (world || 1)) },
       { row: 12, col: 7, text: '$ SELECT = WORLD' },
       { row: 14, col: 10, text: 'PRESS START' },
+      { row: 15, col: 6, text: 'UP OR B = WORLD MAP' },       // R4 star-meta（F4-3）
       { row: 17, col: 8, text: '$ 2026 ORIGINAL' },
       { row: 19, col: 5, text: 'SECRET: C KEY OR $ BTN' }      // fix5：標題也寫出一鍵密技
     ];
@@ -551,7 +644,9 @@
       { row: 10, col: 9, text: 'WORLD ' + worldOf(g.lv) + ' CLEAR' },
       { row: 13, col: 11, text: 'THANK YOU' },
       { row: 16, col: 10, text: 'SCORE ' + pad(g.hero.score, 6) },
-      { row: 19, col: 10, text: 'PRESS START' }
+      { row: 19, col: 10, text: 'PRESS START' },
+      // F4-3 插入：通關結算顯示密碼（10 個字母，紅白機式「抄下來下次用」）
+      { row: 21, col: 5, text: 'CODE ' + (ST.Password ? ST.Password.format(metaPassword()) : '') }
     ];
   }
 
@@ -629,6 +724,15 @@
       var w = parseInt(String(list[i]).charAt(0), 10) || 1;
       if (worlds.indexOf(w) < 0) worlds.push(w);
     }
+    // R4 star-w4：WORLD_FIRST 裡有登記、而且關卡真的存在的世界也要能切到（W3 / W5 同享）
+    for (var wk in WORLD_FIRST) {
+      if (!Object.prototype.hasOwnProperty.call(WORLD_FIRST, wk)) continue;
+      var wn = parseInt(wk, 10) || 0;
+      if (wn && ST.LEVELS[WORLD_FIRST[wk]] && worlds.indexOf(wn) < 0) worlds.push(wn);
+    }
+    worlds.sort(function (a, b) { return a - b; });
+    // R4 star-meta（F4-3）：清單尾端加上 PASSWORD（哨兵 0）⇒ WORLD 1 → 2 → … → PASSWORD → WORLD 1
+    if (ST.PasswordUI && worlds.indexOf(0) < 0) worlds.push(0);
     if (worlds.length < 2) return false;
     var at = worlds.indexOf(g.titleWorld);
     g.titleWorld = worlds[(at + 1) % worlds.length];
@@ -768,6 +872,178 @@
     g.hudDirty = true;
   }
 
+  /* ============ R4 star-meta（F4-3）：世界地圖 / 密碼 / 副武器的膠水 ============
+   * 本區塊 + 下面標了「F4-3 插入」的幾處，就是本卡對 main.js 的全部改動
+   * （清單見 docs/PROGRESS.md「star-meta（R4）§④ 跨檔需求」）。
+   *   mode 'map'        世界地圖（games/star/worldmap.js，SMB3 式節點圖）
+   *   mode 'password'   密碼輸入（games/star/password.js 的 ST.PasswordUI）
+   *   titleWorld === 0  標題的 PASSWORD 選項
+   */
+  var META_PW_SEL = 0;
+
+  // 整片重畫（地圖 / 密碼畫面 ≈ 900 byte）⇒ 比照 rebuildScreen 靜音 VBlank 計帳
+  function metaMute(fn) {
+    var bud = nes0 && nes0.timing && nes0.timing.budget;
+    var muted = bud ? bud.mute : false;
+    if (bud) bud.mute = true;
+    try { fn(); } finally { if (bud) bud.mute = muted; }
+  }
+
+  function metaCleared() { return g ? (g.clearedMask | 0) : 0; }
+
+  // 過關 → 記進通關位元（密碼存的就是這 16 位元 + 命 + 副武器 + 分數千位 + 校驗）
+  function metaOnClear() {
+    if (!ST.Password || !g || !g.levelId) return 0;
+    g.clearedMask = ST.Password.setCleared(g.clearedMask | 0, g.levelId, true);
+    return g.clearedMask;
+  }
+
+  function metaSnapshot() {
+    var h = g.hero;
+    return { cleared: g.clearedMask | 0, lives: h.lives, owned: h.subOwned | 0, sel: h.sub | 0, score: h.score | 0 };
+  }
+  function metaPassword() { return ST.Password ? ST.Password.encode(metaSnapshot()) : ''; }
+
+  function metaApply(data) {
+    if (!data) return false;
+    var h = g.hero;
+    g.clearedMask = data.cleared | 0;
+    h.lives = data.lives | 0;
+    h.subOwned = data.owned | 0;
+    h.sub = data.sel | 0;
+    h.score = data.score | 0;
+    if (h.subOwned && ST.SubWeapon) h.subAmmo = Math.max(h.subAmmo | 0, ST.SubWeapon.AMMO_PICK);
+    g.hudDirty = true;
+    return true;
+  }
+
+  // 密碼套用後要落在哪個世界：最後一個通關位元的「下一關」所在世界
+  function metaNextWorld() {
+    var P = ST.Password, m = metaCleared(), i, last = -1, id, w;
+    if (!P) return g.titleWorld || 1;
+    for (i = 0; i < P.BITS; i++) if (m & (1 << i)) last = i;
+    id = P.bitToId(last + 1) || P.bitToId(0);
+    w = parseInt(String(id).charAt(0), 10) || 1;
+    if (!ST.LEVELS[w + '-1']) w = g.titleWorld || 1;
+    return w;
+  }
+
+  /* ---- 進 / 出世界地圖 ---- */
+  function metaEnterMap(world) {
+    if (!ST.WorldMap) return false;
+    g.titleWorld = (world | 0) || g.titleWorld || 1;
+    if (g.titleWorld === META_PW_SEL) g.titleWorld = 1;
+    g.banner = null;
+    g.camX = 0;                                    // 地圖畫在名稱表 0（split x = 0）
+    ST.WorldMap.open(g.titleWorld, metaCleared(), { at: g.mapAt });
+    g.mode = 'map';
+    g.modeFrames = 0;
+    metaMute(function () { ST.WorldMap.drawScreen(ppu0, g); hudMapStatic(ppu0); });
+    audio('play', songKey('title', 'ground'));
+    return true;
+  }
+  function metaLeaveToTitle() {
+    g.mapAt = ST.WorldMap ? ST.WorldMap.at : 0;
+    if (ST.WorldMap) ST.WorldMap.close();
+    if (ST.PasswordUI) ST.PasswordUI.close();
+    loadLevel(WORLD_FIRST[g.titleWorld] || g.startLevel, true);   // 內含 rebuildScreen ⇒ 蓋掉地圖
+    g.mode = 'title';
+    g.modeFrames = 0;
+    drawTitle(ppu0);
+    audio('play', songKey('title', 'ground'));
+    return true;
+  }
+  function metaEnterLevel(id) {
+    g.mapAt = ST.WorldMap ? ST.WorldMap.at : 0;
+    if (ST.WorldMap) ST.WorldMap.close();
+    g.banner = null;
+    loadLevel(id, true);
+    g.mode = 'play';
+    g.modeFrames = 0;
+    return true;
+  }
+  function metaEnterPassword() {
+    if (!ST.PasswordUI) return false;
+    g.banner = null;
+    g.camX = 0;
+    ST.PasswordUI.open(g.lastCode || null);
+    g.mode = 'password';
+    g.modeFrames = 0;
+    metaMute(function () { ST.PasswordUI.draw(ppu0); hudMapStatic(ppu0); });
+    audio('play', songKey('title', 'ground'));
+    return true;
+  }
+
+  /** 標題：^（UP）/ B = 世界地圖；選到 PASSWORD 時 START / A = 密碼輸入。回 true = 已處理。 */
+  function metaTitleEnter(input) {
+    if (!input) return false;
+    if (g.titleWorld === META_PW_SEL && (input.pressed(BTN.START) || input.pressed(BTN.A))) {
+      return metaEnterPassword();
+    }
+    if (input.pressed(BTN.UP) || input.pressed(BTN.B)) return metaEnterMap(g.titleWorld);
+    return false;
+  }
+
+  /** mode 'map' / 'password' 的每幀。 */
+  function metaUpdate(input) {
+    var a;
+    if (g.mode === 'map') {
+      a = ST.WorldMap ? ST.WorldMap.update(g, input) : null;
+      if (!a) return true;
+      if (a.type === 'level') return metaEnterLevel(a.id);
+      if (a.type === 'exit') return metaLeaveToTitle();
+      if (a.type === 'shop' || a.type === 'shop_draw') { metaMute(function () { ST.WorldMap.drawShop(ppu0, g); }); return true; }
+      if (a.type === 'redraw') { metaMute(function () { ST.WorldMap.drawScreen(ppu0, g); }); return true; }
+      if (a.type === 'refresh') { metaMute(function () { ST.WorldMap.refresh(ppu0, g); }); return true; }
+      return true;
+    }
+    a = ST.PasswordUI ? ST.PasswordUI.update(g, input) : null;
+    if (!a) return true;
+    if (a.type === 'ok') {
+      metaApply(a.data);
+      g.lastCode = a.code;
+      g.mapAt = -1;                                  // 進度換了 ⇒ 游標重新挑「第一個沒通關的節點」
+      return metaEnterMap(metaNextWorld());
+    }
+    if (a.type === 'exit') return metaLeaveToTitle();
+    metaMute(function () { ST.PasswordUI.draw(ppu0); });          // bad / redraw
+    return true;
+  }
+
+  /** mode 'map' / 'password' 的 draw：背景已經在名稱表上，只要補玩家棋子精靈。 */
+  function metaDraw(ppu) {
+    var oam = g.oam;
+    ppu.scroll(0, 0, 0);
+    ppu.split(SPLIT_LINE, { x: 0, y: SPLIT_LINE, nt: 0 });
+    oam.begin();
+    if (g.mode === 'map' && ST.WorldMap) ST.WorldMap.drawSprites(oam, g);
+    oam.end();
+  }
+
+  /* F4-3（使用者回饋）：金幣放大成 16×16 之後，碰到「畫面上看得到的那一塊」就該撿到，
+   * 不能只認原本的 8×8 地形格（任務指示：碰撞框跟著放大、以對玩家友善為準）。 */
+  function metaIconTouch() {
+    if (!ST.Icons2x || !ST.Icons2x.enabled || !ST.Icons2x.touching) return 0;
+    var h = g.hero, list, i, t;
+    if (h.state === 'dead') return 0;
+    list = ST.Icons2x.touching(h.x, h.y, h.w || 12, h.h || 22, tileAt, g.cols);
+    for (i = 0; i < list.length; i++) {
+      t = tileAt(list[i].col, list[i].row);
+      if (t === ST.TILE.COIN) onTouch(list[i].col, list[i].row, t);
+    }
+    return list.length;
+  }
+
+  /** 副武器 / 道具屋的提示字（遊戲進行中疊一行，沿用 fix5 的浮動疊字機制）。 */
+  function metaNote(text) {
+    if (!text || g.mode !== 'play' || g.paused) return false;
+    var s = String(text).slice(0, 28), col = 16 - (s.length >> 1);
+    if (col < 1) col = 1;
+    showFloat([{ row: 18, col: col, text: s }]);
+    g.secretMsg = (ST.SubWeapon && ST.SubWeapon.MSG_FRAMES) || 90;
+    return true;
+  }
+
   /* ------------------------------- 音訊 ------------------------------- */
   function audio(fn, a) {
     if (ST.Audio && typeof ST.Audio[fn] === 'function') {
@@ -819,6 +1095,10 @@
 
   function onBump(col, row) {
     var T = ST.TILE, h = g.hero, t = tileAt(col, row);
+    // F4-3 插入：本關的「指定 ? 磚」頂出來是副武器（金幣照給，所以只是多一行效果）
+    if (t === T.QBLOCK && ST.SubWeapon && typeof ST.SubWeapon.hidden === 'function') {
+      try { ST.SubWeapon.hidden(g, col, row); } catch (e) { }
+    }
     if (t === T.QBLOCK) {
       if (g.lv && typeof g.lv.hit === 'function') {
         try { g.lv.hit(col, row); } catch (e) { }
@@ -931,6 +1211,7 @@
     g.modeFrames = 0;
     g.clearTally = 0;
     g.cleared = true;
+    metaOnClear();                           // F4-3 插入：通關位元（密碼存檔）
     g.hero.score += SCORE_GOAL;
     g.hudDirty = true;
     sfx('goal');
@@ -983,6 +1264,7 @@
     var BM = bossMod();
     if (BM && typeof BM.reset === 'function') { try { BM.reset(); } catch (e) { } }
     if (ST.Objects && typeof ST.Objects.seek === 'function') { try { ST.Objects.seek(g.camX); } catch (e) { } }
+    if (ST.ObjectsW4 && typeof ST.ObjectsW4.seek === 'function') { try { ST.ObjectsW4.seek(g.camX); } catch (e) { } }
     g.pole = null;
     g.starMusic = false;
     g.bossMusic = 0;                          // 魔王房復活：重新進房時再切一次 boss 曲
@@ -1123,6 +1405,32 @@
     onPitSave: onPitSave, onStarEnd: onStarEnd
   };
 
+  /* R4 star-w4：崩塌磚的視覺抖動（R3 star-w2「留給後續」第 5 條）。
+   * `ST.Objects.crumbleTimer(c, r)` 在踩住的最後 CRUMBLE_SHAKE 幀會回非 0 ⇒ 在磚的上緣
+   * 畫一顆左右抖動的粉塵（W_PUFF，SPR_WORLD 的磚 ⇒ 兩張精靈 bank 索引相同，W4 也能用）。
+   * 崩塌只會發生在**主角腳下**，所以只掃主角那 3 欄 × 2 列，每幀 ≤ 6 次查詢。 */
+  function drawCrumbleShake(oam, h) {
+    var O = ST.Objects;
+    if (!oam || !oam.add || !h || !O || typeof O.crumbleTimer !== 'function') return 0;
+    if (!ST.TILE || ST.TILE.CRUMBLE === undefined) return 0;
+    if (!ST.World || typeof ST.World.oam16 !== 'function') return 0;
+    var hold = O.CRUMBLE_HOLD || 36, shake = O.CRUMBLE_SHAKE || 12;
+    var art = ST.World.oam16((g.frames & 4) ? 'W_PUFF1' : 'W_PUFF0');
+    if (!art) return 0;
+    var w = h.w || 12, hh = h.h || 22;
+    var c0 = (h.x >> 3) - 1, c1 = ((h.x + w - 1) >> 3) + 1;
+    var r0 = (h.y + hh) >> 3, c, r, n = 0, jit = (g.frames & 2) ? 1 : -1;
+    for (c = c0; c <= c1; c++) {
+      for (r = r0; r <= r0 + 1; r++) {
+        if (tileAt(c, r) !== ST.TILE.CRUMBLE) continue;
+        if (O.crumbleTimer(c, r) < hold - shake) continue;
+        oam.add({ x: c * 8 - g.camX + jit, y: r * 8 - 7, tile: art, pal: 1, prio: 4 });
+        n++;
+      }
+    }
+    return n;
+  }
+
   /* ============================== GAME ============================== */
   var GAME = {
     init: function (nes) {
@@ -1145,6 +1453,7 @@
       // R3 star-w2：機關 / 魔王 / 敵人要用的共用 callback
       g.onItem = onItem;
       g.sfx = sfx;
+      g.subNote = metaNote;                  // F4-3 插入：副武器 / 道具屋的提示字
 
       // ---- CHR：精靈表 1 = 主角(0..127) + 世界(128..255)；背景表 0 = HUD(0..63) + 地形 ----
       var sprObj = {}, bgObj = {}, k;
@@ -1164,6 +1473,21 @@
       if (ST.SPR_W2) {
         for (k in ST.SPR_W2) if (Object.prototype.hasOwnProperty.call(ST.SPR_W2, k)) sprObj[k] = ST.SPR_W2[k];
       }
+      // F4-3 插入：2× 圖示的背景磚（金幣 / 旗桿球 / ? 磚 / 用過的磚 / 磚塊，共 14 磚）
+      if (ST.BG_ICON2X) {
+        for (k in ST.BG_ICON2X) if (Object.prototype.hasOwnProperty.call(ST.BG_ICON2X, k)) bgObj[k] = ST.BG_ICON2X[k];
+      }
+      // F4-3 插入：世界地圖的背景磚（23 磚，`M_` 前綴；精靈 bank 一磚都沒加）
+      if (ST.BG_MAP) {
+        for (k in ST.BG_MAP) if (Object.prototype.hasOwnProperty.call(ST.BG_MAP, k)) bgObj[k] = ST.BG_MAP[k];
+      }
+      // R4 star-w4：世界 4 的背景磚（20 磚）併進來；**精靈刻意不併**（256 磚已滿），
+      // 改由 chr_w4.js 的 ST.SprBanks 在換關時切圖樣表 1（真機的 CHR bank switching）。
+      if (ST.BG_W4) {
+        for (k in ST.BG_W4) if (Object.prototype.hasOwnProperty.call(ST.BG_W4, k)) bgObj[k] = ST.BG_W4[k];
+      }
+      // R4 star-w3：世界 3 的背景磚（34 磚）併進來；精靈同樣走 ST.SprBanks 的分頁（st_spr_w3）
+      if (ST.BG_W3) { for (k in ST.BG_W3) if (Object.prototype.hasOwnProperty.call(ST.BG_W3, k)) bgObj[k] = ST.BG_W3[k]; }
       sprBank = NES.CHR.bank('st_spr', sprObj);
       bgBank = NES.CHR.bank('st_bg', bgObj);
       NES.CHR.setPattern(0, bgBank);
@@ -1227,6 +1551,9 @@
         // R3 star-w2：SELECT 切世界（WORLD 1 / 2），START 從該世界的第一關開始
         if (input.pressed(BTN.SELECT)) {
           toggleTitleWorld(nes.ppu);
+        // F4-3 插入：^ / B = 世界地圖；選到 PASSWORD 時 START = 密碼輸入（回 true = 已處理）
+        } else if (metaTitleEnter(input)) {
+          /* 已切到 mode 'map' / 'password' */
         } else if (input.pressed(BTN.START) || input.pressed(BTN.A)) {
           var want = WORLD_FIRST[g.titleWorld] || g.startLevel;
           clearTitle(nes.ppu);
@@ -1246,6 +1573,10 @@
         Hero.update(h, ctx);
         // R3 star-w2：機關（升降板 / 崩塌磚 / 彈簧 / 間歇泉 / 道具）在主角移動之後結算
         if (ST.Objects && typeof ST.Objects.update === 'function') { try { ST.Objects.update(g); } catch (e) { } }
+        // F4-3 插入：副武器投射物（火球 / 飛鏢）在機關之後、敵人碰撞之前結算
+        if (ST.SubWeapon && typeof ST.SubWeapon.update === 'function') { try { ST.SubWeapon.update(g); } catch (e) { } }
+        metaIconTouch();                      // F4-3：2× 金幣的友善撿取範圍
+        if (ST.ObjectsW4 && typeof ST.ObjectsW4.update === 'function') { try { ST.ObjectsW4.update(g); } catch (e) { } }
         var worldDidCollide = false;
         var BM = bossMod();
         if (ST.Enemies && typeof ST.Enemies.update === 'function') { try { ST.Enemies.update(g); worldDidCollide = true; } catch (e) { } }
@@ -1314,6 +1645,9 @@
           drawTitle(nes.ppu);
           audio('play', 'title');
         }
+      // F4-3 插入：世界地圖 / 密碼輸入（兩個新模式；前面的分支都只認自己的 mode ⇒ 不互相干擾）
+      } else if (g.mode === 'map' || g.mode === 'password') {
+        metaUpdate(input);
       }
       musicTick();
     },
@@ -1323,6 +1657,8 @@
       if (g.hudDirty) { hudWrite(ppu, false); g.hudDirty = false; }
       ppu.scroll(0, 0, 0);                                     // 上段（HUD）固定
       ppu.split(SPLIT_LINE, { x: g.camX % 512, y: SPLIT_LINE, nt: 0 });
+      // F4-3 插入：地圖 / 密碼畫面的背景已經寫在名稱表上，只補玩家棋子精靈
+      if (g.mode === 'map' || g.mode === 'password') { metaDraw(ppu); return; }
 
       var oam = g.oam;
       oam.begin();
@@ -1339,7 +1675,11 @@
       }
       // fix4：GAME OVER 畫面不畫敵人（主角本來就不畫）—— 三行字才不會被路過的敵人精靈蓋掉
       if (g.mode !== 'gameover') {
+        // F4-3 插入：副武器投射物（prio 1，壓在敵人前面）
+        if (ST.SubWeapon && typeof ST.SubWeapon.draw === 'function') { try { ST.SubWeapon.draw(oam, g); } catch (e) { } }
         if (ST.Objects && typeof ST.Objects.draw === 'function') { try { ST.Objects.draw(oam, g); } catch (e) { } }
+        if (ST.ObjectsW4 && typeof ST.ObjectsW4.draw === 'function') { try { ST.ObjectsW4.draw(oam, g); } catch (e) { } }
+        drawCrumbleShake(oam, h);
         if (ST.Enemies && typeof ST.Enemies.draw === 'function') { try { ST.Enemies.draw(oam, g); } catch (e) { } }
         var BD = bossMod();
         if (BD && typeof BD.draw === 'function') { try { BD.draw(oam, g); } catch (e) { } }
@@ -1381,9 +1721,26 @@
         star: h.star | 0, stars: h.stars | 0, pitSaves: h.pitSaves | 0,
         onMover: !!h.onMover, pole: g.pole ? g.pole.phase : null,
         titleWorld: g.titleWorld | 0,
+        // R4 star-w4
+        sprBank: (ST.SprBanks && ST.SprBanks.currentName) ? ST.SprBanks.currentName() : null,
+        belted: (ST.ObjectsW4 && ST.ObjectsW4.pushed) | 0,
+        zaps: (ST.ObjectsW4 && ST.ObjectsW4.zaps) | 0,
+        lifted: (ST.ObjectsW4 && ST.ObjectsW4.rides) | 0,
         springs: (ST.Objects && ST.Objects.springs) | 0,
         picked: (ST.Objects && ST.Objects.picked) | 0,
-        floatBanner: g.floatBanner ? g.floatBanner.map(function (t) { return t.text; }) : null
+        floatBanner: g.floatBanner ? g.floatBanner.map(function (t) { return t.text; }) : null,
+        // R4 star-meta（F4-3）：世界地圖 / 密碼 / 副武器
+        clearedMask: g.clearedMask | 0, password: metaPassword(),
+        sub: h.sub | 0, subOwned: h.subOwned | 0, subAmmo: h.subAmmo | 0,
+        subShots: h.subShots | 0, subInf: !!(ST.SubWeapon && ST.SubWeapon.infinite),
+        subLive: (ST.SubWeapon && ST.SubWeapon.state) ? ST.SubWeapon.state().live : 0,
+        subKills: (ST.SubWeapon && ST.SubWeapon.kills) | 0,
+        mapNode: (ST.WorldMap && ST.WorldMap.isOpen) ? ST.WorldMap.at : -1,
+        mapWalking: !!(ST.WorldMap && ST.WorldMap.isOpen && ST.WorldMap.state().walking),
+        mapShop: !!(ST.WorldMap && ST.WorldMap.isOpen && ST.WorldMap.state().shop),
+        icons2x: !!(ST.Icons2x && ST.Icons2x.enabled),
+        pwAt: (ST.PasswordUI && ST.PasswordUI.state) ? ST.PasswordUI.state().at : -1,
+        pwCode: (ST.PasswordUI && ST.PasswordUI.state) ? ST.PasswordUI.state().code : ''
       };
     },
 
@@ -1453,8 +1810,50 @@
       moverTops: function (t) { return (ST.Objects && ST.Objects.moverTops) ? ST.Objects.moverTops(t) : []; },
       objNow: function () { return (ST.Objects && ST.Objects.now) ? ST.Objects.now() : 0; },
       hazardAt: function (x, y, w, h2, t) { return !!(ST.Objects && ST.Objects.hazardHit && ST.Objects.hazardHit(x, y, w, h2, t)); },
+      // R4 star-w4：世界 4 的機關（輸送帶 / 雷射 / 升降台）也是時間（或位置）的純函式
+      objects4: function () { return (ST.ObjectsW4 && ST.ObjectsW4.state) ? ST.ObjectsW4.state() : null; },
+      liftTops: function (t) { return (ST.ObjectsW4 && ST.ObjectsW4.liftTops) ? ST.ObjectsW4.liftTops(t) : []; },
+      obj4Now: function () { return (ST.ObjectsW4 && ST.ObjectsW4.now) ? ST.ObjectsW4.now() : 0; },
+      laserAt: function (x, y, w, h2, t) { return !!(ST.ObjectsW4 && ST.ObjectsW4.hazardHit && ST.ObjectsW4.hazardHit(x, y, w, h2, t)); },
+      beltAt: function (x, row) { return (ST.ObjectsW4 && ST.ObjectsW4.beltAt) ? ST.ObjectsW4.beltAt(x, row) : 0; },
+      convAt: function (x, row) { return (ST.ObjectsW4 && ST.ObjectsW4.convAt) ? ST.ObjectsW4.convAt(x, row) : 0; },
       tiles: function () { return heroTiles; },
-      scroller: function () { return g.scr; }
+      scroller: function () { return g.scr; },
+      /* ---- R4 star-meta（F4-3）：地圖 / 密碼 / 副武器的測試與機器人入口 ---- */
+      meta: function () {
+        return {
+          cleared: g.clearedMask | 0, password: metaPassword(), snapshot: metaSnapshot(),
+          map: (ST.WorldMap && ST.WorldMap.state) ? ST.WorldMap.state() : null,
+          pw: (ST.PasswordUI && ST.PasswordUI.state) ? ST.PasswordUI.state() : null,
+          sub: (ST.SubWeapon && ST.SubWeapon.state) ? ST.SubWeapon.state() : null,
+          mode: g.mode
+        };
+      },
+      icons2x: function (on) {
+        if (on !== undefined && ST.Icons2x) { ST.Icons2x.enabled = !!on; rebuildScreen(); }
+        return (ST.Icons2x && ST.Icons2x.state) ? ST.Icons2x.state() : null;
+      },
+      iconTouch: function () { return metaIconTouch(); },
+      openMap: function (world) { return metaEnterMap(world === undefined ? g.titleWorld : world); },
+      openPassword: function () { return metaEnterPassword(); },
+      setCleared: function (mask) { g.clearedMask = mask | 0; return g.clearedMask; },
+      clearLevel: function (id) { g.clearedMask = ST.Password.setCleared(g.clearedMask | 0, id, true); return g.clearedMask; },
+      applyCode: function (code) { return metaApply(ST.Password.decode(code)); },
+      // fix-r4（qa-r4 P2-4）：吃字串（'fire' / 'dart'）也吃數字；舊版 'fire' 會靜默失敗
+      giveSub: function (kind, ammo) {
+        if (!ST.SubWeapon) return false;
+        return ST.SubWeapon.give(g.hero, ST.SubWeapon.kindOf ? ST.SubWeapon.kindOf(kind) : kind, ammo, g);
+      },
+      fireSub: function () { return ST.SubWeapon ? ST.SubWeapon.fire(g.hero, g) : false; },
+      titleSel: function (w) {
+        if (g.mode === 'title') clearBanner(ppu0, TITLE);
+        g.titleWorld = w | 0;
+        TITLE = titleLines(g.titleWorld);
+        if (g.mode === 'title') drawBanner(ppu0, TITLE);
+        return g.titleWorld;
+      },
+      levels: function () { return levelList(); },
+      win: function () { enterGameOver(true); return GAME.state(); }
     }
   };
 

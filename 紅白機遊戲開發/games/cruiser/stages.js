@@ -27,6 +27,7 @@
  * | 4 | 1.15 | 104 | 12 | 17 列 | 2688 |
  * | 5 | 1.20 |  96 | 13 | 17 列 | 2944 |
  * | 6 | 1.30 |  88 | 14 | 16 列 | 3072 |
+ * | 7 | 1.35 |  84 | 14 | 20 列 | 1024 |（R4 魔王連戰：補給接近段 + 9 隻魔王）
  * 第二輪（loop）再由 runtime 乘 LOOP_SCALE（彈速 +8% / 週期 -8% 每輪，各有上下限）。
  *
  * ── 檢查點安全規則（fix2 訂的，六關通用；runtime 會**自動過濾**違規事件）──
@@ -422,16 +423,46 @@
     }
   };
 
+  /* ==================================================== 關卡 7：魔王連戰（R4） */
+  // 研究 16 §7-2：FC 原作的第 7 關就是「要塞連續戰」。本作做成真正的 boss rush：
+  //   128 欄的接近段（純空戰補給、**零固定砲**、13 波膠囊）→ 欄 128 起整片是連戰室
+  //   → 相機到底（camX 1024）魔王進場 = `CR.Bosses.rush`（六隻強化版 + OMEGA 三形態）。
+  // 長度只有 1024 px（前六關是 2560~3072）：連戰本身就有 9 隻魔王（約 6000 幀），
+  // 接近段只負責「把能量表餵滿」，再長就只是耗時間。
+  var S7 = {
+    index: 7, key: 'rush', name: 'BOSS RUSH', music: 'boss_final', boss: 'rush',
+    cols: 160, minFree: 20, bossCol0: 128, airEnd: 96,
+    terrain: [
+      [128, 0, 0],                                          // 接近段：純星空（零地形 = 零撞死）
+      [32, 2, 2]                                            // 連戰室（上下各 2 列，通道 22 列）
+    ],
+    tiles: tiles({ wall2: 'CIRC', pipeH: 'CIRC', bossBg: 'CORE2' }),
+    bigRocks: [],
+    params: { bulletScale: 345, period: 84, easyPeriod: 84, easyCol0: -1, easyCol1: -1, maxAlive: 14 },
+    speedZones: null,
+    theme: function (at, A) {
+      // 接近段只放補給（fan 編隊 + 紅色單體），**不放任何固定砲**：
+      // 連戰前一定要讓玩家把能量表湊滿（SPEED×2 + MISSILE + LASER + OPTION×2 = 11 顆），
+      // 不然 9 隻魔王純粹是處刑 —— 機器人實測：只有 4 顆膠囊時 6 死 GAME OVER。
+      at(100, A.fan(80));
+      at(106, A.zigs([64, 128], 0));
+      at(112, A.fan(104));
+      at(118, A.redzig(96));
+      at(124, A.fan(72));
+      at(130, A.redzig(112));
+    }
+  };
+
   /* ==================================================== 匯出 */
-  var LIST = [null, S1, S2, S3, S4, S5, S6];
+  var LIST = [null, S1, S2, S3, S4, S5, S6, S7];
   CR.STAGES = LIST;
-  CR.STAGE_COUNT = 6;
+  CR.STAGE_COUNT = 7;
   CR.StageData = {
     SPEED_DEFAULT: SPEED_DEFAULT, SPEED_SLOW: SPEED_SLOW,
     GUN_KINDS: GUN_KINDS,
     makeApi: makeApi,
     buildWaves: buildWaves,
     get: function (n) { return LIST[n] || LIST[1]; },
-    count: 6
+    count: 7
   };
 })();

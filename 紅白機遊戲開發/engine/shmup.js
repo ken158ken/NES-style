@@ -295,6 +295,24 @@
     return this.push(s.x, s.y, s.tile, s.pal, s.prio,
       (s.flipH ? 1 : 0) | (s.flipV ? 2 : 0) | (s.behind ? 4 : 0));
   };
+  /* R4 star-w4：16×16 精靈（8×16 模式下 = 左右兩個 8×16）的便利 add。
+   * **水平翻轉時必須「兩塊各自翻 + 左右對調」**，只翻不調會把左右半邊接反
+   * （R3 的 games/star/enemies.js 曾因此畫錯），所以由本層統一處理。
+   * 低階版 `push16(x, y, tileL, tileR, pal, prio, flags)`；flags bit0 flipH / bit1 flipV / bit2 behind。
+   * 回傳**實際收下的塊數**（0..2）：越界的那一塊照 `add()` 的規則略過並計 `skipped`。 */
+  OAM.prototype.push16 = function (x, y, tileL, tileR, pal, prio, flags) {
+    var fl = (flags & 1) !== 0;
+    var a = this.push(x, y, fl ? tileR : tileL, pal, prio, flags);
+    var b = this.push(x + 8, y, fl ? tileL : tileR, pal, prio, flags);
+    return (a ? 1 : 0) + (b ? 1 : 0);
+  };
+  /** 加入一個 16×16 精靈 `{x, y, tileL, tileR | tiles:[L,R], pal, flipH, flipV, behind, prio}`。 */
+  OAM.prototype.add16 = function (s) {
+    var tl = s.tileL, tr = s.tileR;
+    if (s.tiles) { tl = s.tiles[0]; tr = s.tiles[1]; }
+    return this.push16(s.x, s.y, tl, tr, s.pal, s.prio,
+      (s.flipH ? 1 : 0) | (s.flipV ? 2 : 0) | (s.behind ? 4 : 0));
+  };
   /** 排序 + 輪替 + 寫進 OAM；回傳實際寫入的精靈數（其餘計入 `dropped`）。 */
   OAM.prototype.end = function () {
     var n = this.n, cnt = this._cnt, gs = this._gs, gl = this._gl, ord = this._ord, pr = this._pr;
