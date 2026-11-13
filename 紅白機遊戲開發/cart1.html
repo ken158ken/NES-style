@@ -42,7 +42,7 @@
 <script src="engine/ppu.js?v=e2bb80b9"></script>
 <script src="engine/nes_lint.js?v=230e6bcf"></script>
 <script src="engine/apu.js?v=5e88b263"></script>
-<script src="engine/music.js?v=17d7aefa"></script>
+<script src="engine/music.js?v=71d36546"></script>
 <script src="engine/shmup.js?v=27ccc395"></script>
 <script src="engine/touch.js?v=144579cd"></script>
 <script src="engine/nes.js?v=4bed9ffa"></script>
@@ -50,40 +50,41 @@
 <!-- ===== 遊戲：games/cart1「星塵 8 合 1」合輯卡帶（R5）=====
      載入順序：registry（CT 註冊表 + window.GAME 分派）→ 各遊戲（CT.register，每款一個子資料夾）
      → shell（開機選單；缺檔時直接跑 ?game=<id> 或第一款）。新遊戲檔一律插在 shell 之前。 -->
-<script src="games/cart1/registry.js?v=29dfa610"></script>
+<script src="games/cart1/registry.js?v=d1459f25"></script>
 <!-- cart1:games:begin（各遊戲 agent 只在這段插入自己的 script） -->
 <script src="games/cart1/maze/chr.js?v=4408cb78"></script>
 <script src="games/cart1/maze/maps.js?v=93b8c7ae"></script>
 <script src="games/cart1/maze/song.js?v=8d895534"></script>
-<script src="games/cart1/maze/main.js?v=89729c2a"></script>
+<script src="games/cart1/maze/main.js?v=e4090842"></script>
 <script src="games/cart1/snake/chr.js?v=7deb087d"></script>
 <script src="games/cart1/snake/stages.js?v=587811e9"></script>
-<script src="games/cart1/snake/song.js?v=5f3b8f33"></script>
-<script src="games/cart1/snake/main.js?v=69260b12"></script>
+<script src="games/cart1/snake/song.js?v=3a1cfef2"></script>
+<script src="games/cart1/snake/main.js?v=d3d4f364"></script>
 <script src="games/cart1/blocks/art.js?v=269c85db"></script>
-<script src="games/cart1/blocks/audio.js?v=5a203684"></script>
-<script src="games/cart1/blocks/main.js?v=c5261e67"></script>
+<script src="games/cart1/blocks/audio.js?v=d5a2f7bb"></script>
+<script src="games/cart1/blocks/main.js?v=953397e9"></script>
 <script src="games/cart1/brick/art.js?v=2b36cbff"></script>
 <script src="games/cart1/brick/levels.js?v=0a908a7a"></script>
-<script src="games/cart1/brick/audio.js?v=f3379efd"></script>
-<script src="games/cart1/brick/main.js?v=c1642e35"></script>
+<script src="games/cart1/brick/audio.js?v=c13fd2b4"></script>
+<script src="games/cart1/brick/main.js?v=8175da8d"></script>
 <script src="games/cart1/pinball/phys.js?v=461d4966"></script>
 <script src="games/cart1/pinball/art.js?v=d7535b33"></script>
-<script src="games/cart1/pinball/song.js?v=3ab7df8a"></script>
-<script src="games/cart1/pinball/main.js?v=2cd7ad44"></script>
+<script src="games/cart1/pinball/song.js?v=32878bdb"></script>
+<script src="games/cart1/pinball/main.js?v=29eb95e9"></script>
 <script src="games/cart1/flyer/art.js?v=1a6dcaf2"></script>
-<script src="games/cart1/flyer/song.js?v=089cd316"></script>
-<script src="games/cart1/flyer/main.js?v=cabd2cfc"></script>
-<script src="games/cart1/racing/chr.js?v=4f788dcc"></script>
+<script src="games/cart1/flyer/song.js?v=9c27943f"></script>
+<script src="games/cart1/flyer/main.js?v=1ebc0ed3"></script>
+<script src="games/cart1/racing/chr.js?v=b1e7eaf0"></script>
 <script src="games/cart1/racing/tracks.js?v=2b25b5d5"></script>
-<script src="games/cart1/racing/song.js?v=cb78b5ab"></script>
-<script src="games/cart1/racing/main.js?v=e22bbf57"></script>
+<script src="games/cart1/racing/song.js?v=0da4ead8"></script>
+<script src="games/cart1/racing/main.js?v=cdb79c06"></script>
 <script src="games/cart1/tower/chr.js?v=d10e38b3"></script>
 <script src="games/cart1/tower/maps.js?v=c38d80aa"></script>
-<script src="games/cart1/tower/song.js?v=fa216a42"></script>
-<script src="games/cart1/tower/main.js?v=0c193f98"></script>
+<script src="games/cart1/tower/song.js?v=0a15044c"></script>
+<script src="games/cart1/tower/main.js?v=dfde9e53"></script>
 <!-- cart1:games:end -->
-<script src="games/cart1/shell.js?v=bc63a87e"></script>
+<script src="games/cart1/cart.js?v=aa4addae"></script>
+<script src="games/cart1/shell.js?v=1a33a3a4"></script>
 
 <script>
 // ---- 啟動：桌機整數放大置中 / 手機小數倍貼齊、鍵盤焦點、F 全螢幕、觸控覆蓋層版面 ----

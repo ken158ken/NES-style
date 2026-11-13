@@ -28,6 +28,15 @@ tools/apu_render.py — 用 Playwright 載入 engine/apu.js + engine/music.js，
      （找不到 = 有第六個音源 / 非 APU 成分）→ FAIL
   d) 波形健康度：無 NaN、峰值 ≤ 1.0、無削波
   ※ 離線渲染一律 loop:true，所以 clear / gameover / extend 這些短曲會重複播到指定秒數。
+
+  合輯卡帶模式（R7 C7-4）：開 cartN.html（debug，不跑主迴圈），從 `CT.<Id>.SONGS` / `CT.<Id>.Audio.SONGS`
+  （各款 song.js / audio.js 掛的曲目表；找不到再搜尋 CT 底下鍵名以 `<id>_` 開頭的 SONGS）讀曲目，選單曲讀 `CT.Shell.dev.SONG`：
+    ../卡比之星/.venv/bin/python tools/apu_render.py --game cart2/slash            # 卡帶二《星塵忍者斬》全部曲目
+    ../卡比之星/.venv/bin/python tools/apu_render.py --game cart1/maze --song maze_title --seconds 4
+    ../卡比之星/.venv/bin/python tools/apu_render.py --game cart3/menu             # 卡帶三選單曲
+    ../卡比之星/.venv/bin/python tools/apu_render.py --game cart3                  # 卡帶三：已註冊的每一款 + 選單曲
+    ../卡比之星/.venv/bin/python tools/apu_render.py --game cart1,cart2,cart3 --seconds 4 --table   # 全部 + 印 Markdown 表
+  檢查項目與單款模式相同（暫存器稽核 / 逐聲道 / 頻譜歸屬 / 波形健康）；WAV 檔名 `<cart>_<id>_<key>.wav`。
 """
 import argparse, base64, cmath, json, math, pathlib, struct, sys, wave
 
@@ -280,6 +289,9 @@ window.R = (function(){
   }
 
   // ---- 遊戲曲目（games/<game>/song.js 的 CR.SONGS）----
+  // R7 合輯卡帶模式：Python 端先設 window.__R_SONGS / __R_SFX（某款的 CT.<Id>.SONGS 或 CT.<Id>.Audio.SONGS）；沒設 = 舊行為（CR.SONGS）
+  function SONGS_OF(){ return window.__R_SONGS || (window.CR && window.CR.SONGS) || {}; }
+  function SFX_OF(){ return window.__R_SFX || (window.CR && window.CR.SFX) || {}; }
   // keep = 5 bit 遮罩（bit0 p1 / 1 p2 / 2 tri / 3 noi / 4 dmc）；被遮掉的聲道連暫存器都不寫
   function chanMask(a, keep){
     return {
@@ -298,12 +310,12 @@ window.R = (function(){
   // 回傳 {b64, nan, peak, addrs}；keep 預設 0x1F（五聲道全開）
   function gameSong(sr, seconds, key, keep){
     if (keep === undefined || keep === null) keep = 0x1F;
-    const songs = (window.CR && window.CR.SONGS) || {};
+    const songs = SONGS_OF();
     const song = songs[key];
     if (!song) throw new Error('沒有這首曲子：' + key);
     const a = nes(sr);
     const m = M.create(keep === 0x1F ? a : chanMask(a, keep));
-    const sfx = (window.CR && window.CR.SFX) || {};
+    const sfx = SFX_OF();
     for (const n in sfx) m.define(n, sfx[n]);
     m.record(true);
     m.play(song, {loop: true});
@@ -328,12 +340,16 @@ window.R = (function(){
             frames: frames, samples: out.length};
   }
 
-  function gameSongList(){ return Object.keys((window.CR && window.CR.SONGS) || {}); }
+  function gameSongList(){ return Object.keys(SONGS_OF()); }
   function gameSongInfo(key){
-    const s = (window.CR && window.CR.SONGS || {})[key];
+    const s = SONGS_OF()[key];
     if (!s) return null;
     const tracks = {};
-    for (const p of s.patterns) for (const k in p) tracks[k] = 1;
+    // 「宣告用到的軌」= 至少有一格非空（R7：整軌全 null 的空軌不算宣告，例如結束曲刻意不打鼓）
+    for (const p of s.patterns) for (const k in p) {
+      const t = p[k];
+      if (Array.isArray(t) ? t.some(function(e){ return e && (e.note !== undefined || e.inst !== undefined); }) : !!t) tracks[k] = 1;
+    }
     return {name: s.name, speed: s.speed, patterns: s.patterns.length,
             order: s.order.length, tracks: Object.keys(tracks)};
   }
@@ -411,16 +427,52 @@ def top_peaks(mags, n, sr, N, fmin=40.0, fmax=16000.0):
     return out
 
 
+CART_RESOLVE_JS = r"""
+(sel) => {
+  const CT = window.CT || {};
+  const isSongs = (o) => o && typeof o === 'object' && Object.keys(o).length && Object.keys(o).every(k => o[k] && o[k].patterns && o[k].order);
+  if (sel === 'menu') {
+    const dev = CT.Shell && CT.Shell.dev, song = dev && dev.SONG;
+    if (!song) return null;
+    window.__R_SONGS = { menu: song }; window.__R_SFX = (dev && dev.SFX) || {};
+    return { keys: ['menu'] };
+  }
+  const ns = CT[sel.charAt(0).toUpperCase() + sel.slice(1)];
+  let songs = null, sfx = null;
+  [ns, ns && ns.Audio, ns && ns.Song, ns && ns.Music, ns && ns.Sound].forEach(o => { if (!songs && o && isSongs(o.SONGS)) { songs = o.SONGS; sfx = o.SFX || (ns && ns.SFX) || null; } });
+  if (!songs) Object.keys(CT).forEach(k => { const o = CT[k]; if (songs || !o || typeof o !== 'object') return;
+    [o, o.Audio, o.Song].forEach(x => { if (!songs && x && isSongs(x.SONGS) && Object.keys(x.SONGS).some(n => n.indexOf(sel + '_') === 0)) { songs = x.SONGS; sfx = x.SFX || o.SFX || null; } }); });
+  if (!songs) return null;
+  window.__R_SONGS = songs; window.__R_SFX = sfx || {};
+  return { keys: Object.keys(songs) };
+}
+"""
+
+
+def cart_jobs(spec):
+    """'cart2/slash' / 'cart3' / 'cart1,cart2' → [(cart, id)]；不是合輯格式回 None。"""
+    parts = [p.strip() for p in spec.split(',') if p.strip()]
+    if not parts or not all(p.split('/')[0].startswith('cart') and (ROOT / (p.split('/')[0] + '.html')).exists() for p in parts):
+        return None
+    out = []
+    for p in parts:
+        cart, _, gid = p.partition('/')
+        out.append((cart, gid))           # gid '' = 整張卡帶（每款 + 選單）
+    return out
+
+
 def run_game(args):
-    """--game 模式：離線渲染 games/<game>/song.js 的曲目 + 只含五聲道成分檢查。"""
+    """--game 模式：離線渲染 games/<game>/song.js 的曲目 + 只含五聲道成分檢查。
+    R7：--game cartN[/id]（逗號可多個）= 合輯卡帶模式（見檔頭）。"""
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
         print('需要 playwright：../卡比之星/.venv/bin/python -m pip install playwright', file=sys.stderr)
         return 2
 
+    carts = cart_jobs(args.game)
     song_js = ROOT / 'games' / args.game / 'song.js'
-    if not song_js.exists():
+    if carts is None and not song_js.exists():
         print('找不到 %s' % song_js, file=sys.stderr)
         return 2
     outdir = pathlib.Path(args.out_dir)
@@ -428,6 +480,7 @@ def run_game(args):
         outdir = ROOT / 'shots' / 'agent_audio'
     sr = args.rate
     checks = []
+    table = []                                          # R7：--table 的每曲一列
 
     def ck(name, ok, detail=''):
         checks.append((name, bool(ok), detail))
@@ -438,96 +491,129 @@ def run_game(args):
         page = browser.new_page()
         errs = []
         page.on('pageerror', lambda e: errs.append(str(e)))
-        page.goto('about:blank')
-        page.add_script_tag(path=str(APU))
-        page.add_script_tag(path=str(MUSIC))
-        page.add_script_tag(path=str(song_js))
-        page.evaluate(JS)
-        if errs:
-            print('JS 錯誤：', errs, file=sys.stderr)
-            return 2
+        if carts is None:
+            jobs = [(args.game, None, None)]
+        else:
+            jobs = []
+            for cart, gid in carts:
+                page.goto((ROOT / (cart + '.html')).as_uri() + '?debug=1&mute=1&scale=1&boot=0')
+                page.wait_for_function('() => !!window.__nes && !!window.CT')
+                ids = [gid] if gid else page.evaluate('() => CT.games.map(g => g.id)') + ['menu']
+                for i in ids:
+                    jobs.append((cart + '_' + i, cart, i))
+        loaded = None
+        for label, cart, gid in jobs:
+            if cart is None:
+                page.goto('about:blank')
+                page.add_script_tag(path=str(APU))
+                page.add_script_tag(path=str(MUSIC))
+                page.add_script_tag(path=str(song_js))
+                page.evaluate(JS)
+                game = args.game
+                if errs:
+                    print('JS 錯誤：', errs, file=sys.stderr)
+                    return 2
+                keys = [k.strip() for k in args.song.split(',') if k.strip()] or page.evaluate('()=>R.gameSongList()')
+            else:
+                if loaded != cart:
+                    page.goto((ROOT / (cart + '.html')).as_uri() + '?debug=1&mute=1&scale=1&boot=0')
+                    page.wait_for_function('() => !!window.__nes && !!window.CT')
+                    page.evaluate(JS)
+                    loaded = cart
+                found = page.evaluate(CART_RESOLVE_JS, gid)
+                game = label
+                if not found:
+                    ck('%s 找得到曲目表' % label, False, 'CT.<Id>.SONGS / Audio.SONGS 都沒有')
+                    continue
+                keys = [k.strip() for k in args.song.split(',') if k.strip()] or found['keys']
+            print('== %s：渲染 %s（每首 %.1f 秒 @ %d Hz）==' % (game, ','.join(keys), args.seconds, sr))
+            n0 = len(checks)
+            for key in keys:
+                info = page.evaluate('()=>R.gameSongInfo(%s)' % json.dumps(key))
+                if not info:
+                    ck('曲目 %s 存在' % key, False, '不在 CR.SONGS')
+                    continue
+                full = page.evaluate('()=>R.gameSong(%d,%f,%s)' % (sr, args.seconds, json.dumps(key)))
+                x = decode(full['b64'])
+                path = outdir / ('%s_%s.wav' % (game.replace('/', '_'), key))
+                clipped = write_wav(path, x, sr)
+                bpm = 3600.0 / (info['speed'] * 4)
+                print('\n-- %s「%s」 speed=%d ≈ %.1f BPM  %d pattern / %d order  軌 %s'
+                      % (key, info['name'], info['speed'], bpm, info['patterns'], info['order'],
+                         '+'.join(info['tracks'])))
+                print('   %s  %.2fs  RMS=%.4f  峰值=%.4f%s'
+                      % (path, len(x) / sr, rms(x), full['peak'], ('  ⚠ 削波 %d' % clipped) if clipped else ''))
 
-        keys = [k.strip() for k in args.song.split(',') if k.strip()] or page.evaluate('()=>R.gameSongList()')
-        print('== %s：渲染 %s（每首 %.1f 秒 @ %d Hz）==' % (args.game, ','.join(keys), args.seconds, sr))
+                # d) 波形健康度
+                ck('%-9s 無 NaN / Inf' % key, full['nan'] == 0, '%d 個非有限樣本' % full['nan'])
+                ck('%-9s 峰值 %.4f ≤ 1.0 且有訊號' % (key, full['peak']), 0.02 < full['peak'] <= 1.0)
 
-        for key in keys:
-            info = page.evaluate('()=>R.gameSongInfo(%s)' % json.dumps(key))
-            if not info:
-                ck('曲目 %s 存在' % key, False, '不在 CR.SONGS')
-                continue
-            full = page.evaluate('()=>R.gameSong(%d,%f,%s)' % (sr, args.seconds, json.dumps(key)))
-            x = decode(full['b64'])
-            path = outdir / ('%s_%s.wav' % (args.game, key))
-            clipped = write_wav(path, x, sr)
-            bpm = 3600.0 / (info['speed'] * 4)
-            print('\n-- %s「%s」 speed=%d ≈ %.1f BPM  %d pattern / %d order  軌 %s'
-                  % (key, info['name'], info['speed'], bpm, info['patterns'], info['order'],
-                     '+'.join(info['tracks'])))
-            print('   %s  %.2fs  RMS=%.4f  峰值=%.4f%s'
-                  % (path, len(x) / sr, rms(x), full['peak'], ('  ⚠ 削波 %d' % clipped) if clipped else ''))
+                # a) 暫存器稽核
+                addrs = full['addrs']
+                bad = [a for a in addrs if a < 0x4000 or a > 0x4017]
+                ck('%-9s 暫存器寫入全在 $4000~$4017（%d 個位址）' % (key, len(addrs)), not bad,
+                   '越界 %s' % [hex(a) for a in bad] if bad else
+                   ' '.join('$%04X' % a for a in addrs))
+                blocks = set()
+                for a in addrs:
+                    if a <= 0x4013:
+                        blocks.add(CH_NAMES[(a - 0x4000) >> 2])
+                    elif a in (0x4015, 0x4017):
+                        blocks.add('ctl')
+                ck('%-9s 只碰五個聲道區塊 + $4015/$4017' % key,
+                   blocks <= {'p1', 'p2', 'tri', 'noi', 'dmc', 'ctl'}, '碰到 %s' % sorted(blocks))
 
-            # d) 波形健康度
-            ck('%-9s 無 NaN / Inf' % key, full['nan'] == 0, '%d 個非有限樣本' % full['nan'])
-            ck('%-9s 峰值 %.4f ≤ 1.0 且有訊號' % (key, full['peak']), 0.02 < full['peak'] <= 1.0)
+                # b) 逐聲道單獨渲染
+                # （前 0.5 秒是 APU 高通濾波器的啟動暫態 DC，會讓「靜音軌」量到殘留，一律跳過）
+                skip = min(len(x) - 1, sr // 2)
+                solos, solo_rms = {}, {}
+                for ci, cn in enumerate(CH_NAMES):
+                    r = page.evaluate('()=>R.gameSong(%d,%f,%s,%d)' % (sr, args.seconds, json.dumps(key), 1 << ci))
+                    y = decode(r['b64'])
+                    solos[cn] = y
+                    solo_rms[cn] = rms(y[skip:])
+                used = [c for c in CH_NAMES if solo_rms[c] > 1e-4]
+                print('   單軌 RMS：' + '  '.join('%s=%.4f' % (c, solo_rms[c]) for c in CH_NAMES))
+                ck('%-9s 宣告用到的軌都有訊號（%s）' % (key, '+'.join(info['tracks'])),
+                   all(t in used for t in info['tracks']), '實際有聲 %s' % used)
+                ck('%-9s 沒宣告的軌保持靜音' % key,
+                   all(c in info['tracks'] for c in used), '多出 %s' % [c for c in used if c not in info['tracks']])
 
-            # a) 暫存器稽核
-            addrs = full['addrs']
-            bad = [a for a in addrs if a < 0x4000 or a > 0x4017]
-            ck('%-9s 暫存器寫入全在 $4000~$4017（%d 個位址）' % (key, len(addrs)), not bad,
-               '越界 %s' % [hex(a) for a in bad] if bad else
-               ' '.join('$%04X' % a for a in addrs))
-            blocks = set()
-            for a in addrs:
-                if a <= 0x4013:
-                    blocks.add(CH_NAMES[(a - 0x4000) >> 2])
-                elif a in (0x4015, 0x4017):
-                    blocks.add('ctl')
-            ck('%-9s 只碰五個聲道區塊 + $4015/$4017' % key,
-               blocks <= {'p1', 'p2', 'tri', 'noi', 'dmc', 'ctl'}, '碰到 %s' % sorted(blocks))
-
-            # b) 逐聲道單獨渲染
-            # （前 0.5 秒是 APU 高通濾波器的啟動暫態 DC，會讓「靜音軌」量到殘留，一律跳過）
-            skip = min(len(x) - 1, sr // 2)
-            solos, solo_rms = {}, {}
-            for ci, cn in enumerate(CH_NAMES):
-                r = page.evaluate('()=>R.gameSong(%d,%f,%s,%d)' % (sr, args.seconds, json.dumps(key), 1 << ci))
-                y = decode(r['b64'])
-                solos[cn] = y
-                solo_rms[cn] = rms(y[skip:])
-            used = [c for c in CH_NAMES if solo_rms[c] > 1e-4]
-            print('   單軌 RMS：' + '  '.join('%s=%.4f' % (c, solo_rms[c]) for c in CH_NAMES))
-            ck('%-9s 宣告用到的軌都有訊號（%s）' % (key, '+'.join(info['tracks'])),
-               all(t in used for t in info['tracks']), '實際有聲 %s' % used)
-            ck('%-9s 沒宣告的軌保持靜音' % key,
-               all(c in info['tracks'] for c in used), '多出 %s' % [c for c in used if c not in info['tracks']])
-
-            # c) 頻譜覆蓋：全混音的每個主要峰值，都要在某一軌裡找得到
-            off = min(len(x) // 4, sr)
-            win = 8192
-            mix = x[off:off + win]
-            mags, N = spectrum(mix)
-            pk = top_peaks(mags, args.peaks, sr, N)
-            solo_mags = {}
-            for c in used:
-                sm, _ = spectrum(solos[c][off:off + win])
-                solo_mags[c] = sm
-            uncovered = []
-            for k, m in pk:
-                best, who = 0.0, None
+                # c) 頻譜覆蓋：全混音的每個主要峰值，都要在某一軌裡找得到
+                off = min(len(x) // 4, sr)
+                win = 8192
+                mix = x[off:off + win]
+                mags, N = spectrum(mix)
+                pk = top_peaks(mags, args.peaks, sr, N)
+                solo_mags = {}
                 for c in used:
-                    v = max(solo_mags[c][max(1, k - 3):k + 4])
-                    if v > best:
-                        best, who = v, c
-                # 某一軌在該頻率的能量要能解釋混音的峰（-20 dB 容許：非線性混音會壓縮）
-                if best < m * 0.1:
-                    uncovered.append((k * sr / N, 20 * math.log10(max(best, 1e-12) / max(m, 1e-12))))
-            ck('%-9s 只含五聲道成分（前 %d 個頻譜峰全部可歸屬單軌）' % (key, len(pk)), not uncovered,
-               '未歸屬 %s' % ['%.0fHz %.0fdB' % (f, d) for f, d in uncovered] if uncovered else
-               '峰值 %s' % ' '.join('%.0f' % (k * sr / N) for k, _ in pk[:8]))
+                    sm, _ = spectrum(solos[c][off:off + win])
+                    solo_mags[c] = sm
+                uncovered = []
+                for k, m in pk:
+                    best, who = 0.0, None
+                    for c in used:
+                        v = max(solo_mags[c][max(1, k - 3):k + 4])
+                        if v > best:
+                            best, who = v, c
+                    # 某一軌在該頻率的能量要能解釋混音的峰（-20 dB 容許：非線性混音會壓縮）
+                    if best < m * 0.1:
+                        uncovered.append((k * sr / N, 20 * math.log10(max(best, 1e-12) / max(m, 1e-12))))
+                ck('%-9s 只含五聲道成分（前 %d 個頻譜峰全部可歸屬單軌）' % (key, len(pk)), not uncovered,
+                   '未歸屬 %s' % ['%.0fHz %.0fdB' % (f, d) for f, d in uncovered] if uncovered else
+                   '峰值 %s' % ' '.join('%.0f' % (k * sr / N) for k, _ in pk[:8]))
+                kc = [c for c in checks[n0:] if c[0].split()[0] == key]
+                table.append(('%s/%s' % (game, key), info['name'], info['speed'], info['patterns'], info['order'], '+'.join(info['tracks']),
+                              rms(x), full['peak'], '%d/%d' % (sum(1 for c in kc if c[1]), len(kc))))
 
         browser.close()
 
     npass = sum(1 for _, ok, _ in checks if ok)
+    if args.table and table:
+        print('\n| 曲目 | 曲名 | speed | pattern/order | 軌 | RMS | 峰值 | 檢查 |')
+        print('|---|---|---|---|---|---|---|---|')
+        for row in table:
+            print('| %s | %s | %d | %d/%d | %s | %.4f | %.3f | %s |' % row)
     print('\n輸出目錄：%s' % outdir)
     print('檢查 %d 項，通過 %d，失敗 %d' % (len(checks), npass, len(checks) - npass))
     print('總結：%s' % ('PASS' if npass == len(checks) else 'FAIL'))
@@ -545,6 +631,7 @@ def main():
                                                 '或搭配 --game 時 = CR.SONGS 的 key（逗號分隔，省略 = 全部）')
     ap.add_argument('--game', default='', help='遊戲曲目模式：載入 games/<game>/song.js，渲染 CR.SONGS')
     ap.add_argument('--peaks', type=int, default=12, help='五聲道覆蓋檢查要驗幾個頻譜峰值（預設 12）')
+    ap.add_argument('--table', action='store_true', help='R7：遊戲 / 合輯模式結束時印每曲一列的 Markdown 表')
     args = ap.parse_args()
 
     if args.game:

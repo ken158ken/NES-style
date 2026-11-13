@@ -349,11 +349,14 @@ def main():
     ok('§6-5 標題寫著 HOLD START+SELECT: MENU', r['found'], r)
     # §6-2 / P3-1：暫停 = BGM 停、恢復接續同一小節
     r = page.evaluate("""() => { __nes.tap('start', 1); __nes.step(200); const M = __nes.nes().music, m = { get orderIndex() { return M.state().orderIndex; }, get rowsPlayed() { return M.state().rowsPlayed; }, get playing() { return M.state().playing; } };
-        const ord0 = m.orderIndex; __nes.tap('start', 1); __nes.step(1); const r0 = m.rowsPlayed, pl = m.playing; __nes.step(120);
+        const ord0 = m.orderIndex; __nes.tap('start', 1); __nes.step(1); const r0 = m.rowsPlayed, pl = m.playing, row0 = M.state().row, paused = M.state().paused; __nes.step(120);
         const r1 = m.rowsPlayed, hudPause = GAME.state().s.paused; __nes.tap('start', 1); __nes.step(1);
-        return { ord0, pl, still: r1 === r0, hudPause, resumed: m.playing, ord1: m.orderIndex, song: CT.Pinball.Audio.current }; }""")
+        const c = M.state();
+        return { ord0, pl, paused, still: r1 === r0, hudPause, resumed: m.playing, ord1: m.orderIndex, row0, row1: c.row, dRows: c.rowsPlayed - r0, song: CT.Pinball.Audio.current }; }""")
     ok('§6-2 暫停時 BGM 停止（120 幀 rowsPlayed 不動）', r['hudPause'] and not r['pl'] and r['still'], r)
     ok('§6-2 解除暫停 → 同一首、同一小節接續播放', r['resumed'] and r['song'] == 'pinball_play' and r['ord1'] == r['ord0'], r)
+    ok('fix-r6 P3-8 暫停走 engine pause（state.paused）、解除從同一 row 接續（不回 row 0）',
+       r['paused'] and r['row1'] in (r['row0'], r['row0'] + 1) and 0 <= r['dRows'] <= 1, r)
     r = page.evaluate("""() => { __nes.tap('start', 1); __nes.step(2); const p = __nes.nes().ppu, A = CT.Pinball.Art.make(), w = A.textTiles('PAUSE  HOLD');
         const ok = w.every((t, i) => p.getTile(2, 1 + i, 27) === t); __nes.tap('start', 1); __nes.step(2); return ok; }""")
     ok('§6-5 暫停狀態列寫著 PAUSE  HOLD START+SELECT: MENU', r)
@@ -361,7 +364,7 @@ def main():
     r = page.evaluate("""() => { const d = CT.Pinball.dev, g = d.g(); d.award(4750); const sc = g.score; CT.get('pinball').exit(__nes.nes());
         const b1 = CT.load('pinball', 'best', 0); g.score = 10; CT.get('pinball').exit(__nes.nes()); const b2 = CT.load('pinball', 'best', 0);
         return { sc, b1, b2, text: CT.get('pinball').bestText() }; }""")
-    ok('§6-3 exit() 存最高分（較低分不覆蓋）、bestText 反映', r['b1'] == r['sc'] and r['b2'] == r['sc'] and r['text'] == str(r['sc']).zfill(7), r)
+    ok('§6-3 exit() 存最高分（較低分不覆蓋）、bestText 反映', r['b1'] == r['sc'] and r['b2'] == r['sc'] and r['text'] == str(min(r['sc'], 999999)).zfill(6), r)
     # §6-4 / P3-9：backTile 指向自己精靈表裡的彈珠
     r = page.evaluate("""() => { const g = CT.get('pinball'), bt = g.backTile, A = CT.Pinball.Art.make();
         return { bt, ball: A.spr.index('BALL') }; }""")

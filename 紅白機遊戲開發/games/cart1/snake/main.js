@@ -659,7 +659,7 @@
     get backTile() { return { tile: spB ? spB.index('BACK') : Object.keys(S.SPR_TILES).indexOf('BACK'), pal: 0 }; },   // §6-4
     bot: bot,
     goal: function () { return !!g && g.mode2 === 1 && g.clearsRun >= 3 && g.cheats === 0; },
-    bestText: function () { return num(CT.load('snake', 'best', 0), 6); }
+    bestText: function () { return num(Math.min(999999, CT.load('snake', 'best', 0)), 6); }   // R6 §1-6：右對齊 6 字元（超過封頂）
   };
   CT.register(game);
 

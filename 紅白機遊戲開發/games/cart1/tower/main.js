@@ -489,8 +489,8 @@
   function setPause(on) {                    // 暫停 = BGM 停（qa-r5 P3-1），解除暫停接續播
     if (on === g.paused) return;
     g.paused = on;
-    if (on) { g.pauseSong = Audio.current; Audio.stop(); }
-    else if (g.pauseSong) { Audio.play(g.pauseSong); g.pauseSong = null; }
+    if (on) { g.pauseSong = Audio.current; Audio.pause(); }                   // R6：driver pause（記住 row）
+    else if (g.pauseSong) { if (!Audio.resume()) Audio.play(g.pauseSong); g.pauseSong = null; }
   }
   function saveBest() { if (g.score > CT.load('tower', 'best', 0)) CT.save('tower', 'best', g.score); }
 
@@ -773,7 +773,7 @@
     bot: bot,
     goal: function () { return !!(g && g.clean[0]); },
     get backTile() { return { tile: Art.spr('BACK'), pal: 0 }; },   // 8×8 實心方塊（qa-r5 P3-9）
-    bestText: function () { return 'SC' + pad(CT.load('tower', 'best', 0), 5); }
+    bestText: function () { return pad(Math.min(999999, CT.load('tower', 'best', 0) | 0), 6); }   // R6 §1-6：右對齊 6 字元
   };
   T.dev = {
     g: function () { return g; },

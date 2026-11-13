@@ -541,7 +541,7 @@
     }
     if (st && (g.mode === 'play' || g.mode === 'ready')) {
       g.paused = !g.paused;
-      if (g.paused) K.Audio.stop(nes0); else K.Audio.play(nes0, g.boss ? 'brick_boss' : 'brick_main');
+      if (g.paused) K.Audio.pause(nes0); else if (!K.Audio.resume(nes0)) K.Audio.play(nes0, g.boss ? 'brick_boss' : 'brick_main');   // R6：同一 row 接續
       return;
     }
     if (g.paused) return;
@@ -791,7 +791,7 @@
     cheat: cheat,
     bot: function () { return g ? bot() : 0; },
     goal: function () { return !!(g && g.goal && g.cheats === 0); },
-    bestText: function () { return num(CT.load('brick', 'best', 0), 6); }
+    bestText: function () { return num(Math.min(999999, CT.load('brick', 'best', 0)), 6); }   // R6 §1-6：右對齊 6 字元（超過封頂）
   };
 
   K.dev = {

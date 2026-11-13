@@ -601,8 +601,8 @@
   function setPause(on) {
     if (on === g.paused) return;
     g.paused = on;
-    if (on) { g.pauseSong = Audio.current; Audio.stop(); }
-    else if (g.pauseSong) { Audio.play(g.pauseSong); g.pauseSong = null; }
+    if (on) { g.pauseSong = Audio.current; Audio.pause(); }                   // R6：driver pause（記住 row）
+    else if (g.pauseSong) { if (!Audio.resume()) Audio.play(g.pauseSong); g.pauseSong = null; }
   }
   function endRace() {
     var cs = g.cars.slice();
@@ -763,8 +763,8 @@
     },
     bot: bot,
     goal: function () { return !!(g && g.champion && g.cleared.every(Boolean) && g.cheats === 0); },
-    get backTile() { return { tile: Art.spr('BACK'), pal: 0 }; },   // 8×16：上下兩塊 = 一顆實心星鑽（qa-r5 P3-9）
-    bestText: function () { return 'PTS ' + pad(CT.load('racing', 'best', 0), 2); }
+    get backTile() { return { tile: Art.spr('BACK'), pal: 3 }; },   // R6：改用調色盤 3（加速只閃調色盤 0 = 車身，提示不跟著閃白）   // 8×16：上下兩塊 = 一顆實心星鑽（qa-r5 P3-9）
+    bestText: function () { return pad(Math.min(999, Math.max(0, CT.load('racing', 'best', 0) | 0)), 3) + 'PTS'; }   // R6 §1-6：右對齊 6 字元（點數 + PTS）
   };
   function saveBest() {
     var b = CT.load('racing', 'best', 0);

@@ -252,11 +252,14 @@ def main():
         st = S(page)
         ok('START 暫停：蟲不動、PAUSE 訊息', st['paused'] and st['head'] == h0, (st['paused'], h0, st['head']))
         ok('§6-5 暫停畫面寫 HOLD START+SELECT: MENU', 'HOLD START+SELECT: MENU' in page.evaluate('() => CT.Snake.dev.rowText(17)'))
-        mus = page.evaluate('() => { const d = NES.Music._default, a = d.rowsPlayed; __nes.step(60); return { playing: !!d.playing, rows: d.rowsPlayed - a }; }')
+        mus = page.evaluate('() => { const d = NES.Music._default, a = d.rowsPlayed; __nes.step(60); return { playing: !!d.playing, rows: d.rowsPlayed - a, paused: d.isPaused(), ord: d.orderIndex, row: d.row, rp: d.rowsPlayed }; }')
+        snap = mus
         ok('§6-2 暫停 = BGM 停（playing false、60 幀 rowsPlayed 不前進）', not mus['playing'] and mus['rows'] == 0, mus)
         page.evaluate('() => { __nes.tap("start", 1); __nes.step(1); }')
-        mus = page.evaluate('() => ({ playing: !!NES.Music._default.playing, cur: CT.Snake.Audio.current })')
+        mus = page.evaluate('() => { const d = NES.Music._default; return { playing: !!d.playing, cur: CT.Snake.Audio.current, ord: d.orderIndex, row: d.row, rp: d.rowsPlayed }; }')
         ok('§6-2 解除暫停 → 同一首 BGM 接續（snake_play）', mus['playing'] and mus['cur'] == 'snake_play', mus)
+        ok('fix-r6 P3-8 暫停走 engine pause、解除從同一小節同一 row 接續（不回 row 0）',
+           snap['paused'] and mus['ord'] == snap['ord'] and mus['row'] in (snap['row'], snap['row'] + 1) and 0 <= mus['rp'] - snap['rp'] <= 1, (snap, mus))
         ok('§6-5 解除暫停 → 提示清掉', 'HOLD' not in page.evaluate('() => CT.Snake.dev.rowText(17)'))
         i0 = S(page)['interval']; l0 = S(page)['lives']
         page.evaluate('() => { window.dispatchEvent(new CustomEvent("nes-cheat", { detail: { source: "test" } })); __nes.step(1); }')

@@ -507,7 +507,7 @@
     cheat: function () { if (!g || (g.mode !== 'play' && g.mode !== 'over')) return false; g.cheatReq = true; return true; },
     bot: function () { return botMask(); },
     goal: function () { return !!(g && g.goalHit && !g.cheated); },
-    bestText: function () { return pad(CT.load('pinball', 'best', 0), 7); }
+    bestText: function () { return pad(Math.min(999999, Math.max(0, CT.load('pinball', 'best', 0) | 0)), 6); }   // R6 §1-6：右對齊 6 字元
   };
   PB.GOAL_SCORE = GOAL_SCORE;
   PB.dev = {

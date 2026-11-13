@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """tools/test_touch.py — engine/touch.js（NES.Touch）與**四個**入口頁手機版面的自動測試
-（agent: nes-touch, R2；R4 mech-r1 把 mech.html 加進 PAGES ⇒ 255 → 340 項；R5 fix-r5-shell 加 cart1.html ⇒ 433 項）
+（agent: nes-touch, R2；R4 mech-r1 把 mech.html 加進 PAGES ⇒ 255 → 340 項；R5 fix-r5-shell 加 cart1.html ⇒ 433 項；
+ R6 C6-0 cart-platform 加 cart2.html（共用 shell + 測試用空殼遊戲 zz_touch））
 
 用法：
     ../卡比之星/.venv/bin/python tools/test_touch.py [--only cruiser] [--headed]
@@ -28,7 +29,7 @@ import sys
 from playwright.sync_api import sync_playwright
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-PAGES = ['game.html', 'star.html', 'cruiser.html', 'mech.html', 'cart1.html']
+PAGES = ['game.html', 'star.html', 'cruiser.html', 'mech.html', 'cart1.html', 'cart2.html', 'cart3.html']
 # R5 fix-r5-shell（qa-r5 P3-12）：cart1.html《星塵 8 合 1》—— __nes.state() 是 {game, s}，主角在各款裡不同：
 #   mode：還在選單（boot / menu）⇒ 'select'（再按 START）、launch 閃爍中 ⇒ 'ready'（等），已進遊戲 ⇒ 'play'；
 #   x   ：量「目前遊戲的 update 看到 RIGHT 被按住幾幀」（測試頁內包一層計數，不依賴各款主角欄位）。
@@ -40,6 +41,22 @@ X_JS = {'cart1.html': """()=>{ const g = window.CT && CT.current; if (!g) return
   if (!g.__ttWrap) { const u = g.update; g.__ttWrap = true; g.__ttRight = 0;
     g.update = function (nes) { if (NES.Input.held(NES.Input.BTN.RIGHT)) g.__ttRight++; return u.call(g, nes); }; }
   return g.__ttRight; }"""}
+# R6 C6-0：cart2.html《星塵反應 8 合 1》共用同一個 shell ⇒ 判定與 cart1 相同。卡帶二的遊戲由其他卡平行開發中（0~8 款），
+#   這裡測的是「入口頁 + shell + 觸控」平台本身 ⇒ 測試時注入一個空殼遊戲 zz_touch（order 0，選單第一列），START 直接進它。
+MODE_JS['cart2.html'] = MODE_JS['cart1.html']
+X_JS['cart2.html'] = X_JS['cart1.html']
+CART_PAGES = ('cart1.html', 'cart2.html', 'cart3.html')
+TOUCH_STUB = {'cart2.html': r"""(function () {
+  var CT = window.CT = window.CT || {}; CT.games = CT.games || [];
+  CT.games.push({ id: 'zz_touch', order: 0, title: 'TOUCH', legacy: [],
+    init: function (nes) { nes.ppu.setBackdrop(0x0F); }, update: function () {}, draw: function () {},
+    state: function () { return {}; }, cheat: function () { return true; },
+    bot: function () { return 0; }, goal: function () { return false; } });
+})();"""}
+# R7 C7-0：cart3.html《星塵益智 8 合 1》同一個 shell ⇒ 判定 / 空殼遊戲沿用 cart2 的
+MODE_JS['cart3.html'] = MODE_JS['cart1.html']
+X_JS['cart3.html'] = X_JS['cart1.html']
+TOUCH_STUB['cart3.html'] = TOUCH_STUB['cart2.html']
 # (裝置, 是否橫向, 標籤)
 DEVS = [('iPhone 13', True, 'iPhone13橫'), ('Pixel 5', False, 'Pixel5直')]
 KEYS = ('dpad', 'a', 'b', 'select', 'start', 'cheat', 'fs')      # fix5：第 7 顆 ★密技
@@ -110,6 +127,8 @@ def run_mobile(p, page_name, device, landscape, label, results):
     errors = []
     try:
         ctx = b.new_context(**dev)
+        if page_name in TOUCH_STUB:
+            ctx.add_init_script(TOUCH_STUB[page_name])
         pg = ctx.new_page()
         pg.on('pageerror', lambda e: errors.append(str(e)))
         pg.on('console', lambda m: errors.append(m.text) if m.type == 'error' and
@@ -224,7 +243,7 @@ def run_mobile(p, page_name, device, landscape, label, results):
         ok('全部放開：mask 0（inject 佇列已清、鍵盤取回控制權）',
            z['tm'] == 0 and z['im'] == 0, 'touch=%s input=%s' % (z['tm'], z['im']))
 
-        if page_name == 'cart1.html':
+        if page_name in CART_PAGES:
             # R5（qa-r5 P3-12）：兩指同按 SELECT + START 70 幀 ⇒ 回選單、游標停在剛玩的那款、放開後沒有黏鍵
             gid = pg.evaluate('()=>__nes.state().game')
             se, st2 = R['select'], R['start']

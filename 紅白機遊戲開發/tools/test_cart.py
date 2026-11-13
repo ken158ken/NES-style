@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-"""《星塵 8 合 1》（cart1.html）合輯殼層測試：註冊契約 / 開機選單 / 切換無殘留 / 預算 / lint / 最高分 / 回選單提示。
+"""合輯卡帶殼層測試（R5 cart1.html《星塵 8 合 1》；R6 起參數化：cart1 + cart2《星塵反應 8 合 1》…）：
+註冊契約 / 開機選單 / 切換無殘留 / 預算 / lint / 最高分 / 回選單提示 / 多卡帶設定（CT.CART_CFG）。
 
 容忍「已註冊 0~8 款」：真遊戲有幾款就驗幾款（逐款的契約欄位、標題畫面 lint、launch → back → launch
 下一款）；切換契約另用**只在測試中載入的假遊戲**驗（`add_init_script` 在 registry 之前塞進
@@ -10,9 +11,11 @@
   [registry] games/cart1/registry.js（CT.launch / CT.back / CT.resetHW / START+SELECT 60 幀）
   [引擎] docs/ENGINE_API.md §5（VBlank 160 byte）、§7（≤ 25 色 / 每線 8 精靈）、§11（__nes）
 
-用法：../卡比之星/.venv/bin/python tools/test_cart.py [-v]
+用法：../卡比之星/.venv/bin/python tools/test_cart.py [-v] [--page cart1.html|cart2.html]
+      （不給 --page = 依序跑 PAGES 全部；非 cart1 的項目名稱前面加 [cart2] 之類的標記）
 結束碼：0 全過 / 1 有失敗 / 2 環境錯誤
 """
+import json
 import pathlib
 import sys
 
@@ -22,9 +25,28 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / 'tools'))
 import playthrough_cart  # noqa: E402
 
-BASE = (ROOT / 'cart1.html').resolve().as_uri() + '?debug=1&scale=1&mute=1'
 VERBOSE = '-v' in sys.argv or '--verbose' in sys.argv
-DEFAULT_IDS = ['maze', 'blocks', 'brick', 'pinball', 'snake', 'racing', 'flyer', 'tower']
+# R6：每張卡帶的入口頁 → 期望的 8 槽 id（cart1 照 R5；其餘以該卡 CART_CFG.slots 為準，這裡只是保底）
+PAGES = {
+    'cart1.html': ['maze', 'blocks', 'brick', 'pinball', 'snake', 'racing', 'flyer', 'tower'],
+    'cart2.html': ['slash', 'laser', 'dodge', 'rope', 'catch', 'pop', 'gallery', 'mash'],
+    'cart3.html': ['merge', 'sudoku', 'mines', 'gomoku', 'slide', 'lines', 'labyrinth', 'party'],   # R7 C7-0
+}
+PAGE_NAME = 'cart1.html'
+CART = 'cart1'
+PREFIX = 'cart1'
+BASE = (ROOT / PAGE_NAME).resolve().as_uri() + '?debug=1&scale=1&mute=1'
+DEFAULT_IDS = list(PAGES['cart1.html'])
+
+
+def set_cart(page_name):
+    """切換目前受測的卡帶（全域 BASE / CART / PREFIX / DEFAULT_IDS）。"""
+    global PAGE_NAME, CART, PREFIX, BASE, DEFAULT_IDS
+    PAGE_NAME = page_name
+    CART = page_name.rsplit('.', 1)[0]
+    PREFIX = CART
+    BASE = (ROOT / page_name).resolve().as_uri() + '?debug=1&scale=1&mute=1'
+    DEFAULT_IDS = list(PAGES.get(page_name, []))
 BTN = {'A': 1, 'B': 2, 'SELECT': 4, 'START': 8, 'UP': 16, 'DOWN': 32, 'LEFT': 64, 'RIGHT': 128}
 
 results = []
@@ -32,7 +54,9 @@ warnings = []
 
 
 def ok(name, cond, detail=''):
-    results.append((bool(cond), name, detail))
+    if CART != 'cart1':
+        name = '[%s] %s' % (CART, name)
+    results.append((bool(cond), name, detail, CART))
     if VERBOSE or not cond:
         print(('  PASS ' if cond else '  FAIL ') + name + (('  — ' + str(detail)) if detail else ''))
 
@@ -180,7 +204,7 @@ def test_real(page):
     }))""")
     ids = [g['id'] for g in games]
     print('  已註冊 %d 款：%s' % (len(ids), ', '.join(ids) or '（無）'))
-    ok('真遊戲：已註冊 0~8 款且 id 都在卡帶一的 8 槽內', len(ids) <= 8 and all(i in DEFAULT_IDS for i in ids), ids)
+    ok('真遊戲：已註冊 0~8 款且 id 都在卡帶一的 8 槽內' if CART == 'cart1' else '真遊戲：已註冊 0~8 款且 id 都在本卡帶的 8 槽內', len(ids) <= 8 and all(i in DEFAULT_IDS for i in ids), ids)
     ok('真遊戲：id 不重複', len(set(ids)) == len(ids), ids)
     ok('選單：8 槽 + 未註冊顯示準備中', len(st['s']['slots']) == 8 and
        all((s['registered'] == (s['id'] in ids)) and (s['name'] == ('ready' if s['id'] not in ids else s['name']))
@@ -252,13 +276,13 @@ def test_menu(page):
     s = st['s']
     ok('開機：沒有 ?game= ⇒ shell 接管、mode = boot', st['game'] is None and s and s['mode'] == 'boot', s and s['mode'])
     step(page, 60)
-    ok('開機：第 48 幀播開機音效', S(page)['s']['lastSfx'] == 'cart1_boot', S(page)['s']['lastSfx'])
+    ok('開機：第 48 幀播開機音效', S(page)['s']['lastSfx'] == PREFIX + '_boot', S(page)['s']['lastSfx'])
     page.evaluate('() => __nes.render()')
     lt = page.evaluate('() => __nes.lint()')
     ok('開機畫面 lint 綠', lt.get('ok'), lt.get('colors'))
     step(page, 100)
     s = S(page)['s']
-    ok('開機：150 幀自動進選單 + 選單曲', s['mode'] == 'menu' and s['song'] == 'cart1_menu', (s['mode'], s['song']))
+    ok('開機：150 幀自動進選單 + 選單曲', s['mode'] == 'menu' and s['song'] == PREFIX + '_menu', (s['mode'], s['song']))
     st = open_page(page)
     step(page, 12)
     tap(page, 'start')
@@ -275,11 +299,11 @@ def test_menu(page):
     unreg = [i for i, x in enumerate(s['slots']) if not x['registered']]
     if unreg:
         row = 8 + unreg[0] * 2
-        want = tile_index(page, 'cart1_bg', 'GN_2_準_0')
+        want = tile_index(page, PREFIX + '_bg', 'GN_2_準_0')
         got = row_tiles(page, row, 7, 8)[0]
         ok('選單：未註冊槽畫「準備中」灰字', got == want, (got, want))
         icon = row_tiles(page, row, 4, 5)[0]
-        ok('選單：未註冊槽畫「?」圖示', icon == tile_index(page, 'cart1_bg', 'IC_none_0'), icon)
+        ok('選單：未註冊槽畫「?」圖示', icon == tile_index(page, PREFIX + '_bg', 'IC_none_0'), icon)
     else:
         ok('選單：未註冊槽畫「準備中」灰字（全部已註冊 ⇒ 略過）', True)
         ok('選單：未註冊槽畫「?」圖示（略過）', True)
@@ -287,7 +311,7 @@ def test_menu(page):
     sel0 = S(page)['s']['sel']
     tap(page, 'down')
     s = S(page)['s']
-    ok('選單：↓ 移一格 + 移動音效', s['sel'] == sel0 + 1 and s['lastSfx'] == 'cart1_move', (s['sel'], s['lastSfx']))
+    ok('選單：↓ 移一格 + 移動音效', s['sel'] == sel0 + 1 and s['lastSfx'] == PREFIX + '_move', (s['sel'], s['lastSfx']))
     tap(page, 'up'); tap(page, 'up')
     ok('選單：↑ 在第一格會繞到最後一格', S(page)['s']['sel'] == len(ids) - 1, S(page)['s']['sel'])
     tap(page, 'select')
@@ -304,7 +328,7 @@ def test_menu(page):
         tap(page, 'a')
         step(page, 40)
         s = S(page)
-        ok('選單：未註冊槽按 A ⇒ 錯誤音效、留在選單', s['game'] is None and s['s']['lastSfx'] == 'cart1_ng', s['s']['lastSfx'])
+        ok('選單：未註冊槽按 A ⇒ 錯誤音效、留在選單', s['game'] is None and s['s']['lastSfx'] == PREFIX + '_ng', s['s']['lastSfx'])
     else:
         ok('選單：未註冊槽按 A（全部已註冊 ⇒ 略過）', True)
     page.evaluate('() => __nes.render()')
@@ -330,7 +354,7 @@ def test_switch(page):
     page.evaluate('(i) => window.CT.Shell.dev.select(i)', ia)
     tap(page, 'start')
     s = S(page)
-    ok('進入：A/START ⇒ 決定音效 + 閃爍（launch 模式）', s['s']['mode'] == 'launch' and s['s']['lastSfx'] == 'cart1_ok',
+    ok('進入：A/START ⇒ 決定音效 + 閃爍（launch 模式）', s['s']['mode'] == 'launch' and s['s']['lastSfx'] == PREFIX + '_ok',
        (s['s']['mode'], s['s']['lastSfx']))
     step(page, 30)
     s = S(page)
@@ -475,7 +499,7 @@ def test_best(page):
     i = [x['id'] for x in s['slots']].index('zz_fake')
     row = 8 + i * 2 + 1
     got = row_tiles(page, row, 25, 29)
-    want = [tile_index(page, 'cart1_bg', 'N' + c) for c in '4321']
+    want = [tile_index(page, PREFIX + '_bg', 'N' + c) for c in '4321']
     ok('最高分：名稱表右對齊寫在第 25~28 欄', got == want, (got, want))
     page.evaluate('() => { CT.save("zz_fake", "best", 0); }')
 
@@ -484,17 +508,17 @@ def test_best(page):
 def test_bot(browser):
     ctx = browser.new_context()
     pg = ctx.new_page()
-    r = playthrough_cart.run_game(pg, 'zz_fake', 600, init_script=FAKE_JS, chunk=50)
+    r = playthrough_cart.run_game(pg, 'zz_fake', 600, init_script=FAKE_JS, chunk=50, page_name=PAGE_NAME)
     ok('playthrough_cart：假遊戲 bot() 達成 goal()、每線 ≤ 8、overFrames 0', r['ok'] and r['goal'] and r['frames'] < 60,
        {k: r[k] for k in ('goal', 'frames', 'maxLine', 'overFrames', 'errors')})
     pg.close()
     pg = ctx.new_page()
-    r = playthrough_cart.run_game(pg, 'zz_fake', 600, init_script=FAKE_JS, chunk=50, hint=True)
+    r = playthrough_cart.run_game(pg, 'zz_fake', 600, init_script=FAKE_JS, chunk=50, hint=True, page_name=PAGE_NAME)
     ok('playthrough_cart --hint：提示常駐（backTile ⇒ tile 模式）仍達成 goal、每線 ≤ 8、沒被踢回選單',
        r['ok'] and r.get('hint') == 'tile' and r['maxLine'] <= 8, {k: r.get(k) for k in ('hint', 'goal', 'maxLine', 'errors')})
     pg.close()
     pg = ctx.new_page()
-    r = playthrough_cart.run_game(pg, 'zz_none', 60, init_script=FAKE_JS)
+    r = playthrough_cart.run_game(pg, 'zz_none', 60, init_script=FAKE_JS, page_name=PAGE_NAME)
     ok('playthrough_cart：未註冊 id ⇒ unregistered、不 ok', r.get('unregistered') and not r['ok'], r['errors'])
     pg.close()
     ctx.close()
@@ -503,56 +527,234 @@ def test_bot(browser):
 # =====================================================================  ⑥ 選單曲 / 音效資料
 def test_audio(page):
     open_page(page, 'boot=0')
-    bad = page.evaluate(r"""() => {
+    bad = page.evaluate(r"""(pre) => {
       const d = CT.Shell.dev, s = d.SONG, bad = [];
       const toMidi = NES.Music.noteToMidi || null;
       s.patterns.forEach((p, i) => ['p1','p2','tri','noi'].forEach(t => {
         if (!p[t] || p[t].length !== s.rows) bad.push(i + t + ' len ' + (p[t] && p[t].length));
         (p[t] || []).forEach(r => { if (r && t !== 'noi' && toMidi && toMidi(r.note) == null) bad.push(i + t + ' note ' + r.note); });
       }));
-      Object.keys(d.SFX).forEach(k => { if (k.indexOf('cart1_') !== 0) bad.push('sfx 名稱沒前綴 ' + k); });
+      Object.keys(d.SFX).forEach(k => { if (k.indexOf(pre + '_') !== 0) bad.push('sfx 名稱沒前綴 ' + k); });
       return { bad, nSfx: Object.keys(d.SFX).length, playing: __nes.nes().music.state ? true : true };
-    }""")
+    }""", PREFIX)
     ok('選單曲：4 段 × 4 軌、每軌 32 列、音名可解析', not bad['bad'], bad['bad'][:5])
-    ok('音效：≥ 3 個且一律 cart1_ 前綴', bad['nSfx'] >= 3, bad['nSfx'])
+    ok('音效：≥ 3 個且一律 %s_ 前綴' % PREFIX, bad['nSfx'] >= 3, bad['nSfx'])
+
+
+# =====================================================================  ⑦ R6 多卡帶設定（CT.CART_CFG）+ bestText 統一格式
+STUB_JS = r"""
+(function () {
+  // 只補「還沒註冊」的槽：registry 的 CT.register 會用同 id 的真遊戲蓋掉這些空殼
+  var CT = window.CT = window.CT || {};
+  CT.games = CT.games || [];
+  (window.__stubIds || []).forEach(function (d) {
+    CT.games.push({ id: d[0], order: d[1], title: d[2], legacy: [], __stub: true,
+      init: function () {}, update: function () {}, draw: function () {}, state: function () { return {}; },
+      cheat: function () { return false; }, bot: function () { return 0; }, goal: function () { return false; } });
+  });
+})();
+"""
+
+
+def test_cfg(page):
+    open_page(page, 'boot=0')
+    c = page.evaluate(r"""() => {
+      const C = CT.CART_CFG || null, LG = /^[.123]{16}$/;
+      if (!C) return null;
+      const slots = (C.slots || []).map(s => ({ id: s.id, order: s.order, name: s.name, legacy: s.legacy,
+        pal: s.icon && s.icon.pal, artOk: !!(s.icon && Array.isArray(s.icon.art) && s.icon.art.length === 16 && s.icon.art.every(r => LG.test(r))),
+        nonEmpty: !!(s.icon && s.icon.art && s.icon.art.join('').replace(/\./g, '').length >= 24) }));
+      const logo = C.logo || [], lgT = Object.assign({ '8': 1, '1': 1 }, C.logoGlyph || {});
+      const cols = logo.map(x => x[1]).sort((a, b) => a - b);
+      return { id: C.id, prefix: C.prefix, key: CT.KEY, cart: CT.CART, st: GAME.state().cart, slots,
+        logoOk: logo.length > 0 && logo.every(x => !!lgT[x[0]] && x[1] >= 1 && x[1] + 1 <= 30) &&
+                cols.every((v, i) => i === 0 || v - cols[i - 1] >= 2),
+        logoHex: Object.keys(C.logoGlyph || {}).every(k => /^[0-9a-f]{64}$/.test(C.logoGlyph[k])),
+        glyphHex: Object.keys(C.glyph || {}).every(k => /^[0-9a-f]{64}$/.test(C.glyph[k])),
+        sub: C.sub, song: CT.Shell.dev.SONG && CT.Shell.dev.SONG.name,
+        bankBg: !!NES.CHR.getBank(C.prefix + '_bg'), bankSpr: !!NES.CHR.getBank(C.prefix + '_spr'),
+        nameChars: (C.slots || []).every(s => (s.name || '').length >= 2 && (s.name || '').length <= 6),
+        pals: !!(C.palettes && C.palettes.bg && C.palettes.bg.length === 4 && C.palettes.spr && C.palettes.spr.length === 4) };
+    }""")
+    ok('R6 卡帶設定：CT.CART_CFG 存在（games/%s/cart.js 在 shell 前載入）' % CART, c is not None, c)
+    if not c:
+        return
+    ok('R6 卡帶設定：id / prefix = %s、CT.CART = %s、存檔前綴 nes.%s.、state().cart' % (CART, CART, CART),
+       c['id'] == CART and c['prefix'] == CART and c['cart'] == CART and c['key'] == 'nes.%s.' % CART and c['st'] == CART, c)
+    ids = [x['id'] for x in c['slots']]
+    ok('R6 卡帶設定：8 槽 id 照任務表順序（%s）' % ','.join(DEFAULT_IDS), ids == DEFAULT_IDS, ids)
+    ok('R6 卡帶設定：order 1..8、名稱 2~6 字、legacy 非空陣列',
+       [x['order'] for x in c['slots']] == list(range(1, 9)) and c['nameChars'] and
+       all(isinstance(x['legacy'], list) and x['legacy'] for x in c['slots']), [(x['id'], x['order'], x['name']) for x in c['slots']])
+    ok('R6 卡帶設定：8 個圖示都是 16×16 的 .123、pal 0..3、不是空白',
+       all(x['artOk'] and x['nonEmpty'] and x['pal'] in (0, 1, 2, 3) for x in c['slots']),
+       [(x['id'], x['artOk'], x['nonEmpty'], x['pal']) for x in c['slots'] if not (x['artOk'] and x['nonEmpty'])])
+    ok('R6 卡帶設定：logo 每字都有點陣、2 欄寬不重疊、落在第 1~30 欄；點陣 64 位十六進位',
+       c['logoOk'] and c['logoHex'] and c['glyphHex'], c)
+    ok('R6 卡帶設定：選單曲 = %s_menu、CHR bank %s_bg / %s_spr、調色盤 4+4 組' % (PREFIX, PREFIX, PREFIX),
+       c['song'] == PREFIX + '_menu' and c['bankBg'] and c['bankSpr'] and c['pals'], c)
+    # 存檔前綴隔離：本卡寫的 key 只落在 nes.<cart>.
+    iso = page.evaluate("""(cart) => { CT.save('zz_iso', 'best', 77);
+      const mine = localStorage.getItem('nes.' + cart + '.zz_iso.best'), other = ['cart1', 'cart2', 'cart3'].filter(k => k !== cart)
+        .some(k => localStorage.getItem('nes.' + k + '.zz_iso.best') !== null);
+      localStorage.removeItem('nes.' + cart + '.zz_iso.best'); return { mine, other }; }""", CART)
+    ok('R6 存檔：CT.save 只寫 nes.%s.<id>.<key>，不碰別張卡帶' % CART, iso['mine'] == '77' and not iso['other'], iso)
+    # bestText 統一格式（R6 §1-6）：右對齊 6 字元
+    bts = page.evaluate("""() => CT.games.filter(g => typeof g.bestText === 'function').map(g => {
+      let t = null; try { t = g.bestText(); } catch (e) { t = 'ERR ' + e; } return [g.id, t]; })""")
+    for gid, t in bts:
+        ok('R6 bestText %s：右對齊 6 字元（純分數 000000 / 單位 ≤ 6）' % gid,
+           isinstance(t, str) and len(t) == 6 and t == t.rstrip() and t.strip() != '' and all(ch.isalnum() or ch in (' ./:-' if CART not in ('cart1', 'cart2') else ' ./') for ch in t), t)   # R7 brief §1-5：時間紀錄 03:25 / 未有紀錄 --:--
+
+
+def test_cfg_full(browser):
+    """8 槽全部有遊戲（沒註冊的用空殼補）時：選單磁磚 ≤ 256、無缺字、圖示畫在第 4 欄、lint 綠。"""
+    ctx = browser.new_context()
+    stubs = [[gid, i + 1, 'STUB'] for i, gid in enumerate(DEFAULT_IDS)]
+    ctx.add_init_script('window.__stubIds = %s;' % json.dumps(stubs))
+    ctx.add_init_script(STUB_JS)
+    pg = ctx.new_page()
+    errs = []
+    pg.on('pageerror', lambda e: errs.append(str(e)))
+    open_page(pg, 'boot=0')
+    step(pg, 30)
+    names = pg.evaluate("() => (CT.CART_CFG.slots || []).map(s => [s.id, s.name])")
+    # 空殼的 title 換成卡帶設定裡的中文名（真遊戲保留自己的 title）⇒ 量「全部中文名」的磁磚用量
+    pg.evaluate("(nm) => { nm.forEach(([id, n]) => { const g = CT.get(id); if (g && g.__stub) g.title = n; }); CT.back(); __nes.step(10); }", names)
+    st = S(pg)['s']
+    ok('R6 全滿選單：8 槽都註冊、名稱全部 16×16 中文（無缺字）',
+       len(st['slots']) == 8 and all(x['registered'] and x['name'] == 'glyph' for x in st['slots']) and not st['missingGlyph'],
+       ([(x['id'], x['name']) for x in st['slots']], st['missingGlyph']))
+    ok('R6 全滿選單：BG bank ≤ 256 磁磚', 0 < st['tiles'] <= 256, st['tiles'])
+    icons = pg.evaluate("""(pre) => { const p = __nes.nes().ppu, b = NES.CHR.getBank(pre + '_bg');
+      return CT.Shell.state().slots.map((s, i) => p.getTile(0, 4, 8 + i * 2) === b.index('IC_' + s.id + '_0')); }""", PREFIX)
+    ok('R6 全滿選單：每槽畫自己的圖示（第 4 欄 = IC_<id>_0）', all(icons), icons)
+    pg.evaluate('() => __nes.render()')
+    lt = pg.evaluate('() => __nes.lint()')
+    sb = pg.evaluate('() => __nes.stats()')
+    ok('R6 全滿選單：lint 綠（≤ 25 色）、每線 ≤ 8、overFrames 0',
+       lt.get('ok') and lt.get('colors', 99) <= 25 and sb['maxSpritesLine'] <= 8 and sb['budget']['overFrames'] == 0,
+       (lt.get('colors'), sb['maxSpritesLine'], sb['budget']['overFrames']))
+    ok('R6 全滿選單：沒有 pageerror', not errs, errs[:3])
+    ctx.close()
+
+
+# =====================================================================  ⑧ R6 cart1：暫停 BGM 從同一 row 接續（engine Music.pause / resume）
+PAUSE_GAMES = [('blocks', ''), ('brick', ''), ('racing', 'track=1'), ('tower', 'map=1')]
+
+
+def test_pause_resume(page):
+    for gid, q in PAUSE_GAMES:
+        open_page(page, 'game=%s&bot=1%s' % (gid, ('&' + q) if q else ''))
+        # 機器人把遊戲帶進「遊玩中 + BGM 在播」，再多跑到曲子不在小節開頭
+        r = page.evaluate("""() => { const M = __nes.nes().music;
+          for (let i = 0; i < 9000; i++) { __nes.step(1); const s = GAME.state().s || {}, m = M.state();
+            if (s.music && s.paused === false && (s.mode === 'play' || s.mode === 'race') && m.playing && m.row >= 3 && m.row <= 10) return { ok: true, f: i, music: s.music }; }
+          return { ok: false, s: GAME.state().s && GAME.state().s.mode }; }""")
+        if not r.get('ok'):
+            ok('R6 暫停接續 %s：進到遊玩中且 BGM 在播' % gid, False, r)
+            continue
+        res = page.evaluate("""() => { CT.botOn = false; __nes.release(); const M = __nes.nes().music;
+          const p0 = M.state(); __nes.tap('start', 1); __nes.step(1);
+          const s1 = GAME.state().s, m1 = M.state(), paused1 = M.isPaused();
+          __nes.step(120); const m2 = M.state();
+          __nes.tap('start', 1); __nes.step(1);
+          const s3 = GAME.state().s, m3 = M.state();
+          return { o0: p0.orderIndex, r0: p0.row, gp: s1.paused, mus1: s1.music, paused1, pl1: m1.playing,
+                   still: m1.row === m2.row && m1.orderIndex === m2.orderIndex && m1.rowsPlayed === m2.rowsPlayed,
+                   o1: m1.orderIndex, r1: m1.row, o3: m3.orderIndex, r3: m3.row, pl3: m3.playing, gp3: s3.paused, mus3: s3.music,
+                   paused3: M.isPaused() }; }""")
+        ok('R6 暫停接續 %s：START 暫停 ⇒ driver.isPaused、音樂停、120 幀位置不動' % gid,
+           res['gp'] is True and res['paused1'] and not res['pl1'] and res['still'] and res['mus1'] is None, res)
+        ok('R6 暫停接續 %s：解除 ⇒ 從同一 order / row 接續（不是從頭）、曲名恢復 %s' % (gid, r['music']),
+           res['gp3'] is False and res['pl3'] and not res['paused3'] and res['o3'] == res['o1'] and
+           res['r1'] <= res['r3'] <= res['r1'] + 1 and res['mus3'] == r['music'] and (res['r3'] > 0 or res['o3'] > 0), res)
+
+
+def test_racing_backtile(page):
+    open_page(page, 'game=racing&track=1')
+    r = page.evaluate("""() => { const g = CT.Racing.dev.g(); __nes.press(['a'], 200); const bt = CT.get('racing').backTile;
+      const p = __nes.nes().ppu, seen = new Set(), seen0 = new Set();
+      g.player.boost = 60;
+      for (let i = 0; i < 24; i++) { __nes.press(['a'], 1); seen.add(p.getSprPalette(bt.pal).join(',')); seen0.add(p.getSprPalette(0).join(',')); }
+      return { pal: bt.pal, n: seen.size, n0: seen0.size, mode: g.mode }; }""")
+    ok('R6 racing backTile：不用調色盤 0、加速時它的調色盤不閃（車身調色盤 0 有在閃）',
+       r['pal'] != 0 and r['n'] == 1 and r['n0'] >= 2, r)
+
+
+def run_page(br, page_name):
+    set_cart(page_name)
+    print('==================== %s（%s）' % (page_name, CART))
+    plain = br.new_context()
+    pg = plain.new_page()
+    errs = []
+    pg.on('pageerror', lambda e: errs.append(str(e)))
+    # 卡帶設定裡的 8 槽 = 期望 id（cart1 照 R5 固定表）
+    if CART != 'cart1':
+        open_page(pg, 'boot=0')
+        got = pg.evaluate('() => ((window.CT.CART_CFG && window.CT.CART_CFG.slots) || []).map(s => s.id)')
+        if got and got != DEFAULT_IDS:
+            warn('%s 的 CART_CFG.slots 與 test_cart PAGES 表不同：%s' % (CART, got))
+    print('① 真遊戲（已註冊的才驗）')
+    test_real(pg)
+    plain.close()
+
+    fake = br.new_context()
+    fake.add_init_script(FAKE_JS)
+    pg = fake.new_page()
+    pg.on('pageerror', lambda e: errs.append(str(e)))
+    print('② 開機 / 選單')
+    test_menu(pg)
+    print('③ launch / back 契約')
+    test_switch(pg)
+    print('③b 回選單提示 backTile 邊界')
+    test_backtile(pg)
+    print('④ 最高分')
+    test_best(pg)
+    print('⑥ 音樂')
+    test_audio(pg)
+    fake.close()
+    print('⑤ 機器人工具')
+    test_bot(br)
+    ok('全程沒有 pageerror', not errs, errs[:3])
+
+    print('⑦ R6 多卡帶設定 / bestText')
+    plain = br.new_context()
+    pg = plain.new_page()
+    pg.on('pageerror', lambda e: errs.append(str(e)))
+    test_cfg(pg)
+    if CART == 'cart1':
+        print('⑧ R6 cart1：暫停 BGM 接續 / racing backTile')
+        test_pause_resume(pg)
+        test_racing_backtile(pg)
+    plain.close()
+    test_cfg_full(br)
+    ok('R6 段沒有 pageerror', not errs, errs[:3])
 
 
 def main():
+    pages = list(PAGES)
+    if '--page' in sys.argv:
+        k = sys.argv.index('--page')
+        pages = [sys.argv[k + 1]] if k + 1 < len(sys.argv) else pages
+    for pn in pages:
+        if not (ROOT / pn).exists():
+            print('環境錯誤：找不到 %s' % pn)
+            return 2
     try:
         with sync_playwright() as p:
             br = p.chromium.launch()
-            plain = br.new_context()
-            pg = plain.new_page()
-            errs = []
-            pg.on('pageerror', lambda e: errs.append(str(e)))
-            print('① 真遊戲（已註冊的才驗）')
-            test_real(pg)
-            plain.close()
-
-            fake = br.new_context()
-            fake.add_init_script(FAKE_JS)
-            pg = fake.new_page()
-            pg.on('pageerror', lambda e: errs.append(str(e)))
-            print('② 開機 / 選單')
-            test_menu(pg)
-            print('③ launch / back 契約')
-            test_switch(pg)
-            print('③b 回選單提示 backTile 邊界')
-            test_backtile(pg)
-            print('④ 最高分')
-            test_best(pg)
-            print('⑥ 音樂')
-            test_audio(pg)
-            fake.close()
-            print('⑤ 機器人工具')
-            test_bot(br)
-            ok('全程沒有 pageerror', not errs, errs[:3])
+            for pn in pages:
+                run_page(br, pn)
             br.close()
     except Exception as e:
         import traceback
         traceback.print_exc()
         print('環境錯誤：', e)
         return 2
+    for cart in sorted(set(r[3] for r in results)):
+        sub = [r for r in results if r[3] == cart]
+        print('  %s：%d / %d PASS' % (cart, sum(1 for r in sub if r[0]), len(sub)))
     n_ok = sum(1 for r in results if r[0])
     print('test_cart: %d / %d PASS%s' % (n_ok, len(results), ('（%d 警告）' % len(warnings)) if warnings else ''))
     return 0 if n_ok == len(results) else 1

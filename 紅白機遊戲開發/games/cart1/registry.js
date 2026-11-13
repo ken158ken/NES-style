@@ -1,5 +1,5 @@
 /*
- * games/cart1/registry.js — 《星塵 8 合 1》合輯卡帶的遊戲註冊表與共用工具（全域 `CT`）
+ * games/cart1/registry.js — 合輯卡帶共用的遊戲註冊表與工具（全域 `CT`；R5《星塵 8 合 1》起，R6 起各卡帶共用，靠 window.CART_ID 區分）
  * ---------------------------------------------------------------------------
  * 擁有者：總控（R5 開工骨架）。**只准 Edit 插入**，契約見 docs/R5_BRIEF.md §2。
  * 載入順序：engine/* → games/cart1/registry.js → 各遊戲檔（CT.register）→ shell.js（選單，可缺）→ boot.js
@@ -24,7 +24,9 @@
 
   CT.games = CT.games || [];
   CT.current = null;          // 目前執行中的遊戲物件（選單時 = null）
-  CT.KEY = 'nes.cart1.';      // localStorage 前綴
+  // R6 起多卡帶共用本檔：入口頁在載入本檔前設 `window.CART_ID = 'cart2'`（缺省 = 'cart1'，行為與 R5 相同）
+  CT.CART = String(window.CART_ID || 'cart1');
+  CT.KEY = 'nes.' + CT.CART + '.';      // localStorage 前綴（cart1 = 'nes.cart1.'，舊存檔不變）
 
   CT.register = function (g) {
     if (!g || !g.id) throw new Error('CT.register: 缺 id');
@@ -166,7 +168,7 @@
       if (g && g.state) s = g.state();
       else if (!g && CT.Shell && CT.Shell.state) s = CT.Shell.state();
       return {
-        cart: 'cart1', game: g ? g.id : null, goal: !!(g && g.goal && g.goal()),
+        cart: CT.CART, game: g ? g.id : null, goal: !!(g && g.goal && g.goal()),
         games: CT.games.map(function (x) { return x.id; }), bot: CT.botOn, s: s
       };
     }

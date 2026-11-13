@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
-"""《星塵 8 合 1》（cart1.html）合輯機器人：跑某一款（或全部）的 `bot()` 直到 `goal()` 或幀數上限。
+"""合輯卡帶機器人（cart1.html《星塵 8 合 1》/ cart2.html《星塵反應 8 合 1》…）：跑某一款（或全部）的 `bot()` 直到 `goal()` 或幀數上限。
 
 用法（PY=../卡比之星/.venv/bin/python）：
+  $PY tools/playthrough_cart.py --page cart2.html --game slash   # R6：指定卡帶入口頁（預設 cart1.html）
+  $PY tools/playthrough_cart.py --page cart2.html --all          # 卡帶二全部（未註冊的槽 = 該卡 CART_CFG.slots 列為 SKIP）
   $PY tools/playthrough_cart.py --game maze              # 單款
   $PY tools/playthrough_cart.py --game blocks --max 60000
   $PY tools/playthrough_cart.py --all                    # 全部已註冊的款（未註冊的槽列為 SKIP）
@@ -9,7 +11,7 @@
   $PY tools/playthrough_cart.py --all --hint             # R5 fix：全程強制畫回選單提示（CT.backProgress 固定 0.5）
                                                          #   ⇒ 每線峰值含 backTile 的 OAM 62/63（qa-r5 的壓力法收進工具）
 
-作法：開 `cart1.html?debug=1&bot=1&game=<id>&scale=1&mute=1`（registry 的 ?bot=1 ⇒ 每幀把
+作法：開 `<page>?debug=1&bot=1&game=<id>&scale=1&mute=1`（registry 的 ?bot=1 ⇒ 每幀把
   `g.bot(nes)` 的回傳值 inject 成下一幀的按鍵；**不開密技**），在頁面內逐幀 `__nes.step(1)`，
   每幀讀 `__nes.stats()`：
     - `maxSpritesLine`（PPU 這幀「同一掃描線上的精靈數」峰值，含被第 9 個以後擋掉的 ⇒ 不靠輪替）
@@ -29,7 +31,17 @@ import sys
 import time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-PAGE = (ROOT / 'cart1.html').resolve().as_uri()
+PAGE_NAME = 'cart1.html'
+PAGE = (ROOT / PAGE_NAME).resolve().as_uri()
+CART1_IDS = ['maze', 'blocks', 'brick', 'pinball', 'snake', 'racing', 'flyer', 'tower']
+
+
+def set_page(name):
+    """R6：切換入口頁（cart1.html / cart2.html …）；回傳 file:// URI。"""
+    global PAGE, PAGE_NAME
+    PAGE_NAME = name
+    PAGE = (ROOT / name).resolve().as_uri()
+    return PAGE
 DEFAULT_MAX = 36000          # 10 分鐘遊戲時間
 CHUNK = 600
 
@@ -55,11 +67,11 @@ RUN_JS = r"""
 """
 
 
-def page_url(gid, extra=''):
+def page_url(gid, extra='', page_uri=None):
     q = 'debug=1&bot=1&scale=1&mute=1&game=' + gid
     if extra:
         q += '&' + extra.lstrip('&?')
-    return PAGE + '?' + q
+    return (page_uri or PAGE) + '?' + q
 
 
 def attach_errors(page):
@@ -81,24 +93,28 @@ def attach_errors(page):
 WARN = []
 
 
-def registered(page):
-    """回傳目前 cart1.html 已註冊的 id 清單（開一次頁面）。"""
+def registered(page, with_slots=False):
+    """回傳目前入口頁已註冊的 id 清單（開一次頁面）；with_slots ⇒ (ids, 該卡 CART_CFG.slots 的 id 清單)。"""
     page.goto(PAGE + '?debug=1&scale=1&mute=1&boot=0')
     page.wait_for_function('() => !!window.__nes && !!window.GAME && !!window.CT')
-    return page.evaluate('() => window.CT.games.map(g => g.id)')
+    ids = page.evaluate('() => window.CT.games.map(g => g.id)')
+    if not with_slots:
+        return ids
+    slots = page.evaluate('() => ((window.CT.CART_CFG && window.CT.CART_CFG.slots) || []).map(s => s.id)')
+    return ids, (slots or (CART1_IDS if PAGE_NAME == 'cart1.html' else []))
 
 
-def run_game(page, gid, max_frames=DEFAULT_MAX, extra='', init_script=None, chunk=CHUNK, hint=False):
-    """在 page 上跑一款的機器人；回傳結果 dict。init_script 給 test_cart.py 塞假遊戲用。"""
+def run_game(page, gid, max_frames=DEFAULT_MAX, extra='', init_script=None, chunk=CHUNK, hint=False, page_name=None):
+    """在 page 上跑一款的機器人；回傳結果 dict。init_script 給 test_cart.py 塞假遊戲用；page_name = 入口頁（預設目前 --page）。"""
     errs = attach_errors(page)
     if init_script:
         page.add_init_script(init_script)
     t0 = time.time()
-    page.goto(page_url(gid, extra))
+    page.goto(page_url(gid, extra, (ROOT / page_name).resolve().as_uri() if page_name else None))
     page.wait_for_function('() => !!window.__nes && !!window.GAME && !!window.CT')
     info = page.evaluate('() => ({ cur: window.GAME.state().game, games: window.CT.games.map(g => g.id),'
                          ' bot: !!(window.CT.current && window.CT.current.bot), goal: !!(window.CT.current && window.CT.current.goal) })')
-    res = {'game': gid, 'ok': False, 'goal': False, 'frames': 0, 'maxLine': 0, 'overFrames': 0,
+    res = {'game': gid, 'page': page_name or PAGE_NAME, 'ok': False, 'goal': False, 'frames': 0, 'maxLine': 0, 'overFrames': 0,
            'budgetPeak': 0, 'errors': [], 'sec': 0.0}
     if info['cur'] != gid:
         res['errors'] = ['未註冊（已註冊：%s）' % ','.join(info['games'])]
@@ -133,6 +149,7 @@ def run_game(page, gid, max_frames=DEFAULT_MAX, extra='', init_script=None, chun
 
 
 def table(rows):
+    print('入口頁：%s' % PAGE_NAME)
     print('%-9s %-5s %-5s %8s %7s %6s %6s %6s  %s' % ('game', 'ok', 'goal', 'frames', 'maxLine', 'over', 'peak', 'sec', '備註'))
     print('-' * 78)
     for r in rows:
@@ -147,7 +164,8 @@ def table(rows):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    ap.add_argument('--game', default='', help='遊戲 id（maze / blocks / brick / pinball / snake / racing / flyer / tower）')
+    ap.add_argument('--page', default='cart1.html', help='卡帶入口頁（cart1.html / cart2.html …；預設 cart1.html）')
+    ap.add_argument('--game', default='', help='遊戲 id（cart1：maze / blocks / … / tower；cart2：slash / laser / … / mash）')
     ap.add_argument('--all', action='store_true', help='跑全部已註冊的款')
     ap.add_argument('--max', type=int, default=DEFAULT_MAX, help='幀數上限（預設 %d）' % DEFAULT_MAX)
     ap.add_argument('--query', default='', help='額外網址參數（例如 "seed=3"）')
@@ -156,6 +174,10 @@ def main():
     a = ap.parse_args()
     if not a.game and not a.all:
         ap.error('請給 --game <id> 或 --all')
+    if not (ROOT / a.page).exists():
+        print('環境錯誤：找不到入口頁 %s' % a.page)
+        return 2
+    set_page(a.page)
     try:
         from playwright.sync_api import sync_playwright
     except Exception as e:  # pragma: no cover
@@ -167,12 +189,12 @@ def main():
             br = p.chromium.launch()
             ctx = br.new_context()
             ids = [a.game] if a.game else []
+            defaults = list(CART1_IDS)
             if a.all:
                 pg = ctx.new_page()
-                ids = registered(pg)
+                ids, defaults = registered(pg, with_slots=True)
                 pg.close()
-                # 未註冊的預設槽也列出來（SKIP）
-                defaults = ['maze', 'blocks', 'brick', 'pinball', 'snake', 'racing', 'flyer', 'tower']
+                # 未註冊的預設槽（= 該卡 CART_CFG.slots）也列出來（SKIP）
                 for d in defaults:
                     if d not in ids:
                         rows.append({'game': d, 'ok': False, 'unregistered': True, 'errors': []})
@@ -191,7 +213,7 @@ def main():
             if r.get('unregistered'):
                 print(json.dumps(r, ensure_ascii=False))
     if not a.json:
-        order = ['maze', 'blocks', 'brick', 'pinball', 'snake', 'racing', 'flyer', 'tower']
+        order = defaults
         rows.sort(key=lambda r: order.index(r['game']) if r['game'] in order else 99)
         print()
         table(rows)

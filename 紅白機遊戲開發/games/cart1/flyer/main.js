@@ -614,7 +614,7 @@
     cheat: function () { if (!g || g.mode === 'title') return false; g.cheatReq = true; return true; },   // 標題無效
     bot: function () { return botMask(); },
     goal: function () { return !!(g && g.goalHit && !g.cheated); },
-    bestText: function () { return pad(CT.load('flyer', 'best', 0), 3) + ' GATE'; }
+    bestText: function () { return pad(Math.min(9999, Math.max(0, CT.load('flyer', 'best', 0) | 0)), 4) + 'GT'; }   // R6 §1-6：右對齊 6 字元（門數 + GT）
   };
   FY.GOAL_GATES = GOAL_GATES;
   FY.SCENES = SCENES;

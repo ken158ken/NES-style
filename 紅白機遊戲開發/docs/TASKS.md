@@ -618,3 +618,99 @@ credits 快轉 `overFrames = 0`（修前 1、peak 960）。
 
 **驗收（已達成）**：`playthrough_cart.py --game racing` goal 9125 幀 / maxLine 8 / over 0 / peak 56 byte；
 `--game tower` goal 7182 幀 / maxLine 6 / over 0 / peak 77 byte；兩支測試全綠；`bash tools/run_all.sh --quick` 總結 PASS。
+
+### R6 多卡帶契約 — C6-0 cart-platform（2026-11-13）
+
+**所有權**：`games/cart1/shell.js`（多卡帶化）、新 `games/cart1/cart.js`、新 `games/cart2/cart.js`、`tools/playthrough_cart.py`、`tools/test_cart.py`；
+`engine/music.js` + `docs/ENGINE_API.md` §10 + `tools/test_apu.py`（只插入）；`games/cart1/{blocks,brick,racing,tower}/**`（暫停接續）、cart1 八款 `bestText()`、
+racing `backTile`；Edit 插入 `tools/{run_all.sh,build.py,stamp.py,test_touch.py}`、`cart1.html`（shell 前一行 cart.js）、`README.md` / `index.html` / `CLAUDE.md`。
+`registry.js` 未動。
+
+**多卡帶契約（給之後每張卡帶 cartN）**：
+| 項目 | 規則 |
+|---|---|
+| 入口頁 | `cartN.html`：`<script>window.CART_ID = 'cartN';</script>` → `games/cart1/registry.js` → `<!-- cartN:games:begin/end -->` 之間各遊戲 → `games/cartN/cart.js` → `games/cart1/shell.js` → 啟動段（同 cart1.html） |
+| 卡帶設定 | `games/cartN/cart.js` 設 `CT.CART_CFG = {id, prefix, title, logo:[[字,欄]…], logoGlyph, logoPal?, sub, subCol, slots:[{id, order, name, icon:{pal, art[16]}, legacy}×8], glyph, song(kit)\|song, palettes:{backdrop, bg[4], spr[4]}, dots?, sparkles?, bootText?, sfx?}`（欄位說明在 `games/cart1/cart.js` 檔頭） |
+| 槽位順序 | **以 CART_CFG.slots 的 order 為準**（選單版面歸卡帶）；遊戲自己的 `order` 只用在表外 id |
+| 前綴 | 存檔 `nes.cartN.<id>.<key>`（registry）；選單 CHR bank `cartN_bg` / `cartN_spr`、選單曲 `cartN_menu`、音效 `cartN_move/ok/ng/boot`（shell） |
+| 打包 | `build.py --src cartN.html` → `dist/<卡帶名>.html`（在 build.py 的對照表加一行）；`games/*/cart.js` 不會被自動補進別張卡帶 |
+| 工具 | `playthrough_cart.py --page cartN.html --game <id> \| --all`；`test_cart.py` 的 `PAGES` 加一列（入口頁 → 8 槽 id）；`stamp.py` / `test_touch.py` 的 `PAGES` 加入口頁；`run_all.sh` 加 `build --check` + 冒煙 |
+| bestText | 右對齊 6 字元：純分數 `000000`，有單位 ≤ 6 字（`0017GT`、`017PTS`、`12.3S`） |
+| 暫停 BGM | `nes.music.pause()` / `resume()`（engine R6），解除暫停從同一 row 接續 |
+
+**驗收**：`test_cart.py` cart1 原 167 項 + R6 段全綠、cart2（0~8 款註冊皆可）全綠；cart1 選單 / 開機畫面與 R5 逐像素相同；
+`test_apu.py` 18 段全綠；`test_touch.py` 含 cart2；cart1 四款暫停接續 + 八款 bestText 測試綠；`bash tools/run_all.sh --quick` PASS。
+
+### C6-4 cart2-aim（R6，2026-11-13）— ⑦ `gallery` 星塵射擊場 + ⑧ `mash` 星塵連打
+**所有權**：`games/cart2/gallery/**`（art / song / main）、`games/cart2/mash/**`（art / song / main）、`games/cart2/test_gallery.py`、`games/cart2/test_mash.py`；`cart2.html` 在 `cart2:games` 標記內 6 行 script。
+**驗收**：`test_gallery.py` 48/48、`test_mash.py` 45/45；`playthrough_cart.py --page cart2.html --game gallery|mash` goal 達成、每線 ≤ 8、overFrames 0；
+gallery goal = 精準靶 + 速射兩模式都 ≥ B（不開密技）；mash goal = COMMAND 一局 ≥ 30 連段（不開密技）；§6 規則（密技原地續關 / 標題結算無效 / 暫停 BGM / exit 存分 / backTile / HOLD START+SELECT / C/★）全有測項。
+
+### C6-2 cart2-dodge（R6，2026-11-13）— ③ `dodge` 星塵躲避 + ④ `rope` 星塵跳繩
+**所有權**：`games/cart2/dodge/**`（art / song / main）、`games/cart2/rope/**`（art / song / main）、`games/cart2/test_dodge.py`、`games/cart2/test_rope.py`；`cart2.html` 在 `cart2:games` 標記內 6 行 script。全域只掛 `CT.Dodge` / `CT.Rope`；CHR bank / 曲名 / 音效名一律 `dodge_` / `rope_` 前綴。`engine/` / `registry.js` / `games/cart1/**` 未動。
+| 款 | 驗收 |
+|---|---|
+| ③ `dodge` | 兩模式：COURT（BG 砲蟹投手 2→8 隻、B 衝刺無敵、5 種球、4 種道具）／ BARRAGE（6 種原創彈幕每 10 秒輪替 + 60 秒後 LOOP、擦彈、精細移動、星爆）。**每線 ≤ 8：逐線配額器（主角優先、子彈依被藏次數優先、每幀輪替）+ 彈數上限 48 / 20**，機器人逐幀量。goal = BARRAGE 存活 60 秒且未用密技；`test_dodge.py` 49 項 |
+| ④ `rope` | NORMAL / DOUBLE（A 左腳 / B 右腳）、3 角色 × 3 場地、繩速浮動 + 3 種假動作（HOLD / DIP / RUSH）、PERFECT 判定、3 顆心。**每線 ≤ 8：跳繩者 2 + 單繩 6 顆星珠；雙繩交叉時繩珠走配額器輪替**。goal = NORMAL 連跳 100 且未用密技；`test_rope.py` 48 項 |
+
+**驗收（已達成）**：`playthrough_cart.py --page cart2.html --game dodge` goal 3621 幀 / maxLine 8 / over 0 / peak 40；`--game rope` goal 8329 幀 / maxLine 8 / over 0 / peak 32（`--hint` 相同）；§6 規則全有測項；兩支測試全綠。
+
+### R6 合輯卡帶二 — C6-1 cart2-blade（2026-11-13）
+
+**所有權**：`games/cart2/slash/**`（art / song / main）、`games/cart2/laser/**`（art / song / main）、`games/cart2/test_slash.py`、`games/cart2/test_laser.py`；`cart2.html` 在 `cart2:games` 標記內 6 行 script。
+`engine/`、`games/cart1/**` 未動。全域只掛 `CT.Slash` / `CT.Laser`；CHR bank / 曲名 / 音效名一律 `slash_` / `laser_` 前綴。
+**驗收**：`test_slash.py` 53/53、`test_laser.py` 55/55；`playthrough_cart.py --page cart2.html --game slash|laser`（含 `--hint`）goal 達成、每線 7 / 6、overFrames 0、VBlank 尖峰 32 / 37 byte；
+slash goal = 同一局連過 3 關且未用密技；laser goal = 同一局守過 5 波且未用密技；§6 規則（密技原地續關 / 標題結局無效 / 暫停 BGM 接續 / exit 存分 / backTile / HOLD START+SELECT / C/★ / 段落空列）全有測項。
+
+### C6-3 cart2-pop（R6，2026-11-13）— ⑤ `catch` 星塵接球 + ⑥ `pop` 星塵泡泡
+**所有權**：`games/cart2/catch/**`（art / song / levels / main）、`games/cart2/pop/**`（art / song / main）、`games/cart2/test_catch.py`、`games/cart2/test_pop.py`；`cart2.html` 在 `cart2:games` 標記內 7 行 script。全域只掛 `CT.Catch` / `CT.Pop`；CHR bank / 曲名 / 音效名一律 `catch_` / `pop_` 前綴。`engine/` / `registry.js` / `games/cart1/**` 未動。
+| 款 | 驗收 |
+|---|---|
+| ⑤ `catch`（order 5） | 三模式：CATCH STARS（落下物依落下距離生成 ⇒ 每線 ≤ 1 顆）／ KEEP IT UP（1→2→3 顆球 + 風 + 重力階段）／ BOUNCE TOWER（6 張原創關卡，彈簧 / 星刺 / 碎晶 / 苔墊；解題器與遊戲共用 `bStep` 證明全部可通關）。goal = 頂球連續 60 秒且未用密技；`test_catch.py` 45 項 |
+| ⑥ `pop`（order 6） | 三模式：BUBBLE RISE（背景磚泡泡牆 + 垂直捲動 + split 狀態列、同色連鎖 / 色彩倍率 / 冰殼 / 星泡）／ BALLOON SHOT（40 秒配額、黑氣球扣時；同速生成規則 ⇒ 任一 24 px 帶 ≤ 3 顆）／ BURROW BOP（3×3 = 8 方向 + 中央、原創噗噗芽 5 種走背景磚，THORN 不能敲、FAKER 假動作、SPITTER 吐孢子反擊）。游標依 R6 §1-4。goal = 敲噗噗芽一局 ≥ 8000 分且未用密技；`test_pop.py` 51 項 |
+
+**驗收（已達成）**：`playthrough_cart.py --page cart2.html --game catch` goal 3616 幀 / maxLine 4 / over 0 / peak 31；`--game pop` goal 1567 幀 / maxLine 3 / over 0 / peak 24（`--hint` 相同）；其他四個模式長跑每線 ≤ 5、over 0；§6 規則全有測項。
+
+### C7-0 cart3-shell+party（R7，2026-11-13）— 卡帶三設定 + 工具整合 + ⑧ `party` 星塵派對
+**所有權**：`games/cart3/cart.js`、`games/cart3/party/**`（art / song / main）、`games/cart3/test_party.py`；`cart3.html` 在 `cart3:games` 標記內 3 行 script；
+Edit 插入 `tools/{test_cart.py,run_all.sh,build.py,stamp.py,test_touch.py}`、`README.md` / `index.html` / `CLAUDE.md`。全域只掛 `CT.Party`；CHR / 曲 / 音效一律 `party_` 前綴；選單 `cart3_*`。
+**驗收**：`test_party.py` 67/67、`test_cart.py --page cart3.html` 全綠、`test_touch.py` 含 cart3；`playthrough_cart.py --page cart3.html --game party` goal 達成（1203 幀）、每線 ≤ 8（峰值 3）、overFrames 0、VBlank ≤ 160（26）；
+goal = STAR CUP NORMAL 以上晉級制連勝 3 位且未用密技；HARD 猜數 7 次可解有解題器測項；§6 規則全有測項；`build.py --check cart3.html` PASS；`run_all.sh --quick` PASS。
+
+### C7-4 cart3-maze（R7，2026-11-13）— ⑦ `labyrinth` 星塵迷宮探索 + ⑧ `apu_render.py` 合輯曲目
+**所有權**：`games/cart3/labyrinth/**`（gen / art / song / main）、`games/cart3/test_labyrinth.py`；`cart3.html` 在 `cart3:games` 標記內 4 行 script；
+`tools/apu_render.py`（只 Edit：JS 曲目表改走 `SONGS_OF()`、`run_game` 加合輯 jobs、`--table`；單款 `--game cruiser` 用法不變）、`tools/test_apu.py`（只插入 §18 四項）。
+全域只掛 `CT.Labyrinth`；CHR bank / 曲名 / 音效名一律 `labyrinth_` 前綴。`engine/` / registry / shell / cart1 / cart2 未動。
+| 項目 | 驗收 |
+|---|---|
+| ⑦ `labyrinth`（order 7） | 探索型（與 cart1 maze 吃點 + 追兵區隔）：頭燈有限視野 = **屬性表**（明亮 / 微光 / 全黑三組 BG 調色盤）、鑰匙鎖門、日月開關 + 日門 / 月門、潮汐牆（兩組輪流升降，有人站著延後）、星屑 / 星燈 / 羅盤、**小地圖 = nt1**（SELECT 只切捲動基底）。9 層固定種子 + 隨機 `?seed=`；`gen.js` 產生器 + 全狀態驗證器（出口可達、無死局、星屑永遠拿得到）；計時 / PAR / 三星等 / 每層紀錄 / 冒險總時間。goal = 冒險模式從 F1 連過 3 層且未用密技；`test_labyrinth.py` 60 項 |
+| ⑧ `apu_render.py --game cartN[/id]` | 合輯卡帶模式：讀 `CT.<Id>.SONGS` / `CT.<Id>.Audio.SONGS`（搜尋 fallback）、`cartN/menu` = 選單曲、`cartN` = 整張卡、逗號多張、`--table` 印 Markdown 表；檢查同單款模式；`test_apu.py` §18 |
+
+**驗收（已達成）**：`playthrough_cart.py --page cart3.html --game labyrinth`（含 `--hint`）goal 1732 幀 / maxLine 2 / over 0 / peak 27；機器人續跑全 9 層 ≈ 12000 幀 over 0；cart1~3 全部已註冊曲目離線渲染表見 PROGRESS `cart3-maze` 段。
+
+### C7-1 cart3-number（R7，2026-11-13）— ① `merge` 星塵合星 + ② `sudoku` 星塵數獨
+**所有權**：`games/cart3/merge/**`（art / song / main）、`games/cart3/sudoku/**`（gen / art / song / main）、`games/cart3/test_merge.py`、`games/cart3/test_sudoku.py`；`cart3.html` 在 `cart3:games` 標記內 7 行 script。全域只掛 `CT.Merge` / `CT.Sudoku`；CHR bank / 曲名 / 音效名一律 `merge_` / `sudoku_` 前綴。`engine/` / registry / shell / cart1 / cart2 未動。
+| 款 | 驗收 |
+|---|---|
+| ① `merge`（order 1） | 12 階原創天體圖示（非數字方塊，數值只在 HUD）、4×4 / 5×5 / 3×3 / 黑洞 5×5、復原 1 步、卡死評價 + 原地續關、`?seed=`；goal = 4×4 合出第 8 階且未用密技；`test_merge.py` 54 項 |
+| ② `sudoku`（order 2） | 產生器 + 唯一解驗證 + 無猜題邏輯解題器（T1/T2/T3）、INTRO 6×6 + 9×9 四級、筆記（B）/ 錯誤提示三段 / 提示 / 多步復原（SELECT）/ 自動檢查、最短時間紀錄；goal = 入門 + 簡單各解 1 題；`test_sudoku.py` 54 項（Python 獨立數解驗 40 題唯一） |
+
+**驗收（已達成）**：`playthrough_cart.py --page cart3.html --game merge` goal 892 幀 / maxLine 3 / over 0 / peak 140；`--game sudoku` goal 1063 幀 / maxLine 2 / over 0 / peak 46（`--hint` 相同）；機器人以解題器操作游標完成，不改盤面狀態；§6 規則全有測項。
+
+### C7-2 cart3-board（R7，2026-11-13）— ③ `mines` 星塵探雷 + ④ `gomoku` 星塵五子棋（含井字）
+**所有權**：`games/cart3/mines/**`（gen / art / song / main）、`games/cart3/gomoku/**`（ai / art / song / main）、`games/cart3/test_mines.py`、`games/cart3/test_gomoku.py`；`cart3.html` 在 `cart3:games` 標記內 8 行 script。全域只掛 `CT.Mines` / `CT.Gomoku`；CHR bank / 曲名 / 音效名一律 `mines_` / `gomoku_` 前綴。`engine/` / registry / shell / cart1 / cart2 未動。
+| 款 | 驗收 |
+|---|---|
+| ③ `mines`（order 3） | EASY 10×10/12、NORMAL 12×11/24、HARD 14×12/40、CUSTOM（寬 6~14 偶數 / 高 6~12 / 雷 ≤ 25%）；每格 16×16 = 一個屬性區塊（數字每格換色）；**無猜盤面**：首擊後才產生（首擊 3×3 無雷），`gen.js` 邏輯解題器（單點 / 兩兩 / 全域）能從首擊解完才採用，每幀 ≤ 4 ms 分幀抽盤；插旗 / 和弦 / 多步復原（SELECT，踩雷後也能退）/ 暫停選單提示 / 計時 + 三星 + 每難度最佳時間 + 連勝；原創「星岩 + 探測信標 + 星塵雷」外觀。goal = EASY 無猜盤面連贏 3 局且未用密技；`test_mines.py` 42 項 |
+| ④ `gomoku`（order 4） | 五子棋 15×15（1 交叉點 = 1 磁磚，太陽石 / 月亮石）對 CPU EASY / NORMAL / HARD（五格窗增量評估 + 0 / 2 / 6 層 α-β、必勝必擋）或雙人；井字 3×3（HARD 完整搜尋不敗）/ 4×4（連 4，深度 6）；**分幀思考**（generator，每幀 5 ms）；悔棋、提示、B 跳到最後一手。goal = 五子棋擊敗 CPU NORMAL 且未用密技；`test_gomoku.py` 45 項 |
+
+**驗收（已達成）**：`playthrough_cart.py --page cart3.html --game mines` goal 539 幀 / maxLine 2 / over 0 / peak 140（`--hint` maxLine 4）；`--game gomoku` goal 359 幀 / maxLine 3 / over 0 / peak 42（`--hint` 相同）；兩款機器人都用解題器 / AI 決定、十字鍵一格一格走 + A / B，不改盤面狀態；探雷機器人 0 次猜測；§6 規則全有測項。
+
+### C7-3 cart3-slide（R7，2026-11-13）— ⑤ `slide` 星塵拼圖 + ⑥ `lines` 星塵連線
+**所有權**：`games/cart3/slide/**`（pics / solver / art / song / main）、`games/cart3/lines/**`（gen / levels / art / song / main）、`games/cart3/test_slide.py`、`games/cart3/test_lines.py`；`cart3.html` 在 `cart3:games` 標記內 10 行 script。全域只掛 `CT.Slide` / `CT.Lines`；CHR bank / 曲名 / 音效名一律 `slide_` / `lines_` 前綴。`engine/` / registry / shell / cart1 / cart2 未動。
+| 款 | 驗收 |
+|---|---|
+| ⑤ `slide`（order 5） | 3 模式：SLIDE 3×3 / 4×4 / 5×5（亂數排列 + 奇偶修正 ⇒ 必可解）、SWAP 3~5（選兩片交換，標準 = 最少交換）、ROTATE 3×3 / 4×4（2×2 窗格 A 順轉 / B 逆轉）；6 張原創 160×160 像素畫（每張一個 CHR bank：UI 共用索引 + 圖面去重 / 合併 ≤ 196 磁磚；屬性每 16×16 自動挑誤差最小的調色盤）；一片 = 32 px = 2×2 屬性區、半格滑動動畫；分段 BFS 解題器（滑塊 / 旋轉）+ 循環分解（換位）；復原 / 提示 / 偷看；步數 vs 標準 → 星等、各模式 × 尺寸最佳時間；goal = SLIDE 3×3 + 4×4 各拼好 1 次且未用密技；`test_slide.py` 47 項 |
+| ⑥ `lines`（order 6） | 原創連線益智：同色星珠相連、不交叉不分岔、填滿 + 自創機關**星橋**（一橫一直立體交叉）/ **星門**（進一扇出另一扇）；36 關 7 章（5×5 → 9×9），`gen.js` 產生器（不自鄰長路徑分割 + 調色盤分組）+ 解題器數解 == 1 才收，烘成 `levels.js`；RANDOM 模式 `?seed=`；下筆 / 收回 / 切斷 / 復原 / 提示 / 清線；時間 + 提示 → 星等、每關最佳星；goal = 前 10 關全破且未用密技；`test_lines.py` 41 項 |
+
+**驗收（已達成）**：`playthrough_cart.py --page cart3.html --game slide` goal 1347 幀 / maxLine 2 / over 0 / peak 60；`--game lines` goal 2127 幀 / maxLine 3 / over 0 / peak 68；兩款機器人都用解題器的解、十字鍵一格一格移動游標 + A，不改盤面狀態；§6 規則全有測項。

@@ -27,6 +27,7 @@ apu.js / music.js / games/cruiser/song.js（這三個都是 audio agent 自己�
   15 cruiser：CR.SONGS 全部曲目的 pattern 合法性（音域 / 聲道分配 / order / 長度；R2 六首另有長度表）
   16 cruiser：CR.SFX 優先權表 + 搶佔後音樂軌回復
   17 cruiser：10 秒離線渲染無 NaN / 不削波
+  18 music：pause / resume（R6：暫停靜音、從同一 row 接續、play / stop 取消快照）
 """
 import sys, pathlib, json
 
@@ -482,6 +483,63 @@ T.slideDetune = function(){
           triS, noi, sfxT, sfxDetune, off};
 };
 
+/* ============ 18 music：pause / resume（R6 C6-0 插入）============ */
+T.pauseResume = function(){
+  const song = M.DEMO.song, sp = song.speed;
+  // 參考：不暫停連跑 N 幀的 APU 寫入序列
+  function regsAfter(m, n){ for (let i=0;i<n;i++) m.tick(); return m.state(); }
+  const ref = M.create(mk()); ref.play(song,{loop:true}); ref.record(true);
+  const refSt = regsAfter(ref, sp*5+3);
+  const refLog = ref.log.slice(); ref.log.length = 0;
+  for (let i=0;i<sp*3;i++) ref.tick();
+  const refAfter = ref.log.filter(w => w[0] !== 0x4015).map(w => w.join(','));
+  const refState = ref.state();
+  // 暫停版：跑一樣 N 幀 → pause → 空轉 120 幀 → resume → 跑 sp*3 幀
+  const apu = mk(); const m = M.create(apu); m.play(song,{loop:true});
+  const st0 = regsAfter(m, sp*5+3);
+  m.pause();
+  const p1 = m.state();
+  const maskAfterPause = apu.state ? m.state().enableMask : -1;
+  for (let i=0;i<120;i++) m.tick();
+  const p2 = m.state();
+  const r = m.resume();
+  const resumedRowSame = m.state().row === st0.row && m.state().rowFrame === st0.rowFrame && m.state().orderIndex === st0.orderIndex;
+  m.record(true);
+  for (let i=0;i<sp*3;i++) m.tick();
+  // resume 後第一幀會強制重寫全部暫存器 ⇒ 比較「之後的音高狀態」而不是原始寫入流
+  const resState = m.state();
+  const sameCh = JSON.stringify(resState.channels.map(c => [c.on, c.midi, c.period, c.vol])) ===
+                 JSON.stringify(refState.channels.map(c => [c.on, c.midi, c.period, c.vol]));
+  // 邊界：沒在播時 pause 無效；resume 無快照回 false；pause 後 play / stop 取消快照
+  const e = M.create(mk());
+  e.pause(); const idlePaused = e.isPaused(); const idleResume = e.resume();
+  e.play(song,{loop:true}); for (let i=0;i<10;i++) e.tick(); e.pause(); const pausedNow = e.isPaused();
+  e.pause(); const twice = e.isPaused();
+  e.play(song,{loop:true}); const afterPlay = e.isPaused(); const afterPlayResume = e.resume();
+  for (let i=0;i<10;i++) e.tick(); e.pause(); e.stop(); const afterStop = e.isPaused(); const afterStopResume = e.resume();
+  const afterStopPlaying = e.state().playing;
+  // 暫停中音效照常播、放完後音樂仍靜音；resume 後音樂拿回聲道
+  const f = M.create(mk()); f.define('coin', M.DEMO.sfx.coin); f.play(song,{loop:true});
+  for (let i=0;i<20;i++) f.tick(); f.pause(); f.sfx('coin');
+  f.tick(); const sfxDuring = f.state().sfx.map(s => s.name);
+  for (let i=0;i<40;i++) f.tick();
+  const quietMask = f.state().enableMask;
+  f.resume(); f.tick(); const backMask = f.state().enableMask;
+  // 預設 driver 門面（nes.music = NES.Music）也有 pause / resume / isPaused
+  const savedDefault = M._default;      // 別的段（cruiser）用的預設 driver ⇒ 測完還原
+  M.attach(mk()); M.play(song,{loop:true}); for (let i=0;i<7;i++) M.tick();
+  const facadeRow = M.state().row; M.pause(); const facadePaused = M.isPaused() && M.state().paused === true;
+  for (let i=0;i<30;i++) M.tick(); M.resume(); const facadeRow2 = M.state().row;
+  M._default = savedDefault;
+  return {refRow: refSt.row, refRF: refSt.rowFrame, row0: st0.row, rowFrame0: st0.rowFrame,
+          pausedPlaying: p1.playing, pausedFlag: p1.paused, maskAfterPause, p2rows: p2.rowsPlayed, p1rows: p1.rowsPlayed,
+          p2row: p2.row, resumeRet: r, resumedRowSame, sameCh, resPlaying: resState.playing,
+          rowsPlayedRes: resState.rowsPlayed, rowsPlayedRef: refState.rowsPlayed, rowRes: resState.row, rowRef: refState.row,
+          idlePaused, idleResume, pausedNow, twice, afterPlay, afterPlayResume, afterStop, afterStopResume, afterStopPlaying,
+          sfxDuring, quietMask, backMask, facadeRow, facadePaused, facadeRow2,
+          api: ['pause','resume','isPaused'].every(k => typeof M[k] === 'function' && typeof M.Driver.prototype[k] === 'function')};
+};
+
 /* ============ 15/16/17 games/cruiser/song.js（CR.Audio / CR.SONGS / CR.SFX）============ */
 
 T.hasCruiser = function(){ return !!(window.CR && window.CR.SONGS && window.CR.SFX); };
@@ -852,6 +910,27 @@ def main():
               'base=%d got=%d' % (A4, r['sfxDetune']))
         check('14.13 slide:0 關掉滑音', r['off'] == [A4, A4 + 8, A4, A4], r['off'])
 
+        # 18 pause / resume（R6 C6-0）
+        r = run('pauseResume')
+        check('18.1 pause()：playing=false、state().paused=true、$4015 遮罩清 0',
+              r['pausedPlaying'] is False and r['pausedFlag'] is True and r['maskAfterPause'] == 0, r)
+        check('18.2 暫停中 tick 120 幀：row / rowsPlayed 不前進',
+              r['p2rows'] == r['p1rows'] and r['p2row'] == r['row0'], (r['p1rows'], r['p2rows'], r['p2row']))
+        check('18.3 resume()：回 true、同一 order / row / rowFrame（不是從小節開頭）',
+              r['resumeRet'] is True and r['resumedRowSame'] and r['row0'] == r['refRow'] and r['rowFrame0'] == r['refRF'], r)
+        check('18.4 resume 後再跑 3 row：row / rowsPlayed / 各聲道音高音量 = 沒暫停過的參考',
+              r['resPlaying'] and r['rowRes'] == r['rowRef'] and r['rowsPlayedRes'] == r['rowsPlayedRef'] and r['sameCh'], r)
+        check('18.5 沒在播時 pause 無效；無快照 resume 回 false',
+              r['idlePaused'] is False and r['idleResume'] is False, (r['idlePaused'], r['idleResume']))
+        check('18.6 重複 pause 不覆蓋快照（仍是暫停）', r['pausedNow'] and r['twice'], (r['pausedNow'], r['twice']))
+        check('18.7 暫停後 play() / stop() ⇒ 快照取消、resume 回 false、stop 後不會被 resume 復活',
+              r['afterPlay'] is False and r['afterPlayResume'] is False and r['afterStop'] is False and
+              r['afterStopResume'] is False and r['afterStopPlaying'] is False, r)
+        check('18.8 暫停中音效照常播、播完音樂保持靜音、resume 後音樂拿回聲道',
+              r['sfxDuring'] == ['coin'] and r['quietMask'] == 0 and r['backMask'] != 0, (r['sfxDuring'], r['quietMask'], r['backMask']))
+        check('18.9 NES.Music 門面與 Driver 都有 pause / resume / isPaused；門面暫停 30 幀後 row 不變',
+              r['api'] and r['facadePaused'] and r['facadeRow'] == r['facadeRow2'], (r['api'], r['facadeRow'], r['facadeRow2']))
+
         if not page.evaluate('()=>T.hasCruiser()'):
             check('15.0 games/cruiser/song.js 載入（CR.SONGS / CR.SFX）', False, '沒有 window.CR')
         else:
@@ -942,6 +1021,24 @@ def main():
                 check('17.%s 10 秒渲染無 NaN / 峰值 %.4f ≤ 1.0 / 有訊號（RMS %.4f、%d 樣本）'
                       % (key, r['peak'], r['rms'], r['samples']),
                       r['nan'] == 0 and 0.02 < r['peak'] <= 1.0 and r['rms'] > 0.01, r)
+
+        # 18 R7（C7-4）：apu_render.py 合輯卡帶模式（--game cartN/id、cartN/menu、--table）
+        import subprocess, tempfile
+        render = ROOT / 'tools' / 'apu_render.py'
+        with tempfile.TemporaryDirectory() as td:
+            def ar(*a):
+                p = subprocess.run([sys.executable, str(render)] + list(a) + ['--out-dir', td],
+                                   capture_output=True, text=True, timeout=600)
+                return p.returncode, p.stdout + p.stderr
+            rc, out = ar('--game', 'cart1/maze', '--song', 'maze_title', '--seconds', '2')
+            check('18.1 --game cart1/maze：讀 CT.Maze.SONGS 渲染 + 五聲道檢查全 PASS', rc == 0 and '總結：PASS' in out
+                  and (pathlib.Path(td) / 'cart1_maze_maze_title.wav').exists(), out[-200:])
+            rc, out = ar('--game', 'cart2/rope', '--song', 'rope_title', '--seconds', '2', '--table')
+            check('18.2 --game cart2/rope：讀 CT.Rope.Audio.SONGS、--table 印出表格列', rc == 0 and '| cart2_rope/rope_title |' in out, out[-200:])
+            rc, out = ar('--game', 'cart2/menu', '--seconds', '2')
+            check('18.3 --game cart2/menu：選單曲（CT.Shell.dev.SONG）', rc == 0 and '總結：PASS' in out, out[-200:])
+            rc, out = ar('--game', 'cart2/nosuchgame', '--seconds', '1')
+            check('18.4 找不到的款 → 結束碼 1 + 明確 FAIL', rc == 1 and '找得到曲目表' in out, out[-200:])
 
         browser.close()
 

@@ -838,7 +838,7 @@
     get backTile() { return { tile: spB ? spB.index('BACK') : Object.keys(Z.SPR_TILES).indexOf('BACK'), pal: 0 }; },
     bot: bot,
     goal: function () { return !!g && g.clears >= 3 && g.cheats === 0; },
-    bestText: function () { return num(CT.load('maze', 'best', 0), 6); }
+    bestText: function () { return num(Math.min(999999, CT.load('maze', 'best', 0)), 6); }   // R6 §1-6：右對齊 6 字元（超過封頂）
   };
   CT.register(game);
 

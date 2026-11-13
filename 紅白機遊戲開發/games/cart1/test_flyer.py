@@ -202,14 +202,17 @@ def main():
         const ord0 = M.state().orderIndex; __nes.tap('start', 1); __nes.step(1); const a = M.state(); __nes.step(120); const b = M.state();
         const p = __nes.nes().ppu, A = CT.Flyer.Art.make(), w = A.hud('PAUSE  HOLD'), txt = w.every((t, i) => p.getTile(0, 1 + i, 27) === t);
         __nes.tap('start', 1); __nes.step(1); const c = M.state();
-        return { ord0, pl: a.playing, still: a.rowsPlayed === b.rowsPlayed, txt, resumed: c.playing, ord1: c.orderIndex, song: CT.Flyer.Audio.current, mode: GAME.state().s.mode }; }""")
+        return { ord0, pl: a.playing, paused: a.paused, still: a.rowsPlayed === b.rowsPlayed, txt, resumed: c.playing, ord1: c.orderIndex,
+                 row0: a.row, row1: c.row, dRows: c.rowsPlayed - a.rowsPlayed, song: CT.Flyer.Audio.current, mode: GAME.state().s.mode }; }""")
     ok('§6-2 暫停時 BGM 停止（120 幀 rowsPlayed 不動）', r['mode'] == 'play' and not r['pl'] and r['still'], r)
     ok('§6-2 解除暫停 → 同一首、同一小節接續播放', r['resumed'] and r['song'] == 'flyer_sky' and r['ord1'] == r['ord0'], r)
+    ok('fix-r6 P3-8 暫停走 engine pause（state.paused）、解除從同一 row 接續（不回 row 0）',
+       r['paused'] and r['row1'] in (r['row0'], r['row0'] + 1) and 0 <= r['dRows'] <= 1, r)
     ok('§6-5 暫停狀態列寫著 PAUSE  HOLD START+SELECT: MENU', r['txt'], r)
     # §6-3 / P3-2
     r = page.evaluate("""() => { const g = CT.Flyer.dev.g(); g.passed = 17; CT.get('flyer').exit(__nes.nes()); const b1 = CT.load('flyer', 'best', 0);
         g.passed = 3; CT.get('flyer').exit(__nes.nes()); return { b1, b2: CT.load('flyer', 'best', 0), text: CT.get('flyer').bestText() }; }""")
-    ok('§6-3 exit() 存最高分（較低不覆蓋）、bestText 反映', r['b1'] == 17 and r['b2'] == 17 and r['text'] == '017 GATE', r)
+    ok('§6-3 exit() 存最高分（較低不覆蓋）、bestText 反映', r['b1'] == 17 and r['b2'] == 17 and r['text'] == '0017GT', r)
     # §6-4 / P3-9
     r = page.evaluate("""() => { const bt = CT.get('flyer').backTile, A = CT.Flyer.Art.make();
         return { bt, star: A.spr.index('STAR'), wing: [0,1,2,3].map(q => A.spr.index('BIRD0_' + q)) }; }""")

@@ -196,6 +196,20 @@
       if (!d || !SFX[name]) return false;
       try { d.sfx(name); return true; } catch (e) { return false; }
     },
-    tick: function (nes) { var d = drv(nes); if (d) { try { d.tick(); } catch (e) { } } }
+    tick: function (nes) { var d = drv(nes); if (d) { try { d.tick(); } catch (e) { } } },
+    // R6：暫停 = driver pause（記住 row）、解除 = 從同一 row 接續（engine NES.Music.pause / resume）
+    pauseKey: null,
+    pause: function (nes) {
+      var d = drv(nes), k = K.Audio.current;
+      K.Audio.pauseKey = k; K.Audio.current = null;
+      if (!d) return;
+      try { if (k && d.pause) d.pause(); else d.stop(); } catch (e) { }
+    },
+    resume: function (nes) {                     // 回 true = 已接續；false = 呼叫端照舊重播
+      var d = drv(nes), k = K.Audio.pauseKey;
+      K.Audio.pauseKey = null;
+      if (!d || !k || !d.isPaused || !d.isPaused()) return false;
+      try { d.resume(); K.Audio.current = k; return true; } catch (e) { return false; }
+    }
   };
 })(typeof window !== 'undefined' ? window : this);

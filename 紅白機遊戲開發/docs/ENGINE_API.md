@@ -371,6 +371,17 @@ song 格式定義寫在 `engine/music.js` 檔頭（pattern 陣列；每列 = 1 �
 | `define(name, sfxData)` | 註冊音效 |
 | `tick()` | 每幀呼叫一次，**由遊戲的 `update()` 呼叫**（不是 nes.js） |
 | `state()` | channel 快照，R2 起新增 `detune / slide / slideAcc` 三欄 |
+| `pause()` | **R6 新增**：曲子播放中才有效——記下曲子 / order / row / rowFrame / 各聲道狀態後靜音（`playing = false`、`$4015 = 0`）；之後 `tick()` 不推進音樂（`rowsPlayed` 不動），**音效照常播**。已暫停 / 沒在播 ⇒ 不動作 |
+| `resume()` | **R6 新增**：從暫停時**同一 row 同一幀**接續（不是小節開頭），聲道狀態還原並強制重寫暫存器；回 `true`。沒有快照 ⇒ 回 `false`、不動作。**暫停後呼叫過 `play()` / `stop()` ⇒ 快照作廢**（stop 的曲子不會被 resume 復活） |
+| `isPaused()` | **R6 新增**：有暫停快照 ⇒ `true`；`state().paused` 同值 |
+
+遊戲暫停的標準寫法（R6 起；cart1 blocks / brick / racing / tower 已改用）：
+```js
+// 暫停：記下自己的曲名（給畫面 / 測試），再 pause；解除：有快照就 resume，否則照舊重播
+if (on) { pauseKey = Audio.current; Audio.current = null; nes.music.pause ? nes.music.pause() : nes.music.stop(); }
+else if (nes.music.isPaused && nes.music.isPaused()) { nes.music.resume(); Audio.current = pauseKey; }
+else if (pauseKey) Audio.play(pauseKey);
+```
 
 ### 效果欄（R2 audio agent 新增；格式向下相容，demo 曲零改動）
 | 欄 | 說明 |

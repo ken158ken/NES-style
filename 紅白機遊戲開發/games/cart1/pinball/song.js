@@ -156,11 +156,17 @@
       if (!d || !SFX[name]) return false;
       try { if (!defined) Audio.init(Audio._nes); d.sfx(name); return true; } catch (e) { return false; }
     },
-    // 暫停（fix-r5 §6-2）：記下目前小節後停 driver；resume 從同一小節接續播放
+    // 暫停（fix-r5 §6-2 → fix-r6 P3-8）：engine NES.Music.pause() 記住 row 並靜音；resume() 從同一 row 同一幀接續
+    //   （與 blocks / brick / racing / tower 一致）。driver 沒有 pause（舊引擎）時退回「記小節 → stop → 從小節開頭重播」。
     pause: function () {
       var d = drv(Audio._nes);
       if (!d || !Audio.current || Audio._paused) return false;
-      var st = null; try { st = d.state ? d.state() : d; } catch (e) { st = d; }   // nes.music 是包裝 API：位置要從 state() 讀
+      if (d.pause && d.isPaused) {
+        Audio._paused = { key: Audio.current, engine: true };
+        try { d.pause(); } catch (e) { }
+        return true;
+      }
+      var st = null; try { st = d.state ? d.state() : d; } catch (e) { st = d; }
       Audio._paused = { key: Audio.current, from: st && st.playing ? (st.orderIndex || 0) : -1 };
       try { d.stop(); if (d.stopSfx) d.stopSfx(); } catch (e) { }
       return true;
@@ -168,7 +174,12 @@
     resume: function () {
       var d = drv(Audio._nes), p = Audio._paused, s = p && SONGS[p.key];
       Audio._paused = null;
-      if (!d || !s || p.from < 0) return false;
+      if (!d || !p) return false;
+      if (p.engine) {
+        if (!d.isPaused()) return false;            // 暫停期間有人 play / stop ⇒ 快照作廢，不復活
+        try { d.resume(); Audio.current = p.key; return true; } catch (e) { return false; }
+      }
+      if (!s || p.from < 0) return false;
       try { d.play(s, { loop: s.playLoop, from: p.from % s.order.length }); Audio.current = p.key; return true; } catch (e) { return false; }
     },
     tick: function () { var d = drv(Audio._nes); if (d) { try { d.tick(); } catch (e) { } } }

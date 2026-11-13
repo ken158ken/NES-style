@@ -27,14 +27,16 @@ ENGINE_ORDER = ['palette.js', 'fixed.js', 'input.js', 'cpu_timing.js', 'chr.js',
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--out', default='')
-    ap.add_argument('--src', default='game.html', help='入口頁（game.html = 星塵測試室 demo；star.html = 星塵勇者；cruiser.html = 星塵巡航艦；mech.html = 星塵機甲；cart1.html = 星塵 8 合 1）')
+    ap.add_argument('--src', default='game.html', help='入口頁（game.html = 星塵測試室 demo；star.html = 星塵勇者；cruiser.html = 星塵巡航艦；mech.html = 星塵機甲；cart1.html = 星塵 8 合 1；cart2.html = 星塵反應 8 合 1；cart3.html = 星塵益智 8 合 1）')
     ap.add_argument('--check', action='store_true', help='只檢查不寫檔')
     a = ap.parse_args()
     global SRC
     SRC = ROOT / a.src
     if not a.out:
         a.out = {'cruiser.html': 'dist/星塵巡航艦.html', 'star.html': 'dist/星塵勇者.html',
-                 'mech.html': 'dist/星塵機甲.html', 'cart1.html': 'dist/星塵8合1.html'}.get(a.src, 'dist/星塵測試室.html')
+                 'mech.html': 'dist/星塵機甲.html', 'cart1.html': 'dist/星塵8合1.html',
+                 'cart2.html': 'dist/星塵反應8合1.html',
+                 'cart3.html': 'dist/星塵益智8合1.html'}.get(a.src, 'dist/星塵測試室.html')
 
     html = SRC.read_text(encoding='utf-8')
     found, missing, order = [], [], []
@@ -60,6 +62,9 @@ def main():
     # R2：只補「入口頁已經用到的遊戲資料夾」底下的漏列檔（games/demo 與 games/cruiser 各自成一款）
     used_dirs = {s.rsplit('/', 1)[0] for s in listed if s.startswith('games/')}
     extra = [s for s in extra if s not in listed and s.rsplit('/', 1)[0] in used_dirs]
+    # R6：games/cartN/cart.js 是「卡帶設定」（CT.CART_CFG），只能由該卡自己的入口頁列；cart2 用到 games/cart1/ 的共用檔
+    #     時不可把 cart1 的設定補進來（會蓋掉 cart2 的 CART_CFG）
+    extra = [s for s in extra if not s.endswith('/cart.js')]
     if extra:
         blocks = []
         for src in extra:

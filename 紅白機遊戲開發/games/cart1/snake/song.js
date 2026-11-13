@@ -181,10 +181,16 @@
         try { d.define(name, SFX[name]); d.sfx(name); return true; } catch (e2) { return false; }
       }
     },
-    // fix-r5 §6-2：暫停 = 停 BGM（音效照常），記住目前小節；解除時同一首從該小節接續
+    // fix-r5 §6-2 → fix-r6 P3-8：暫停 = engine NES.Music.pause()（停 BGM、音效照常、記住 row）；
+    //   解除 = resume() 從同一 row 同一幀接續（與 blocks / brick / racing / tower 一致）。舊引擎沒有 pause ⇒ 退回記小節重播。
     paused: null,
     pause: function (nes) {
       var d = core(nes); if (!d || !S.Audio.current) return false;
+      if (d.pause && d.isPaused) {
+        S.Audio.paused = { key: S.Audio.current, engine: true, was: !!d.playing };
+        try { d.pause(); } catch (e) { }
+        return true;
+      }
       S.Audio.paused = { key: S.Audio.current, from: d.playing ? (d.orderIndex || 0) : 0, was: !!d.playing };
       try { d.stop(); } catch (e) { }
       return true;
@@ -192,6 +198,10 @@
     resume: function (nes) {
       var p = S.Audio.paused, d = core(nes); S.Audio.paused = null;
       if (!p || !d || !p.was) return false;
+      if (p.engine) {
+        if (!d.isPaused()) return false;            // 暫停期間 play / stop 過 ⇒ 快照作廢
+        try { d.resume(); S.Audio.current = p.key; return true; } catch (e) { return false; }
+      }
       var s = S.SONGS[p.key]; if (!s) return false;
       try { d.play(s, { loop: s.playLoop, from: p.from }); S.Audio.current = p.key; return true; } catch (e) { return false; }
     },

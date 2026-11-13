@@ -200,7 +200,20 @@
         try { d.define(name, SFX[name]); d.sfx(name); return true; } catch (e2) { return false; }
       }
     },
-    tick: function () { var d = drv(); try { d && d.tick && d.tick(); } catch (e) { } }
+    tick: function () { var d = drv(); try { d && d.tick && d.tick(); } catch (e) { } },
+    // R6：暫停 = driver pause（記住 row）、解除 = 從同一 row 接續（engine NES.Music.pause / resume）
+    pauseKey: null,
+    pause: function () {
+      var d = drv(), k = Audio.current;
+      Audio.pauseKey = k; Audio.current = null;
+      try { if (d) { if (k && d.pause) d.pause(); else d.stop(); } } catch (e) { }
+    },
+    resume: function () {                        // 回 true = 已接續；false = 呼叫端照舊重播
+      var d = drv(), k = Audio.pauseKey;
+      Audio.pauseKey = null;
+      if (!d || !k || !d.isPaused || !d.isPaused()) return false;
+      try { d.resume(); Audio.current = k; return true; } catch (e) { return false; }
+    }
   };
   R.Audio = Audio;
   if (offline) {                            // 只給 tools/apu_render.py 用（見檔頭）

@@ -317,7 +317,7 @@
     // START 暫停（SELECT 同時按著 = registry 的回選單組合，不處理）
     if (pressed(BTN.START) && !held(BTN.SELECT) && g.sub !== 'over' && g.sub !== 'done') {
       g.paused = !g.paused;
-      if (g.paused) B.Audio.stop(nes0); else playMusic();
+      if (g.paused) B.Audio.pause(nes0); else if (!B.Audio.resume(nes0)) playMusic();   // R6：從同一 row 接續
       sfx('blocks_ok');
     }
     if (g.paused) return;
@@ -713,7 +713,7 @@
     cheat: cheat,
     bot: function () { return g ? bot() : 0; },
     goal: function () { return !!(g && g.goal && g.cheats === 0); },
-    bestText: function () { return num(CT.load('blocks', 'best', 0), 7); }
+    bestText: function () { return num(Math.min(999999, CT.load('blocks', 'best', 0)), 6); }   // R6 §1-6：右對齊 6 字元
   };
 
   // 測試鉤子（只讀寫本遊戲狀態，不碰 engine）

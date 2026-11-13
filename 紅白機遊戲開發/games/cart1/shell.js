@@ -1,7 +1,11 @@
 /*
- * games/cart1/shell.js — 《星塵 8 合 1》開機選單（設 CT.Shell）
+ * games/cart1/shell.js — 合輯卡帶共用的開機選單（設 CT.Shell；R5《星塵 8 合 1》起，R6 起多卡帶共用）
  * ---------------------------------------------------------------------------
- * 擁有者：C5-0 cart1-shell agent（R5）。契約：docs/R5_BRIEF.md §2 / §4、games/cart1/registry.js。
+ * 擁有者：C5-0 cart1-shell agent（R5）→ C6-0 cart-platform（R6 多卡帶化）。契約：docs/R5_BRIEF.md §2 / §4、games/cart1/registry.js。
+ *
+ * R6 多卡帶：卡帶專屬的資料（logo 字 / 副標 / 8 槽 + 圖示 / 槽名點陣 / 選單曲 / 調色盤）一律由
+ *   `CT.CART_CFG`（games/cartN/cart.js，在本檔之前載入）提供，本檔只留共用的邏輯與磁磚；
+ *   CHR bank / 音效名稱前綴 = CART_CFG.prefix（cart1 = 'cart1_'，與 R5 相同）。沒有 CART_CFG ⇒ 退回空設定（只列已註冊的款）。
  *
  * 流程：開機 logo「STARDUST WORKS」（星星落下 + 鐘聲，約 2.5 秒，A / START 可跳過）
  *     → 選單畫面：上方原創 logo 字「星塵 8 合 1」（16×16 中文字 + 陰影）、下方 8 槽清單
@@ -10,8 +14,8 @@
  *     → 遊戲內 START+SELECT 按住 60 幀 → registry 呼叫 CT.back() → 本檔 init({from:id})，
  *       直接回選單（不重播開機 logo），游標停在剛玩的那款。
  *
- * 畫面規格（全部經 PPU）：BG 表 0 = bank 'cart1_bg'（engine 原創 DEMO.FONT + 邊框 + 星點 +
- *   圖示 + logo 字 + 選單用到的中文字），精靈表 1 = 'cart1_spr'（游標星、閃光、開機大星）。
+ * 畫面規格（全部經 PPU）：BG 表 0 = bank '<prefix>_bg'（engine 原創 DEMO.FONT + 邊框 + 星點 +
+ *   圖示 + logo 字 + 選單用到的中文字），精靈表 1 = '<prefix>_spr'（游標星、閃光、開機大星）；cart1 = 'cart1_bg' / 'cart1_spr'。
  *   中文字是離線用 Noto Sans CJK TC（SIL OFL）16px 點陣化後的 16×16 位元圖（每字 4 磚，
  *   只建這次選單用得到的字）；遇到表外的字 → 執行期用 canvas 點陣化一次；再不行就顯示 id 英文。
  *   調色盤：BG0 一般字 / BG1 選中行 / BG2 暖色圖示 + logo / BG3 冷色圖示；同屏 ≤ 25 色。
@@ -22,62 +26,54 @@
  *   「往中間收攏 + 快閃」；沒填 ⇒ 不借精靈，改閃 backdrop（越接近 60 幀閃越快）。放開後全部還原。
  *   （正式 hook 的需求寫在 PROGRESS 跨檔需求。）
  *
- * 音樂 / 音效（全部原創，名稱前綴 cart1_）：選單曲 cart1_menu、cart1_move / cart1_ok / cart1_ng / cart1_boot。
+ * 音樂 / 音效（全部原創）：選單曲 = CART_CFG.song（cart1_menu / cart2_menu …）、音效 <prefix>_move / _ok / _ng / _boot。
  */
 (function () {
   'use strict';
   var NES = window.NES = window.NES || {};
   var CT = window.CT = window.CT || {};
 
-  /* ============================================================ 槽位預設表（LEGACY_MAP 卡帶一） */
-  var DEFAULT_SLOTS = [
-    { id: 'maze', order: 1, title: '星塵迷宮', icon: 'maze' },
-    { id: 'blocks', order: 2, title: '星塵方塊', icon: 'blocks' },
-    { id: 'brick', order: 3, title: '星塵打磚塊', icon: 'brick' },
-    { id: 'pinball', order: 4, title: '星塵彈珠台', icon: 'pinball' },
-    { id: 'snake', order: 5, title: '星塵貪食蟲', icon: 'snake' },
-    { id: 'racing', order: 6, title: '星塵賽車', icon: 'racing' },
-    { id: 'flyer', order: 7, title: '星塵飛鳥', icon: 'flyer' },
-    { id: 'tower', order: 8, title: '星塵塔防', icon: 'tower' }
-  ];
+  /* ============================================================ 卡帶設定（CT.CART_CFG，見 games/cart1/cart.js 檔頭） */
+  var FALLBACK_CFG = {
+    id: 'cart', prefix: 'cart', title: 'STARDUST', logo: [], logoGlyph: {}, sub: 'STARDUST 8 IN 1', subCol: 8,
+    slots: [], glyph: {}, song: null, palettes: null
+  };
+  function cfg() { return CT.CART_CFG || FALLBACK_CFG; }
+  function prefix() { return String(cfg().prefix || cfg().id || CT.CART || 'cart'); }
+  // 槽位預設表（= CART_CFG.slots 換成 R5 的 {id, order, title, icon} 形狀）
+  function defaultSlots() {
+    return (cfg().slots || []).map(function (d, k) {
+      return { id: d.id, order: d.order || (k + 1), title: d.name || d.title || d.id, icon: d.id, legacy: d.legacy || [] };
+    });
+  }
   var MAX_SLOTS = 10;          // 預設 8 槽；表外 id 的註冊遊戲接在後面（最多 10 列，第 9 列起不畫說明列）
   var NAME_CHARS = 6;          // 名稱最多 6 個中文字（12 欄）
 
   /* ============================================================ 16×16 中文點陣（每列 4 位十六進位） */
+  // 共用字（準備中）；槽名用字由 CART_CFG.glyph 提供，logo 字由 CART_CFG.logoGlyph 提供
   // 產生方式：PIL ImageFont（NotoSansCJK-Regular.ttc, TC, 16px, 門檻 90 / logo 用 Bold 15px 門檻 120）
-  var GLYPH = {
-    '星': '1ffc100c1ffc100c100c1ff8198019803ffc61801ff8018001807ffe00000000',
-    '塵': '008000803ffe22603ffe22663ffe2c602ffe2c622fbe60806ffc40807ffe4000',
-    '迷': '22643364016c7968106037fe616879681b641e661c62106038606e0047fe0000',
-    '宮': '010001807ffe60066ff66816081008100ff001001ffc100c100c100c1ffc1008',
-    '方': '018000807ffe06000600060007fc060804080c080c0818081818301860f00000',
-    '塊': '108013fe12267e2633fe1226122613fe10b014bc3cba71be41300333063e0000',
-    '打': '1000180019ff18187e181818181818181e1878185818181818181818101870f0',
-    '磚': '00307ffe303031fe213621fe3d3665fe6434e7fe640827fe24883cc820480038',
-    '彈': '7bde0a520bde08007bfe4326432643fe7b260bfe08200fff0820182078200000',
-    '珠': '00207da011a011fe112013207e20102013ff107010f814a87da4632606220020',
-    '台': '0300020006200c30181831fc3ffc000600001ff810081008100810081ff81008',
-    '貪': '018003c00e703ffc700e1ff800301ff810081ff81ff810081ff80c30781c6006',
-    '食': '0180038006401ff0781c7ffe18181ff8181818181ff8180c19f818701f98180c',
-    '蟲': '01801ffc118c118c1ffc01987ffc080608107efe4a927efe0a140a167ffe0102',
-    '賽': '01807ffe44227ffe04201ff87ffe7ffe1ffc781e5ff81ff818180ff01c3c7004',
-    '車': '018001807ffe01803ffc318c318c3ffc318c318c3ffc01807ffe018001800180',
-    '飛': '3ff4013c0d3c791e7110111a110e7ff01136111c111e31122118610f41060000',
-    '鳥': '010001001ff810081ff810081ff810001ffe10001ffe0006252625b66484401c',
-    '塔': '1108110c17fe110c7d6830f01198130e17fa10001ffc3b046304030403fc0104',
-    '防': '7c206c206ffe68c068c068c06cfc64c4648464847d8461046304660c64380000',
+  var BASE_GLYPH = {
     '準': '21203b2007fe66203ffc02200bfc1220322063fe01807ffe0180018001800180',
     '備': '199817fe3198319877fe730077fe3e66326633fe326633fe36663666342c0000',
     '中': '0180018001807ffe618661866186618661867ffe618601800180018001800180'
   };
-  var LOGO_GLYPH = {
-    '星': '00003ff830183ff830183ff8198039803ff87ff863801ff801807ffc7ffc0000',
-    '塵': '01803ffc36e026c03ffc26cc3ffc2c786ffc6d7c6f806ff86180fffc40000000',
-    '合': '0180038007c00ee01c787ffc7fec00001ff01ff8181818181ff81ff818100000',
-    // 數字是手繪（粗體 8 / 1）
+  function glyphTable() {
+    var out = {}, k, g = cfg().glyph || {};
+    for (k in g) if (Object.prototype.hasOwnProperty.call(g, k)) out[k] = g[k];
+    for (k in BASE_GLYPH) if (Object.prototype.hasOwnProperty.call(BASE_GLYPH, k)) out[k] = BASE_GLYPH[k];
+    return out;
+  }
+  // logo 用的手繪粗體數字（各卡帶 logo 都是「…8 合 1」，cfg.logoGlyph 沒給就用這兩個）
+  var LOGO_DIGIT = {
     '8': '000007e00c301c381c380e7007e00e701c38381c381c381c1c3807f000000000',
     '1': '000001c003c007c00dc001c001c001c001c001c001c001c00ff8000000000000'
   };
+  function logoTable() {
+    var out = {}, k, g = cfg().logoGlyph || {};
+    for (k in g) if (Object.prototype.hasOwnProperty.call(g, k)) out[k] = g[k];
+    for (k in LOGO_DIGIT) if (Object.prototype.hasOwnProperty.call(LOGO_DIGIT, k) && !out[k]) out[k] = LOGO_DIGIT[k];
+    return out;
+  }
   var READY_TEXT = '準備中';
 
   function hexRows(hex) {           // 64 hex → 16 個 16 位元整數
@@ -135,147 +131,9 @@
   }
 
   /* ============================================================ 圖示（16×16，原創；. 1 2 3） */
-  var ICON = {
-    // R5 fix：抽象單線迷宮 + 中央星星（避開吃豆 / 追兵造型；牆綠、星白、角落藍星屑）
-    maze: { pal: 3, art: [
-      '2222222222222222',
-      '2......2.......2',
-      '2.2222.2.22222.2',
-      '2.2.........2..2',
-      '2.2.2..3..2.2.22',
-      '2...2.333.2....2',
-      '222.233333222..2',
-      '2.....333......2',
-      '2.2..33.33..2.22',
-      '2.2.........2..2',
-      '2.22222.2.222..2',
-      '2.......2......2',
-      '2.222.2.2.2222.2',
-      '2...2.2...2....2',
-      '2.1.2.222.2..1.2',
-      '2222222222222222'] },
-    blocks: { pal: 2, art: [
-      '................',
-      '......3333......',
-      '......3223......',
-      '......3223......',
-      '......3333......',
-      '..3333....1111..',
-      '..3223....1221..',
-      '..3223....1221..',
-      '..3333....1111..',
-      '1111333311113333',
-      '1221322312213223',
-      '1221322312213223',
-      '1111333311113333',
-      '3333111111113333',
-      '3223122112213223',
-      '3333111111113333'] },
-    brick: { pal: 2, art: [
-      '1111.2222.1111.2',
-      '1111.2222.1111.2',
-      '................',
-      '22.1111.2222.111',
-      '22.1111.2222.111',
-      '................',
-      '1111.2222.......',
-      '1111.2222.......',
-      '................',
-      '..........33....',
-      '.........3333...',
-      '.........3333...',
-      '..........33....',
-      '................',
-      '....2222222.....',
-      '...333333333....'] },
-    pinball: { pal: 3, art: [
-      '..2222......22..',
-      '.2....2....2..2.',
-      '2..33..2...2..2.',
-      '2..33..2....22..',
-      '.2....2.........',
-      '..2222.....33...',
-      '..........3333..',
-      '..........3333..',
-      '...........33...',
-      '................',
-      '1..............1',
-      '11............11',
-      '.111........111.',
-      '..1111....1111..',
-      '....111..111....',
-      '................'] },
-    snake: { pal: 3, art: [
-      '................',
-      '............3...',
-      '...........333..',
-      '............3...',
-      '................',
-      '....1111........',
-      '...122221.......',
-      '..12232321......',
-      '..12222221......',
-      '...1112221......',
-      '......12221..111',
-      '.......122211221',
-      '.......122222221',
-      '........1222221.',
-      '.........11111..',
-      '................'] },
-    // R5 fix：俯視賽車（遊戲是俯視捲軸）+ 左側紅白路緣
-    racing: { pal: 2, art: [
-      '11..............',
-      '11...222222.....',
-      '33.1122222211...',
-      '33.1122222211...',
-      '11..23333332....',
-      '11..23333332....',
-      '33..22222222....',
-      '33..22211222....',
-      '11..22211222....',
-      '11..22222222....',
-      '33.1122222211...',
-      '33.1123333211...',
-      '11.1122222211...',
-      '11...222222.....',
-      '33..............',
-      '33..............'] },
-    // R5 fix（P3-8）：藍色星燕「琉璃」（星冠、燕尾分叉、白腹、黑眼；同遊戲內 PAL_BIRD 的 0x12 藍 + 白）
-    flyer: { pal: 3, art: [
-      '.........3......',
-      '........333.....',
-      '..1......3......',
-      '..11....111.....',
-      '...11..11111....',
-      '...111.11.111...',
-      '1...111111111333',
-      '11...11111113...',
-      '.11.1111111333..',
-      '..111111113333..',
-      '...1111113333...',
-      '..11.1111333....',
-      '.11...11111.....',
-      '11..............',
-      '................',
-      '................'] },
-    tower: { pal: 3, art: [
-      '......2.........',
-      '......2222......',
-      '......222.......',
-      '......2.........',
-      '....1.1.1.1.....',
-      '....1111111.....',
-      '.....11111......',
-      '.....13131......',
-      '.....11111......',
-      '.....11311......',
-      '.....11111......',
-      '....1111111.....',
-      '....1131311.....',
-      '...111111111....',
-      '..11111111111...',
-      '................'] },
-    none: { pal: 0, art: [
+  // 各槽圖示來自 CART_CFG.slots[i].icon {pal, art}；none = 未註冊 / 表外 id 的「?」
+  var NONE_ICON = {
+    pal: 0, art: [
       '................',
       '.22222222222222.',
       '.2............2.',
@@ -291,8 +149,15 @@
       '.2............2.',
       '.22222222222222.',
       '................',
-      '................'] }
+      '................']
   };
+  function iconTable() {
+    var out = {}, sl = cfg().slots || [], i;
+    for (i = 0; i < sl.length; i++) if (sl[i] && sl[i].icon && sl[i].icon.art) out[sl[i].id] = { pal: sl[i].icon.pal | 0, art: sl[i].icon.art };
+    out.none = NONE_ICON;
+    return out;
+  }
+  var ICON = iconTable();
   function artQuad(art) {
     var q = [[], [], [], []], y;
     for (y = 0; y < 16; y++) {
@@ -368,45 +233,18 @@
     return out;
   }
   var R32 = 32;
-  // 選單曲「星塵卡帶」：F 大調、speed 6（≈150 BPM）、4 段 × 2 小節，A A' B C 後回 A；全部自作
-  var MENU_SONG = {
-    name: 'cart1_menu', speed: 6, rows: R32, loop: 0,
-    instruments: {
-      lead: { vol: [14, 13, 12, 11, 10, 10, 9, 9, 8, 8, 7], volLoop: 10, duty: [2, 2, 1] },
-      harm: { vol: [9, 8, 7, 6, 5, 4, 3, 2, 1, 0], duty: [1] },
-      bass: { vol: [15] },
-      kick: { vol: [15, 12, 8, 4, 0] },
-      snare: { vol: [13, 10, 7, 5, 3, 1, 0] },
-      hat: { vol: [8, 4, 0] }
-    },
-    patterns: [
-      { // A
-        p1: track('F-5 - A-5 - C-6 - - - A-5 - C-6 - D-6 - C-6 - A-5 - - - G-5 - F-5 - G-5 - A-5 - - - - -', 'lead', 13, 2, R32),
-        p2: track('A-4 - C-5 - - - A-4 - C-5 - - - A-4 - C-5 - E-4 - G-4 - - - E-4 - G-4 - - - C-5 - - -', 'harm', 10, 1, R32),
-        tri: track('F-3 - - - F-3 - C-3 - F-3 - - - F-3 - C-3 - C-3 - - - C-3 - G-2 - C-3 - - - E-3 - - -', 'bass', 15, null, R32),
-        noi: drums('k - h - s - h - k - h k s - h - k - h - s - h - k - h k s - s s', R32)
-      },
-      { // A'
-        p1: track('F-5 - A-5 - C-6 - - - A-5 - C-6 - F-6 - E-6 - D-6 - - - C-6 - A#5 - A-5 - G-5 - - - F-5 -', 'lead', 13, 2, R32),
-        p2: track('A-4 - C-5 - - - A-4 - C-5 - - - A-4 - C-5 - A#4 - D-5 - - - A#4 - C-5 - - - A-4 - - -', 'harm', 10, 1, R32),
-        tri: track('F-3 - - - F-3 - C-3 - F-3 - - - F-3 - C-3 - A#2 - - - A#2 - F-2 - C-3 - - - F-3 - - -', 'bass', 15, null, R32),
-        noi: drums('k - h - s - h - k - h k s - h - k - h - s - h - k - h k s - s s', R32)
-      },
-      { // B（轉到 D 小調，帶一點冒險感）
-        p1: track('D-6 - - - C-6 - A-5 - - - F-5 - G-5 - A-5 - A#5 - - - A-5 - G-5 - - - E-5 - C-5 - - -', 'lead', 12, 1, R32),
-        p2: track('F-4 - A-4 - - - F-4 - A-4 - - - F-4 - A-4 - G-4 - A#4 - - - G-4 - A#4 - - - G-4 - - -', 'harm', 9, 1, R32),
-        tri: track('D-3 - - - D-3 - A-2 - D-3 - - - D-3 - A-2 - G-2 - - - G-2 - D-3 - C-3 - - - C-3 - - -', 'bass', 15, null, R32),
-        noi: drums('k - h - s - h h k - h - s - h h k - h - s - h h k - k - s s s s', R32)
-      },
-      { // C（回主調的上行收束）
-        p1: track('A#5 - A-5 - G-5 - A#5 - A-5 - G-5 - F-5 - A-5 - G-5 - E-5 - C-5 - E-5 - F-5 - - - - - - -', 'lead', 13, 2, R32),
-        p2: track('D-5 - C-5 - A#4 - D-5 - C-5 - A#4 - A-4 - C-5 - A#4 - G-4 - E-4 - G-4 - A-4 - - - - - - -', 'harm', 9, 1, R32),
-        tri: track('A#2 - - - A#2 - - - F-3 - - - F-3 - - - C-3 - - - C-3 - - - F-3 - C-3 - F-2 - - -', 'bass', 15, null, R32),
-        noi: drums('k - h - s - h - k - h - s - h - k - h - s - h - k - s s k s s s', R32)
-      }
-    ],
-    order: [0, 1, 2, 3]
-  };
+  // 選單曲 = CART_CFG.song（物件，或 function(kit) → song）；同一個 cfg 只建一次
+  var songCache = { src: null, song: null };
+  function menuSong() {
+    var src = cfg().song;
+    if (!src) return null;
+    if (songCache.src !== src) {
+      songCache.src = src;
+      try { songCache.song = (typeof src === 'function') ? src({ track: track, drums: drums, R32: R32 }) : src; }
+      catch (e) { songCache.song = null; }
+    }
+    return songCache.song;
+  }
   function sq(list) {               // [[note, frames, vol, duty?], ...] → 方波音效幀
     var out = [], i, j;
     for (i = 0; i < list.length; i++) {
@@ -420,12 +258,21 @@
     out.push({ off: true });
     return out;
   }
-  var SFX = {
-    cart1_move: { priority: 3, data: { p2: sq([['E-6', 2, 9, 1], ['A-6', 3, 7, 1]]) } },
-    cart1_ok: { priority: 6, data: { p2: sq([['C-6', 3, 12, 2], ['E-6', 3, 12, 2], ['G-6', 3, 12, 2], ['C-7', 8, 11, 2], ['C-7', 6, 6, 2]]) } },
-    cart1_ng: { priority: 5, data: { p2: sq([['C-4', 4, 11, 0], ['B-3', 6, 9, 0]]) } },
-    cart1_boot: { priority: 7, data: { p2: sq([['G-6', 4, 13, 1], ['D-7', 4, 12, 1], ['G-7', 10, 11, 1], ['G-7', 10, 6, 1], ['G-7', 10, 3, 1]]) } }
+  var SFX_BASE = {
+    move: { priority: 3, data: { p2: sq([['E-6', 2, 9, 1], ['A-6', 3, 7, 1]]) } },
+    ok: { priority: 6, data: { p2: sq([['C-6', 3, 12, 2], ['E-6', 3, 12, 2], ['G-6', 3, 12, 2], ['C-7', 8, 11, 2], ['C-7', 6, 6, 2]]) } },
+    ng: { priority: 5, data: { p2: sq([['C-4', 4, 11, 0], ['B-3', 6, 9, 0]]) } },
+    boot: { priority: 7, data: { p2: sq([['G-6', 4, 13, 1], ['D-7', 4, 12, 1], ['G-7', 10, 11, 1], ['G-7', 10, 6, 1], ['G-7', 10, 3, 1]]) } }
   };
+  // 音效名 = <prefix>_move / _ok / _ng / _boot（CART_CFG.sfx 可逐個覆寫資料）；cart1 = cart1_move …（同 R5）
+  var SFX = {};
+  function buildSfx() {
+    var k, o = (cfg().sfx) || {};
+    SFX = {};
+    for (k in SFX_BASE) if (Object.prototype.hasOwnProperty.call(SFX_BASE, k)) SFX[prefix() + '_' + k] = o[k] || SFX_BASE[k];
+    return SFX;
+  }
+  buildSfx();
   function music(nes) { return (nes && nes.music) || (NES.Music && NES.Music._default ? NES.Music : null); }
   function defineSfx(nes) {
     var m = music(nes), k;
@@ -441,7 +288,9 @@
   function playMenuSong(nes) {
     var m = music(nes);
     if (!m || !m.play) return;
-    try { m.play(MENU_SONG, { loop: true }); S.song = 'cart1_menu'; } catch (e) { }
+    var song = menuSong();
+    if (!song) { try { m.stop(); } catch (e0) { } S.song = null; return; }
+    try { m.play(song, { loop: true }); S.song = song.name || (prefix() + '_menu'); } catch (e) { }
   }
 
   /* ============================================================ 狀態 */
@@ -457,10 +306,12 @@
 
   function buildSlots() {
     var list = [], seen = {}, i, g;
+    var DEFAULT_SLOTS = defaultSlots();
     for (i = 0; i < DEFAULT_SLOTS.length; i++) {
       var d = DEFAULT_SLOTS[i];
       g = CT.get ? CT.get(d.id) : null;
-      list.push({ id: d.id, order: g && g.order ? g.order : d.order, title: g ? (g.title || d.title) : d.title,
+      // R6：卡帶設定裡的槽位順序優先（選單版面歸卡帶管；cart1 兩邊一致 ⇒ 與 R5 相同），表外 id 才用遊戲自己的 order
+      list.push({ id: d.id, order: d.order || (g && g.order) || 99, title: g ? (g.title || d.title) : d.title,
                   icon: d.icon, game: g });
       seen[d.id] = 1;
     }
@@ -491,10 +342,13 @@
 
   /* ============================================================ CHR bank */
   function glyphBits(ch) {
-    if (GLYPH[ch]) return hexRows(GLYPH[ch]);
+    var G = glyphTable();
+    if (G[ch]) return hexRows(G[ch]);
     return rasterGlyph(ch);
   }
   function buildBanks() {
+    ICON = iconTable();
+    var LOGO_GLYPH = logoTable();
     var bg = {}, k, i, q, F = (NES.CHR && NES.CHR.DEMO && NES.CHR.DEMO.FONT) || {};
     bg.SP = ['........', '........', '........', '........', '........', '........', '........', '........'];
     for (k in F) if (Object.prototype.hasOwnProperty.call(F, k) && k !== 'SP') bg[k] = F[k];
@@ -537,24 +391,25 @@
       }
       sl.nameMode = (okAll && t.length) ? 'glyph' : 'ascii';
     }
-    S.bank = NES.CHR.bank('cart1_bg', bg);
-    S.spr = NES.CHR.bank('cart1_spr', SPR);
+    S.bank = NES.CHR.bank(prefix() + '_bg', bg);
+    S.spr = NES.CHR.bank(prefix() + '_spr', SPR);
     S.tileCount = S.bank.tiles.length;
   }
   function T(name) { return S.bank.index(name); }
   function P(name) { return S.spr.index(name); }
 
   /* ============================================================ 畫面（全部在 CT.blank 內呼叫） */
+  var DEFAULT_PAL = {
+    backdrop: 0x0F,
+    bg: [[0x11, 0x10, 0x30], [0x11, 0x00, 0x28], [0x16, 0x27, 0x38], [0x12, 0x2A, 0x30]],
+    spr: [[0x16, 0x27, 0x38], [0x21, 0x31, 0x30], [0x16, 0x27, 0x38], [0x12, 0x2A, 0x30]]
+  };
   function setPalettes(ppu) {
-    ppu.setBackdrop(0x0F);
-    ppu.setBgPalette(0, [0x11, 0x10, 0x30]);   // 一般：邊框藍 / 灰字 / 白字
-    ppu.setBgPalette(1, [0x11, 0x00, 0x28]);   // 選中行：白字 → 黃字
-    ppu.setBgPalette(2, [0x16, 0x27, 0x38]);   // 暖色：logo 陰影紅 / 橘 / 淡黃（圖示也用）
-    ppu.setBgPalette(3, [0x12, 0x2A, 0x30]);   // 冷色圖示：藍 / 綠 / 白
-    ppu.setSprPalette(0, [0x16, 0x27, 0x38]);  // 游標 / 開機大星
-    ppu.setSprPalette(1, [0x21, 0x31, 0x30]);  // 閃光
-    ppu.setSprPalette(2, [0x16, 0x27, 0x38]);
-    ppu.setSprPalette(3, [0x12, 0x2A, 0x30]);
+    // BG0 一般字 / BG1 選中行 / BG2 暖色圖示 + logo / BG3 冷色圖示；SPR0 游標 + 開機大星 / SPR1 閃光（CART_CFG.palettes）
+    var P0 = cfg().palettes || DEFAULT_PAL, i;
+    ppu.setBackdrop(P0.backdrop === undefined ? 0x0F : P0.backdrop);
+    for (i = 0; i < 4; i++) ppu.setBgPalette(i, (P0.bg || DEFAULT_PAL.bg)[i] || DEFAULT_PAL.bg[i]);
+    for (i = 0; i < 4; i++) ppu.setSprPalette(i, (P0.spr || DEFAULT_PAL.spr)[i] || DEFAULT_PAL.spr[i]);
   }
   function text(ppu, col, row, s) {
     s = String(s);
@@ -589,8 +444,9 @@
     }
   }
   function drawBootText(ppu) {
-    text(ppu, 9, 15, 'STARDUST WORKS');
-    ppu.fillTiles(0, 9, 16, 14, 1, T('BAR'));
+    var bt = String(cfg().bootText || 'STARDUST WORKS').substring(0, 30), c0 = 16 - Math.ceil(bt.length / 2);
+    text(ppu, c0, 15, bt);
+    ppu.fillTiles(0, c0, 16, bt.length, 1, T('BAR'));
   }
   function slotRow(i) { return ROW0 + i * 2; }
   function drawSlot(ppu, i) {
@@ -633,13 +489,15 @@
     for (c = 1; c < 31; c++) { ppu.setTile(0, c, 1, T('BD_H')); ppu.setTile(0, c, 28, T('BD_H')); }
     for (r = 2; r < 28; r++) { ppu.setTile(0, 0, r, T('BD_V')); ppu.setTile(0, 31, r, T('BD_V')); }
     // logo「星塵 8 合 1」：第 3~4 列，屬性列 1~2（第 2~5 列）用暖色組
-    var LOGO = [['星', 9], ['塵', 11], ['8', 14], ['合', 17], ['1', 20]], i;
-    for (i = 0; i < LOGO.length; i++) quad(ppu, LOGO[i][1], 3, 'LG_' + LOGO[i][0] + '_');
-    for (c = 1; c <= 14; c++) { ppu.setAttr(0, c, 1, 2); ppu.setAttr(0, c, 2, 2); }
+    var C = cfg(), LOGO = C.logo || [], LG = logoTable(), i;
+    for (i = 0; i < LOGO.length; i++) if (LG[LOGO[i][0]]) quad(ppu, LOGO[i][1], 3, 'LG_' + LOGO[i][0] + '_');
+    var lp = (C.logoPal === undefined ? 2 : C.logoPal) & 3;                 // logo 調色盤（cart1 = 2 暖色）
+    for (c = 1; c <= 14; c++) { ppu.setAttr(0, c, 1, lp); ppu.setAttr(0, c, 2, lp); }
     // logo 兩側星點
-    ppu.setTile(0, 5, 3, T('DOT2')); ppu.setTile(0, 7, 5, T('DOT1')); ppu.setTile(0, 24, 4, T('DOT2'));
-    ppu.setTile(0, 26, 2, T('DOT1')); ppu.setTile(0, 3, 5, T('DOT1')); ppu.setTile(0, 28, 5, T('DOT2'));
-    text(ppu, 7, 6, 'ACTION 8 IN 1  CART-1');
+    var DOTS = C.dots || [[5, 3, 'DOT2'], [7, 5, 'DOT1'], [24, 4, 'DOT2'], [26, 2, 'DOT1'], [3, 5, 'DOT1'], [28, 5, 'DOT2']];
+    for (i = 0; i < DOTS.length; i++) ppu.setTile(0, DOTS[i][0], DOTS[i][1], T(DOTS[i][2] === 'DOT1' ? 'DOT1' : 'DOT2'));
+    var sub = String(C.sub || '');
+    text(ppu, C.subCol === undefined ? Math.max(1, 16 - (sub.length >> 1)) : C.subCol, 6, sub);
     if (S.slots.length <= 8) text(ppu, 24, 7, 'BEST');
     for (i = 0; i < S.slots.length; i++) drawSlot(ppu, i);
     if (S.slots.length <= 8) {
@@ -775,8 +633,9 @@
 
   /* ============================================================ CT.Shell */
   var Shell = {
-    VERSION: 'cart1-shell r5',
-    DEFAULT_SLOTS: DEFAULT_SLOTS,
+    VERSION: 'cart-shell r6',
+    get DEFAULT_SLOTS() { return defaultSlots(); },
+    cart: function () { return cfg(); },
     init: function (nes, opt) {
       // registry 的「第一次開機」路徑沒有包 CT.blank ⇒ 自己包（巢狀呼叫安全：會還原外層的 mute）
       if (CT.blank) CT.blank(nes, function () { Shell._init(nes, opt); });
@@ -798,6 +657,7 @@
       if (ppu.spriteMode) ppu.spriteMode(8);
       ppu.flicker = 'rotate'; ppu.flickerStep = 8;
       if (ppu.mirroring) ppu.mirroring('v');
+      buildSfx();
       defineSfx(nes);
       setPalettes(ppu);
       // 游標：回選單 → 停在剛玩的那款；第一次開機 → 0
@@ -822,7 +682,7 @@
       S.t++;
       var ppu = nes.ppu;
       if (S.mode === 'boot') {
-        if (S.t === 48) { drawBootText(ppu); sfx(nes, 'cart1_boot'); }
+        if (S.t === 48) { drawBootText(ppu); sfx(nes, prefix() + '_boot'); }
         if (S.t >= BOOT_FRAMES || (S.t > 8 && (pressed(nes, BTN.START) || pressed(nes, BTN.A)))) enterMenu(nes);
         return;
       }
@@ -839,14 +699,14 @@
       // menu（START+SELECT 一起按 = 回選單熱鍵的手勢 ⇒ 在選單裡兩顆都不算，避免誤進遊戲）
       if (held(nes, BTN.START) && held(nes, BTN.SELECT)) { S.hold = 0; return; }
       var d = moveDir(nes);
-      if (d) { select(nes, S.sel + d); sfx(nes, 'cart1_move'); }
+      if (d) { select(nes, S.sel + d); sfx(nes, prefix() + '_move'); }
       if (pressed(nes, BTN.A) || pressed(nes, BTN.START)) {
         var sl = S.slots[S.sel];
         if (sl && sl.game) {
           S.mode = 'launch'; S.launchT = 0; S.launchId = sl.id;
           if (m && m.stop) { try { m.stop(); } catch (e) { } }
-          sfx(nes, 'cart1_ok');
-        } else sfx(nes, 'cart1_ng');
+          sfx(nes, prefix() + '_ok');
+        } else sfx(nes, prefix() + '_ng');
       }
     },
     draw: function (nes) {
@@ -873,8 +733,9 @@
       if (hide) ppu.sprite(0, null);
       else ppu.sprite(0, { x: 16 + bob, y: cy, tile: P('CUR'), pal: 0 });
       var ph = (t >> 4) & 3;
-      ppu.sprite(1, { x: 60, y: 22, tile: P(ph & 1 ? 'SPK0' : 'SPK1'), pal: 1 });
-      ppu.sprite(2, { x: 188, y: 34, tile: P(ph & 2 ? 'SPK0' : 'SPK1'), pal: 1 });
+      var SPK = cfg().sparkles || [[60, 22], [188, 34]];
+      ppu.sprite(1, { x: SPK[0][0], y: SPK[0][1], tile: P(ph & 1 ? 'SPK0' : 'SPK1'), pal: 1 });
+      ppu.sprite(2, { x: SPK[1][0], y: SPK[1][1], tile: P(ph & 2 ? 'SPK0' : 'SPK1'), pal: 1 });
       for (k = 3; k < 6; k++) ppu.sprite(k, null);
     },
     state: function () {
@@ -894,7 +755,9 @@
       overlayMode: function () { return OV.mode; },
       overlayLastMode: function () { return OV.lastMode; },
       flashColor: flashColor, backTileOf: backTileOf,
-      S: S, SONG: MENU_SONG, SFX: SFX, GLYPH: GLYPH, ICON: ICON
+      S: S,
+      get SONG() { return menuSong(); }, get SFX() { return SFX; }, get GLYPH() { return glyphTable(); },
+      get ICON() { return ICON; }, get CFG() { return cfg(); }
     }
   };
   CT.Shell = Shell;

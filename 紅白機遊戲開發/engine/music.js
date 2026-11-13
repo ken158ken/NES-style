@@ -64,6 +64,7 @@
  *   driver.define(name, sfx)
  *   driver.play(song, {loop:true})
  *   driver.stop()
+ *   driver.pause() / driver.resume() / driver.isPaused()   R6：暫停（靜音、記住位置）/ 從同一 row 接續
  *   driver.sfx(name, {priority, channels})   channels = ['p1'] 之類，覆寫 sfx 預設佔用的軌
  *   driver.tick()                            每幀呼叫一次（遊戲 update 裡）
  *   driver.state()                           測試用狀態快照
@@ -283,6 +284,7 @@
     opts = opts || {};
     this.song = song;
     this.playing = true;
+    this._paused = null;               // R6：play() 蓋掉暫停中的曲子（resume 不再有效）
     this.loopSong = opts.loop === undefined ? true : !!opts.loop;
     this.speed = song.speed || 6;
     this.orderIndex = opts.from || 0;
@@ -316,11 +318,54 @@
 
   Driver.prototype.stop = function () {
     this.playing = false;
+    this._paused = null;               // R6：stop() 也取消暫停快照
     for (var i = 0; i < 5; i++) { this.ch[i].on = false; this.ch[i].midi = null; }
     this.enableMask = 0;
     this._w(0x4015, 0);
     return this;
   };
+
+  /* --- 暫停 / 接續（R6 C6-0 插入；既有 play / stop / tick 行為不變） ---
+   * pause()  ：曲子播放中才有效——記下 song / order / row / rowFrame / 各聲道狀態，然後像 stop() 一樣靜音
+   *            （playing = false、$4015 = 0）；之後的 tick() 不推進音樂（rowsPlayed 不動），音效照常播。
+   *            已暫停或沒在播 ⇒ 不動作。
+   * resume() ：從暫停時「同一 row 同一幀」接續（不是從小節開頭），聲道狀態還原後強制重寫暫存器。
+   *            沒有暫停快照（從沒 pause、或其間呼叫過 play() / stop()）⇒ 不動作、回 false。
+   * isPaused()：有暫停快照 ⇒ true。 */
+  Driver.prototype.pause = function () {
+    if (this._paused || !this.playing || !this.song) return this;
+    var chs = [], i, k;
+    for (i = 0; i < 5; i++) {
+      var c = this.ch[i], snap = {};
+      for (k in c) if (Object.prototype.hasOwnProperty.call(c, k)) snap[k] = c[k];
+      chs.push(snap);
+    }
+    this._paused = {
+      song: this.song, loopSong: this.loopSong, speed: this.speed, orderIndex: this.orderIndex,
+      row: this.row, rowFrame: this.rowFrame, rowsPlayed: this.rowsPlayed, ch: chs
+    };
+    this.playing = false;
+    for (i = 0; i < 5; i++) this.ch[i].on = false;
+    this.enableMask = 0;
+    this._w(0x4015, 0);
+    return this;
+  };
+  Driver.prototype.resume = function () {
+    var p = this._paused, i, k;
+    if (!p) return false;
+    this._paused = null;
+    this.song = p.song; this.loopSong = p.loopSong; this.speed = p.speed; this.orderIndex = p.orderIndex;
+    this.row = p.row; this.rowFrame = p.rowFrame; this.rowsPlayed = p.rowsPlayed;
+    for (i = 0; i < 5; i++) {
+      var c = this.ch[i], snap = p.ch[i];
+      for (k in snap) if (Object.prototype.hasOwnProperty.call(snap, k)) c[k] = snap[k];
+      c.force = true;                          // 下一次 _writeMusic 全部暫存器重寫
+      c.lastCtl = c.lastLo = c.lastHi = c.lastSweep = -1;
+    }
+    this.playing = true;
+    return true;
+  };
+  Driver.prototype.isPaused = function () { return !!this._paused; };
 
   /* --- 取 pattern --- */
 
@@ -570,6 +615,7 @@
     var self = this;
     return {
       playing: this.playing,
+      paused: !!this._paused,
       frame: this.frame,
       orderIndex: this.orderIndex,
       row: this.row,
@@ -776,6 +822,13 @@
     }
   };
   ['define', 'play', 'stop', 'sfx', 'tick', 'state', 'stopSfx', 'record'].forEach(function (m) {
+    api[m] = function () {
+      if (!api._default) throw new Error('請先呼叫 NES.Music.attach(apu)');
+      return api._default[m].apply(api._default, arguments);
+    };
+  });
+  // R6：pause / resume / isPaused 也走預設 driver（另一行插入，既有清單不動）
+  ['pause', 'resume', 'isPaused'].forEach(function (m) {
     api[m] = function () {
       if (!api._default) throw new Error('請先呼叫 NES.Music.attach(apu)');
       return api._default[m].apply(api._default, arguments);

@@ -221,8 +221,8 @@ def main():
         bt = page.evaluate("""() => { const G = CT.get('racing'), b = G.backTile, A = CT.Racing.Art;
             return { b, odd: (b.tile & 1) === 1, isBack: b.tile === A.spr('BACK'),
                      notCar: ['CAR_UP_L','CAR_UP_R','CAR_RT_L','CAR_RT_R','FLAG','NONE'].every(n => A.spr(n) !== b.tile) }; }""")
-        ok('backTile：8×16 圖樣表 1 的專用星鑽（不是半台車）、pal 0', bt['odd'] and bt['isBack'] and bt['notCar']
-           and bt['b']['pal'] == 0, bt)
+        ok('backTile：8×16 圖樣表 1 的專用星鑽（不是半台車）、pal 3（R6：不用加速閃白的 pal 0）', bt['odd'] and bt['isBack'] and bt['notCar']
+           and bt['b']['pal'] == 3, bt)
         ht = page.evaluate("""() => { __nes.step(15); __nes.tap('start', 1); __nes.step(2); const p = __nes.nes().ppu, A = CT.Racing.Art;
             const row = r => p._nt[0].slice(r * 32, r * 32 + 32).join();
             const has = (r, s) => row(r).indexOf(A.text(s).join()) >= 0;
