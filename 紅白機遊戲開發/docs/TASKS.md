@@ -714,3 +714,55 @@ goal = STAR CUP NORMAL 以上晉級制連勝 3 位且未用密技；HARD 猜數 
 | ⑥ `lines`（order 6） | 原創連線益智：同色星珠相連、不交叉不分岔、填滿 + 自創機關**星橋**（一橫一直立體交叉）/ **星門**（進一扇出另一扇）；36 關 7 章（5×5 → 9×9），`gen.js` 產生器（不自鄰長路徑分割 + 調色盤分組）+ 解題器數解 == 1 才收，烘成 `levels.js`；RANDOM 模式 `?seed=`；下筆 / 收回 / 切斷 / 復原 / 提示 / 清線；時間 + 提示 → 星等、每關最佳星；goal = 前 10 關全破且未用密技；`test_lines.py` 41 項 |
 
 **驗收（已達成）**：`playthrough_cart.py --page cart3.html --game slide` goal 1347 幀 / maxLine 2 / over 0 / peak 60；`--game lines` goal 2127 幀 / maxLine 3 / over 0 / peak 68；兩款機器人都用解題器的解、十字鍵一格一格移動游標 + A，不改盤面狀態；§6 規則全有測項。
+
+### C8-0 cart4-shell+color（R8，2026-11-13）— 卡帶四設定 + 工具整合 + ⑧ `color` 星塵色感
+**所有權**：`games/cart4/cart.js`、`games/cart4/color/**`（art / song / main）、`games/cart4/test_color.py`；`cart4.html` 在 `cart4:games` 標記內 3 行 script；
+Edit 插入 `tools/{test_cart.py,run_all.sh,build.py,stamp.py,test_touch.py}`（cart4 一列 / 一行）、`README.md` / `index.html` / `CLAUDE.md`（入口）；本段。全域只掛 `CT.Color`；CHR / 曲 / 音效一律 `color_` 前綴；選單 `cart4_*`。
+`engine/` / registry / shell / cart1~3 未動；`apu_render.py` 已支援 cartN（R7），不需改。
+| 項目 | 驗收 |
+|---|---|
+| 卡帶設定 | 「星塵節奏 8 合 1」Bold 15px 霓虹粉紅 logo、玫瑰紅邊框 $15、副標 `RHYTHM 8 IN 1  CART-4`、8 槽（LEGACY_MAP 順序 cards / simon / flash / tune / rhythm / reflex / brain / color）原創圖示（已對齊 cards / simon / flash / tune / rhythm / color 的遊戲內造型）、槽名點陣 19 字、選單曲「節拍星港」`cart4_menu` |
+| ⑧ `color`（order 8） | 三模式：INK OR WORD 色字干擾（5 級 × 8 題、4 → 6 色鍵、字跳動、INK / WORD 規則切換；限時 180/150/150/120/120 幀；字寫完才顯示並開始計時）／ COLOR RUSH（3606 幀 = 60.0 秒、SAME / BRIGHTER、答錯 −180 幀、難度遞增）／ HUE MIXER（10 回合色相 12 × 亮度 4 轉盤、記憶回合 + B 重看 −150）；6 色鍵各有形狀（● ■ ▲ ★ ◆ ✚）+ SHAPE ASSIST 色弱模式；說明頁畫手把對照圖。goal = INK OR WORD 一局結束時 ≥ 3000 分且未用密技 |
+
+**驗收（已達成）**：`test_color.py` 74/74；`test_cart.py --page cart4.html` 全綠；`test_touch.py --only cart4` 93/93；`playthrough_cart.py --page cart4.html --game color` goal 2561 幀 / maxLine 1 / over 0 / peak 81；
+機器人反應延遲 0 / 18 / 24 / 36 / 60 幀全部達成 goal（5725 / 5461 / 5381 / 5213 / 4869 分）；§6 規則全有測項；`build.py --check cart4.html` PASS。
+
+### C8-1 cart4-memory（R8，2026-11-13）— ① `cards` 星塵翻牌 + ③ `flash` 星塵閃記
+**所有權**：`games/cart4/cards/**`（art / song / main）、`games/cart4/flash/**`（art / song / main）、`games/cart4/test_cards.py`、`games/cart4/test_flash.py`；`cart4.html` 在 `cart4:games` 標記內 6 行 script。
+| 款 | 驗收 |
+|---|---|
+| ① `cards`（order 1） | 18 種原創牌面（暖 / 冷 / 綠三色組各 6、組內剪影全不同；一張牌 = 4×4 磁磚 = 2×2 屬性區塊 ⇒ 一張牌一組 BG 調色盤）、5 盤 4×3 ~ 6×5、5 格翻牌動畫（每格 3 幀）、發牌 + READY 90 幀預備、連對加分；CLASSIC 步數上限 16/24/30/36/45、TIME ATTACK 40~130 秒（配對 +2 秒）、VS PIPPO 6×5 輪流翻（CPU 只記翻開過的牌，DOZY / NORMAL / SHARP / PERFECT = 容量 2/5/10/30 × 想起率 60/80/94/100%）、B 偷看每盤 1 次（扣 4 步 / 8 秒）；goal = 經典 4×4 在 24 步內翻完；`test_cards.py` 56 項 |
+| ③ `flash`（order 3） | PATTERN 12 級（3×3 → 5×5、亮 3 → 12 格、展示 40+10k 幀 × RELAX 1.5 / NORMAL / EXPERT 0.7）、SEQUENCE（長度 = 級 + 2，每格五聲音階音高 + 亮格；BGM 只用三角 + 雜訊）、SPOT CHANGE（8 形 × 4 色、1→3 處變化、第 4 級起才換色）、RACE ZIPPY（雙盤競速先到 5 分，CPU 16/11/6 幀一格、記住率 78/90/98%）；READY 90 幀 / LEVEL 45 幀、B 重看每級 1 次（該級得分減半不扣命）；5 種格子狀態形狀 + 調色盤雙重區分；goal = PATTERN NORMAL 以上過第 8 級；`test_flash.py` 64 項 |
+
+**機器人規則**：兩款都**只讀 PPU 名稱表 / 屬性表**（`ppu.getTile` / `getAttr` 認圖），測試用 Proxy 包住隱藏答案陣列，bot() 期間讀取次數 = 0；`&lag=N` 反應延遲（預設 12），0 / 12 / 24 都過 goal。
+**驗收（已達成）**：`playthrough_cart.py --page cart4.html --game cards` goal 1305 幀 / maxLine 4 / over 0 / peak 49；`--game flash` goal 2350 幀 / maxLine 2 / over 0 / peak 81（`--hint` 相同）。
+
+### C8-3 cart4-beat（R8，2026-11-13）— ⑤ `rhythm` 星塵節奏 + ⑥ `reflex` 星塵反應
+**所有權**：`games/cart4/rhythm/**`（song / chart / art / main）、`games/cart4/reflex/**`（song / art / main）、`games/cart4/test_rhythm.py`、`games/cart4/test_reflex.py`；`cart4.html` 在 `cart4:games` 標記內 7 行 script。
+| 款 | 驗收 |
+|---|---|
+| ⑤ `rhythm`（order 5） | 6 首原創曲（speed 5 / 6 / 7 / 8，每首 = 數拍 2 小節 + ABAC 16 + 收尾 1，p1 / p2 / tri / noi 四聲道）+ 標題 / 過關 / 失敗 3 首；`chart.js` 從曲子的 p1 旋律 / 大鼓小鼓 /（HARD 加 p2 和聲）onset 產生 4 模式 × 3 難度 = 72 份譜面並驗證（onset 對位、間距、每線配額）；**同步 = driver `rowsPlayed × speed + rowFrame − 1`**，不讀實際時鐘；判定窗口 PERFECT ≤ 2 / GREAT ≤ 5 / GOOD ≤ 8 幀；模式 CROSS 星十字（十字鍵 4 軌，從四邊匯入中央星核）/ DUO（B ← A →）/ ORBIT 繞行（單鍵）/ BLADE 節拍武士；SIGHT FULL / FADE / EAR（只靠聲音 + 預告音）；能量、連擊、S~D 評價、FAILED → 密技原地續關（driver.resume）；goal = CROSS NORMAL 前 3 首都 B 以上 |
+| ⑥ `reflex`（order 6） | 4 模式：SIMPLE 5 次（紅燈等 → 綠燈 + 嗶，亮燈前或亮燈後 < 6 幀 = 偷跑）、CHOICE 10 次（四艙亮哪按哪）、COLOR 12 次（7 目標 + 5 干擾，顏色 + 形狀雙標記）、ARROW 15 次三級（中央 / 位置衝突 / 空心紅 = 反向）；反應以幀計、顯示 ms；平均 / 最佳 / 稱號（PULSAR ~ MOONWALKER）；goal = SIMPLE 平均 ≤ 20 幀（333 ms）且 0 偷跑 |
+
+**機器人規則**：rhythm 只對「已在畫面上出現 ≥ lag 幀」的音符反應（EAR 模式改以預告音那一拍起算），按鍵時機 = 音符幀 + 雜湊誤差 ±jit（`&lag=` 預設 12、`&jit=` 預設 3）；reflex 看到刺激（燈色 / 亮艙 / 箭頭）後等 `&lag=`（預設 18）幀才按，等待期間不碰鍵。
+**驗收（已達成）**：`playthrough_cart.py --page cart4.html --game rhythm` goal 6077 幀 / maxLine 6 / over 0 / peak 27；`--game reflex` goal 984 幀 / maxLine 2 / over 0 / peak 25（`--hint` 相同）；`test_rhythm.py` 53/53、`test_reflex.py` 50/50；`apu_render.py --game cart4/rhythm` 63/63、`cart4/reflex` 21/21。
+
+### C8-2 cart4-sound（R8，2026-11-13）— ② `simon` 星塵跟我做 + ④ `tune` 星塵旋律
+**所有權**：`games/cart4/simon/**`（art / song / main）、`games/cart4/tune/**`（art / song / main）、`games/cart4/test_simon.py`、`games/cart4/test_tune.py`；`cart4.html` 在 `cart4:games` 標記內 6 行 script。全域只掛 `CT.Simon` / `CT.Tune`；CHR / 曲 / 音效一律 `simon_` / `tune_` 前綴。
+| 款 | 驗收 |
+|---|---|
+| ② `simon`（order 2） | 十字排列 4 顆不同形狀的星標（星 / 月 / 環行星 / 彗星，不是圓盤扇形），每顆音高 + 音色不同（OCTET 第二組 + 八度閃爍）；CLASSIC / EAR / EYE / REVERSE / OCTET；READY 120 幀、SELECT（或 B）重看一次扣分不扣命、3 命、逾時 360 幀；goal = CLASSIC 15 步 |
+| ④ `tune`（order 4） | 8 根星鐘管（← ↓ ↑ → = DO RE MI FA、B + 方向 = SO LA TI DO）；題目 = 規則產生的原創短句、由 driver 播放、亮鍵 / 時間軸由 driver row 推回；REPLAY 8 級（第 5 級起節奏判定：max(6 幀, 30%)、PERFECT ≤ 4 幀、速度容許 0.8~1.25）/ HIGH-LOW 8 級 / ODD NOTE 8 級；HINT OFF = 只靠聲音；goal = REPLAY 第 6 級過關 |
+
+**聲道契約**：遊玩 BGM 只用 tri + noi，鍵音 p1，系統音效 p2 ⇒ 鍵音與 BGM 共存不搶聲道。
+**機器人規則**：只讀 PPU（simon 調色盤 / tune 屬性表）或 APU 方波 1 實際週期（聽音），上升緣記錄；`&lag=N`（預設 14），0 / 14 / 24 都過 goal；隱藏答案包 Proxy，bot() 期間讀取 0 次。
+**驗收（已達成）**：`test_simon.py` 51/51、`test_tune.py` 60/60；`playthrough_cart.py --page cart4.html --game simon` goal 7096 幀 / maxLine 2 / over 0 / peak 48；`--game tune` goal 6090 幀 / maxLine 2 / over 0 / peak 53（`--hint` 相同）；`apu_render.py --game cart4/simon|cart4/tune` 全 PASS。
+
+### C8-4 cart4-brain（R8，2026-11-13）— ⑦ `brain` 星塵腦力
+**所有權**：`games/cart4/brain/**`（art / song / core / dual / multi / track / tilt / main）、`games/cart4/test_brain.py`；`cart4.html` 在 `cart4:games` 標記內 8 行 script。全域只掛 `CT.Brain`；CHR / 曲 / 音效一律 `brain_` 前綴。
+| 款 | 驗收 |
+|---|---|
+| ⑦ `brain`（order 7） | 四模式各有等級 + 合格條件 + S~D 評價 + 稱號 + 最佳評價存檔：TWIN 雙手同步（左十字鍵閃隕石 / 右 A·B 分揀，8 級 × 20 秒，第 5 級起規則對調；split(144) 上流動下固定、屬性三分區）、JUGGLE 多工（四格屬性分區，2→3→4 件任務，**90 秒 = goal**，150 秒結算）、TRACER 時空追蹤（8 級 × 3 回合，NOW / START / STEP 題、CLOAK 箭頭盲段、B 重看一次半分）、TILT 重力感應（8 張星盤，整數物理：傾斜慣性 / 摩擦 / 冰 / 輸送帶 / 反彈 / 子步碰撞、洞吸力；split 位移 ±2 px）；說明頁有手把對照圖與起始等級 |
+
+**機器人規則**：`?bot=1&botmode=1..4`（預設 2）、`&lag=N`（預設 15）；外界只讀 L 幀前的畫面觀察（`M.observe()`），自己的手與按過的鍵用目前值；記憶類只記展示當下看得到的位置 / 箭頭。
+**驗收（已達成）**：`test_brain.py` 78/78；`playthrough_cart.py --page cart4.html --game brain` goal 5585 幀 / maxLine 2 / over 0 / peak 106（`--hint` 相同；lag 0 / 12 / 24 / 30 都 goal）；TWIN `--hint` 每線 8；四模式機器人 lag 0 / 15 / 24 都打到結算；`apu_render.py --game cart4/brain` 49/49。

@@ -122,12 +122,17 @@
     g.hist.push(new Int8Array(g.view));
     if (g.hist.length > HIST_MAX) g.hist.shift();
   }
+  // fix-r7-shell（qa-r7 P3-5 HUD 貼頂）：HUD 兩列能下移就從第 1 / 2 列（畫面 y = 0）移到第 2 / 3 列；
+  // 盤框最上一列要在第 5 列以下 ⇒ 11 列高的 NORMAL 盤面從 oy 4 改 6（盤框第 5~28 列，原本第 28 列的操作說明讓位，同 HARD）。
+  // HARD 12 列（盤框第 3~28 列）沒有空列，HUD 維持第 1 / 2 列（qa-r7：「沒空間的維持現狀也可以」）。
+  function boardOy(H) { return H >= 12 ? 4 : Math.max(6, 4 + 2 * ((12 - H) >> 1)); }
+  function hudRow() { return g.oy >= 6 ? 2 : 1; }
   function newBoard(keepStreakCheck) {
     var c = modeCfg();
     if (keepStreakCheck && g.sub === 'live') breakStreak();       // 中途放棄 = 連勝中斷
     g.W = c.w; g.H = c.h; g.M = c.m;
     g.ox = (16 - g.W) & ~1; if (g.ox < 2) g.ox = 2;
-    g.oy = 4 + 2 * ((12 - g.H) >> 1);
+    g.oy = boardOy(g.H);
     g.view = new Int8Array(g.W * g.H); g.view.fill(-1);
     g.mines = null; g.num = null; g.shown = new Uint8Array(g.W * g.H);
     g.cx = g.W >> 1; g.cy = g.H >> 1;
@@ -450,10 +455,10 @@
     for (r = 0; r < 30; r++) for (c = 0; c < 32; c++) put(c, r, sp);
     for (r = 0; r < 15; r++) for (c = 0; c < 16; c++) putAttr(c, r, 0);
     var ox = g.ox, oy = g.oy, W2 = g.W * 2, H2 = g.H * 2;
-    stars(5, 50, function (c2, r2) { return r2 <= 2 || (c2 >= ox - 1 && c2 <= ox + W2 && r2 >= oy - 1 && r2 <= oy + H2); });
+    stars(5, 50, function (c2, r2) { return r2 <= hudRow() + 1 || (c2 >= ox - 1 && c2 <= ox + W2 && r2 >= oy - 1 && r2 <= oy + H2); });
     box(ox - 1, oy - 1, ox + W2, oy + H2);
     put(ox - 1, oy - 1, A.t('FR_GEM')); put(ox + W2, oy - 1, A.t('FR_GEM'));
-    put(1, 1, A.t('IC_MINE')); put(23, 1, A.t('IC_CLK'));
+    put(1, hudRow(), A.t('IC_MINE')); put(23, hudRow(), A.t('IC_CLK'));
     render();
     flush(true);
   }
@@ -480,19 +485,19 @@
     }
   }
   function renderHUD() {
-    var left = g.M - flags();
-    text(2, 1, (left < 0 ? '-' : ' ') + num(Math.abs(left), 2));
+    var left = g.M - flags(), hr = hudRow();
+    text(2, hr, (left < 0 ? '-' : ' ') + num(Math.abs(left), 2));
     var c = modeCfg();
-    text(8, 1, pad(c.name + ' ' + c.w + 'X' + c.h, 13));
+    text(8, hr, pad(c.name + ' ' + c.w + 'X' + c.h, 13));
     var t = g.sub === 'ready' || g.sub === 'gen' ? 0 : g.timer;
     var s = Math.floor(t / 60);
-    text(25, 1, num(Math.min(99, Math.floor(s / 60)), 2) + ':' + num(s % 60, 2));
+    text(25, hr, num(Math.min(99, Math.floor(s / 60)), 2) + ':' + num(s % 60, 2));
     var line;
     if (g.msgT > 0 && g.msg) line = g.msg;
     else if (g.sub === 'ready') line = 'PICK A START CELL: PUSH A';
     else if (g.sub === 'gen') line = (g.genFrames > 2) ? 'SCANNING STAR FIELD' + '...'.substring(0, (g.genFrames >> 3) % 4) : '';
     else line = 'STREAK ' + num(g.streak, 2) + '  HINT ' + g.hints + '  UNDO ' + Math.min(99, g.undos);
-    text(1, 2, pad(line, 30));
+    text(1, hr + 1, pad(line, 30));
     var bottom = g.oy + g.H * 2 + 1;
     if (bottom <= 28) text(2, 28, pad(g.paused ? '' : 'A OPEN B FLAG SELECT UNDO', 28));
   }
@@ -699,7 +704,7 @@
       g.num = Gen.counts(W, H, g.mines);
       g.view = new Int8Array(W * H); g.view.fill(-1);
       g.shown = new Uint8Array(W * H); g.hist = [];
-      g.ox = (16 - W) & ~1; if (g.ox < 2) g.ox = 2; g.oy = 4 + 2 * ((12 - H) >> 1);
+      g.ox = (16 - W) & ~1; if (g.ox < 2) g.ox = 2; g.oy = boardOy(H);
       g.sub = 'live'; g.cx = sx; g.cy = sy; g.timer = 0;
       CT.blank(nes0, function () { drawPlayScreen(); });
       if (sx !== undefined) { i = sy * W + sx; reveal(i, true); }

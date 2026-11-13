@@ -78,6 +78,9 @@ run "build.py --check mech.html" "$PY" tools/build.py --check --src mech.html
 run "build.py --check cart1.html" "$PY" tools/build.py --check --src cart1.html
 run "build.py --check cart2.html" "$PY" tools/build.py --check --src cart2.html
 run "build.py --check cart3.html" "$PY" tools/build.py --check --src cart3.html
+run "build.py --check cart4.html" "$PY" tools/build.py --check --src cart4.html
+run "build.py --check cart5.html" "$PY" tools/build.py --check --src cart5.html
+run "cjk_glyphs.py --check" "$PY" tools/cjk_glyphs.py --check   # R9：卡帶五字形資料與文字同步（缺字 → 重跑 tools/cjk_glyphs.py）
 
 if [ "$QUICK" = 0 ]; then
   echo "== ④ 冒煙截圖 shot.py =="
@@ -85,6 +88,8 @@ if [ "$QUICK" = 0 ]; then
   run "shot.py 冒煙 cart1 選單" "$PY" tools/shot.py --url cart1.html --query "boot=0" --steps 20 --scale 3 --lint --out shots/run_all/cart1_menu.png
   run "shot.py 冒煙 cart2 選單" "$PY" tools/shot.py --url cart2.html --query "boot=0" --steps 20 --scale 3 --lint --out shots/run_all/cart2_menu.png
   run "shot.py 冒煙 cart3 選單" "$PY" tools/shot.py --url cart3.html --query "boot=0" --steps 20 --scale 3 --lint --out shots/run_all/cart3_menu.png
+  run "shot.py 冒煙 cart4 選單" "$PY" tools/shot.py --url cart4.html --query "boot=0" --steps 20 --scale 3 --lint --out shots/run_all/cart4_menu.png
+  run "shot.py 冒煙 cart5 選單" "$PY" tools/shot.py --url cart5.html --query "boot=0" --steps 20 --scale 3 --lint --out shots/run_all/cart5_menu.png
 
   echo "== ⑤ nes_lint.py 抽查截圖 =="
   if [ -f tools/nes_lint.py ]; then

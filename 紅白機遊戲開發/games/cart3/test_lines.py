@@ -31,7 +31,7 @@ def ok(name, cond, detail=''):
 def fresh(page, query=''):
     page.goto(BASE + query)
     page.wait_for_function('() => !!window.__nes && !!window.CT && !!CT.Lines && !!CT.Lines.dev')
-    page.evaluate('() => { localStorage.removeItem("nes.cart3.lines.stars"); __nes.step(1); }')
+    page.evaluate('() => { localStorage.removeItem("nes.cart3.lines.stars"); localStorage.removeItem("nes.cart3.lines.seen"); __nes.step(1); }')
 
 
 def st(page):
@@ -127,7 +127,11 @@ def main():
     page.evaluate('() => { CT.Lines.dev.g().sel = 2; NES.Input.inject(1, 1); __nes.step(3); }')
     rows = screen()
     body = [i for i in range(4, 26) if rows[i].strip()]
-    ok('說明頁：規則（星橋 / 星門）寫出來、段落之間空一列', 'BRIDGE' in '\n'.join(rows) and 'GATE' in '\n'.join(rows) and all(body[i + 1] - body[i] >= 2 for i in range(len(body) - 1)), body)
+    ok('說明頁：規則（星橋 / 星門 / 星鏡）寫出來、段落之間空一列', all(k in '\n'.join(rows) for k in ('BRIDGE', 'GATE', 'MIRROR')) and all(body[i + 1] - body[i] >= 2 for i in range(len(body) - 1)), body)
+    ok('說明頁文字不超出 32 欄（每列最後一欄空）', all(r_[31] == ' ' for r_ in rows), [r_ for r_ in rows if r_[31] != ' '])
+    r = page.evaluate("""() => { const p = __nes.nes().ppu, A = CT.Lines.Art.make(); const at = (c, r) => [p.getTile(0, c, r), p.getTile(0, c + 1, r), p.getTile(0, c, r + 1), p.getTile(0, c + 1, r + 1)].join();
+        return { b: at(2, 10) === A.cell('B00').join() && at(4, 10) === A.cell('B23').join(), g: at(2, 14) === A.cell('G0').join(), m: at(2, 18) === A.cell('M10').join() }; }""")
+    ok('P2-1 說明頁範例圖 = 遊戲內同一組格子磁磚（空橋 / 過橋 / 星門 / 星鏡）', r['b'] and r['g'] and r['m'], r)
 
     # ---------------- 遊玩操作 ----------------
     page.evaluate('() => { CT.Lines.dev.start(0); __nes.step(2); }')
@@ -223,6 +227,120 @@ def main():
     p = page.evaluate('(k) => CT.Lines.dev.paths()[k]', t['k'])
     ok('星門：走進一扇門 ⇒ 線從另一扇門出來、游標跳到另一扇門', p[-2:] == [t['gin'], t['gout']] and s['cy'] * s['w'] + s['cx'] == t['gout'], (p[-3:], t))
 
+    # ---------------- fix-r7：星鏡（自創機關）/ 機關外觀 / 教學頁 / 選關排版 / HUD ----------------
+    v = page.evaluate("""() => { const G = CT.Lines.Gen, L = CT.Lines.LEVELS, out = { mirLv: 0, first: -1, ok: 0, bad: [] };
+        for (let i = 0; i < L.length; i++) { const lv = G.decode(L[i].code); if (!lv.mirrors.length) continue; out.mirLv++; if (out.first < 0) out.first = i;
+          const w = lv.w, sol = G.solve(lv, 1).sol, mc = lv.mirrors.map(m => [m[1] * w + m[0], m[2]]); let good = true;
+          for (const [c, t] of mc) { const p = sol.find(q => q.indexOf(c) > 0 && q.indexOf(c) < q.length - 1); if (!p) { good = false; continue; }
+            const j = p.indexOf(c), side = (a, b) => b === a - w ? 0 : b === a + 1 ? 1 : b === a + w ? 2 : 3;
+            if (G.mirPartner(t, side(c, p[j - 1])) !== side(c, p[j + 1])) good = false; }
+          if (good) out.ok++; else out.bad.push(i + 1); }
+        return out; }""")
+    ok('P3-7 自創機關「星鏡」：後段 ≥ 10 關（第 26 關起），每面鏡子的正解都照鏡面反彈', v['mirLv'] >= 10 and v['first'] == 25 and v['ok'] == v['mirLv'], v)
+    r = page.evaluate(r"""() => { const G = CT.Lines.Gen;
+        // 獨立暴力列舉（逐色 DFS：一般格一次、橋格 H/V 各一次且直行、星鏡照鏡面反彈、星門傳送）vs 解題器數解
+        function brute(L, cap) { const w = L.w, h = L.h, N = w * h, endAt = new Int8Array(N).fill(-1), br = new Uint8Array(N), tw = new Int16Array(N).fill(-1), mr = new Int8Array(N);
+          L.ends.forEach((e, k) => { endAt[e[1]*w+e[0]] = k; endAt[e[3]*w+e[2]] = k; }); (L.bridges||[]).forEach(b => br[b[1]*w+b[0]] = 1);
+          (L.gates||[]).forEach(q => { const a = q[1]*w+q[0], b = q[3]*w+q[2]; tw[a] = b; tw[b] = a; }); (L.mirrors||[]).forEach(m => mr[m[1]*w+m[0]] = m[2]);
+          const u = new Uint8Array(N), uH = new Uint8Array(N), uV = new Uint8Array(N), D = [[0,-1],[1,0],[0,1],[-1,0]]; let cnt = 0;
+          const free = (c, d) => br[c] ? ((d & 1) ? !uH[c] : !uV[c]) : !u[c], mark = (c, d, v) => { if (br[c]) { if (d & 1) uH[c] = v; else uV[c] = v; } else u[c] = v; };
+          const full = () => { for (let c = 0; c < N; c++) { if (br[c] ? (!uH[c] || !uV[c]) : !u[c]) return false; } return true; };
+          function color(k) { if (cnt >= cap) return; if (k === L.ends.length) { if (full()) cnt++; return; } const e = L.ends[k], a = e[1]*w+e[0]; u[a] = 1; step(k, a, -1, e[3]*w+e[2]); u[a] = 0; }
+          function step(k, c, inD, t0) { let ds = [0,1,2,3]; if (br[c] && inD >= 0) ds = [inD]; if (mr[c] && inD >= 0) { const ps = G.mirPartner(mr[c], (inD + 2) % 4); ds = ps < 0 ? [] : [ps]; }
+            for (const d of ds) { const x = c % w + D[d][0], y = ((c / w) | 0) + D[d][1]; if (x < 0 || y < 0 || x >= w || y >= h) continue; const t = y * w + x;
+              if (t === t0) { u[t] = 1; color(k + 1); u[t] = 0; continue; } if (endAt[t] >= 0 || !free(t, d)) continue;
+              if (tw[t] >= 0) { const t2 = tw[t]; if (u[t2]) continue; u[t] = 1; u[t2] = 1; step(k, t2, -1, t0); u[t] = 0; u[t2] = 0; continue; }
+              mark(t, d, 1); step(k, t, d, t0); mark(t, d, 0); } }
+          color(0); return cnt; }
+        let n = 0, agree = 0, multi = 0, bad = [];
+        for (let s = 1; s <= 200; s++) { const R = G.rng(s * 31), cells = [...Array(16).keys()].sort(() => R() - 0.5), mx = 1 + Math.floor(R() * 2), my = 1 + Math.floor(R() * 2), mc = my * 4 + mx;
+          const pool = cells.filter(c => c !== mc), ends = [[pool[0]%4, pool[0]>>2, pool[1]%4, pool[1]>>2], [pool[2]%4, pool[2]>>2, pool[3]%4, pool[3]>>2]];
+          const L = { w: 4, h: 4, ends, mirrors: [[mx, my, 1 + Math.floor(R() * 2)]] }, a = G.solve(L, 99).count, b = brute(L, 99); n++; if (a === b) agree++; else bad.push(s); if (a >= 2) multi++; }
+        for (let s = 1; s <= 24; s++) { const sp = [{ w: 5, h: 5, minLen: 3, maxLen: 8, mirrors: 2 }, { w: 5, h: 5, minLen: 3, maxLen: 9, mirrors: 1, bridges: 1 }, { w: 5, h: 5, minLen: 3, maxLen: 9, mirrors: 2, gates: 1 }][s % 3];
+          const L = G.generate(sp, s * 977, 60); if (!L) continue; const a = G.solve(L, 9).count, b = brute(L, 9); n++; if (a === b && a === 1) agree++; else bad.push('g' + s); }
+        return { n, agree, multi, bad }; }""")
+    ok('星鏡：解題器 vs 獨立暴力列舉計數一致（4×4 隨機盤含 0 / 1 / 多解 + 5×5 產生盤唯一解）', r['n'] >= 200 and r['agree'] == r['n'] and r['multi'] >= 5, r)
+    r = page.evaluate("""() => { const G = CT.Lines.Gen, sp = { w: 6, h: 6, minLen: 3, maxLen: 9, mirrors: 2 };
+        const a = G.generate(sp, 777), b = G.generate(sp, 777); return { same: G.encode(a) === G.encode(b), mir: a.mirrors.length, uniq: G.solve(a, 2).count, rt: G.encode(G.decode(G.encode(a))) === G.encode(a) }; }""")
+    ok('星鏡：產生器 spec.mirrors 可重現、唯一解、關卡字串第 6 欄編碼 / 解碼來回一致', r['same'] and r['mir'] == 2 and r['uniq'] == 1 and r['rt'], r)
+    mi = v['first']
+    page.evaluate('(i) => { CT.Lines.dev.start(i); __nes.step(2); }', mi)
+    t = page.evaluate("""() => { const g = CT.Lines.dev.g(), P = g.P, w = P.w;
+        for (let k = 0; k < P.ncol; k++) { const s = P.sol[k]; for (let i = 1; i < s.length - 1; i++) if (P.mirror[s[i]]) {
+          g.paths[k] = s.slice(0, i + 1); g.pen = k; g.cx = s[i] % w; g.cy = Math.floor(s[i] / w);
+          const dm = (a, b) => b === a - w ? 16 : b === a + w ? 32 : b === a + 1 ? 128 : 64, inD = dm(s[i - 1], s[i]);
+          const wrong = [16, 32, 64, 128].filter(m => m !== dm(s[i], s[i + 1]) && m !== dm(s[i], s[i - 1]) && (s[i] % w + (m === 128 ? 1 : m === 64 ? -1 : 0)) >= 0 && (s[i] % w + (m === 128 ? 1 : m === 64 ? -1 : 0)) < w);
+          return { k, i, right: dm(s[i], s[i + 1]), wrong: wrong[0], look: CT.Lines.dev.cellLook(s[i]) }; } }
+        return null; }""")
+    tap(page, t['wrong'])
+    l1 = page.evaluate('(k) => CT.Lines.dev.paths()[k].length', t['k'])
+    msg = page.evaluate('() => CT.Lines.dev.g().msg')
+    tap(page, t['right'])
+    l2 = page.evaluate('(k) => CT.Lines.dev.paths()[k].length', t['k'])
+    ok('星鏡：在鏡格上只能照鏡面方向出去（別的方向擋下並提示），照鏡面 ⇒ 延伸', l1 == t['i'] + 1 and l2 == t['i'] + 2 and 'MIRROR' in msg, (l1, l2, msg, t))
+    ok('星鏡：有線經過畫成「轉角線 + 鏡面」磁磚（屬性 = 線色組）', t['look'][0].startswith('M') and t['look'][0][-1] in 'AB', t['look'])
+    r = page.evaluate("""() => { const g = CT.Lines.dev.g(), P = g.P; for (let k = 0; k < P.ncol; k++) g.paths[k] = P.sol[k].slice(); g.time = 99999; CT.Lines.dev.refresh();
+        const ok1 = CT.Lines.dev.solved(); return { ok1 }; }""")
+    ok('星鏡關：照正解畫完 ⇒ 判定完成', r['ok1'], r)
+    # 機關外觀：空的機關用亮色（色 3）、各自不同的調色盤組；色 1 = 亮灰 $10
+    pal = page.evaluate('() => { const p = __nes.nes().ppu; return [0, 1, 2, 3].map(i => Array.from(p.getBgPalette(i))); }')
+    ok('P2-1 色 1（格點 / 有線時的機關結構）= 亮灰 $10，四組一致', all(q[1] == 0x10 for q in pal), pal)
+    r = page.evaluate("""() => { CT.Lines.dev.start(10); __nes.step(2); const P = CT.Lines.dev.puzzle(), b = P.L.bridges[0], c = b[1] * P.w + b[0];
+        const l0 = CT.Lines.dev.cellLook(c); const g = CT.Lines.dev.g(); const t0 = g.t; let keys = new Set();
+        for (let f = 0; f < 70; f++) { __nes.step(1); keys.add(CT.Lines.dev.cellLook(c)[0]); }
+        const lv = CT.Lines.LEVELS, G = CT.Lines.Gen; CT.Lines.dev.start(20); __nes.step(2); const P2 = CT.Lines.dev.puzzle(), q = P2.L.gates[0];
+        const gl = CT.Lines.dev.cellLook(q[1] * P2.w + q[0]); CT.Lines.dev.start(25); __nes.step(2); const P3 = CT.Lines.dev.puzzle(), m = P3.L.mirrors[0];
+        const ml = CT.Lines.dev.cellLook(m[1] * P3.w + m[0]); return { l0, keys: [...keys], gl, ml }; }""")
+    ok('P2-1 空星橋 = 白欄杆紅柱（組 0 色 3），還沒被兩線填滿時每 32 幀閃一次（換一組磁磚）', r['l0'] == ['B00', 0] and set(r['keys']) == {'B00', 'B00x'}, r)
+    ok('P2-1 空星門 = 青色傳送環（組 2）、空星鏡 = 金色斜鏡（組 1）——三種機關各自一種亮色', r['gl'] == ['G0', 2] and r['ml'][1] == 1 and r['ml'][0] in ('M10', 'M20'), r)
+    px = page.evaluate('() => ({ bg: CT.Lines.Art.make().bg.count })')
+    ok('CHR：加上星鏡 / 閃爍橋之後背景 bank 仍 ≤ 256', px['bg'] <= 256, px)
+    # 教學頁
+    page.evaluate('() => { localStorage.removeItem("nes.cart3.lines.seen"); CT.Lines.dev.begin(10); __nes.step(3); }')
+    s1 = st(page)
+    rows = screen()
+    tut_txt = '\n'.join(rows)
+    tutor_cells = page.evaluate("""() => { const p = __nes.nes().ppu, A = CT.Lines.Art.make(); const want = new Set([...A.cell('B00'), ...A.cell('B23')]); let n = 0;
+        for (let r = 0; r < 30; r++) for (let c = 0; c < 32; c++) if (want.has(p.getTile(0, c, r))) n++; return n; }""")
+    ok('P2-1 第 11 關（第一座星橋）開場先跳教學頁：示意圖（空 / 解好）+ 說明 + A 關閉', s1['mode'] == 'tutor' and s1['tutor'] == 'bridge' and 'NEW: STAR BRIDGE' in tut_txt and 'GOT IT' in tut_txt and tutor_cells >= 8, (s1['mode'], s1['tutor'], tutor_cells))
+    page.evaluate('() => __nes.step(15)')
+    tap(page, A, 3)
+    s2 = st(page)
+    page.evaluate('() => { CT.Lines.dev.begin(10); __nes.step(3); }')
+    s3 = st(page)
+    ok('教學頁按 A ⇒ 進入關卡；看過就存檔，下次不再跳', s2['mode'] == 'play' and s2['level'] == 10 and s3['mode'] == 'play' and page.evaluate('() => CT.load("lines", "seen", {}).bridge') == 1, (s2['mode'], s3['mode']))
+    page.evaluate('() => { CT.Lines.dev.begin(20); __nes.step(3); }')
+    sg = st(page)
+    tg = '\n'.join(screen())
+    page.evaluate('() => __nes.step(15)')
+    tap(page, A, 3)
+    page.evaluate('() => { CT.Lines.dev.begin(25); __nes.step(3); }')
+    sm = st(page)
+    tm = '\n'.join(screen())
+    page.evaluate('() => __nes.step(15)')
+    tap(page, A, 3)
+    sm2 = st(page)
+    ok('P2-1 第 21 關（第一對星門）開場教學', sg['mode'] == 'tutor' and sg['tutor'] == 'gate' and 'NEW: STAR GATE' in tg, sg['tutor'])
+    ok('P3-7 第 26 關（第一面星鏡）開場教學、A 關閉後進關', sm['tutor'] == 'mirror' and 'NEW: STAR MIRROR' in tm and sm2['mode'] == 'play' and sm2['level'] == 25, (sm['tutor'], sm2['mode']))
+    page.evaluate('() => { CT.Lines.dev.begin(30); __nes.step(3); }')
+    ok('三種機關都看過 ⇒ 後面的關卡直接開始', st(page)['mode'] == 'play')
+    # 選關排版：36 個關卡號都在名稱表上
+    page.evaluate('() => { CT.Lines.dev.select(); __nes.step(3); }')
+    rows = screen()
+    seen_ids = page.evaluate("""() => { const p = __nes.nes().ppu, A = CT.Lines.Art.make(), out = [];
+        for (let i = 0; i < CT.Lines.LEVELS.length; i++) { const q = CT.Lines.dev.selPos(i), s = String(i + 1).padStart(2, '0');
+          if (p.getTile(0, q[0], q[1]) === A.ch(s[0]) && p.getTile(0, q[0] + 1, q[1]) === A.ch(s[1])) out.push(i + 1); } return out; }""")
+    ok('P2-2 選關：36 個關卡號全部在名稱表上（不被說明列蓋掉）', len(seen_ids) == 36, seen_ids)
+    page.evaluate('() => { const g = CT.Lines.dev.g(); g.lsel = 29; NES.Input.inject(32, 1); __nes.step(4); }')
+    rows2 = screen()
+    seen2 = page.evaluate("""() => { const p = __nes.nes().ppu, A = CT.Lines.Art.make(); let n = 0;
+        for (let i = 0; i < 36; i++) { const q = CT.Lines.dev.selPos(i), s = String(i + 1).padStart(2, '0'); if (p.getTile(0, q[0], q[1]) === A.ch(s[0]) && p.getTile(0, q[0] + 1, q[1]) === A.ch(s[1])) n++; } return n; }""")
+    ok('P2-2 游標移到第 36 關：說明列寫出 LV 36 / 機關，關卡號仍全在', st(page)['lsel'] == 35 and any('LV 36' in r_ for r_ in rows2) and any('MIRROR' in r_ for r_ in rows2) and seen2 == 36, [r_ for r_ in rows2 if 'LV' in r_])
+    ok('P3-5 選關 / 遊玩畫面第 1 列（y=0）沒有 HUD 字', rows[1].strip() == '', rows[1])
+    page.evaluate('() => { CT.Lines.dev.start(30); __nes.step(3); }')
+    rows = screen()
+    ok('P3-5 遊玩 HUD：第 1 列空、標題 / 時間在第 2 列、9×9 盤也不和 HUD 重疊', rows[1].strip() == '' and 'LV 31' in rows[2] and 'TIME' in rows[2] and 'LINKS' in rows[23], (rows[1], rows[2], rows[23]))
+
     # ---------------- 過關 / 紀錄 / 暫停 / 密技 ----------------
     page.evaluate('() => { CT.Lines.dev.start(0); __nes.step(2); }')
     r = page.evaluate("""() => { const g = CT.Lines.dev.g(); const sol = CT.Lines.dev.sol(); for (let k = 0; k < sol.length; k++) { g.paths[k] = sol[k].slice(); }
@@ -247,6 +365,10 @@ def main():
     print('  機器人：goal %d 幀、每線峰值 %d、overFrames %d、VBlank 尖峰 %d' % (rr['f'], rr['ml'], rr['over'], rr['peak']))
     lint = page.evaluate('() => { __nes.render(); const r = __nes.lint(); return { ok: r.ok !== false, colors: r.colors }; }')
     ok('過關畫面 lint 綠（≤ 25 色）', lint['ok'], lint)
+    rr2 = page.evaluate("""() => { const out = []; for (const lv of [25, 35]) { CT.Lines.dev.start(lv); __nes.step(2); let f = 0, ml = 0, over0 = __nes.stats().budget.overFrames | 0;
+          while (f < 6000 && GAME.state().s.mode === 'play') { __nes.step(1); f++; ml = Math.max(ml, __nes.stats().maxSpritesLine | 0); }
+          out.push({ lv: lv + 1, mode: GAME.state().s.mode, f, ml, over: (__nes.stats().budget.overFrames | 0) - over0 }); } return out; }""")
+    ok('機器人照解題器一格一格操作：第 26 關（星鏡）與第 36 關（9×9 橋 + 門 + 鏡）都能過關、每線 ≤ 8、overFrames 0', all(x['mode'] == 'clear' and x['ml'] <= 8 and x['over'] == 0 for x in rr2), rr2)
 
     ok('頁面錯誤 0', not errs, errs[:3])
     browser.close()

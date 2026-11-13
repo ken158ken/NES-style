@@ -9,9 +9,13 @@
  *   3. 【星橋 BRIDGE】橋格必須被「一條橫線 + 一條直線」各直直穿過一次（兩條線在這格立體交叉、不能轉彎）；
  *   4. 【星門 GATE】一對星門（兩格）算同一個節點：線從其中一扇門進去、一定從另一扇門出來（出門方向自選），
  *      兩扇門都算被填滿；星門不能當端點。
+ *   5. 【星鏡 MIRROR】（fix-r7 新增的自創機關）格子裡有一面斜放的鏡子（/ 或 \），線碰到鏡子一定反彈 90°：
+ *      「/」只准左↔上、右↔下，「\」只准上↔右、左↔下；鏡格只能被一條線經過（也要填滿）、不能當端點。
+ *      ⇒ 和「隨便轉彎」不同，鏡子的朝向決定了線從哪一側進、就一定從哪一側出。
  *
  * 圖模型：每格一個節點；橋格拆成 H 節點（只接左右）+ V 節點（只接上下）；一對星門共用一個節點
- *   （第二扇門那格的節點 = 死節點，度數 0）。端點度數 1、死節點 0、其餘 2。星門節點額外要求「A 側 1 條 + B 側 1 條」。
+ *   （第二扇門那格的節點 = 死節點，度數 0）。端點度數 1、死節點 0、其餘 2。星門節點額外要求「A 側 1 條 + B 側 1 條」；
+ *   星鏡節點額外要求「成對的兩條邊同開同關」（/：左上一對、右下一對；\：上右一對、左下一對）。
  *
  * 解題器 solve(level, limit)：邊變數（未定 / 關 / 開）回溯 + 傳播（度數、星門兩側、顏色一致、禁止成環、
  *   每色兩端點可達），回傳 { count, sol:[第一組解：每色格子序列], nodes }。count 數到 limit（預設 2）就停 ⇒ 唯一解驗證。
@@ -33,10 +37,17 @@
   }
 
   /* ---------------- 圖 ---------------- */
-  // level = { w, h, ends:[[x1,y1,x2,y2],...], bridges:[[x,y]], gates:[[x1,y1,x2,y2]] }
+  // level = { w, h, ends:[[x1,y1,x2,y2],...], bridges:[[x,y]], gates:[[x1,y1,x2,y2]], mirrors:[[x,y,t]]（t 1 = /、2 = \） }
+  // 鏡子的成對邊（方向 0 上 1 右 2 下 3 左）
+  var MIR_PAIRS = { 1: [[3, 0], [1, 2]], 2: [[0, 1], [3, 2]] };
+  function mirPartner(t, side) {
+    var P = MIR_PAIRS[t];
+    for (var q = 0; q < 2; q++) { if (P[q][0] === side) return P[q][1]; if (P[q][1] === side) return P[q][0]; }
+    return -1;
+  }
   function build(L) {
     var w = L.w, h = L.h, N = w * h, i, k;
-    var bridges = L.bridges || [], gates = L.gates || [];
+    var bridges = L.bridges || [], gates = L.gates || [], mirrors = L.mirrors || [];
     var bIdx = new Int16Array(N).fill(-1), gMap = new Int16Array(N).fill(-1), gTwin = new Int16Array(N).fill(-1);
     for (k = 0; k < bridges.length; k++) bIdx[bridges[k][1] * w + bridges[k][0]] = k;
     for (k = 0; k < gates.length; k++) {
@@ -74,15 +85,28 @@
     var ne = ea.length, adj = [];
     for (i = 0; i < nn; i++) adj.push([]);
     for (k = 0; k < ne; k++) { adj[ea[k]].push(k); adj[eb[k]].push(k); }
+    // 星鏡：mir[節點] = 1 (/) / 2 (\)；mirE[節點] = [上, 右, 下, 左] 的邊（沒有 = -1）
+    var mir = new Int8Array(nn), mirE = {};
+    for (k = 0; k < mirrors.length; k++) {
+      var mc = mirrors[k][1] * w + mirrors[k][0];
+      mir[mc] = mirrors[k][2] || 1;
+      var E4 = [-1, -1, -1, -1];
+      for (var j = 0; j < adj[mc].length; j++) {
+        var ee = adj[mc][j], oc = ea[ee] === mc ? ecb[ee] : eca[ee], d = oc - mc;
+        E4[d === -w ? 0 : d === 1 ? 1 : d === w ? 2 : 3] = ee;
+      }
+      mirE[mc] = E4;
+    }
     return { w: w, h: h, N: N, nn: nn, ne: ne, ea: ea, eb: eb, eca: eca, ecb: ecb, eside: eside, adj: adj,
-             deg: deg, color: color, isGate: isGate, bIdx: bIdx, gMap: gMap, gTwin: gTwin, nodeFor: nodeFor, ncol: ends.length, L: L };
+             deg: deg, color: color, isGate: isGate, bIdx: bIdx, gMap: gMap, gTwin: gTwin, nodeFor: nodeFor, ncol: ends.length, L: L,
+             mir: mir, mirE: mirE };
   }
 
   /* ---------------- 解題器 ---------------- */
   function solve(L, limit, maxNodes) {
     limit = limit || 2;
     maxNodes = maxNodes || 2000000;
-    var G = build(L), ne = G.ne, nn = G.nn, ea = G.ea, eb = G.eb, adj = G.adj, deg = G.deg, eside = G.eside, isGate = G.isGate;
+    var G = build(L), ne = G.ne, nn = G.nn, ea = G.ea, eb = G.eb, adj = G.adj, deg = G.deg, eside = G.eside, isGate = G.isGate, mir = G.mir;
     var es = new Int8Array(ne).fill(-1), col = new Int8Array(G.color);
     var trail = [];               // 正數 = 邊 index+1（復原成 -1）；負數 = -(節點+1)（顏色復原成 0）
     var queue = [], inq = new Uint8Array(nn);
@@ -147,6 +171,18 @@
           if (so > 1 || so + su < 1) return false;
           if (so === 1 && su) { for (j = 0; j < L2.length; j++) { e = L2[j]; if (eside[e] === side && es[e] === -1 && !setE(e, 0)) return false; } }
           else if (so === 0 && su === 1 && !setE(last, 1)) return false;
+        }
+      }
+      if (mir[v]) {
+        // 星鏡：成對的兩條邊同開同關（缺邊的那一對 ⇒ 另一條也關）
+        var MP = MIR_PAIRS[mir[v]], E4 = G.mirE[v];
+        for (var q = 0; q < 2; q++) {
+          var e1 = E4[MP[q][0]], e2 = E4[MP[q][1]];
+          if (e1 < 0 || e2 < 0) { if (e1 >= 0 && !setE(e1, 0)) return false; if (e2 >= 0 && !setE(e2, 0)) return false; continue; }
+          var s1 = es[e1], s2 = es[e2];
+          if (s1 !== -1 && s2 !== -1) { if (s1 !== s2) return false; }
+          else if (s1 !== -1) { if (!setE(e2, s1)) return false; }
+          else if (s2 !== -1) { if (!setE(e1, s2)) return false; }
         }
       }
       // 顏色
@@ -304,15 +340,31 @@
       if (dx + dy < 3 || !farFromSpecial(c1, 2) || !farFromSpecial(c2, 2)) continue;
       special[c1] = 2; special[c2] = 2; gates.push([c1 % w, (c1 / w) | 0, c2 % w, (c2 / w) | 0]);
     }
-    if (bridges.length < (spec.bridges || 0) || gates.length < (spec.gates || 0)) return null;
-    var Ltmp = { w: w, h: h, ends: [], bridges: bridges, gates: gates };
+    var mirrors = [];
+    tries = 0;
+    while (mirrors.length < (spec.mirrors || 0) && tries++ < 300) {
+      var mc = rnd(N);
+      if (!interior(mc) || special[mc] || !farFromSpecial(mc, 2)) continue;
+      special[mc] = 3; mirrors.push([mc % w, (mc / w) | 0, 1 + rnd(2)]);
+    }
+    if (bridges.length < (spec.bridges || 0) || gates.length < (spec.gates || 0) || mirrors.length < (spec.mirrors || 0)) return null;
+    var Ltmp = { w: w, h: h, ends: [], bridges: bridges, gates: gates, mirrors: mirrors };
     var G = build(Ltmp), nn = G.nn;
     var owner = new Int16Array(nn).fill(-1);       // 節點屬於哪條路徑
     var cellOwner = [];                             // 每格的擁有者集合（橋格 2 個）
     for (i = 0; i < N; i++) cellOwner.push([]);
     var paths = [];                                 // 每條 = 節點序列
     var pathCells = [];                             // 每條 = 格子序列（星門兩格都列）
-    function nbrs(v, enterSide) {                   // v 的鄰邊（星門：只能走另一側）
+    function sideAt(e, v) {                         // 邊 e 在節點 v（一般格 / 鏡格）那端是哪一側：0 上 1 右 2 下 3 左
+      var c = cellAt(e, v), o = G.ea[e] === v ? G.ecb[e] : G.eca[e], d = o - c;
+      return d === -w ? 0 : d === 1 ? 1 : d === w ? 2 : 3;
+    }
+    function mirExit(v, eIn) {                      // 從 eIn 進入鏡格 v ⇒ 唯一能出去的邊（沒有 = -1）
+      var ps = mirPartner(G.mir[v], sideAt(eIn, v));
+      return ps < 0 ? -1 : G.mirE[v][ps];
+    }
+    function nbrs(v, enterSide, enterE) {           // v 的鄰邊（星門：只能走另一側；星鏡：只能走成對的那一側）
+      if (G.mir[v] && enterE >= 0) { var mx = mirExit(v, enterE); return mx >= 0 ? [mx] : []; }
       var out = [], L2 = G.adj[v];
       for (var j = 0; j < L2.length; j++) {
         var e = L2[j];
@@ -350,13 +402,19 @@
       if (best < 0) return null;                    // 只剩機關沒覆蓋 ⇒ 失敗
       var p = paths.length, nodes = [best], cells = [best];
       owner[best] = p; cellOwner[best].push(p); uncovered--;
-      var target = minLen + rnd(maxLen - minLen + 1), v = best, enterSide = 0;
+      var target = minLen + rnd(maxLen - minLen + 1), v = best, enterSide = 0, enterE = -1;
       for (;;) {
-        if (nodes.length >= target && !G.isGate[v] && !(v >= N || G.bIdx[v] >= 0)) break;
-        var opts = nbrs(v, enterSide), cand = [];
+        if (nodes.length >= target && !G.isGate[v] && !G.mir[v] && !(v >= N || G.bIdx[v] >= 0)) break;
+        var opts = nbrs(v, enterSide, enterE), cand = [];
         for (k = 0; k < opts.length; k++) {
           var e = opts[k], u = G.ea[e] === v ? G.eb[e] : G.ea[e];
           if (owner[u] >= 0 || !G.deg[u]) continue;
+          if (G.mir[u]) {                           // 走進鏡格：反彈出去的那格要還空著
+            var mx2 = mirExit(u, e);
+            if (mx2 < 0) continue;
+            var w2 = G.ea[mx2] === u ? G.eb[mx2] : G.ea[mx2];
+            if (w2 === v || owner[w2] >= 0 || !G.deg[w2]) continue;
+          }
           var cu = cellAt(e, u), cv = cellAt(e, v);
           var tailCells = [cells[cells.length - 1], cv];
           if (selfAdj(p, cu, tailCells)) continue;
@@ -374,10 +432,11 @@
         owner[ch.u] = p; uncovered--;
         cellOwner[ch.cu].push(p); if (ch.cv !== cells[cells.length - 2] || true) { if (cellOwner[ch.cv].indexOf(p) < 0) cellOwner[ch.cv].push(p); }
         enterSide = G.isGate[ch.u] ? G.eside[ch.e] : 0;
+        enterE = ch.e;
         v = ch.u;
       }
       // 終點不得是機關
-      if (G.isGate[v] || v >= N || G.bIdx[v] >= 0) return null;
+      if (G.isGate[v] || G.mir[v] || v >= N || G.bIdx[v] >= 0) return null;
       if (nodes.length < minLen) {
         // 太短：嘗試接到相鄰路徑的端點（兩條合併）
         var merged = false;
@@ -432,7 +491,7 @@
     }
     var group = assignGroups(P.length, cross, R);
     if (!group) return null;
-    return { w: w, h: h, bridges: bridges, gates: gates, paths: PC, group: group };
+    return { w: w, h: h, bridges: bridges, gates: gates, mirrors: mirrors, paths: PC, group: group };
   }
   // 把 n 條線分到 4 組 × 2 色；cross 的兩條必須同組
   function assignGroups(n, cross, R) {
@@ -478,7 +537,9 @@
       ends.push([a % w, (a / w) | 0, b % w, (b / w) | 0]);
       colors.push(byColor[i].c);
     }
-    return { w: part.w, h: part.h, ends: ends, colors: colors, bridges: part.bridges, gates: part.gates };
+    var L = { w: part.w, h: part.h, ends: ends, colors: colors, bridges: part.bridges, gates: part.gates };
+    if (part.mirrors && part.mirrors.length) L.mirrors = part.mirrors;
+    return L;
   }
 
   function generate(spec, seed, maxTries) {
@@ -494,18 +555,20 @@
     return null;
   }
 
-  /* ---------------- 關卡字串（levels.js 用）：'WxH|ends|colors|bridges|gates' ---------------- */
+  /* ---------------- 關卡字串（levels.js 用）：'WxH|ends|colors|bridges|gates[|mirrors]' ---------------- */
   function encode(L) {
     function flat(a) { return a.map(function (q) { return q.join(','); }).join(';'); }
-    return L.w + 'x' + L.h + '|' + flat(L.ends) + '|' + L.colors.join(',') + '|' + flat(L.bridges || []) + '|' + flat(L.gates || []);
+    var s = L.w + 'x' + L.h + '|' + flat(L.ends) + '|' + L.colors.join(',') + '|' + flat(L.bridges || []) + '|' + flat(L.gates || []);
+    if (L.mirrors && L.mirrors.length) s += '|' + flat(L.mirrors);
+    return s;
   }
   function decode(s) {
     var p = s.split('|'), wh = p[0].split('x');
     function arr(t) { return t ? t.split(';').map(function (q) { return q.split(',').map(Number); }) : []; }
-    return { w: +wh[0], h: +wh[1], ends: arr(p[1]), colors: p[2] ? p[2].split(',').map(Number) : [], bridges: arr(p[3]), gates: arr(p[4]) };
+    return { w: +wh[0], h: +wh[1], ends: arr(p[1]), colors: p[2] ? p[2].split(',').map(Number) : [], bridges: arr(p[3]), gates: arr(p[4]), mirrors: arr(p[5]) };
   }
 
-  LN.Gen = { rng: rng, build: build, solve: solve, generate: generate, encode: encode, decode: decode,
+  LN.Gen = { rng: rng, build: build, MIR_PAIRS: MIR_PAIRS, mirPartner: mirPartner, solve: solve, generate: generate, encode: encode, decode: decode,
              assignGroups: assignGroups, PAL_GROUPS: PAL_GROUPS, PER_PAL: PER_PAL, MAX_COLORS: MAX_COLORS };
   if (typeof module !== 'undefined' && module.exports) module.exports = LN.Gen;
 })(typeof window !== 'undefined' ? window : globalThis);

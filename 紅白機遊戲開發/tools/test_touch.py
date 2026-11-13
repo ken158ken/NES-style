@@ -29,7 +29,7 @@ import sys
 from playwright.sync_api import sync_playwright
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-PAGES = ['game.html', 'star.html', 'cruiser.html', 'mech.html', 'cart1.html', 'cart2.html', 'cart3.html']
+PAGES = ['game.html', 'star.html', 'cruiser.html', 'mech.html', 'cart1.html', 'cart2.html', 'cart3.html', 'cart4.html', 'cart5.html']
 # R5 fix-r5-shell（qa-r5 P3-12）：cart1.html《星塵 8 合 1》—— __nes.state() 是 {game, s}，主角在各款裡不同：
 #   mode：還在選單（boot / menu）⇒ 'select'（再按 START）、launch 閃爍中 ⇒ 'ready'（等），已進遊戲 ⇒ 'play'；
 #   x   ：量「目前遊戲的 update 看到 RIGHT 被按住幾幀」（測試頁內包一層計數，不依賴各款主角欄位）。
@@ -45,7 +45,7 @@ X_JS = {'cart1.html': """()=>{ const g = window.CT && CT.current; if (!g) return
 #   這裡測的是「入口頁 + shell + 觸控」平台本身 ⇒ 測試時注入一個空殼遊戲 zz_touch（order 0，選單第一列），START 直接進它。
 MODE_JS['cart2.html'] = MODE_JS['cart1.html']
 X_JS['cart2.html'] = X_JS['cart1.html']
-CART_PAGES = ('cart1.html', 'cart2.html', 'cart3.html')
+CART_PAGES = ('cart1.html', 'cart2.html', 'cart3.html', 'cart4.html', 'cart5.html')
 TOUCH_STUB = {'cart2.html': r"""(function () {
   var CT = window.CT = window.CT || {}; CT.games = CT.games || [];
   CT.games.push({ id: 'zz_touch', order: 0, title: 'TOUCH', legacy: [],
@@ -57,6 +57,15 @@ TOUCH_STUB = {'cart2.html': r"""(function () {
 MODE_JS['cart3.html'] = MODE_JS['cart1.html']
 X_JS['cart3.html'] = X_JS['cart1.html']
 TOUCH_STUB['cart3.html'] = TOUCH_STUB['cart2.html']
+# R8 C8-0：cart4.html《星塵節奏 8 合 1》同一個 shell ⇒ 同上
+MODE_JS['cart4.html'] = MODE_JS['cart1.html']
+X_JS['cart4.html'] = X_JS['cart1.html']
+TOUCH_STUB['cart4.html'] = TOUCH_STUB['cart2.html']
+# R9 C9-0：cart5.html《星塵文創 6 合 1》同一個 shell ⇒ 同上
+MODE_JS['cart5.html'] = MODE_JS['cart1.html']
+X_JS['cart5.html'] = X_JS['cart1.html']
+# cart5 只有 6 槽、第二批遊戲還沒註冊時第 1 槽是「準備中」⇒ 空殼佔 id 'adventure'（真遊戲註冊時 CT.register 會取代它）
+TOUCH_STUB['cart5.html'] = TOUCH_STUB['cart2.html'].replace("id: 'zz_touch', order: 0", "id: 'adventure', order: 1")
 # (裝置, 是否橫向, 標籤)
 DEVS = [('iPhone 13', True, 'iPhone13橫'), ('Pixel 5', False, 'Pixel5直')]
 KEYS = ('dpad', 'a', 'b', 'select', 'start', 'cheat', 'fs')      # fix5：第 7 顆 ★密技

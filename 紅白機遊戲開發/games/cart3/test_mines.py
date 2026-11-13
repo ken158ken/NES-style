@@ -206,6 +206,17 @@ def main():
     r = page.evaluate('() => { const c = CT.cheat(); __nes.step(1); return { c, s: GAME.state().s }; }')
     ok('遊玩中密技 = 一口氣開完推得出的安全格（補強）', r['c'] and r['s']['opened'] > o0 and r['s']['boardCheated'], (o0, r['s']['opened']))
 
+    fresh(page, '&seed=9')
+    # qa-r7 P3-5：HUD 不貼頂（EASY / NORMAL 第 2 / 3 列、第 1 列空；HARD 12 列盤面沒有空列，維持第 1 / 2 列）
+    hud = page.evaluate("""() => { const p = __nes.nes().ppu, A = CT.Mines.Art.make(), d = CT.Mines.dev, out = [];
+        const blank = (r) => { for (let c = 0; c < 32; c++) { const t = p.getTile(0, c, r); if (t !== 0 && t !== A.t('SP') && t !== A.t('ST1') && t !== A.t('ST2')) return false; } return true; };
+        for (const m of [0, 1, 2]) { d.start(m); for (let i = 0; i < 40; i++) __nes.step(1);
+          const g = d.g(); out.push({ m, oy: g.oy, r1: blank(1), mine1: p.getTile(0, 1, 1) === A.t('IC_MINE'), mine2: p.getTile(0, 1, 2) === A.t('IC_MINE'),
+            boxTop: g.oy - 1, helpRow: p.getTile(0, 2, 28) }); }
+        d.start(0); return out; }""")
+    ok('qa-r7 P3-5：EASY / NORMAL HUD 下移到第 2 列（第 1 列空、盤框在第 5 列以下）；HARD 維持第 1 列',
+       hud[0]['r1'] and hud[0]['mine2'] and hud[0]['boxTop'] >= 4 and hud[1]['r1'] and hud[1]['mine2'] and hud[1]['oy'] == 6 and hud[1]['boxTop'] >= 4
+       and hud[2]['mine1'] and hud[2]['oy'] == 4, hud)
     # ---------------- 提示 / 暫停 ----------------
     fresh(page, '&seed=9')
     page.evaluate('() => { CT.Mines.dev.start(0); CT.Mines.dev.cursor(5, 5); }')

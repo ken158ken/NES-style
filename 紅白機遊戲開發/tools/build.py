@@ -27,7 +27,7 @@ ENGINE_ORDER = ['palette.js', 'fixed.js', 'input.js', 'cpu_timing.js', 'chr.js',
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--out', default='')
-    ap.add_argument('--src', default='game.html', help='入口頁（game.html = 星塵測試室 demo；star.html = 星塵勇者；cruiser.html = 星塵巡航艦；mech.html = 星塵機甲；cart1.html = 星塵 8 合 1；cart2.html = 星塵反應 8 合 1；cart3.html = 星塵益智 8 合 1）')
+    ap.add_argument('--src', default='game.html', help='入口頁（game.html = 星塵測試室 demo；star.html = 星塵勇者；cruiser.html = 星塵巡航艦；mech.html = 星塵機甲；cart1.html = 星塵 8 合 1；cart2.html = 星塵反應 8 合 1；cart3.html = 星塵益智 8 合 1；cart4.html = 星塵節奏 8 合 1；cart5.html = 星塵文創 6 合 1）')
     ap.add_argument('--check', action='store_true', help='只檢查不寫檔')
     a = ap.parse_args()
     global SRC
@@ -36,7 +36,9 @@ def main():
         a.out = {'cruiser.html': 'dist/星塵巡航艦.html', 'star.html': 'dist/星塵勇者.html',
                  'mech.html': 'dist/星塵機甲.html', 'cart1.html': 'dist/星塵8合1.html',
                  'cart2.html': 'dist/星塵反應8合1.html',
-                 'cart3.html': 'dist/星塵益智8合1.html'}.get(a.src, 'dist/星塵測試室.html')
+                 'cart3.html': 'dist/星塵益智8合1.html',
+                 'cart4.html': 'dist/星塵節奏8合1.html',
+                 'cart5.html': 'dist/星塵文創6合1.html'}.get(a.src, 'dist/星塵測試室.html')
 
     html = SRC.read_text(encoding='utf-8')
     found, missing, order = [], [], []

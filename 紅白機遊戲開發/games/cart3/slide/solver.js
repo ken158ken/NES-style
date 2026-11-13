@@ -204,7 +204,53 @@
     return arr.length - cyc;
   }
 
+  /* ---------------- 內容等價（相同圖面的片可互換） ---------------- */
+  // cls[片號] = 與該片圖面（16 磁磚 + 4 屬性）完全相同的最小片號；完成判定 = 每格放的片與該格「同類」
+  function solvedEq(arr, cls) {
+    if (!cls) return solvedArr(arr);
+    for (var i = 0; i < arr.length; i++) if (cls[arr[i]] !== cls[i]) return false;
+    return true;
+  }
+  // 依內容重新編號：已經「同類到位」的片改標成該格的號碼，其餘同類片依序分配剩下的號碼 ⇒ 之後照一般解題器解。
+  // slideN > 0（滑塊）：重新編號若改變奇偶（不可解），就把同類兩片的號碼對調（同類片外觀相同，對調不影響畫面）。
+  function canon(arr, cls, slideN) {
+    if (!cls) return arr.slice();
+    var N = arr.length, out = new Array(N), used = new Uint8Array(N), p, q;
+    for (p = 0; p < N; p++) if (cls[arr[p]] === cls[p]) { out[p] = p; used[p] = 1; }
+    for (p = 0; p < N; p++) {
+      if (out[p] !== undefined) continue;
+      var c = cls[arr[p]];
+      for (q = 0; q < N; q++) if (!used[q] && cls[q] === c) break;
+      out[p] = q; used[q] = 1;
+    }
+    if (slideN && !slideSolvable(out, slideN)) {
+      var blank = N - 1, best = null;
+      for (p = 0; p < N && !best; p++) for (q = p + 1; q < N; q++) {
+        if (out[p] === blank || out[q] === blank || cls[out[p]] !== cls[out[q]]) continue;
+        if (out[p] !== p && out[q] !== q) { best = [p, q]; break; }
+        if (!best) best = [p, q];
+      }
+      if (best) { var t = out[best[0]]; out[best[0]] = out[best[1]]; out[best[1]] = t; }
+    }
+    return out;
+  }
+  // 片像素陣列 → cls：兩片「不同的像素 ≤ tol」就算同一類（併查集，取最小片號當代表）；skip = 不參與合併的片號（滑塊的空格）
+  function classes(pix, tol, skip) {
+    var n = pix.length, par = [], i, j;
+    for (i = 0; i < n; i++) par.push(i);
+    function find(x) { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; }
+    for (i = 0; i < n; i++) for (j = i + 1; j < n; j++) {
+      if (i === skip || j === skip) continue;
+      var a = pix[i], b = pix[j], d = 0;
+      for (var k = 0; k < a.length && d <= tol; k++) if (a[k] !== b[k]) d++;
+      if (d <= tol) { var ri = find(i), rj = find(j); if (ri !== rj) { if (ri < rj) par[rj] = ri; else par[ri] = rj; } }
+    }
+    var cls = []; for (i = 0; i < n; i++) cls.push(find(i));
+    return cls;
+  }
+
   SL.Solve = {
+    solvedEq: solvedEq, canon: canon, classes: classes,
     rng: rng, permParity: permParity, solved: solvedArr, slideSolvable: slideSolvable, misplaced: misplaced,
     scrambleSlide: scrambleSlide, scrambleSwap: scrambleSwap, scrambleRotate: scrambleRotate,
     rotate: rotate, windowCells: windowCells, slideMove: slideMove,

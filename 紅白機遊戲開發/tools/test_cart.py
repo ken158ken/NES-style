@@ -31,6 +31,8 @@ PAGES = {
     'cart1.html': ['maze', 'blocks', 'brick', 'pinball', 'snake', 'racing', 'flyer', 'tower'],
     'cart2.html': ['slash', 'laser', 'dodge', 'rope', 'catch', 'pop', 'gallery', 'mash'],
     'cart3.html': ['merge', 'sudoku', 'mines', 'gomoku', 'slide', 'lines', 'labyrinth', 'party'],   # R7 C7-0
+    'cart4.html': ['cards', 'simon', 'flash', 'tune', 'rhythm', 'reflex', 'brain', 'color'],   # R8 C8-0
+    'cart5.html': ['adventure', 'escape', 'quiz', 'words', 'typing', 'paint'],   # R9 C9-0：6 槽（以下「8」一律 = len(DEFAULT_IDS)）
 }
 PAGE_NAME = 'cart1.html'
 CART = 'cart1'
@@ -204,9 +206,9 @@ def test_real(page):
     }))""")
     ids = [g['id'] for g in games]
     print('  已註冊 %d 款：%s' % (len(ids), ', '.join(ids) or '（無）'))
-    ok('真遊戲：已註冊 0~8 款且 id 都在卡帶一的 8 槽內' if CART == 'cart1' else '真遊戲：已註冊 0~8 款且 id 都在本卡帶的 8 槽內', len(ids) <= 8 and all(i in DEFAULT_IDS for i in ids), ids)
+    ok('真遊戲：已註冊 0~8 款且 id 都在卡帶一的 8 槽內' if CART == 'cart1' else '真遊戲：已註冊 0~8 款且 id 都在本卡帶的 8 槽內', len(ids) <= len(DEFAULT_IDS) and all(i in DEFAULT_IDS for i in ids), ids)
     ok('真遊戲：id 不重複', len(set(ids)) == len(ids), ids)
-    ok('選單：8 槽 + 未註冊顯示準備中', len(st['s']['slots']) == 8 and
+    ok('選單：8 槽 + 未註冊顯示準備中', len(st['s']['slots']) == len(DEFAULT_IDS) and
        all((s['registered'] == (s['id'] in ids)) and (s['name'] == ('ready' if s['id'] not in ids else s['name']))
            for s in st['s']['slots']), [(s['id'], s['name']) for s in st['s']['slots']])
     for g in games:
@@ -216,7 +218,7 @@ def test_real(page):
            isinstance(g['title'], str) and g['title'] and isinstance(g['legacy'], list) and g['exit'] and g['bestText'],
            (g['title'], g['legacy']))
         want = DEFAULT_IDS.index(gid) + 1
-        ok('契約 %s：order 為 1..8 的整數' % gid, isinstance(g['order'], int) and 1 <= g['order'] <= 8, g['order'])
+        ok('契約 %s：order 為 1..8 的整數' % gid, isinstance(g['order'], int) and 1 <= g['order'] <= len(DEFAULT_IDS), g['order'])
         if g['order'] != want:
             warn('%s 的 order=%r 與 LEGACY_MAP 槽位 %d 不同（選單照 order 排）' % (gid, g['order'], want))
         slot = [s for s in st['s']['slots'] if s['id'] == gid][0]
@@ -289,7 +291,7 @@ def test_menu(page):
     ok('開機：START 可跳過', S(page)['s']['mode'] == 'menu', S(page)['s']['mode'])
     s = S(page)['s']
     ids = [x['id'] for x in s['slots']]
-    ok('選單：預設 8 槽 + 表外 id 接在後面（共 10）', ids[:8] == DEFAULT_IDS and ids[8:] == ['zz_fake', 'zz_fake2'] if len(ids) == 10 else False, ids)
+    ok('選單：預設 8 槽 + 表外 id 接在後面（共 10）', ids[:len(DEFAULT_IDS)] == DEFAULT_IDS and ids[len(DEFAULT_IDS):] == ['zz_fake', 'zz_fake2'] if len(ids) == len(DEFAULT_IDS) + 2 else False, ids)
     names = {x['id']: x['name'] for x in s['slots']}
     ok('選單：表外中文字走執行期點陣（星塵測試 → glyph）', names.get('zz_fake') == 'glyph' and not s['missingGlyph'],
        (names.get('zz_fake'), s['missingGlyph']))
@@ -584,7 +586,7 @@ def test_cfg(page):
     ids = [x['id'] for x in c['slots']]
     ok('R6 卡帶設定：8 槽 id 照任務表順序（%s）' % ','.join(DEFAULT_IDS), ids == DEFAULT_IDS, ids)
     ok('R6 卡帶設定：order 1..8、名稱 2~6 字、legacy 非空陣列',
-       [x['order'] for x in c['slots']] == list(range(1, 9)) and c['nameChars'] and
+       [x['order'] for x in c['slots']] == list(range(1, len(DEFAULT_IDS) + 1)) and c['nameChars'] and
        all(isinstance(x['legacy'], list) and x['legacy'] for x in c['slots']), [(x['id'], x['order'], x['name']) for x in c['slots']])
     ok('R6 卡帶設定：8 個圖示都是 16×16 的 .123、pal 0..3、不是空白',
        all(x['artOk'] and x['nonEmpty'] and x['pal'] in (0, 1, 2, 3) for x in c['slots']),
@@ -595,7 +597,7 @@ def test_cfg(page):
        c['song'] == PREFIX + '_menu' and c['bankBg'] and c['bankSpr'] and c['pals'], c)
     # 存檔前綴隔離：本卡寫的 key 只落在 nes.<cart>.
     iso = page.evaluate("""(cart) => { CT.save('zz_iso', 'best', 77);
-      const mine = localStorage.getItem('nes.' + cart + '.zz_iso.best'), other = ['cart1', 'cart2', 'cart3'].filter(k => k !== cart)
+      const mine = localStorage.getItem('nes.' + cart + '.zz_iso.best'), other = ['cart1', 'cart2', 'cart3', 'cart4', 'cart5'].filter(k => k !== cart)
         .some(k => localStorage.getItem('nes.' + k + '.zz_iso.best') !== null);
       localStorage.removeItem('nes.' + cart + '.zz_iso.best'); return { mine, other }; }""", CART)
     ok('R6 存檔：CT.save 只寫 nes.%s.<id>.<key>，不碰別張卡帶' % CART, iso['mine'] == '77' and not iso['other'], iso)
@@ -604,7 +606,7 @@ def test_cfg(page):
       let t = null; try { t = g.bestText(); } catch (e) { t = 'ERR ' + e; } return [g.id, t]; })""")
     for gid, t in bts:
         ok('R6 bestText %s：右對齊 6 字元（純分數 000000 / 單位 ≤ 6）' % gid,
-           isinstance(t, str) and len(t) == 6 and t == t.rstrip() and t.strip() != '' and all(ch.isalnum() or ch in (' ./:-' if CART not in ('cart1', 'cart2') else ' ./') for ch in t), t)   # R7 brief §1-5：時間紀錄 03:25 / 未有紀錄 --:--
+           isinstance(t, str) and len(t) == 6 and t == t.rstrip() and t.strip() != '' and all(ch.isalnum() or ch in ((' ./:-%' if CART == 'cart5' else ' ./:-') if CART not in ('cart1', 'cart2') else ' ./') for ch in t), t)   # R9：cart5 另允許 %（paint 臨摹相似度）   # R7 brief §1-5：時間紀錄 03:25 / 未有紀錄 --:--
 
 
 def test_cfg_full(browser):
@@ -623,7 +625,7 @@ def test_cfg_full(browser):
     pg.evaluate("(nm) => { nm.forEach(([id, n]) => { const g = CT.get(id); if (g && g.__stub) g.title = n; }); CT.back(); __nes.step(10); }", names)
     st = S(pg)['s']
     ok('R6 全滿選單：8 槽都註冊、名稱全部 16×16 中文（無缺字）',
-       len(st['slots']) == 8 and all(x['registered'] and x['name'] == 'glyph' for x in st['slots']) and not st['missingGlyph'],
+       len(st['slots']) == len(DEFAULT_IDS) and all(x['registered'] and x['name'] == 'glyph' for x in st['slots']) and not st['missingGlyph'],
        ([(x['id'], x['name']) for x in st['slots']], st['missingGlyph']))
     ok('R6 全滿選單：BG bank ≤ 256 磁磚', 0 < st['tiles'] <= 256, st['tiles'])
     icons = pg.evaluate("""(pre) => { const p = __nes.nes().ppu, b = NES.CHR.getBank(pre + '_bg');

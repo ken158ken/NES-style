@@ -13,6 +13,8 @@
  *   - **視野 = 屬性表**：每個 16×16 屬性區依「到露明的距離」選 BG 調色盤 2（明亮）/ 1（微光）/ 0（全黑 $0F×3）；
  *     同一塊磁磚在三組調色盤下就是亮 / 暗 / 看不見。露明每移動 16 px 才有一圈屬性改變（實測每幀 ≤ 20 byte）。
  *     頭燈閃爍 = 每 8~12 幀換一次明亮調色盤的一色（3 byte）。
+ *     fix-r7-maze：走過記憶——探索過的區塊（g.kb）離開頭燈後維持微光組 1、沒去過的才是 0（只換寫入的值，位元組量不增加）；
+ *     狀態列在第 2 / 3 列（不貼 y = 0）；新機關第一次出現的樓層開場先出說明卡（mode 'intro'，CT.save seen 位元；?hint=0 跳過）。
  *   - **小地圖（SELECT）= 第二張名稱表**：探索到的格子邊走邊寫進 nt1（一塊磁磚 = 2×2 格，16 種四分格 + 物件標記），
  *     按 SELECT 只是把捲動基底切到 nt1 ⇒ 開地圖 0 byte。
  *   - 所有名稱表 / 屬性寫入走影子表 + 差異佇列（屬性 → nt0 → nt1 的順序），每幀 ≤ 140 byte；
@@ -110,7 +112,7 @@
     return {
       mode: 'title', t: 0, row: 0, selFloor: 1, seed: 12345, paused: false, map: false,
       run: null, lv: null, im: null, W: 0, H: 0, OX: 0, OY: 0,
-      sw: 0, dm: 0, km: 0, got: null, known: null, shiftSt: null, shiftPend: null,
+      sw: 0, dm: 0, km: 0, got: null, known: null, kb: null, introT: 0, intro: null, shiftSt: null, shiftPend: null,
       p: { cx: 0, cy: 0, x: 0, y: 0, moving: false, dir: 2, face: 2, tx: 0, ty: 0, step: 0 },
       lastDir: -1, ft: 0, r1: 40, r2: 56, boostT: 0, lampOn: false, compass: COMPASS_N, compT: 0, compDir: 0,
       spark: null, msg: '', msgT: 0, clearT: 0, flick: 0, flickT: 0, lightKey: '', shards: 0, exitAnim: 0,
@@ -165,7 +167,7 @@
 
   /* ============================== 開局 / 樓層 ============================== */
   function startRun(kind, n, seed) {
-    var keep = { bot: g.bot, row: g.row, selFloor: g.selFloor, seed: g.seed };
+    var keep = { bot: g.bot, row: g.row, selFloor: g.selFloor, seed: g.seed, noHint: g.noHint };
     g = newState();
     for (var k in keep) g[k] = keep[k];
     g.run = { kind: kind, floor: n || 1, seed: seed || g.seed, total: 0, cleared: 0, cheated: false, startFloor: n || 1 };
@@ -181,7 +183,7 @@
     g.lv = lv; g.im = Gen.indexMaps(lv);
     g.W = lv.W; g.H = lv.H; g.OX = (31 - lv.W) >> 1; g.OY = 4 + ((23 - lv.H) >> 1);
     var N = lv.W * lv.H;
-    g.sw = 0; g.dm = 0; g.km = 0; g.got = new Uint8Array(N); g.known = new Uint8Array(N);
+    g.sw = 0; g.dm = 0; g.km = 0; g.got = new Uint8Array(N); g.known = new Uint8Array(N); g.kb = new Uint8Array(240);
     g.shiftSt = new Uint8Array(N); g.shiftPend = new Uint8Array(N);
     lv.shifts.forEach(function (s) { g.shiftSt[s.c] = s.ph === 0 ? 2 : 0; });
     var sx = lv.start % lv.W, sy = (lv.start / lv.W) | 0;
@@ -190,8 +192,47 @@
     g.spark = null; g.shards = 0; g.mode = 'play'; g.paused = false; g.map = false; g.clearT = 0; g.lightKey = '';
     g.bot.plan = null;
     g.msg = (lv.spec.n ? 'FLOOR ' + lv.spec.n + '  ' : '') + lv.spec.name; g.msgT = 150;
-    drawFloor();
     AU.play(THEMES[lv.spec.theme].song);
+    var need = g.noHint ? [] : introList(lv);
+    if (need.length) enterIntro(need); else drawFloor();
+  }
+
+  /* ============== fix-r7-maze P3-3：新機關第一次出現 ⇒ 開場說明卡（畫面示意 + 兩行字，A 開始；存檔只播一次） ============== */
+  var HINTS = [
+    { bit: 1, has: function () { return true; }, icons: ['EXIT', 'SHARD'], l1: 'FIND THE STAR GATE', l2: 'SHARDS GIVE A STAR' },
+    { bit: 2, has: function (lv) { return lv.doors.length > 0; }, icons: ['KEY', 'DOOR', 'DOOR_O'], l1: 'A KEY OPENS A DOOR', l2: 'ONE KEY PER DOOR' },
+    { bit: 4, has: function (lv) { return lv.gates.length > 0; }, icons: ['SW_S', 'GA_O', 'GB_C'], l1: 'STEP ON ☼/☾ SWITCH', l2: 'SUN/MOON GATES SWAP' },
+    { bit: 8, has: function (lv) { return lv.shifts.length > 0; }, icons: ['SH_O', 'SH_W', 'SH_C'], l1: 'TIDE WALLS RISE AND', l2: 'FALL. HALF = WARNING' },
+    { bit: 16, has: function (lv) { return lv.lamp >= 0; }, icons: ['LAMP'], l1: 'STAR LAMP WIDENS', l2: 'YOUR HEADLAMP' }
+  ];
+  function seenMask() { return CT.load('labyrinth', 'seen', 0) | 0; }
+  function introList(lv) { var seen = seenMask(); return HINTS.filter(function (h) { return !(seen & h.bit) && h.has(lv); }); }
+  function enterIntro(list) {
+    g.mode = 'intro'; g.introT = 0; g.intro = list;
+    var ppu = nes0.ppu, th = theme(), lv = g.lv;
+    CT.blank(nes0, function () {
+      ppu.split(null); ppu.scroll(0, 0, 0); ppu.mirroring('v');
+      resetShadow(); clearSpr();
+      ppu.setBackdrop(0x0F);
+      ppu.setBgPalette(0, PAL_DARK); ppu.setBgPalette(1, th.dim); ppu.setBgPalette(2, th.lit); ppu.setBgPalette(3, PAL_HUD);
+      wantA.fill(3);
+      text(0, 2, 2, padR((lv.spec.n ? 'F' + lv.spec.n + ' ' : '') + lv.spec.name, 23) + (list.length > 1 || list[0].bit !== 1 ? ' NEW!' : ' TIPS'));
+      list.forEach(function (h, i) {
+        var r = 4 + i * 5;                                     // 每項 5 列：字在 r / r+2，示意磁磚在中間那列（明亮組 2），項與項之間空兩列
+        h.icons.forEach(function (n, j) { put(0, 2 + j * 2, r + 1, art.t(n)); });
+        for (var bx = 1; bx <= 4; bx++) wantA[((r + 1) >> 1) * 16 + bx] = 2;
+        text(0, 11, r, h.l1); text(0, 11, r + 2, h.l2);
+      });
+      text(0, 2, 28, 'A: START');
+      syncAll();
+    });
+  }
+  function closeIntro() {
+    var m = seenMask();
+    g.intro.forEach(function (h) { m |= h.bit; });
+    CT.save('labyrinth', 'seen', m);
+    g.intro = null; g.mode = 'play';
+    drawFloor();
   }
   function theme() { return THEMES[g.lv.spec.theme]; }
   function idx(x, y) { return y * g.W + x; }
@@ -228,7 +269,8 @@
       ppu.setBgPalette(0, PAL_DARK); ppu.setBgPalette(1, th.dim); ppu.setBgPalette(2, th.lit); ppu.setBgPalette(3, PAL_HUD);
       ppu.setSprPalette(0, SPR_P); ppu.setSprPalette(1, SPR_FX);
       for (var y = 0; y < g.H; y++) for (var x = 0; x < g.W; x++) put(0, g.OX + x, g.OY + y, cellTile(idx(x, y)));
-      for (var c = 0; c < 32; c++) put(0, c, 3, art.t('FR_H'));
+      // fix-r7-maze P3-5：狀態列下移一列（第 2 / 3 列，不貼 y = 0）；原第 3 列的外框線讓給狀態列
+      var c;
       wantA.fill(0);
       for (c = 0; c < 16; c++) { wantA[c] = 3; wantA[16 + c] = 3; wantA[14 * 16 + c] = 3; }
       drawHud(true);
@@ -282,14 +324,14 @@
   function drawHud(full) {
     var lv = g.lv;
     if (g.paused) {
-      text(0, 1, 1, padR('PAUSED', 30));
-      text(0, 1, 2, padR('B: RETRY FLOOR   START: RESUME', 30));
+      text(0, 1, 2, padR('PAUSED', 30));
+      text(0, 1, 3, padR('B: RETRY FLOOR   START: RESUME', 30));
       text(0, 0, 28, padR(' HOLD START+SELECT: MENU', 32));
       return;
     }
     var name = (lv.spec.n ? 'F' + lv.spec.n + ' ' : '') + lv.spec.name;
-    text(0, 1, 1, padR(name, 19) + '⚿' + keysHeld() + '  ✦' + g.shards + '/' + lv.shards.length + '  ');
-    text(0, 1, 2, 'TIME ' + mmss(g.ft) + ' PAR ' + mmss(lv.par * 60) + '  ◎' + g.compass + ' ' + (lv.switches.length ? (g.sw ? '☼' : '☾') : ' ') + ' ');
+    text(0, 1, 2, padR(name, 19) + '⚿' + keysHeld() + '  ✦' + g.shards + '/' + lv.shards.length + '  ');
+    text(0, 1, 3, 'TIME ' + mmss(g.ft) + ' PAR ' + mmss(lv.par * 60) + '  ◎' + g.compass + ' ' + (lv.switches.length ? (g.sw ? '☼' : '☾') : ' ') + ' ');
     var line = g.msgT > 0 ? g.msg : 'SELECT MAP   B COMPASS';
     text(0, 0, 28, ' ' + padR(line, 31));
   }
@@ -305,7 +347,8 @@
     for (var by = 2; by <= 13; by++) {
       for (var bx = 0; bx < 16; bx++) {
         var dx = bx * 16 + 8 - pcx, dy = by * 16 + 8 - pcy, d = dx * dx + dy * dy;
-        var pal = d <= R1 ? 2 : (d <= R2 ? 1 : 0);
+        // fix-r7-maze P2-3：走過記憶——已探索的區塊離開頭燈後維持微光組 1（不降回 0），只有沒去過的才全黑
+        var pal = d <= R1 ? 2 : (d <= R2 ? 1 : (g.kb[by * 16 + bx] ? 1 : 0));
         putA(bx, by, pal);
         if (pal) markBlock(bx, by);
       }
@@ -315,6 +358,7 @@
     for (var q = 0; q < 4; q++) {
       var cx = bx * 2 + (q & 1) - g.OX, cy = by * 2 + (q >> 1) - g.OY;
       if (cx < 0 || cy < 0 || cx >= g.W || cy >= g.H) continue;
+      g.kb[by * 16 + bx] = 1;                                  // 這塊有迷宮格 ⇒ 記成「去過」
       var c = idx(cx, cy);
       if (!g.known[c]) { g.known[c] = 1; mapDirty(c); }
     }
@@ -503,7 +547,7 @@
       if (r.best) text(0, 6, 20, 'BEST     ' + mmss(r.best.t) + '  ' + starStr(r.best.s));
       if (run.kind === 'adv') text(0, 6, 22, 'TOTAL    ' + mmss(run.total));
       var last = run.kind !== 'rand' && (run.kind === 'one' || r.n >= 9);
-      text(0, 6, 24, last ? 'A: FINISH' : 'A: NEXT FLOOR   START: TITLE');
+      text(0, 6, 24, last ? 'A: FINISH' : 'A: NEXT   START: TITLE');   // fix-r7-maze P3-4：原 28 字超出 32 欄
       wantA.fill(0);
       for (c = 0; c < 16; c++) { wantA[2 * 16 + c] = 1; wantA[8 * 16 + c] = 3; }
       syncAll();
@@ -590,6 +634,7 @@
       if (g.row !== 0) return (B.t % 16 === 8) ? BTN.UP : 0;
       return (B.t % 40 === 20) ? BTN.START : 0;
     }
+    if (g.mode === 'intro') return (g.introT > 30 && B.t % 20 === 10) ? BTN.A : 0;
     if (g.mode === 'clear') return (g.clearT > 70 && B.t % 30 === 15) ? BTN.A : 0;
     if (g.mode === 'end') return (g.endT > 90 && B.t % 40 === 20) ? BTN.START : 0;
     if (g.mode !== 'play') return 0;
@@ -637,6 +682,7 @@
       GAME.backTile = { tile: art.s('BACK'), pal: 1 };       // §6-4：實心金星（8×8）
       AU.init(nes);
       g = newState();
+      g.noHint = !!(CT.query && CT.query('hint') === '0');    // 測試 / 量測用：?hint=0 跳過說明卡
       var qs = CT.query ? CT.query('seed') : null, qf = CT.query ? CT.query('floor') : null;
       if (qs) g.seed = Math.max(1, parseInt(qs, 10) || 1);
       if (qf) { var fn = Math.max(1, Math.min(9, parseInt(qf, 10) || 1)); g.selFloor = fn; startRun('one', fn); }
@@ -653,6 +699,7 @@
           g.boostT = 1200; g.lightKey = '';
           g.km |= 1 << (8 + (g.cheats & 7));               // 萬用鑰匙（虛擬位元，不會和真鑰匙撞）
           for (var c = 0; c < g.known.length; c++) if (!g.known[c]) { g.known[c] = 1; mapDirty(c); }
+          for (var bb = 2 * 16; bb < 14 * 16; bb++) markBlock(bb & 15, bb >> 4);   // 走過記憶也全開（頭燈收回後整張圖保持微光）
           g.msg = 'STAR SIGHT! MAP + LIGHT + KEY'; g.msgT = 90; AU.sfx('labyrinth_lamp');
         }
       }
@@ -670,6 +717,8 @@
           AU.sfx('labyrinth_ok');
           if (g.row === 0) startRun('adv', 1); else if (g.row === 1) startRun('one', g.selFloor); else startRun('rand', 1, g.seed);
         }
+      } else if (g.mode === 'intro') {
+        if (++g.introT > 20 && (I.pressed(BTN.A) || I.pressed(BTN.START)) && !I.held(BTN.SELECT)) { AU.sfx('labyrinth_ok'); closeIntro(); }
       } else if (g.mode === 'play') updatePlay();
       else if (g.mode === 'clearing') { if (++g.clearT >= 60) enterResult(); }
       else if (g.mode === 'clear') {
@@ -698,6 +747,7 @@
         r1: g.r1, r2: g.r2, boost: g.boostT, compass: g.compass, cleared: g.run ? g.run.cleared : 0, floorsCleared: g.floorsCleared,
         result: g.result, cheated: g.cheated, cheats: g.cheats, maxLine: g.maxLine, writes: wstat.last, writePeak: wstat.peak,
         attrPeak: wstat.attrPeak, backlogPeak: wstat.backlogPeak, queue: qA.length + qT[0].length + qT[1].length,
+        intro: g.intro ? g.intro.map(function (h) { return h.bit; }) : null, seen: seenMask(), kb: g.kb ? g.kb.reduce(function (a, b) { return a + b; }, 0) : 0,
         bot: { replans: g.bot.replans, waits: g.bot.waits }, goal: !!(g.goalHit && !g.cheated)
       };
     },

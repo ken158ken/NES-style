@@ -804,3 +804,85 @@ resize 會二次觸發（iOS 工具列收合延遲）、`?touch=1` / `?touch=0` 
 4. 測試：`tools/test_touch.py`（**255 項**；fix5 每組多 10 項密技鍵檢查 + 桌機 1 項）。
 5. ★密技 鍵**不進 `NES.Input`**（`mask()` / `setExternal` 都不動）⇒ 按它不會打斷正在按的方向鍵，
    也不會被 `?debug=1` 的腳本注入干擾。
+
+---
+
+## 17. 卡帶五文字系統（CT.Text，games/cart5/text.js）
+
+擁有者：C9-0 cart5-text（R9）｜不是 engine 模組（只在 cart5.html 載入），但卡帶五的文字類遊戲**一律用它**；runtime 不准用 canvas 字型。
+示範：`cart5.html?game=textdemo&debug=1`（`games/cart5/textdemo/`，只在 `?game=textdemo` 時註冊）；測試 `games/cart5/test_text.py`。
+
+### 17.1 原理（像真機 CHR-RAM）
+- 字形資料 `games/cart5/glyphs.js`（`CT.GLYPHS`，**自動產生**）：全形字 = Noto Sans CJK TC Regular（SIL OFL）15px 點陣成 16×16；半形 = 原創 8×8（0x20~0x7E）。
+- 遊戲的**背景 bank** 用 `CT.Text.reserve(obj, N)` 預留 12 個框線磁磚（`TX_*`）+ N 磚「字形池」（`TX_P0..`）。執行期把當頁要用的字**寫進池裡**（全形 4 磚 / 半形 2 磚，同字同樣式共用、LRU 回收「畫面上沒有任何格子在用」的字），再把格子排進名稱表。
+- **每磚上傳 16 byte + 每格 1 byte 都計 VBlank 預算**（上傳用 `ppu.budget.use(16×磚數)`，名稱表走 `ppu.setTile` 自動計帳）。每幀可用 = `min(maxBytes − 本幀已用, budget.left() − reserveBytes)`（預設 136 / 16）⇒ 遊戲自己在同一幀先寫的量會自動讓出；`CT.blank` 裡（mute）一次寫完。
+- 版面單位 = 名稱表格子：全形字佔 2×2 格（16×16）、半形字佔 1×2 格（8×8 字身置中於 16 列行高）；一行文字高 2 列。
+
+| 一個全形字 | 第一次（要上傳） | 已在池裡 |
+|---|---|---|
+| 成本 | 4 磚 × 16 + 4 格 = **68 byte** | **4 byte** |
+| 半形字 | 2 × 16 + 2 = 34 byte | 2 byte |
+
+### 17.2 建立
+```js
+// init（registry 已包 CT.blank）
+var obj = { SP: [...], 自己的磁磚... };
+CT.Text.reserve(obj, 160);                    // 字形池 160 磚 = 40 個全形字同時在畫面上；+12 框線磚
+var bank = NES.CHR.bank('adv_bg', obj);       // 自己 + 172 ≤ 256
+NES.CHR.setPattern(0, bank);
+var T = CT.Text.create(nes, { bank: bank, nt: 0, fg: 3, bg: 0, shadow: 0, frame1: 1, frame2: 2, maxBytes: 136, reserveBytes: 16 });
+//  fg / bg / shadow = 字形磁磚用的色號（0~3；shadow 0 = 不畫右下陰影）；frame1 / frame2 = 框線暗 / 亮色號
+//  input:false ⇒ 元件不讀手把（自己呼叫 box.next() / menu.select()）
+```
+- `create()` 會把框線磁磚畫進 bank（init 期間，不計預算）。**每次重建 bank 就要重新 `create()`**。
+- 調色盤 / 屬性表由遊戲自己設（`box({pal})` 只是順手排屬性寫入；屬性是 16×16 區塊，框不對齊偶數格會染到鄰格）。
+- 池要多大：一頁對話（3 行 × 13 字）最多 39 個不同全形字 = 156 磚。池比一頁小也行——**分頁會依池容量自動提早換頁**（不截斷），只是一頁字變少。
+
+### 17.3 每幀
+```js
+update(nes) { ...; T.update(); }    // 依建立順序跑各元件（讀手把、打字機），最後依預算消化寫入佇列
+```
+
+### 17.4 對話框 `T.box({x, y, w, h, pad:1, pitch:2, speed:2, pausePunct:8, name, nameStyle, style, pal, input})`
+- 框 = 第 x~x+w−1 欄、第 y~y+h−1 列；文字從 (x+1+pad, y+1) 起，每行 `cols = w−2−2·pad` 欄（全形算 2）、`lines = ⌊(h−4)/pitch⌋+1` 行（h=8 ⇒ 3 行）。
+- `box.say(text, {name, speed, onPage(page, pages), onClose})`：第一次會畫框；`name` = 名牌（疊在框左上，佔第 y−3~y 列，所以 y ≥ 3）。
+  文字：`\n` 換行、`\f` 強制換頁；自動斷行（英文整字換行、避頭「，。！？」」等不放行首、避尾「「（」不放行末）；**依框寬 + 池容量自動分頁，絕不截斷**。
+- 打字機：每 `speed` 幀一個字、空白不花時間、`。！？…` 後停 `pausePunct` 幀；寫入受預算限制（一幀最多兩個新字）。
+- 手把：**A** = 打字中 → 這頁立刻寫完（仍照預算分幀）；頁寫完 → 翻頁；最後一頁 → 關閉（`onClose`）。
+  頁寫完時右下角內側（第 x+w−2 欄、第 y+h−2 列）閃 **▼**（還有下一頁）或 **■**（最後一頁）。
+- `box.state()` → `{phase, page, pages, name, lines[], cols, maxLines, x, y, w, h}`；`phase`：`idle` → `clear`（擦上一頁）→ `type` → `wait`（▼）/ `end`（■）→ `closed`。
+- `box.next()`（= 按 A）、`box.rushPage()`、`box.close({erase:true})`（擦掉框 + 名牌）、`box.active = false`（暫時不吃 A，例如選單開著時）。
+
+### 17.5 選項選單 `T.menu({x, y, items, w, h, frame:true, sel:0, cancel:true, style, pal, onMove(k), onChoose(k), input})`
+- `menu.open()` 畫框 + 選項（`w` / `h` 省略 = 自動）；▶ 游標在第 x+1 欄。**選項超過寬度 / 高度 / 池容量 → throw**（文字不准截斷）。
+- 手把：↑↓（按住：首延遲 12 幀、之後每 4 幀，同 R7）、**A** = 選定（`choice = k`）、**B** = 取消（`choice = -1`，`cancel:false` 關掉）。
+- `menu.state()` → `{phase:'idle'|'drawing'|'open'|'chosen', sel, choice, items}`；`menu.select(k)` / `menu.choose(k)` / `menu.close()`。
+- 用完要 `T.remove(menu)`（從 `T.update` 的元件清單拿掉）；音效在 `onMove` / `onChoose` 裡自己放。
+
+### 17.6 捲動文字 `T.scroll({x, y, w, h, frame:true, pad:1, follow:true, auto:0, style, pal, input})`
+- `scroll.setText(text)`（從第一行顯示）/ `scroll.push(text)`（追加，`follow` = 自動捲到底，訊息紀錄用）/ `scroll.scrollTo(top)` / `scroll.close()`；`scroll.state()` → `{top, lines, rows, cols, atEnd, shown[]}`。
+- 建立時檢查「可視區全是不同全形字」的最壞用量 `rows × ⌊cols/2⌋ × 4` ≤ 字形池，否則 throw；另外記得池也要分給同畫面上的標題 / 對話框（例：textdemo 池 208、捲動區 3 行 × 11 字最壞 132 磚）。
+- 手把 ↑↓ 逐行捲（只重寫有變的行，舊行先擦掉釋放池）；`auto: N` = 每 N 幀自動上捲一行（片尾名單）。
+- 可視行（加上畫面上其他文字）的用字要放得進池；放不下時 `stats().overflow` 會 +1 並以空白代替（測試應驗 0）。對話框不會遇到這個問題：它依「池 − 框外正在用的字」自動分頁。
+
+### 17.7 低階 / 工具
+| 成員 | 說明 |
+|---|---|
+| `T.print(col, row, text, {nt, style:{fg,shadow,bg}, w})` | 直接排一段字（不打字機；`\n` 換行，給 `w` 就自動斷行）→ `{cols, lines}` |
+| `T.frame(x, y, w, h, {fill, pal})` / `T.clear(x, y, w, h)` | 畫框 / 擦成空白（已是空白的格子不花預算） |
+| `T.call(fn)` | 排在佇列裡，前面的寫入都完成時呼叫 |
+| `T.busy()` / `T.pending()` / `T.flush()` | 佇列還有東西 / 筆數 / 立刻消化（mute 時一次寫完） |
+| `T.reset()` | 遊戲自己整片重畫名稱表後呼叫（忘掉格子；池內容留著當快取） |
+| `T.release(x, y, w, h)` | 遊戲自己蓋掉某區後呼叫（那區的字不再佔池） |
+| `T.free()` / `T.heldOutside(x,y,w,h)` | 可用池磚 / 某矩形以外正在用的池磚 |
+| `T.stats()` | `{bytes 本幀, peak, uploads 磚, glyphUploads, hits, evictions, overflow, cached, free, pool, queue, missing[]}` |
+| `T.charAt(col,row)` / `T.readLine(col,row,cols)` | 讀回畫面上的字（測試用） |
+| `CT.Text.measure(s)` / `wrap(s, cols)` / `paginate(s, cols, lines, capTiles)` / `pageTiles(lines)` | 純函式：寬度（欄）/ 斷行 / 分頁 / 一頁用幾磚 |
+| `CT.Text.has(ch)` / `CT.Text.missing()` | 字形表有沒有這個字 / 執行期遇到的缺字（顯示成 □；**測試應驗空陣列**） |
+| `T.tile.BLANK / H / V / TL / TR / BL / BR / J / NEXT / END / CUR0 / CUR1` | 框線磁磚索引（遊戲自己畫框也可以用） |
+
+### 17.8 字形工具 `tools/cjk_glyphs.py`（**新增 / 改文字後一定要重跑**）
+- 掃描約定：`games/cart5/**/*.js`（glyphs.js 除外）裡**字串常值**（`'…'` `"…"` `` `…` ``，含 `\uXXXX`）的非 ASCII 字；**註解不算**。另收 `games/cart5/**/text*.txt|json` 全文。
+  建議把故事 / 題庫放 `games/cart5/<id>/text_<名>.js`（字串陣列或物件），程式碼裡的中文字串一樣會被收到。
+- `$PY tools/cjk_glyphs.py` 重產；`--check` 只驗（缺字 / 多字 / 點陣與 Noto 不符 → exit 1，`run_all.sh` 會跑）；`--list` 列各檔用字與新字；`--render 字` 印點陣。
+- 遊戲裡別讓玩家輸入任意中文（字形只收資料裡出現過的字）。

@@ -33,9 +33,11 @@
     { id: 'hole', name: 'HOLE 5X5', n: 5, hole: true, key: 'besth', stars: [7, 8, 10] }
   ];
   var LAYOUT = { 3: { ox: 6, oy: 10, P: 22 }, 4: { ox: 4, oy: 8, P: 22 }, 5: { ox: 2, oy: 6, P: 24 } };
-  var PAL_BG = [[0x00, 0x10, 0x30], [0x07, 0x17, 0x27], [0x02, 0x12, 0x31], [0x05, 0x16, 0x38]];
+  var PAL_BG = [[0x00, 0x10, 0x30], [0x14, 0x27, 0x37], [0x11, 0x1A, 0x2C], [0x16, 0x28, 0x31]];   // fix-r7 P3-6（見 art.js TIERS）
   var PAL_SPR = [[0x28, 0x38, 0x30], [0x21, 0x31, 0x30], [0x16, 0x27, 0x38], [0x00, 0x10, 0x30]];
   var HOLE_PAL = 1;
+  // fix-r7 P3-3：黑洞模式第一次進入的說明卡（盤面區 20 欄內、段落空一列）
+  var INTRO = ['BLACK HOLE', '', 'BLOCKS SLIDES', '', 'EATS DUST/PEBBLE', '', 'FOR +5 EACH', '', 'JUMPS EVERY 24 MOVES'];
   var DIRS = { LEFT: 0, RIGHT: 1, UP: 2, DOWN: 3 };
   MG.MODES = MODES;
 
@@ -165,6 +167,7 @@
     g.score = 0; g.moves = 0; g.time = 0; g.top = 1; g.over = false; g.paused = false;
     g.undo = null; g.undos = 0; g.cheats = 0; g.ignited = false; g.goal = false; g.msg = ''; g.msgT = 0;
     g.fx = []; g.pop = null; g.swallowed = 0; g.merges = 0; g.botWait = 0;
+    g.intro = !!(g.m.hole && !CT.load('merge', 'seenHole', 0));   // fix-r7 P3-3：第一次進黑洞模式先看說明卡
     spawn(); spawn();
     g.top = topTier(g.cells);
     g.best = CT.load('merge', g.m.key, 0);
@@ -195,6 +198,7 @@
       if (--g.holeT <= 0) relocateHole();
     }
     spawn();
+    if (r.swallowed) { g.msg = 'GULP +' + (SWALLOW_PTS * r.swallowed); g.msgT = 60; }
     if (r.swallowed) sfx('merge_swallow');
     else if (g.top > oldTop && g.top >= 6) sfx('merge_big');
     else if (r.merged.length) sfx('merge_merge');
@@ -249,6 +253,10 @@
     if ((pressed(BTN.START) && !held(BTN.SELECT)) || pressed(BTN.A)) { sfx('merge_ok'); startGame(); }
   }
   function updatePlay() {
+    if (g.intro) {    // 黑洞說明卡：A / START 關閉（只出現一次，存檔記住）
+      if (pressed(BTN.A) || (pressed(BTN.START) && !held(BTN.SELECT))) { g.intro = false; CT.save('merge', 'seenHole', 1); sfx('merge_ok'); }
+      return;
+    }
     if (pressed(BTN.START) && !held(BTN.SELECT) && !g.over) {
       g.paused = !g.paused;
       if (g.paused) Au.pause(); else if (!Au.resume()) Au.play('merge_play');
@@ -329,7 +337,6 @@
     text(4, 18, 'D-PAD SLIDE  B UNDO');
     text(4, 20, 'START PAUSE  C/$ = CHEAT');
     text(4, 22, 'HOLD START+SELECT: MENU');
-    text(4, 24, '4X4 GOAL: MAKE A STAR');
     flush(ppu0, true);
     drawTitleValues();
     flush(ppu0, true);
@@ -339,6 +346,7 @@
     put(10, 14, A.t('AL')); text(12, 14, pad(m.name, 11)); put(24, 14, A.t('AR'));
     var best = CT.load('merge', m.key, 0), bt = CT.load('merge', m.key + 'tier', 0);
     text(12, 16, num(Math.min(999999, best), 6) + '  ' + (bt ? pad(MG.TIERS[bt].key, 7) : '       '));
+    text(4, 24, pad(m.hole ? 'HOLE EATS DUST  JUMPS/24' : '4X4 GOAL: MAKE A STAR', 26));
     text(11, 26, (g.blink >> 5) & 1 ? '          ' : 'PUSH START');
   }
 
@@ -358,10 +366,18 @@
   function center(s) { var lo = L(); return lo.ox + 2 * g.n - (s.length >> 1); }
   function renderPlay() {
     var lo = L(), n = g.n, ox = lo.ox, oy = lo.oy, P = lo.P, i;
+    var rr, cc;   // 盤面區先清空（影子表：沒變的格不會真的寫），說明卡 / 暫停字留在間隔磚上也會被清掉
+    for (rr = oy; rr < oy + 4 * n - 1; rr++) for (cc = ox; cc < ox + 4 * n - 1; cc++) put(cc, rr, 0);
     for (i = 0; i < n * n; i++) {
       var cx = ox + 4 * (i % n), cy = oy + 4 * ((i / n) | 0);
-      if (g.paused) icon(cx, cy, -2, 0);
+      if (g.intro) icon(cx, cy, i === (n >> 1) ? -1 : -2, i === (n >> 1) ? HOLE_PAL : 0);
+      else if (g.paused) icon(cx, cy, -2, 0);
       else icon(cx, cy, g.cells[i], tierPal(g.cells[i]));
+    }
+    if (g.intro) {
+      for (i = 0; i < INTRO.length; i++) if (INTRO[i]) text(center(INTRO[i]), oy + 4 + i, INTRO[i]);
+      var ok = (g.frames >> 5) & 1 ? '          ' : 'A: GOT IT';
+      text(center('A: GOT IT'), oy + 4 + INTRO.length + 1, ok);
     }
     if (g.paused) {
       var mid = oy + 2 * n - 2;
@@ -385,7 +401,7 @@
       for (i = 0; i < 3; i++) put(P + i * 2, 24, A.t(i < s ? 'SR1' : 'SR0'));
       for (i = 0; i < 3; i++) put(P + i * 2 + 1, 24, 0);
     } else {
-      lines[0] = g.msgT > 0 ? g.msg : '';
+      lines[0] = g.intro ? 'NEW!' : (g.msgT > 0 ? g.msg : '');
       lines[2] = 'B UNDO ' + (g.undo ? '1' : '-');
       if (g.m.hole) lines[4] = 'SHIFT ' + num(g.holeT, 2);
     }
@@ -394,7 +410,7 @@
 
   function drawSprites() {
     var slot = 0, i, lo, k;
-    if (g.mode === 'play' && !g.paused) {
+    if (g.mode === 'play' && !g.paused && !g.intro) {
       lo = L();
       for (i = 0; i < g.fx.length && slot < 40; i++) {
         var f = g.fx[i], ix = f.idx;
@@ -546,7 +562,7 @@
         mode: g.mode, gameMode: g.m.id, n: g.n, cells: g.cells.slice(), hole: g.hole, holeT: g.holeT,
         score: g.score, best: g.best, moves: g.moves, time: g.time, top: g.top, over: g.over, paused: g.paused,
         undoReady: !!g.undo, undos: g.undos, cheats: g.cheats, ignited: g.ignited, goal: g.goal, msg: g.msgT > 0 ? g.msg : '',
-        swallowed: g.swallowed, merges: g.merges, menu: g.menu, seed: g.seed, stars: starsOf(g.top, g.m),
+        swallowed: g.swallowed, merges: g.merges, menu: g.menu, intro: !!g.intro, seed: g.seed, stars: starsOf(g.top, g.m),
         music: Au.current, lastSfx: Au.lastSfx, queue: pending(), ntWrites: ntWrites, ntPeak: ntPeak, frames: g.frames
       };
     },

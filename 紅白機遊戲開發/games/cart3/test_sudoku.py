@@ -356,6 +356,21 @@ def main():
             return { s: GAME.state().s, over: __nes.stats().budget.overFrames }; }""")
         ok('機器人解 %s（seed %d）：解完、0 錯、overFrames 0' % (LV[lv].upper(), 11 + lv), r['s']['cleared'] and r['s']['misses'] == 0 and r['over'] == 0, (r['s']['empty'], r['s']['frames']))
 
+    # fix-r7 P3-2：宮界一眼可辨（兩種宮底亮度差）、同數字高亮不和宮底同色系
+    start(page, 1, 3)
+    pl = page.evaluate("""() => { const p = __nes.nes().ppu, L = c => { const v = NES.PALETTE.rgb(c).map(x => { x /= 255; return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); }); return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2]; };
+        const b = [0, 1, 2, 3].map(i => p.getBgPalette(i)[1]);
+        return { b: b, rgb: b.map(c => NES.PALETTE.rgb(c)), lum: b.map(L) }; }""")
+    la, lb = pl['lum'][0], pl['lum'][1]
+    ok('P3-2 兩種宮底對比 ≥ 2.5（修前 $0C/$02 約 1.1）', (max(la, lb) + 0.05) / (min(la, lb) + 0.05) >= 2.5, pl['lum'][:2])
+    hr = pl['rgb'][2]
+    ok('P3-2 同數字高亮是紅藍都高的洋紅系（不是藍 / 青 / 紫藍）', hr[0] >= 160 and hr[2] >= 120 and hr[1] < 80, pl['rgb'])
+    n9 = page.evaluate('() => GAME.state().s.size')
+    same_box_diff = all(attr_at(page, i) != attr_at(page, i + 3) for i in (2, 29, 56)) and all(attr_at(page, i) != attr_at(page, i + 27) for i in (18, 22))
+    ok('P3-2 9×9 相鄰兩宮底色交錯（宮界兩側屬性不同）', n9 == 9 and same_box_diff)
+    start(page, 0, 3)
+    ok('P3-2 6×6 相鄰兩宮底色交錯', all(attr_at(page, i) != attr_at(page, i + 1) for i in (2, 8)) and attr_at(page, 6) != attr_at(page, 12))
+
     ok('全程沒有頁面錯誤', not errs, errs[:3])
     browser.close()
     pw.stop()

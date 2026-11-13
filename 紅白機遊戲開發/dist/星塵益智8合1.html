@@ -5750,11 +5750,19 @@
   var CHARMAP = (CHR && CHR.DEMO && CHR.DEMO.CHARMAP) || {};
 
   var TIERS = [null,
-    { key: 'DUST', zh: '星塵', pal: 0 }, { key: 'PEBBLE', zh: '石礫', pal: 1 }, { key: 'COMET', zh: '彗星', pal: 2 },
-    { key: 'MOON', zh: '月', pal: 0 }, { key: 'PLANET', zh: '行星', pal: 2 }, { key: 'RINGED', zh: '環行星', pal: 1 },
-    { key: 'GIANT', zh: '巨行星', pal: 1 }, { key: 'STAR', zh: '恆星', pal: 3 }, { key: 'NOVA', zh: '超新星', pal: 3 },
-    { key: 'PULSAR', zh: '脈衝星', pal: 2 }, { key: 'GALAXY', zh: '星系', pal: 2 }, { key: 'CLUSTER', zh: '星系團', pal: 3 }
+    { key: 'DUST', zh: '星塵', pal: 0, hue: 'white' }, { key: 'PEBBLE', zh: '石礫', pal: 0, hue: 'gray' },
+    { key: 'COMET', zh: '彗星', pal: 2, hue: 'cyan' }, { key: 'MOON', zh: '月', pal: 1, hue: 'beige' },
+    { key: 'PLANET', zh: '行星', pal: 2, hue: 'blue' }, { key: 'RINGED', zh: '環行星', pal: 2, hue: 'green' },
+    { key: 'GIANT', zh: '巨行星', pal: 1, hue: 'orange' }, { key: 'STAR', zh: '恆星', pal: 3, hue: 'yellow' },
+    { key: 'NOVA', zh: '超新星', pal: 3, hue: 'red' }, { key: 'PULSAR', zh: '脈衝星', pal: 3, hue: 'paleblue' },
+    { key: 'GALAXY', zh: '星系', pal: 0, hue: 'silver' }, { key: 'CLUSTER', zh: '星系團', pal: 1, hue: 'magenta' }
   ];
+  // fix-r7 P3-6：12 階的「主色」= 4 組調色盤 × 3 色的 12 個槽位各用一次（相鄰階色相都不同）。
+  //   pal 0 = 灰 $00 / 銀 $10 / 白 $30（也是 HUD）：石礫 = 灰、星系 = 銀、星塵 = 白
+  //   pal 1 = 洋紅 $14 / 橘 $27 / 米黃 $37：星系團 = 洋紅、巨行星 = 橘（米黃條紋）、月 = 米黃（黑洞吸積盤也用這組）
+  //   pal 2 = 藍 $11 / 綠 $1A / 青 $2C：行星 = 藍、環行星 = 綠、彗星 = 青
+  //   pal 3 = 紅 $16 / 黃 $28 / 淡青白 $31：超新星 = 紅、恆星 = 黃、脈衝星 = 淡青白
+  // 每顆先用「1 暗 / 2 本體 / 3 亮」畫，再用 recolor 把角色換成該階的主色槽位。
   MG.TIERS = TIERS;
 
   function canvas(w, h) { var a = []; for (var y = 0; y < h; y++) { a.push([]); for (var x = 0; x < w; x++) a[y].push(0); } return a; }
@@ -5790,6 +5798,9 @@
     }
   }
   function dot(px, x, y, c, big) { S(px, x, y, c); if (big) { S(px, x + 1, y, c); S(px, x, y + 1, c); S(px, x + 1, y + 1, c); } }
+  function recolor(px, map) {
+    for (var y = 0; y < px.length; y++) for (var x = 0; x < px[0].length; x++) px[y][x] = map[px[y][x]];
+  }
   function line(px, x0, y0, x1, y1, c) {
     var n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0)) | 0;
     for (var i = 0; i <= n; i++) S(px, x0 + (x1 - x0) * i / (n || 1), y0 + (y1 - y0) * i / (n || 1), c);
@@ -5802,16 +5813,18 @@
     },
     2: function (px) {   // 石礫：兩顆凹凸小石
       sphere(px, 10, 13, 5.2); sphere(px, 16, 9, 3.4);
-      [[9, 15], [12, 12], [8, 12]].forEach(function (p) { S(px, p[0], p[1], 1); });
+      recolor(px, [0, 1, 1, 2]);    // 灰身 + 銀高光
+      [[9, 15], [12, 12], [8, 12], [11, 16], [15, 10]].forEach(function (p) { S(px, p[0], p[1], 0); });   // 黑色坑洞
       S(px, 5, 12, 0); S(px, 14, 17, 0); S(px, 19, 8, 0);
     },
     3: function (px) {   // 彗星：亮頭 + 往左下拖的尾
       for (var i = 0; i < 14; i++) {
         var t = i / 13;
-        line(px, 14 - i, 9 + i * 0.9, 14 - i - 1, 9 + i * 0.9 + 3 * (1 - t), i < 6 ? 2 : 1);
+        line(px, 14 - i, 9 + i * 0.9, 14 - i - 1, 9 + i * 0.9 + 3 * (1 - t), i < 10 ? 2 : 1);
       }
-      line(px, 13, 12, 3, 21, 1); line(px, 15, 13, 7, 21, 1);
+      line(px, 13, 12, 3, 21, 2); line(px, 15, 13, 7, 21, 1);
       sphere(px, 16, 8, 4.2);
+      recolor(px, [0, 1, 3, 3]);    // 青頭青尾、藍邊
       S(px, 15, 6, 3); S(px, 14, 7, 3);
     },
     4: function (px) {   // 月：新月 + 隕石坑
@@ -5822,9 +5835,12 @@
         if (d2 <= 81 && e2 > 56) px[y][x] = (d2 > 66) ? 3 : 2;
       }
       S(px, 7, 13, 1); S(px, 8, 13, 1); S(px, 9, 17, 1); S(px, 6, 9, 1); S(px, 12, 19, 1);
+      recolor(px, [0, 2, 3, 2]);    // 米黃月面 + 橘邊 / 橘坑
     },
     5: function (px) {   // 行星：條紋球
-      sphere(px, 12, 12, 8.6, { bands: 4 });
+      sphere(px, 12, 12, 8.6);
+      recolor(px, [0, 1, 1, 3]);    // 藍身 + 青高光
+      for (var y = 5; y < 21; y += 4) for (var x = 0; x < 24; x++) if (px[y][x] === 1 && px[y][x - 1] && px[y][x + 1]) px[y][x] = 3;   // 青條紋
       S(px, 8, 7, 3); S(px, 9, 7, 3); S(px, 8, 8, 3);
     },
     6: function (px) {   // 環行星：球 + 斜環（後半被球擋住）
@@ -5836,12 +5852,18 @@
       }
       back.forEach(function (p) { px[p[1]][p[0]] = 1; });
       sphere(px, 12, 12, 6.2);
+      for (y = 5; y < 19; y++) for (x = 5; x < 19; x++) {   // 綠色球體：暗面只留最外一圈藍邊
+        var qx = x + 0.5 - 12, qy = y + 0.5 - 12;
+        if (px[y][x] === 1 && qx * qx + qy * qy < 5.1 * 5.1) px[y][x] = 2;
+      }
       front.forEach(function (p) { px[p[1]][p[0]] = 3; });
     },
     7: function (px) {   // 巨行星：大球 + 寬條紋 + 風暴眼
-      sphere(px, 12, 12, 10.6, { bands: 3 });
-      for (var y = 13; y <= 15; y++) for (var x = 13; x <= 17; x++) if (!((y === 13 || y === 15) && (x === 13 || x === 17))) px[y][x] = 3;
-      px[14][15] = 1;
+      sphere(px, 12, 12, 10.6);
+      recolor(px, [0, 2, 2, 3]);    // 橘身 + 米黃高光
+      for (var by = 4; by < 22; by += 4) for (var bx = 0; bx < 24; bx++) if (px[by][bx] === 2 && px[by][bx - 1] && px[by][bx + 1]) px[by][bx] = 3;   // 米黃條紋
+      for (var y = 13; y <= 15; y++) for (var x = 13; x <= 17; x++) if (!((y === 13 || y === 15) && (x === 13 || x === 17))) px[y][x] = 1;   // 洋紅風暴眼
+      px[14][15] = 3;
     },
     8: function (px) {   // 恆星：核心 + 8 道光芒 + 日冕點
       var k;
@@ -5849,8 +5871,10 @@
         var a = k * Math.PI / 4, l = (k & 1) ? 9 : 11;
         line(px, 12 + Math.cos(a) * 7, 12 + Math.sin(a) * 7, 12 + Math.cos(a) * l, 12 + Math.sin(a) * l, (k & 1) ? 1 : 2);
       }
-      sphere(px, 12, 12, 6.4);
-      for (var y = 0; y < 24; y++) for (var x = 0; x < 24; x++) if (px[y][x] === 2 && Math.abs(x - 12) + Math.abs(y - 12) < 5) px[y][x] = 3;
+      for (var y = 0; y < 24; y++) for (var x = 0; x < 24; x++) {   // 黃色日面（不打暗面）+ 淡白核心
+        var dx = x + 0.5 - 12, dy = y + 0.5 - 12;
+        if (dx * dx + dy * dy <= 6.4 * 6.4) px[y][x] = (Math.abs(x - 12) + Math.abs(y - 12) < 4) ? 3 : 2;
+      }
     },
     9: function (px) {   // 超新星：不規則尖刺 + 外圈震波
       var k, L = [11, 7, 10, 8, 11, 6, 10, 9, 11, 7, 9, 8];
@@ -5864,6 +5888,7 @@
       }
       sphere(px, 12, 12, 3.6);
       for (var y = 9; y <= 15; y++) for (var x = 9; x <= 15; x++) if (px[y][x] === 2) px[y][x] = 3;
+      recolor(px, [0, 2, 1, 3]);    // 紅尖刺 + 黃震波點 + 淡白核
     },
     10: function (px) {  // 脈衝星：小亮核 + 兩道錐形光束 + 磁環
       var i, x, y;
@@ -5879,15 +5904,16 @@
         if (e > 0.8 && e < 1.05 && px[y][x] === 0) px[y][x] = 1;
       }
       sphere(px, 12, 12, 3.1);
-      px[11][11] = 3; px[11][12] = 3; px[12][11] = 3;
+      recolor(px, [0, 1, 3, 3]);    // 淡青白光束 + 紅磁環
+      px[11][11] = 2; px[11][12] = 2; px[12][11] = 2;
     },
     11: function (px) {  // 星系：雙旋臂
       var t, arm;
       for (arm = 0; arm < 2; arm++) for (t = 0; t < 70; t++) {
         var th = t * 0.11 + arm * Math.PI, r = 1.6 + t * 0.15;
         var x = 12 + Math.cos(th) * r, y = 12 + Math.sin(th) * r * 0.78;
-        S(px, x, y, r < 4.5 ? 3 : (r < 8 ? 2 : 1));
-        if (r < 7) S(px, x + 1, y, 2);
+        S(px, x, y, r < 3.5 ? 3 : (r < 9.5 ? 2 : 1));   // 銀色旋臂為主
+        if (r < 9) S(px, x + 1, y, r < 3.5 ? 3 : 2);
       }
       sphere(px, 12, 12, 2.6);
       px[11][11] = 3; px[11][12] = 3; px[12][12] = 3; px[12][11] = 3;
@@ -5896,7 +5922,7 @@
       function mini(cx, cy, r, tilt) {
         for (var y = 0; y < 24; y++) for (var x = 0; x < 24; x++) {
           var dx = x + 0.5 - cx, dy = y + 0.5 - cy, ry = dy - dx * tilt, e = dx * dx / (r * r) + ry * ry / (r * r * 0.3);
-          if (e <= 1) px[y][x] = e < 0.25 ? 3 : (e < 0.6 ? 2 : 1);
+          if (e <= 1) px[y][x] = e < 0.15 ? 3 : (e < 0.35 ? 2 : 1);   // 洋紅小星系為主
         }
       }
       mini(6, 6, 4, 0.5); mini(18, 6, 3.6, -0.6); mini(5, 17, 3.4, -0.4); mini(18, 18, 4.2, 0.4);
@@ -6204,9 +6230,11 @@
     { id: 'hole', name: 'HOLE 5X5', n: 5, hole: true, key: 'besth', stars: [7, 8, 10] }
   ];
   var LAYOUT = { 3: { ox: 6, oy: 10, P: 22 }, 4: { ox: 4, oy: 8, P: 22 }, 5: { ox: 2, oy: 6, P: 24 } };
-  var PAL_BG = [[0x00, 0x10, 0x30], [0x07, 0x17, 0x27], [0x02, 0x12, 0x31], [0x05, 0x16, 0x38]];
+  var PAL_BG = [[0x00, 0x10, 0x30], [0x14, 0x27, 0x37], [0x11, 0x1A, 0x2C], [0x16, 0x28, 0x31]];   // fix-r7 P3-6（見 art.js TIERS）
   var PAL_SPR = [[0x28, 0x38, 0x30], [0x21, 0x31, 0x30], [0x16, 0x27, 0x38], [0x00, 0x10, 0x30]];
   var HOLE_PAL = 1;
+  // fix-r7 P3-3：黑洞模式第一次進入的說明卡（盤面區 20 欄內、段落空一列）
+  var INTRO = ['BLACK HOLE', '', 'BLOCKS SLIDES', '', 'EATS DUST/PEBBLE', '', 'FOR +5 EACH', '', 'JUMPS EVERY 24 MOVES'];
   var DIRS = { LEFT: 0, RIGHT: 1, UP: 2, DOWN: 3 };
   MG.MODES = MODES;
 
@@ -6336,6 +6364,7 @@
     g.score = 0; g.moves = 0; g.time = 0; g.top = 1; g.over = false; g.paused = false;
     g.undo = null; g.undos = 0; g.cheats = 0; g.ignited = false; g.goal = false; g.msg = ''; g.msgT = 0;
     g.fx = []; g.pop = null; g.swallowed = 0; g.merges = 0; g.botWait = 0;
+    g.intro = !!(g.m.hole && !CT.load('merge', 'seenHole', 0));   // fix-r7 P3-3：第一次進黑洞模式先看說明卡
     spawn(); spawn();
     g.top = topTier(g.cells);
     g.best = CT.load('merge', g.m.key, 0);
@@ -6366,6 +6395,7 @@
       if (--g.holeT <= 0) relocateHole();
     }
     spawn();
+    if (r.swallowed) { g.msg = 'GULP +' + (SWALLOW_PTS * r.swallowed); g.msgT = 60; }
     if (r.swallowed) sfx('merge_swallow');
     else if (g.top > oldTop && g.top >= 6) sfx('merge_big');
     else if (r.merged.length) sfx('merge_merge');
@@ -6420,6 +6450,10 @@
     if ((pressed(BTN.START) && !held(BTN.SELECT)) || pressed(BTN.A)) { sfx('merge_ok'); startGame(); }
   }
   function updatePlay() {
+    if (g.intro) {    // 黑洞說明卡：A / START 關閉（只出現一次，存檔記住）
+      if (pressed(BTN.A) || (pressed(BTN.START) && !held(BTN.SELECT))) { g.intro = false; CT.save('merge', 'seenHole', 1); sfx('merge_ok'); }
+      return;
+    }
     if (pressed(BTN.START) && !held(BTN.SELECT) && !g.over) {
       g.paused = !g.paused;
       if (g.paused) Au.pause(); else if (!Au.resume()) Au.play('merge_play');
@@ -6500,7 +6534,6 @@
     text(4, 18, 'D-PAD SLIDE  B UNDO');
     text(4, 20, 'START PAUSE  C/$ = CHEAT');
     text(4, 22, 'HOLD START+SELECT: MENU');
-    text(4, 24, '4X4 GOAL: MAKE A STAR');
     flush(ppu0, true);
     drawTitleValues();
     flush(ppu0, true);
@@ -6510,6 +6543,7 @@
     put(10, 14, A.t('AL')); text(12, 14, pad(m.name, 11)); put(24, 14, A.t('AR'));
     var best = CT.load('merge', m.key, 0), bt = CT.load('merge', m.key + 'tier', 0);
     text(12, 16, num(Math.min(999999, best), 6) + '  ' + (bt ? pad(MG.TIERS[bt].key, 7) : '       '));
+    text(4, 24, pad(m.hole ? 'HOLE EATS DUST  JUMPS/24' : '4X4 GOAL: MAKE A STAR', 26));
     text(11, 26, (g.blink >> 5) & 1 ? '          ' : 'PUSH START');
   }
 
@@ -6529,10 +6563,18 @@
   function center(s) { var lo = L(); return lo.ox + 2 * g.n - (s.length >> 1); }
   function renderPlay() {
     var lo = L(), n = g.n, ox = lo.ox, oy = lo.oy, P = lo.P, i;
+    var rr, cc;   // 盤面區先清空（影子表：沒變的格不會真的寫），說明卡 / 暫停字留在間隔磚上也會被清掉
+    for (rr = oy; rr < oy + 4 * n - 1; rr++) for (cc = ox; cc < ox + 4 * n - 1; cc++) put(cc, rr, 0);
     for (i = 0; i < n * n; i++) {
       var cx = ox + 4 * (i % n), cy = oy + 4 * ((i / n) | 0);
-      if (g.paused) icon(cx, cy, -2, 0);
+      if (g.intro) icon(cx, cy, i === (n >> 1) ? -1 : -2, i === (n >> 1) ? HOLE_PAL : 0);
+      else if (g.paused) icon(cx, cy, -2, 0);
       else icon(cx, cy, g.cells[i], tierPal(g.cells[i]));
+    }
+    if (g.intro) {
+      for (i = 0; i < INTRO.length; i++) if (INTRO[i]) text(center(INTRO[i]), oy + 4 + i, INTRO[i]);
+      var ok = (g.frames >> 5) & 1 ? '          ' : 'A: GOT IT';
+      text(center('A: GOT IT'), oy + 4 + INTRO.length + 1, ok);
     }
     if (g.paused) {
       var mid = oy + 2 * n - 2;
@@ -6556,7 +6598,7 @@
       for (i = 0; i < 3; i++) put(P + i * 2, 24, A.t(i < s ? 'SR1' : 'SR0'));
       for (i = 0; i < 3; i++) put(P + i * 2 + 1, 24, 0);
     } else {
-      lines[0] = g.msgT > 0 ? g.msg : '';
+      lines[0] = g.intro ? 'NEW!' : (g.msgT > 0 ? g.msg : '');
       lines[2] = 'B UNDO ' + (g.undo ? '1' : '-');
       if (g.m.hole) lines[4] = 'SHIFT ' + num(g.holeT, 2);
     }
@@ -6565,7 +6607,7 @@
 
   function drawSprites() {
     var slot = 0, i, lo, k;
-    if (g.mode === 'play' && !g.paused) {
+    if (g.mode === 'play' && !g.paused && !g.intro) {
       lo = L();
       for (i = 0; i < g.fx.length && slot < 40; i++) {
         var f = g.fx[i], ix = f.idx;
@@ -6717,7 +6759,7 @@
         mode: g.mode, gameMode: g.m.id, n: g.n, cells: g.cells.slice(), hole: g.hole, holeT: g.holeT,
         score: g.score, best: g.best, moves: g.moves, time: g.time, top: g.top, over: g.over, paused: g.paused,
         undoReady: !!g.undo, undos: g.undos, cheats: g.cheats, ignited: g.ignited, goal: g.goal, msg: g.msgT > 0 ? g.msg : '',
-        swallowed: g.swallowed, merges: g.merges, menu: g.menu, seed: g.seed, stars: starsOf(g.top, g.m),
+        swallowed: g.swallowed, merges: g.merges, menu: g.menu, intro: !!g.intro, seed: g.seed, stars: starsOf(g.top, g.m),
         music: Au.current, lastSfx: Au.lastSfx, queue: pending(), ntWrites: ntWrites, ntPeak: ntPeak, frames: g.frames
       };
     },
@@ -7398,7 +7440,8 @@
   var CHECKS = ['OFF', 'ON', 'STRICT'];
   var LAYOUT = { 9: { ox: 2, oy: 4 }, 6: { ox: 6, oy: 6 } };
   var P = 22, PICK_ROW = 24;
-  var PAL_BG = [[0x0C, 0x28, 0x30], [0x02, 0x28, 0x30], [0x13, 0x38, 0x30], [0x06, 0x38, 0x30]];
+  // fix-r7 P3-2：兩種宮底拉開亮度差（亮青 $1C ↔ 深藍 $02），同數字高亮改洋紅 $14（不再和藍宮混），錯誤維持暗紅 $06
+  var PAL_BG = [[0x1C, 0x28, 0x30], [0x02, 0x28, 0x30], [0x14, 0x38, 0x30], [0x06, 0x38, 0x30]];
   var PAL_SPR = [[0x30, 0x38, 0x27], [0x28, 0x38, 0x30], [0x21, 0x31, 0x30], [0x16, 0x27, 0x38]];
 
   var A = null, Au = null, Gen = null;
@@ -8676,12 +8719,17 @@
     g.hist.push(new Int8Array(g.view));
     if (g.hist.length > HIST_MAX) g.hist.shift();
   }
+  // fix-r7-shell（qa-r7 P3-5 HUD 貼頂）：HUD 兩列能下移就從第 1 / 2 列（畫面 y = 0）移到第 2 / 3 列；
+  // 盤框最上一列要在第 5 列以下 ⇒ 11 列高的 NORMAL 盤面從 oy 4 改 6（盤框第 5~28 列，原本第 28 列的操作說明讓位，同 HARD）。
+  // HARD 12 列（盤框第 3~28 列）沒有空列，HUD 維持第 1 / 2 列（qa-r7：「沒空間的維持現狀也可以」）。
+  function boardOy(H) { return H >= 12 ? 4 : Math.max(6, 4 + 2 * ((12 - H) >> 1)); }
+  function hudRow() { return g.oy >= 6 ? 2 : 1; }
   function newBoard(keepStreakCheck) {
     var c = modeCfg();
     if (keepStreakCheck && g.sub === 'live') breakStreak();       // 中途放棄 = 連勝中斷
     g.W = c.w; g.H = c.h; g.M = c.m;
     g.ox = (16 - g.W) & ~1; if (g.ox < 2) g.ox = 2;
-    g.oy = 4 + 2 * ((12 - g.H) >> 1);
+    g.oy = boardOy(g.H);
     g.view = new Int8Array(g.W * g.H); g.view.fill(-1);
     g.mines = null; g.num = null; g.shown = new Uint8Array(g.W * g.H);
     g.cx = g.W >> 1; g.cy = g.H >> 1;
@@ -9004,10 +9052,10 @@
     for (r = 0; r < 30; r++) for (c = 0; c < 32; c++) put(c, r, sp);
     for (r = 0; r < 15; r++) for (c = 0; c < 16; c++) putAttr(c, r, 0);
     var ox = g.ox, oy = g.oy, W2 = g.W * 2, H2 = g.H * 2;
-    stars(5, 50, function (c2, r2) { return r2 <= 2 || (c2 >= ox - 1 && c2 <= ox + W2 && r2 >= oy - 1 && r2 <= oy + H2); });
+    stars(5, 50, function (c2, r2) { return r2 <= hudRow() + 1 || (c2 >= ox - 1 && c2 <= ox + W2 && r2 >= oy - 1 && r2 <= oy + H2); });
     box(ox - 1, oy - 1, ox + W2, oy + H2);
     put(ox - 1, oy - 1, A.t('FR_GEM')); put(ox + W2, oy - 1, A.t('FR_GEM'));
-    put(1, 1, A.t('IC_MINE')); put(23, 1, A.t('IC_CLK'));
+    put(1, hudRow(), A.t('IC_MINE')); put(23, hudRow(), A.t('IC_CLK'));
     render();
     flush(true);
   }
@@ -9034,19 +9082,19 @@
     }
   }
   function renderHUD() {
-    var left = g.M - flags();
-    text(2, 1, (left < 0 ? '-' : ' ') + num(Math.abs(left), 2));
+    var left = g.M - flags(), hr = hudRow();
+    text(2, hr, (left < 0 ? '-' : ' ') + num(Math.abs(left), 2));
     var c = modeCfg();
-    text(8, 1, pad(c.name + ' ' + c.w + 'X' + c.h, 13));
+    text(8, hr, pad(c.name + ' ' + c.w + 'X' + c.h, 13));
     var t = g.sub === 'ready' || g.sub === 'gen' ? 0 : g.timer;
     var s = Math.floor(t / 60);
-    text(25, 1, num(Math.min(99, Math.floor(s / 60)), 2) + ':' + num(s % 60, 2));
+    text(25, hr, num(Math.min(99, Math.floor(s / 60)), 2) + ':' + num(s % 60, 2));
     var line;
     if (g.msgT > 0 && g.msg) line = g.msg;
     else if (g.sub === 'ready') line = 'PICK A START CELL: PUSH A';
     else if (g.sub === 'gen') line = (g.genFrames > 2) ? 'SCANNING STAR FIELD' + '...'.substring(0, (g.genFrames >> 3) % 4) : '';
     else line = 'STREAK ' + num(g.streak, 2) + '  HINT ' + g.hints + '  UNDO ' + Math.min(99, g.undos);
-    text(1, 2, pad(line, 30));
+    text(1, hr + 1, pad(line, 30));
     var bottom = g.oy + g.H * 2 + 1;
     if (bottom <= 28) text(2, 28, pad(g.paused ? '' : 'A OPEN B FLAG SELECT UNDO', 28));
   }
@@ -9253,7 +9301,7 @@
       g.num = Gen.counts(W, H, g.mines);
       g.view = new Int8Array(W * H); g.view.fill(-1);
       g.shown = new Uint8Array(W * H); g.hist = [];
-      g.ox = (16 - W) & ~1; if (g.ox < 2) g.ox = 2; g.oy = 4 + 2 * ((12 - H) >> 1);
+      g.ox = (16 - W) & ~1; if (g.ox < 2) g.ox = 2; g.oy = boardOy(H);
       g.sub = 'live'; g.cx = sx; g.cy = sy; g.timer = 0;
       CT.blank(nes0, function () { drawPlayScreen(); });
       if (sx !== undefined) { i = sy * W + sx; reveal(i, true); }
@@ -10565,9 +10613,13 @@
  *   3. 【星橋 BRIDGE】橋格必須被「一條橫線 + 一條直線」各直直穿過一次（兩條線在這格立體交叉、不能轉彎）；
  *   4. 【星門 GATE】一對星門（兩格）算同一個節點：線從其中一扇門進去、一定從另一扇門出來（出門方向自選），
  *      兩扇門都算被填滿；星門不能當端點。
+ *   5. 【星鏡 MIRROR】（fix-r7 新增的自創機關）格子裡有一面斜放的鏡子（/ 或 \），線碰到鏡子一定反彈 90°：
+ *      「/」只准左↔上、右↔下，「\」只准上↔右、左↔下；鏡格只能被一條線經過（也要填滿）、不能當端點。
+ *      ⇒ 和「隨便轉彎」不同，鏡子的朝向決定了線從哪一側進、就一定從哪一側出。
  *
  * 圖模型：每格一個節點；橋格拆成 H 節點（只接左右）+ V 節點（只接上下）；一對星門共用一個節點
- *   （第二扇門那格的節點 = 死節點，度數 0）。端點度數 1、死節點 0、其餘 2。星門節點額外要求「A 側 1 條 + B 側 1 條」。
+ *   （第二扇門那格的節點 = 死節點，度數 0）。端點度數 1、死節點 0、其餘 2。星門節點額外要求「A 側 1 條 + B 側 1 條」；
+ *   星鏡節點額外要求「成對的兩條邊同開同關」（/：左上一對、右下一對；\：上右一對、左下一對）。
  *
  * 解題器 solve(level, limit)：邊變數（未定 / 關 / 開）回溯 + 傳播（度數、星門兩側、顏色一致、禁止成環、
  *   每色兩端點可達），回傳 { count, sol:[第一組解：每色格子序列], nodes }。count 數到 limit（預設 2）就停 ⇒ 唯一解驗證。
@@ -10589,10 +10641,17 @@
   }
 
   /* ---------------- 圖 ---------------- */
-  // level = { w, h, ends:[[x1,y1,x2,y2],...], bridges:[[x,y]], gates:[[x1,y1,x2,y2]] }
+  // level = { w, h, ends:[[x1,y1,x2,y2],...], bridges:[[x,y]], gates:[[x1,y1,x2,y2]], mirrors:[[x,y,t]]（t 1 = /、2 = \） }
+  // 鏡子的成對邊（方向 0 上 1 右 2 下 3 左）
+  var MIR_PAIRS = { 1: [[3, 0], [1, 2]], 2: [[0, 1], [3, 2]] };
+  function mirPartner(t, side) {
+    var P = MIR_PAIRS[t];
+    for (var q = 0; q < 2; q++) { if (P[q][0] === side) return P[q][1]; if (P[q][1] === side) return P[q][0]; }
+    return -1;
+  }
   function build(L) {
     var w = L.w, h = L.h, N = w * h, i, k;
-    var bridges = L.bridges || [], gates = L.gates || [];
+    var bridges = L.bridges || [], gates = L.gates || [], mirrors = L.mirrors || [];
     var bIdx = new Int16Array(N).fill(-1), gMap = new Int16Array(N).fill(-1), gTwin = new Int16Array(N).fill(-1);
     for (k = 0; k < bridges.length; k++) bIdx[bridges[k][1] * w + bridges[k][0]] = k;
     for (k = 0; k < gates.length; k++) {
@@ -10630,15 +10689,28 @@
     var ne = ea.length, adj = [];
     for (i = 0; i < nn; i++) adj.push([]);
     for (k = 0; k < ne; k++) { adj[ea[k]].push(k); adj[eb[k]].push(k); }
+    // 星鏡：mir[節點] = 1 (/) / 2 (\)；mirE[節點] = [上, 右, 下, 左] 的邊（沒有 = -1）
+    var mir = new Int8Array(nn), mirE = {};
+    for (k = 0; k < mirrors.length; k++) {
+      var mc = mirrors[k][1] * w + mirrors[k][0];
+      mir[mc] = mirrors[k][2] || 1;
+      var E4 = [-1, -1, -1, -1];
+      for (var j = 0; j < adj[mc].length; j++) {
+        var ee = adj[mc][j], oc = ea[ee] === mc ? ecb[ee] : eca[ee], d = oc - mc;
+        E4[d === -w ? 0 : d === 1 ? 1 : d === w ? 2 : 3] = ee;
+      }
+      mirE[mc] = E4;
+    }
     return { w: w, h: h, N: N, nn: nn, ne: ne, ea: ea, eb: eb, eca: eca, ecb: ecb, eside: eside, adj: adj,
-             deg: deg, color: color, isGate: isGate, bIdx: bIdx, gMap: gMap, gTwin: gTwin, nodeFor: nodeFor, ncol: ends.length, L: L };
+             deg: deg, color: color, isGate: isGate, bIdx: bIdx, gMap: gMap, gTwin: gTwin, nodeFor: nodeFor, ncol: ends.length, L: L,
+             mir: mir, mirE: mirE };
   }
 
   /* ---------------- 解題器 ---------------- */
   function solve(L, limit, maxNodes) {
     limit = limit || 2;
     maxNodes = maxNodes || 2000000;
-    var G = build(L), ne = G.ne, nn = G.nn, ea = G.ea, eb = G.eb, adj = G.adj, deg = G.deg, eside = G.eside, isGate = G.isGate;
+    var G = build(L), ne = G.ne, nn = G.nn, ea = G.ea, eb = G.eb, adj = G.adj, deg = G.deg, eside = G.eside, isGate = G.isGate, mir = G.mir;
     var es = new Int8Array(ne).fill(-1), col = new Int8Array(G.color);
     var trail = [];               // 正數 = 邊 index+1（復原成 -1）；負數 = -(節點+1)（顏色復原成 0）
     var queue = [], inq = new Uint8Array(nn);
@@ -10703,6 +10775,18 @@
           if (so > 1 || so + su < 1) return false;
           if (so === 1 && su) { for (j = 0; j < L2.length; j++) { e = L2[j]; if (eside[e] === side && es[e] === -1 && !setE(e, 0)) return false; } }
           else if (so === 0 && su === 1 && !setE(last, 1)) return false;
+        }
+      }
+      if (mir[v]) {
+        // 星鏡：成對的兩條邊同開同關（缺邊的那一對 ⇒ 另一條也關）
+        var MP = MIR_PAIRS[mir[v]], E4 = G.mirE[v];
+        for (var q = 0; q < 2; q++) {
+          var e1 = E4[MP[q][0]], e2 = E4[MP[q][1]];
+          if (e1 < 0 || e2 < 0) { if (e1 >= 0 && !setE(e1, 0)) return false; if (e2 >= 0 && !setE(e2, 0)) return false; continue; }
+          var s1 = es[e1], s2 = es[e2];
+          if (s1 !== -1 && s2 !== -1) { if (s1 !== s2) return false; }
+          else if (s1 !== -1) { if (!setE(e2, s1)) return false; }
+          else if (s2 !== -1) { if (!setE(e1, s2)) return false; }
         }
       }
       // 顏色
@@ -10860,15 +10944,31 @@
       if (dx + dy < 3 || !farFromSpecial(c1, 2) || !farFromSpecial(c2, 2)) continue;
       special[c1] = 2; special[c2] = 2; gates.push([c1 % w, (c1 / w) | 0, c2 % w, (c2 / w) | 0]);
     }
-    if (bridges.length < (spec.bridges || 0) || gates.length < (spec.gates || 0)) return null;
-    var Ltmp = { w: w, h: h, ends: [], bridges: bridges, gates: gates };
+    var mirrors = [];
+    tries = 0;
+    while (mirrors.length < (spec.mirrors || 0) && tries++ < 300) {
+      var mc = rnd(N);
+      if (!interior(mc) || special[mc] || !farFromSpecial(mc, 2)) continue;
+      special[mc] = 3; mirrors.push([mc % w, (mc / w) | 0, 1 + rnd(2)]);
+    }
+    if (bridges.length < (spec.bridges || 0) || gates.length < (spec.gates || 0) || mirrors.length < (spec.mirrors || 0)) return null;
+    var Ltmp = { w: w, h: h, ends: [], bridges: bridges, gates: gates, mirrors: mirrors };
     var G = build(Ltmp), nn = G.nn;
     var owner = new Int16Array(nn).fill(-1);       // 節點屬於哪條路徑
     var cellOwner = [];                             // 每格的擁有者集合（橋格 2 個）
     for (i = 0; i < N; i++) cellOwner.push([]);
     var paths = [];                                 // 每條 = 節點序列
     var pathCells = [];                             // 每條 = 格子序列（星門兩格都列）
-    function nbrs(v, enterSide) {                   // v 的鄰邊（星門：只能走另一側）
+    function sideAt(e, v) {                         // 邊 e 在節點 v（一般格 / 鏡格）那端是哪一側：0 上 1 右 2 下 3 左
+      var c = cellAt(e, v), o = G.ea[e] === v ? G.ecb[e] : G.eca[e], d = o - c;
+      return d === -w ? 0 : d === 1 ? 1 : d === w ? 2 : 3;
+    }
+    function mirExit(v, eIn) {                      // 從 eIn 進入鏡格 v ⇒ 唯一能出去的邊（沒有 = -1）
+      var ps = mirPartner(G.mir[v], sideAt(eIn, v));
+      return ps < 0 ? -1 : G.mirE[v][ps];
+    }
+    function nbrs(v, enterSide, enterE) {           // v 的鄰邊（星門：只能走另一側；星鏡：只能走成對的那一側）
+      if (G.mir[v] && enterE >= 0) { var mx = mirExit(v, enterE); return mx >= 0 ? [mx] : []; }
       var out = [], L2 = G.adj[v];
       for (var j = 0; j < L2.length; j++) {
         var e = L2[j];
@@ -10906,13 +11006,19 @@
       if (best < 0) return null;                    // 只剩機關沒覆蓋 ⇒ 失敗
       var p = paths.length, nodes = [best], cells = [best];
       owner[best] = p; cellOwner[best].push(p); uncovered--;
-      var target = minLen + rnd(maxLen - minLen + 1), v = best, enterSide = 0;
+      var target = minLen + rnd(maxLen - minLen + 1), v = best, enterSide = 0, enterE = -1;
       for (;;) {
-        if (nodes.length >= target && !G.isGate[v] && !(v >= N || G.bIdx[v] >= 0)) break;
-        var opts = nbrs(v, enterSide), cand = [];
+        if (nodes.length >= target && !G.isGate[v] && !G.mir[v] && !(v >= N || G.bIdx[v] >= 0)) break;
+        var opts = nbrs(v, enterSide, enterE), cand = [];
         for (k = 0; k < opts.length; k++) {
           var e = opts[k], u = G.ea[e] === v ? G.eb[e] : G.ea[e];
           if (owner[u] >= 0 || !G.deg[u]) continue;
+          if (G.mir[u]) {                           // 走進鏡格：反彈出去的那格要還空著
+            var mx2 = mirExit(u, e);
+            if (mx2 < 0) continue;
+            var w2 = G.ea[mx2] === u ? G.eb[mx2] : G.ea[mx2];
+            if (w2 === v || owner[w2] >= 0 || !G.deg[w2]) continue;
+          }
           var cu = cellAt(e, u), cv = cellAt(e, v);
           var tailCells = [cells[cells.length - 1], cv];
           if (selfAdj(p, cu, tailCells)) continue;
@@ -10930,10 +11036,11 @@
         owner[ch.u] = p; uncovered--;
         cellOwner[ch.cu].push(p); if (ch.cv !== cells[cells.length - 2] || true) { if (cellOwner[ch.cv].indexOf(p) < 0) cellOwner[ch.cv].push(p); }
         enterSide = G.isGate[ch.u] ? G.eside[ch.e] : 0;
+        enterE = ch.e;
         v = ch.u;
       }
       // 終點不得是機關
-      if (G.isGate[v] || v >= N || G.bIdx[v] >= 0) return null;
+      if (G.isGate[v] || G.mir[v] || v >= N || G.bIdx[v] >= 0) return null;
       if (nodes.length < minLen) {
         // 太短：嘗試接到相鄰路徑的端點（兩條合併）
         var merged = false;
@@ -10988,7 +11095,7 @@
     }
     var group = assignGroups(P.length, cross, R);
     if (!group) return null;
-    return { w: w, h: h, bridges: bridges, gates: gates, paths: PC, group: group };
+    return { w: w, h: h, bridges: bridges, gates: gates, mirrors: mirrors, paths: PC, group: group };
   }
   // 把 n 條線分到 4 組 × 2 色；cross 的兩條必須同組
   function assignGroups(n, cross, R) {
@@ -11034,7 +11141,9 @@
       ends.push([a % w, (a / w) | 0, b % w, (b / w) | 0]);
       colors.push(byColor[i].c);
     }
-    return { w: part.w, h: part.h, ends: ends, colors: colors, bridges: part.bridges, gates: part.gates };
+    var L = { w: part.w, h: part.h, ends: ends, colors: colors, bridges: part.bridges, gates: part.gates };
+    if (part.mirrors && part.mirrors.length) L.mirrors = part.mirrors;
+    return L;
   }
 
   function generate(spec, seed, maxTries) {
@@ -11050,18 +11159,20 @@
     return null;
   }
 
-  /* ---------------- 關卡字串（levels.js 用）：'WxH|ends|colors|bridges|gates' ---------------- */
+  /* ---------------- 關卡字串（levels.js 用）：'WxH|ends|colors|bridges|gates[|mirrors]' ---------------- */
   function encode(L) {
     function flat(a) { return a.map(function (q) { return q.join(','); }).join(';'); }
-    return L.w + 'x' + L.h + '|' + flat(L.ends) + '|' + L.colors.join(',') + '|' + flat(L.bridges || []) + '|' + flat(L.gates || []);
+    var s = L.w + 'x' + L.h + '|' + flat(L.ends) + '|' + L.colors.join(',') + '|' + flat(L.bridges || []) + '|' + flat(L.gates || []);
+    if (L.mirrors && L.mirrors.length) s += '|' + flat(L.mirrors);
+    return s;
   }
   function decode(s) {
     var p = s.split('|'), wh = p[0].split('x');
     function arr(t) { return t ? t.split(';').map(function (q) { return q.split(',').map(Number); }) : []; }
-    return { w: +wh[0], h: +wh[1], ends: arr(p[1]), colors: p[2] ? p[2].split(',').map(Number) : [], bridges: arr(p[3]), gates: arr(p[4]) };
+    return { w: +wh[0], h: +wh[1], ends: arr(p[1]), colors: p[2] ? p[2].split(',').map(Number) : [], bridges: arr(p[3]), gates: arr(p[4]), mirrors: arr(p[5]) };
   }
 
-  LN.Gen = { rng: rng, build: build, solve: solve, generate: generate, encode: encode, decode: decode,
+  LN.Gen = { rng: rng, build: build, MIR_PAIRS: MIR_PAIRS, mirPartner: mirPartner, solve: solve, generate: generate, encode: encode, decode: decode,
              assignGroups: assignGroups, PAL_GROUPS: PAL_GROUPS, PER_PAL: PER_PAL, MAX_COLORS: MAX_COLORS };
   if (typeof module !== 'undefined' && module.exports) module.exports = LN.Gen;
 })(typeof window !== 'undefined' ? window : globalThis);
@@ -11072,8 +11183,8 @@
  * games/cart3/lines/levels.js — 《星塵連線》36 關（由 gen.js 的 generate(spec, seed) 產生後烘進來；test_lines.py 會重跑產生器比對 + 解題器驗唯一解）
  * ---------------------------------------------------------------------------
  * 擁有者：C7-3 cart3-slide（R7）
- * 格式：code = 'WxH|端點 x1,y1,x2,y2;…|顏色(調色盤組×2+組內序)|星橋 x,y;…|星門 x1,y1,x2,y2;…'
- * 分章：1-5 SECTOR 1 5×5、6-10 6×6、11-15 6×6+星橋、16-20 7×7+雙橋、21-25 7×7+星門、26-30 8×8 橋+門、31-36 9×9 全機關
+ * 格式：code = 'WxH|端點 x1,y1,x2,y2;…|顏色(調色盤組×2+組內序)|星橋 x,y;…|星門 x1,y1,x2,y2;…[|星鏡 x,y,t;…（t 1 = /、2 = \）]'
+ * 分章：1-5 5×5、6-10 6×6、11-15 6×6+星橋、16-20 7×7+雙橋、21-25 7×7+星門、26-30 8×8+星鏡（fix-r7 自創機關；28-30 加橋）、31-36 9×9 橋+門+鏡
  */
 (function () {
   'use strict';
@@ -11105,17 +11216,17 @@
     { spec: {w: 7,h: 7,minLen: 3,maxLen: 10,gates: 1}, seed: 2526136232, code: '7x7|0,5,2,2;2,5,6,2;0,1,6,3;1,3,3,2;0,0,6,0;4,4,5,5;0,6,5,4;6,1,4,1|0,1,2,3,4,5,6,7||5,3,0,4' },
     { spec: {w: 7,h: 7,minLen: 3,maxLen: 10,gates: 1}, seed: 2286785840, code: '7x7|4,5,4,2;4,3,1,3;6,0,1,0;0,6,2,3;6,1,6,6;5,2,1,5;0,0,5,1|0,1,2,3,4,5,6||4,4,2,5' },
     { spec: {w: 7,h: 7,minLen: 3,maxLen: 10,gates: 1}, seed: 1272881614, code: '7x7|0,0,2,6;1,0,5,4;2,5,4,4;3,6,5,5;6,6,3,0;5,1,2,3;1,5,4,3|0,1,2,3,4,5,6||1,3,2,0' },
-    { spec: {w: 8,h: 8,minLen: 4,maxLen: 12,bridges: 1,gates: 1}, seed: 406903913, code: '8x8|1,3,5,0;4,0,5,4;0,5,6,4;1,2,2,0;0,7,7,4;6,3,7,1;0,0,5,6;4,4,7,0|0,1,2,3,4,5,6,7|2,3|6,6,1,6' },
-    { spec: {w: 8,h: 8,minLen: 4,maxLen: 12,bridges: 1,gates: 1}, seed: 794180830, code: '8x8|4,2,0,5;0,7,1,4;4,1,3,5;4,6,1,7;6,0,1,0;3,1,0,4;7,0,3,7;5,0,1,1|0,1,2,3,4,5,6,7|1,5|2,2,5,6' },
-    { spec: {w: 8,h: 8,minLen: 4,maxLen: 12,bridges: 1,gates: 1}, seed: 3687966983, code: '8x8|7,1,0,5;7,2,2,1;2,3,7,6;5,5,4,3;7,0,1,3;7,5,4,4;0,4,7,7;1,1,3,2|0,1,2,3,4,5,6,7|5,2|7,4,0,7' },
-    { spec: {w: 8,h: 8,minLen: 4,maxLen: 12,bridges: 1,gates: 1}, seed: 1420808139, code: '8x8|0,7,6,2;2,7,6,6;7,7,4,1;3,4,6,5;2,1,0,4;5,3,6,1;0,0,2,2;0,6,1,4|0,1,2,3,4,5,6,7|3,2|1,2,3,6' },
-    { spec: {w: 8,h: 8,minLen: 4,maxLen: 12,bridges: 1,gates: 1}, seed: 2674062757, code: '8x8|5,6,1,7;2,7,0,7;7,1,4,5;3,4,6,1;7,0,0,5;6,2,2,3;5,5,3,3|0,1,2,3,4,5,6|1,6|5,3,3,7' },
-    { spec: {w: 9,h: 9,minLen: 4,maxLen: 14,bridges: 2,gates: 1}, seed: 3892396166, code: '9x9|5,7,5,5;1,6,7,3;2,1,7,8;8,8,0,8;4,3,5,6;7,5,5,4;0,0,1,3;0,4,8,1|0,1,2,3,4,5,6,7|4,5;7,7|6,5,5,3' },
-    { spec: {w: 9,h: 9,minLen: 4,maxLen: 14,bridges: 2,gates: 1}, seed: 4096825349, code: '9x9|0,8,2,2;5,0,2,8;7,7,5,7;6,6,5,8;4,1,2,5;4,3,6,7;8,0,8,2;6,2,8,1|0,1,2,3,4,5,6,7|2,1;3,7|3,4,2,6' },
-    { spec: {w: 9,h: 9,minLen: 4,maxLen: 14,bridges: 2,gates: 1}, seed: 1294463063, code: '9x9|8,4,1,1;1,2,4,8;0,0,6,1;3,0,8,3;5,0,8,2;5,7,7,8;8,8,1,5;1,7,7,7|0,1,2,3,4,5,6,7|2,3;7,3|7,6,2,5' },
-    { spec: {w: 9,h: 9,minLen: 4,maxLen: 14,bridges: 2,gates: 1}, seed: 2251864631, code: '9x9|0,8,4,4;2,2,1,8;4,2,7,8;6,5,2,8;0,0,1,4;6,4,5,8;0,1,3,4;1,2,7,2|0,1,2,3,4,5,6,7|3,6;4,5|2,3,8,2' },
-    { spec: {w: 9,h: 9,minLen: 4,maxLen: 14,bridges: 2,gates: 1}, seed: 3174344990, code: '9x9|0,0,7,2;1,0,6,3;5,2,2,6;5,4,1,4;8,0,4,8;1,8,3,6;7,3,2,8;2,7,4,2|0,1,2,3,4,5,6,7|2,1;2,5|6,4,0,7' },
-    { spec: {w: 9,h: 9,minLen: 4,maxLen: 14,bridges: 2,gates: 1}, seed: 3265768857, code: '9x9|1,7,7,8;7,5,8,8;4,7,2,4;3,4,7,0;1,0,5,7;6,0,6,2;0,8,0,0;6,3,3,1|0,1,2,3,4,5,6,7|7,6;5,5|8,5,0,7' }
+    { spec: {w: 8,h: 8,minLen: 4,maxLen: 12,mirrors: 2}, seed: 1547153215, code: '8x8|7,2,5,5;6,3,5,7;0,0,3,4;7,1,1,6;7,0,4,0;3,0,2,3;1,4,2,0;6,4,0,6|0,1,2,3,4,5,6,7|||4,3,2;4,1,1' },
+    { spec: {w: 8,h: 8,minLen: 4,maxLen: 12,mirrors: 2}, seed: 3814312059, code: '8x8|6,1,2,2;1,2,6,6;0,0,7,2;3,2,1,7;5,1,3,3;4,5,7,3;2,5,4,6;6,7,7,4|0,1,2,3,4,5,6,7|||4,1,1;5,6,1' },
+    { spec: {w: 8,h: 8,minLen: 4,maxLen: 12,mirrors: 2,bridges: 1}, seed: 3720933739, code: '8x8|3,0,1,1;2,1,2,5;1,4,7,5;2,6,7,3;3,4,1,3;5,2,5,0;0,7,2,0;5,5,7,0|0,1,2,3,4,5,6,7|3,2||5,1,1;2,3,2' },
+    { spec: {w: 8,h: 8,minLen: 4,maxLen: 12,mirrors: 2,bridges: 1}, seed: 1305848370, code: '8x8|7,1,6,6;6,4,5,6;0,1,3,7;2,6,3,3;0,0,5,1;7,0,1,2;7,4,2,5;1,3,3,2|0,1,2,3,4,5,6,7|5,5||4,6,2;3,5,2' },
+    { spec: {w: 8,h: 8,minLen: 4,maxLen: 12,mirrors: 2,bridges: 1}, seed: 2946379905, code: '8x8|6,6,5,4;6,4,1,1;5,7,6,0;4,4,3,2;1,6,6,2;4,1,6,3;0,7,4,7;3,5,3,1|0,1,2,3,4,5,6,7|5,5||1,5,2;2,4,2' },
+    { spec: {w: 9,h: 9,minLen: 4,maxLen: 14,bridges: 1,gates: 1,mirrors: 2}, seed: 3831984602, code: '9x9|2,0,4,8;1,1,6,2;1,0,1,8;3,5,5,7;4,1,7,8;5,8,5,5;4,3,8,1;7,7,2,5|0,1,2,3,4,5,6,7|2,3|4,7,6,4|5,2,1;4,5,2' },
+    { spec: {w: 9,h: 9,minLen: 4,maxLen: 14,bridges: 1,gates: 1,mirrors: 2}, seed: 3649136868, code: '9x9|6,1,6,6;5,6,6,2;3,7,1,7;1,4,2,2;0,0,4,8;6,0,2,3;7,0,7,8;7,1,2,7|0,1,2,3,4,5,6,7|5,5|5,7,0,8|1,3,2;3,2,1' },
+    { spec: {w: 9,h: 9,minLen: 4,maxLen: 14,bridges: 1,gates: 1,mirrors: 2}, seed: 3536131552, code: '9x9|8,3,3,5;5,1,1,2;8,0,2,7;8,1,8,6;0,0,5,8;4,6,3,3;1,7,2,1|0,1,2,3,4,5,6|4,2|7,7,6,0|2,4,1;5,3,1' },
+    { spec: {w: 9,h: 9,minLen: 4,maxLen: 14,bridges: 2,gates: 1,mirrors: 2}, seed: 2006650880, code: '9x9|2,4,7,1;4,2,8,1;2,1,7,8;8,3,3,7;0,4,1,6;1,5,1,7;0,0,1,4;4,5,6,8|0,1,2,3,4,5,6,7|5,1;6,3|0,5,6,6|3,4,1;3,6,2' },
+    { spec: {w: 9,h: 9,minLen: 4,maxLen: 14,bridges: 2,gates: 1,mirrors: 2}, seed: 1162254628, code: '9x9|1,2,6,4;6,3,1,7;8,8,8,1;8,7,1,4;8,0,5,1;2,6,2,4;6,0,2,2;3,2,3,5|0,1,2,3,4,5,6,7|5,3;5,7|5,5,7,1|2,5,1;1,6,2' },
+    { spec: {w: 9,h: 9,minLen: 4,maxLen: 14,bridges: 2,gates: 1,mirrors: 2}, seed: 1753960728, code: '9x9|3,2,6,7;1,7,7,5;8,8,3,1;8,1,4,2;8,0,3,0;7,3,1,0;0,0,1,5;1,4,7,6|0,1,2,3,4,5,6,7|5,6;6,2|3,6,2,0|2,4,2;6,5,1' }
   ];
 })();
 
@@ -11127,10 +11238,13 @@
  * 擁有者：C7-3 cart3-slide（R7）｜ 依賴：engine/chr.js（字身沿用原創 DEMO.FONT）
  *
  * 一格 = 16×16 px = 2×2 磁磚 = 剛好一個屬性區 ⇒ 每格的線色由屬性（調色盤組）+ 磁磚裡的色號（2 / 3）決定，
- *   色號 1 = 各組共用的暗灰（格點 / 星門框 / 橋欄）。8 色 = 4 組 × 2 色。
+ *   色號 1 = 各組共用的亮灰 $10（格點 / 有線經過時的橋欄、門框、鏡面）。8 色 = 4 組 × 2 色。
+ * fix-r7（P2-1）：**空的機關用亮色畫**（屬性借某一組的色 3）：星橋 = 白欄杆 + 紅柱（組 0）、星門 = 青色傳送環（組 2）、
+ *   星鏡 = 金色斜鏡（組 1）；有線經過後改用亮灰（色 1）畫結構、線用自己的顏色。星橋還沒被兩條線填滿時欄杆閃爍（另一組磁磚）。
+ *   星橋畫成「從上往下看的橋」：橫線走在橋面上（上下各 1 px 黑邊），直線從欄杆底下鑽過 ⇒ 一眼看出立體交叉。
  * 格子種類（每種畫成 16×16 再切 4 塊，**以內容去重**後才進 bank）：
- *   空格（四角格點）、線段（中心 + ≤ 2 個方向）、星珠端點（+ ≤ 1 個方向）、星橋（橫色 a × 直色 b，各 0/2/3）、
- *   星門（空 / 有線 + ≤ 1 個方向）
+ *   空格（四角格點）、線段（中心 + ≤ 2 個方向）、星珠端點（+ ≤ 1 個方向）、星橋（橫色 a × 直色 b，各 0/2/3，× 閃爍）、
+ *   星門（空 / 有線 + ≤ 1 個方向）、星鏡（/ 或 \：空 / 有線（成對的兩個方向 A、B））
  * 背景 bank `lines_bg`；精靈 bank `lines_spr`（游標四角、筆尖星、回選單提示點）。
  */
 (function () {
@@ -11172,25 +11286,51 @@
     p[3][7] = 1; p[3][8] = 1;
     return p;
   }
-  function cellBridge(a, b) {
-    var p = px16();
-    // 欄杆（暗灰）：中央十字外框
-    rect(p, 4, 4, 11, 4, 1); rect(p, 4, 11, 11, 11, 1); rect(p, 4, 4, 4, 11, 1); rect(p, 11, 4, 11, 11, 1);
-    if (b) { rect(p, 6, 0, 9, 4, b); rect(p, 6, 11, 9, 15, b); rect(p, 6, 5, 9, 10, b); }
-    if (a) { rect(p, 0, 5, 15, 10, 0); rect(p, 0, 6, 15, 9, a); if (b) { rect(p, 6, 5, 9, 5, 0); rect(p, 6, 10, 9, 10, 0); } }
+  // 星橋：b = 直線色（0 無 / 1 錯組亮灰 / 2 / 3）、a = 橫線色（0 / 2 / 3）；blink = 閃爍相位（欄杆換色）
+  function cellBridge(a, b, blink) {
+    var p = px16(), empty = !a && !b;
+    var rail = empty ? (blink ? 1 : 3) : (blink ? (a || b) : 1), post = empty ? 2 : rail;   // 只有一條線 ⇒ 欄杆在亮灰 / 該線色之間閃
+    if (b) rect(p, 6, 0, 9, 15, b);                                    // 直線（在橋底下）
+    rect(p, 1, 2, 14, 3, rail); rect(p, 1, 12, 14, 13, rail);          // 兩道欄杆（壓在直線上 ⇒ 直線從底下鑽過）
+    rect(p, 0, 1, 2, 4, post); rect(p, 13, 1, 15, 4, post); rect(p, 0, 11, 2, 14, post); rect(p, 13, 11, 15, 14, post);
+    if (empty) { for (var x = 4; x <= 11; x += 3) rect(p, x, 5, x, 10, 1); }   // 空橋：橋面木板
+    if (a) { rect(p, 0, 5, 15, 10, 0); rect(p, 0, 6, 15, 9, a); }      // 橫線（在橋面上，上下黑邊）
     return p;
   }
+  // 星門：空 = 青色傳送環（色 3）+ 內圈亮灰；有線 = 亮灰環 + 線色核心 + ≤ 1 個方向
   function cellGate(dir, ci) {
     var p = px16(), x, y;
     for (y = 0; y < 16; y++) for (x = 0; x < 16; x++) {
       var d = Math.abs(x - 7.5) + Math.abs(y - 7.5);
-      if (d >= 6 && d <= 7.5) p[y][x] = 1;
+      if (d >= 5.5 && d <= 7.5) p[y][x] = ci ? 1 : 3;
+      else if (!ci && d >= 2.5 && d <= 3.5) p[y][x] = 1;
     }
     if (ci) {
       if (dir) stroke(p, dir, ci, 0);
-      disc(p, 7.5, 7.5, 9, ci);
+      disc(p, 7.5, 7.5, 12, ci);
       rect(p, 7, 7, 8, 8, 0);
-    } else { p[7][7] = 1; p[8][8] = 1; p[7][8] = 1; p[8][7] = 1; }
+    } else { rect(p, 7, 7, 8, 8, 3); }
+    return p;
+  }
+  // 星鏡：t 1 = /、2 = \（\ = / 左右鏡射）；pair 'A'（/：左+上）/ 'B'（/：右+下）/ ''（空）
+  function cellMirror(t, ci, pair) {
+    var p = px16(), x, y;
+    if (!ci) {
+      dots(p);
+      for (y = 0; y < 16; y++) for (x = 0; x < 16; x++) {
+        var s = x + y;
+        if (x >= 1 && x <= 14 && y >= 1 && y <= 14) { if (s >= 13 && s <= 16) p[y][x] = 3; else if (s === 12 || s === 17 || s === 18) p[y][x] = 1; }
+      }
+    } else {
+      var A = pair === 'A';
+      rect(p, 6, 6, 9, 9, ci);
+      stroke(p, A ? 'L' : 'R', ci); stroke(p, A ? 'U' : 'D', ci);
+      for (y = 0; y < 16; y++) for (x = 0; x < 16; x++) {
+        var s2 = x + y;
+        if (A ? s2 >= 20 && s2 <= 23 && x >= 5 && y >= 5 : s2 >= 7 && s2 <= 10 && x <= 10 && y <= 10) p[y][x] = 1;
+      }
+    }
+    if (t === 2) for (y = 0; y < 16; y++) p[y].reverse();
     return p;
   }
 
@@ -11239,7 +11379,17 @@
     ['', 'U', 'R', 'D', 'L'].forEach(function (d) { addCell('P' + ci + d, cellEnd(d, ci)); addCell('G' + ci + d, cellGate(d, ci)); });
   });
   addCell('G0', cellGate('', 0));
-  [0, 2, 3].forEach(function (aa) { [0, 1, 2, 3].forEach(function (bb) { if (bb === 1 && !aa) return; addCell('B' + aa + bb, cellBridge(aa, bb)); }); });
+  // 星橋：B<橫><直>，還沒被兩條線填滿的另有閃爍版 B<橫><直>x
+  [0, 2, 3].forEach(function (aa) { [0, 1, 2, 3].forEach(function (bb) {
+    if (bb === 1 && !aa) return;
+    addCell('B' + aa + bb, cellBridge(aa, bb, 0));
+    if (!aa || !bb) addCell('B' + aa + bb + 'x', cellBridge(aa, bb, 1));
+  }); });
+  // 星鏡：M<t>0（空）、M<t><色號><A|B>
+  [1, 2].forEach(function (t) {
+    addCell('M' + t + '0', cellMirror(t, 0, ''));
+    [2, 3].forEach(function (ci) { ['A', 'B'].forEach(function (pr) { addCell('M' + t + ci + pr, cellMirror(t, ci, pr)); }); });
+  });
 
   /* ---------------- 精靈 ---------------- */
   var SPR = {
@@ -11439,8 +11589,10 @@
  * 擁有者：C7-3 cart3-slide（R7）｜ 依賴：lines/gen.js、lines/levels.js、lines/art.js、lines/song.js、games/cart1/registry.js
  * 舊作概念來源（只取「把成對的東西連起來」）：connect-lines（舊作是 ≤ 2 折的配對消除；本作改成原創的填滿連線益智）。
  *
- * 規則（見 gen.js 檔頭）：同色星珠兩兩相連、線不交叉不分岔、填滿每一格；自創機關「星橋」（一橫一直立體交叉）
- *   與「星門」（進一扇、出另一扇）。36 關（6 章）全部由產生器做出且解題器驗證唯一解；RANDOM 模式 = `?seed=` 可重現的隨機關。
+ * 規則（見 gen.js 檔頭）：同色星珠兩兩相連、線不交叉不分岔、填滿每一格；機關「星橋」（一橫一直立體交叉）、
+ *   自創「星門」（進一扇、出另一扇）與 fix-r7 新增的自創「星鏡」（/ 或 \ 斜鏡，線碰到一定照鏡面反彈 90°）。
+ *   36 關（7 章）全部由產生器做出且解題器驗證唯一解；RANDOM 模式 = `?seed=` 可重現的隨機關。
+ *   每種機關第一次出現的關卡開場先跳一頁教學（示意圖 + 兩三行字，A 關閉；存檔 `seen`，只跳一次）。
  * 操作：十字鍵一格一格移動游標（按住：12 幀後每 4 幀一格）；A = 下筆 / 收筆（在星珠或線上下筆，從那裡接著畫）；
  *   下筆時十字鍵延伸線（走回上一格 = 收回；撞到別色的線 = 切斷它；走到同色另一顆星珠 = 連成、自動收筆）；
  *   B 點一下 = 收筆 / 清掉游標下那條線；B 長按 30 幀 = 提示（把一條線畫成正解）；SELECT（放開時）= 復原；START = 暫停。
@@ -11458,11 +11610,14 @@
   var AU = LN.Audio, GEN = LN.Gen;
   var BTN = (NES.Input && NES.Input.BTN) || { A: 1, B: 2, SELECT: 4, START: 8, UP: 16, DOWN: 32, LEFT: 64, RIGHT: 128 };
 
+  var HUD_ROW = 2, STAT_ROW = 23, MSG_ROW = 25;
   var FLUSH_LIMIT = 140, REP_DELAY = 12, REP_RATE = 4, HINT_HOLD = 30, GOAL_LEVELS = 10;
-  var CHAPTERS = ['FIRST LIGHT', 'STAR FIELD', 'BRIDGE WAY', 'TWIN BRIDGES', 'STAR GATES', 'DEEP SKY', 'NEBULA HEART'];
+  var CHAPTERS = ['FIRST LIGHT', 'STAR FIELD', 'BRIDGE WAY', 'TWIN BRIDGES', 'STAR GATES', 'STAR MIRRORS', 'NEBULA HEART'];
+  var RANDOM_SPEC = { w: 7, h: 7, minLen: 3, maxLen: 10, bridges: 1, gates: 1, mirrors: 1 };
+  // 色 1 = 亮灰 $10（fix-r7：原本 $00 暗灰在黑底上看不見）；空的機關借色 3：組 0 白（橋）、組 1 金（鏡）、組 2 青（門）
   var PAL = {
     bd: 0x0F,
-    bg: [[0x00, 0x16, 0x30], [0x00, 0x2A, 0x28], [0x00, 0x11, 0x2C], [0x00, 0x24, 0x27]],
+    bg: [[0x10, 0x16, 0x30], [0x10, 0x2A, 0x28], [0x10, 0x11, 0x2C], [0x10, 0x24, 0x27]],
     spr: [[0x30, 0x10, 0x30], [0x28, 0x27, 0x38], [0x2C, 0x21, 0x30], [0x16, 0x26, 0x30]]
   };
   var DX = { U: 0, R: 1, D: 0, L: -1 }, DY = { U: -1, R: 0, D: 1, L: 0 };
@@ -11525,10 +11680,11 @@
   function clearRow(r) { for (var c = 0; c < 32; c++) put(c, r, 0); }
 
   /* ---------------- 關卡 ---------------- */
-  function makePuzzle(L, idx, seed) {
+  function makePuzzle(L, idx, seed, noSolve) {
     var w = L.w, h = L.h, N = w * h, i;
     var P = { L: L, idx: idx, seed: seed, w: w, h: h, N: N, ncol: L.ends.length, colors: L.colors.slice() };
-    P.endAt = new Int8Array(N).fill(-1); P.bridge = new Uint8Array(N); P.twin = new Int16Array(N).fill(-1);
+    P.endAt = new Int8Array(N).fill(-1); P.bridge = new Uint8Array(N); P.twin = new Int16Array(N).fill(-1); P.mirror = new Int8Array(N);
+    (L.mirrors || []).forEach(function (m) { P.mirror[m[1] * w + m[0]] = m[2] || 1; });
     for (i = 0; i < L.ends.length; i++) {
       var e = L.ends[i];
       P.endAt[e[1] * w + e[0]] = i; P.endAt[e[3] * w + e[2]] = i;
@@ -11537,8 +11693,7 @@
     P.endB = L.ends.map(function (e) { return e[3] * w + e[2]; });
     (L.bridges || []).forEach(function (b) { P.bridge[b[1] * w + b[0]] = 1; });
     (L.gates || []).forEach(function (q) { var a = q[1] * w + q[0], b = q[3] * w + q[2]; P.twin[a] = b; P.twin[b] = a; });
-    var r = GEN.solve(L, 1);
-    P.sol = r.sol;
+    P.sol = noSolve ? null : GEN.solve(L, 1).sol;
     P.ox = (16 - w) & ~1; P.oy = 4 + ((((18 - 2 * h) / 2) | 0) & ~1);
     P.par = N * 2 * 60;
     return P;
@@ -11557,6 +11712,12 @@
     return null;
   }
   function horiz(d) { return d === 'L' || d === 'R'; }
+  // 星鏡：沿 travel 方向走進鏡格 c ⇒ 一定要往哪個方向出去（沒有 = null）
+  function mirOut(c, travel) {
+    var ps = GEN.mirPartner(g.P.mirror[c], (DORDER.indexOf(travel) + 2) % 4);
+    return ps < 0 ? null : DORDER[ps];
+  }
+  var DWORD = { U: 'UP', R: 'RIGHT', D: 'DOWN', L: 'LEFT' };
   function axisAt(path, i) {
     var d = null;
     if (i > 0) d = dirTo(path[i - 1], path[i]);
@@ -11589,8 +11750,21 @@
     }
     return [n, tot];
   }
+  function mirrorsOk() {
+    for (var k = 0; k < g.paths.length; k++) {
+      var p = g.paths[k];
+      for (var i = 1; i + 1 < p.length; i++) if (g.P.mirror[p[i]] && dirTo(p[i], p[i + 1]) !== mirOut(p[i], dirTo(p[i - 1], p[i]))) return false;
+    }
+    return true;
+  }
+  function bridgesOk() {
+    var O = occupancy(), P = g.P;
+    for (var c = 0; c < P.N; c++) if (P.bridge[c] && (O.occH[c] < 0 || O.occV[c] < 0)) return false;
+    return true;
+  }
   function solved() {
     for (var k = 0; k < g.P.ncol; k++) if (!complete(k)) return false;
+    if (!mirrorsOk()) return false;
     var f = filledCount();
     return f[0] === f[1];
   }
@@ -11605,7 +11779,18 @@
       var a = O.occH[c], b = O.occV[c], grp = a >= 0 ? grpOf(a) : (b >= 0 ? grpOf(b) : 0);
       var bi = b < 0 ? 0 : (a >= 0 && grpOf(a) !== grpOf(b) ? 1 : ciOf(b));
       if (a < 0 && bi === 1) bi = 0;
-      return ['B' + ciOf(a) + bi, grp];
+      var blk = (a < 0 || b < 0) && g.mode === 'play' && ((g.t >> 5) & 1) ? 'x' : '';   // 還沒被兩條線填滿 ⇒ 每 32 幀閃一次
+      return ['B' + ciOf(a) + bi + blk, grp];
+    }
+    if (P.mirror[c]) {
+      var mt = P.mirror[c], mk = O.occ[c];
+      if (mk < 0) return ['M' + mt + '0', 1];
+      p = g.paths[mk]; i = p.indexOf(c);
+      var side = -1;
+      if (i > 0) side = DORDER.indexOf(dirTo(c, p[i - 1]));
+      else if (i + 1 < p.length) side = DORDER.indexOf(dirTo(c, p[i + 1]));
+      var pa = GEN.MIR_PAIRS[mt][0];
+      return ['M' + mt + ciOf(mk) + (side === pa[0] || side === pa[1] ? 'A' : 'B'), grpOf(mk)];
     }
     if (P.endAt[c] >= 0) {
       k = P.endAt[c]; p = g.paths[k]; var d = '';
@@ -11617,7 +11802,7 @@
     }
     k = O.occ[c];
     if (P.twin[c] >= 0) {
-      if (k < 0) return ['G0', 0];
+      if (k < 0) return ['G0', 2];
       p = g.paths[k]; i = p.indexOf(c); var dd = '';
       if (i > 0 && p[i - 1] !== P.twin[c]) dd = dirTo(c, p[i - 1]) || '';
       if (!dd && i + 1 < p.length && p[i + 1] !== P.twin[c]) dd = dirTo(c, p[i + 1]) || '';
@@ -11675,25 +11860,85 @@
     g.P = save.P; g.paths = save.paths;
     AU.play('lines_title');
   }
+  // 把一格的 4 個磁磚 + 屬性直接放到 (col,row)（col / row 偶數 ⇒ 對齊屬性區）
+  function putCell(col, row, key, grp) {
+    var t = art.cell(key);
+    put(col, row, t[0]); put(col + 1, row, t[1]); put(col, row + 1, t[2]); put(col + 1, row + 1, t[3]);
+    putA(col >> 1, row >> 1, grp);
+  }
   function enterHelp() {
     g.mode = 'help'; g.t = 0;
-    var save = { P: g.P, paths: g.paths };
     redraw(function () {
       center(2, 'HOW TO LINK');
-      var L = ['LINK EACH PAIR OF STARS', 'LINES NEVER CROSS OR BRANCH', 'FILL EVERY CELL ON THE BOARD',
-               '  BRIDGE: ONE ROW LINE AND', '  ONE COLUMN LINE CROSS IT', '  GATE: GO IN ONE GATE,', '  COME OUT OF ITS TWIN',
-               'A PEN   B LIFT / CLEAR LINE', 'HOLD B HINT  SELECT UNDO'];
-      var rows = [5, 7, 9, 12, 14, 17, 19, 22, 24];
-      for (var i = 0; i < L.length; i++) text(3, rows[i], L[i]);
-      // 範例圖：星橋 / 星門（用真的格子磁磚）
-      var b = art.cell('B23'), q = art.cell('G3R');
-      put(2, 12, b[0]); put(3, 12, b[1]); put(2, 13, b[2]); put(3, 13, b[3]); putA(1, 6, 1);
-      put(2, 18, q[0]); put(3, 18, q[1]); put(2, 19, q[2]); put(3, 19, q[3]); putA(1, 9, 2);
+      var L = [[3, 4, 'LINK EACH PAIR OF STARS'], [3, 6, 'NO CROSSING, NO BRANCHING'], [3, 8, 'FILL EVERY CELL'],
+               [7, 10, 'BRIDGE: A ROW LINE AND'], [7, 12, 'A COLUMN LINE CROSS IT'],
+               [7, 14, 'GATE: IN ONE GATE, OUT'], [7, 16, 'OF ITS TWIN GATE'],
+               [7, 18, 'MIRROR: LINES MUST'], [7, 20, 'BOUNCE OFF ITS FACE'],
+               [3, 22, 'A PEN  B LIFT  SELECT UNDO'], [3, 24, 'HOLD B HINT']];
+      for (var i = 0; i < L.length; i++) text(L[i][0], L[i][1], L[i][2]);
+      // 範例圖 = 遊戲內同一組格子磁磚：左 = 空的機關、右 = 有線經過的樣子
+      putCell(2, 10, 'B00', 0); putCell(4, 10, 'B23', 3);
+      putCell(2, 14, 'G0', 2); putCell(4, 14, 'G2R', 1);
+      putCell(2, 18, 'M10', 1); putCell(4, 18, 'M12A', 0);
       center(27, 'PUSH START');
     });
+  }
+  /* ---------------- 新機關教學頁（每種機關第一次出現的關卡開場；A 關閉；存檔只跳一次） ---------------- */
+  var TUTOR = {
+    bridge: { title: 'NEW: STAR BRIDGE', L: { w: 3, h: 3, ends: [[0, 1, 2, 1], [1, 0, 1, 2]], colors: [6, 7], bridges: [[1, 1]] },
+              sol: [[3, 4, 5], [1, 4, 7]],
+              text: ['A ROW LINE AND A COLUMN LINE', 'MUST BOTH CROSS EACH BRIDGE.', 'ONE GOES OVER, ONE UNDER.'] },
+    gate: { title: 'NEW: STAR GATE', L: { w: 4, h: 3, ends: [[0, 0, 3, 2]], colors: [2], gates: [[1, 0, 2, 2]] },
+            sol: [[0, 1, 10, 11]],
+            text: ['GO INTO ONE GATE AND THE', 'LINE COMES OUT OF ITS TWIN.', 'A GATE IS NEVER A LINE END.'] },
+    mirror: { title: 'NEW: STAR MIRROR', L: { w: 4, h: 3, ends: [[0, 1, 1, 0], [3, 1, 2, 0]], colors: [0, 3], mirrors: [[1, 1, 1], [2, 1, 2]] },
+              sol: [[4, 5, 1], [7, 6, 2]],
+              text: ['A LINE THAT HITS A MIRROR', 'MUST BOUNCE OFF ITS FACE', 'AND TURN. FILL EVERY MIRROR.'] }
+  };
+  var TUTOR_ORDER = ['bridge', 'gate', 'mirror'];
+  function kindsOf(L) {
+    var o = [];
+    if (L.bridges && L.bridges.length) o.push('bridge');
+    if (L.gates && L.gates.length) o.push('gate');
+    if (L.mirrors && L.mirrors.length) o.push('mirror');
+    return o;
+  }
+  // 開關卡（玩家流程用）：有沒看過的機關 ⇒ 先跳教學頁
+  function beginLevel(idx, seed) {
+    var kinds = idx >= 0 ? kindsOf(levelOf(idx)) : kindsOf(RANDOM_SPEC.mirrors ? { bridges: [1], gates: [1], mirrors: [1] } : {});
+    var seen = CT.load('lines', 'seen', {}) || {};
+    for (var i = 0; i < TUTOR_ORDER.length; i++) {
+      var k = TUTOR_ORDER[i];
+      if (kinds.indexOf(k) >= 0 && !seen[k]) { enterTutor(k, idx, seed || 0); return; }
+    }
+    startLevel(idx, seed || 0);
+  }
+  function drawDemo(T, ox, oy, solvedView) {
+    var save = { P: g.P, paths: g.paths };
+    g.P = makePuzzle(T.L, -1, 0, true); g.P.ox = ox; g.P.oy = oy;
+    g.paths = T.sol.map(function (p) { return solvedView ? p.slice() : []; });
+    drawFrame(ox, oy, T.L.w, T.L.h);
+    drawBoard();
     g.P = save.P; g.paths = save.paths;
   }
-  function selPos(i) { return [6 + (i % 6) * 4, 6 + Math.floor(i / 6) * 2]; }
+  function enterTutor(kind, idx, seed) {
+    var T = TUTOR[kind];
+    g.mode = 'tutor'; g.t = 0; g.tutor = kind; g.tutorNext = idx; g.tutorSeed = seed;
+    redraw(function () {
+      starField(1, 28);
+      for (var r = 2; r < 28; r++) for (var c = 1; c < 31; c++) put(c, r, 0);
+      center(3, T.title);
+      var w2 = T.L.w * 2, lx = (14 - w2) & ~1, rx = 18;
+      text(lx + (w2 >> 1) - 2, 6, 'EMPTY');
+      text(rx + (w2 >> 1) - 3, 6, 'SOLVED');
+      drawDemo(T, lx, 8, false);
+      drawDemo(T, rx, 8, true);
+      text(15, 10, '>>');
+      for (var i = 0; i < T.text.length; i++) center(17 + i * 2, T.text[i]);
+      center(25, 'A: GOT IT');
+    });
+  }
+  function selPos(i) { return [6 + (i % 6) * 4, 4 + Math.floor(i / 6) * 2]; }
   function enterSelect() {
     g.mode = 'select'; g.t = 0;
     var st = CT.load('lines', 'stars', []) || [];
@@ -11704,19 +11949,20 @@
         text(p[0], p[1], pad(i + 1, 2));
         putA(p[0] >> 1, p[1] >> 1, s >= 3 ? 2 : (s > 0 ? 1 : 0));
       }
-      text(4, 20, 'WHITE NEW  YELLOW CLEAR');
-      text(4, 21, '');
-      text(4, 22, 'BLUE = 3 STARS');
-      center(26, 'A PLAY   B BACK');
+      text(3, 23, 'WHITE NEW  YELLOW CLEAR');
+      text(3, 25, 'BLUE = 3 STARS');
+      center(27, 'A PLAY   B BACK');
     });
     selInfo();
   }
+  // fix-r7（P2-2）：關卡號表格在第 4 ~ 14 列，說明在第 17 / 19 / 21 列 ⇒ 36 關全部看得到
   function selInfo() {
     var i = g.lsel, s = (CT.load('lines', 'stars', []) || [])[i] | 0, L = levelOf(i);
-    var mech = (L.bridges.length ? 'BRIDGE ' : '') + (L.gates.length ? 'GATE' : '');
-    text(2, 16, padR('LV ' + pad(i + 1, 2) + ' ' + CHAPTERS[chapterOf(i)], 28));
-    text(2, 18, padR(L.w + 'X' + L.h + ' ' + L.ends.length + ' PAIRS ' + mech, 28));
-    text(24, 16, s ? ('$$$'.substring(0, s) + '   ').substring(0, 3) : '---');
+    var mech = kindsOf(L).map(function (k) { return k.toUpperCase(); }).join(' ');
+    text(3, 17, padR('LV ' + pad(i + 1, 2) + ' ' + CHAPTERS[chapterOf(i)], 22));
+    text(26, 17, s ? ('$$$'.substring(0, s) + '   ').substring(0, 3) : '---');
+    text(3, 19, padR(L.w + 'X' + L.h + '  ' + L.ends.length + ' PAIRS', 26));
+    text(3, 21, padR(mech || 'NO GADGETS', 26));
   }
 
   /* ---------------- 遊玩 ---------------- */
@@ -11725,7 +11971,7 @@
     if (idx >= 0) L = levelOf(idx);
     else {
       L = null;
-      for (var tries = 0; !L && tries < 8; tries++) L = GEN.generate({ w: 7, h: 7, minLen: 3, maxLen: 10, bridges: 1, gates: 1 }, (seed + tries * 7919) >>> 0, 2000);
+      for (var tries = 0; !L && tries < 8; tries++) L = GEN.generate(RANDOM_SPEC, (seed + tries * 7919) >>> 0, 2000);
       if (!L) L = levelOf(20);
     }
     g.P = makePuzzle(L, idx, seed);
@@ -11742,8 +11988,8 @@
       drawFrame(P.ox, P.oy, P.w, P.h);
       drawBoard();
       hud();
-      text(1, 27, 'A PEN  B LIFT  SELECT UNDO');
-      text(19, 23, 'HOLD B HINT');
+      text(1, 26, 'A PEN  B LIFT  SELECT UNDO');
+      text(1, 27, 'HOLD B HINT  START PAUSE');
     });
     AU.play('lines_play');
   }
@@ -11802,6 +12048,14 @@
       if (inD && (horiz(inD) ? 'H' : 'V') !== ax) { AU.sfx('lines_err'); say('GO STRAIGHT OVER A BRIDGE', 40); return false; }
     }
     if (p.length >= 2 && t === p[p.length - 2]) { p.pop(); AU.sfx('lines_step'); afterChange(); return true; }
+    if (P.mirror[h] && p.length >= 2) {
+      var need = mirOut(h, dirTo(p[p.length - 2], h));
+      if (d !== need) { AU.sfx('lines_err'); say('THE MIRROR SENDS IT ' + DWORD[need], 40); return false; }
+    }
+    if (P.mirror[t]) {
+      var out = mirOut(t, d), ox2 = nx + (out ? DX[out] : 0), oy2 = ny + (out ? DY[out] : 0);
+      if (!out || ox2 < 0 || oy2 < 0 || ox2 >= P.w || oy2 >= P.h) { AU.sfx('lines_err'); say('THE MIRROR FACES THE WALL', 40); return false; }
+    }
     var O = occupancy();
     if (P.endAt[t] >= 0) {
       if (P.endAt[t] !== k) { AU.sfx('lines_err'); say('THAT STAR IS ANOTHER COLOR', 40); return false; }
@@ -11893,18 +12147,20 @@
     var P = g.P;
     if (!P) return;
     var title = P.idx >= 0 ? 'LV ' + pad(P.idx + 1, 2) + ' ' + CHAPTERS[chapterOf(P.idx)] : 'RANDOM ' + pad(P.seed % 100000, 5);
-    text(1, 1, padR(title, 20) + 'TIME ' + mmss(g.time) + (g.cheatUsed ? '$' : ' '));
+    // fix-r7（P3-5）：第一列 HUD 不貼 y = 0 ⇒ 標題 / 時間放第 2 列，連線 / 填滿 / 提示數移到盤面下方第 23 列
+    text(1, HUD_ROW, padR(title, 20) + 'TIME ' + mmss(g.time) + (g.cheatUsed ? '$' : ' '));
     var done = 0; for (var k = 0; k < P.ncol; k++) if (complete(k)) done++;
     var f = filledCount();
-    text(1, 2, padR('LINKS ' + done + '/' + P.ncol + '  FILL ' + pad(Math.floor(f[0] * 100 / f[1]), 3) + '%', 22) + 'HINT ' + g.hints);
+    text(1, STAT_ROW, padR('LINKS ' + done + '/' + P.ncol + '  FILL ' + pad(Math.floor(f[0] * 100 / f[1]), 3) + '%', 22) + 'HINT ' + g.hints);
     if (g.mode !== 'play') return;
     var line;
     if (g.paused) line = 'PAUSE  HOLD START+SELECT: MENU';
     else if (g.msgT > 0) line = g.msg;
     else if (g.pen >= 0) line = 'DRAWING... A TO LIFT THE PEN';
+    else if (done === P.ncol && !bridgesOk()) line = 'EACH BRIDGE NEEDS 2 LINES';
     else if (done === P.ncol) line = 'FILL EVERY CELL TO FINISH';
     else line = 'A ON A STAR TO START A LINE';
-    text(1, 25, padR(line, 30));
+    text(1, MSG_ROW, padR(line, 30));
   }
 
   /* ---------------- 精靈 ---------------- */
@@ -11954,6 +12210,7 @@
     if (g.paused) { selectTap(I); hud(); return; }
     g.t++; g.time++;
     if (g.msgT > 0) g.msgT--;
+    if ((g.t & 31) === 0 && g.P.L.bridges && g.P.L.bridges.length) drawBoard();   // 星橋閃爍（差異佇列只會送變了的那幾格）
     if (selectTap(I)) doUndo();
     var d = dpad(I);
     if (d) {
@@ -12016,6 +12273,7 @@
       tap(q, BTN.A, 4); return;
     }
     if (g.mode === 'help') { tap(q, BTN.START, 4); return; }
+    if (g.mode === 'tutor') { if (g.t < 20) { q.push(0); return; } tap(q, BTN.A, 4); return; }
     if (g.mode === 'select') {
       var want = 0;
       for (var i = 0; i < GOAL_LEVELS; i++) if (!g.goalSet[i]) { want = i; break; }
@@ -12081,7 +12339,7 @@
       g.randSeed = qs ? (parseInt(qs, 10) >>> 0) : 20261113;
       var lv = CT.query ? parseInt(CT.query('level') || '', 10) : NaN;
       if (qs && CT.query('direct') === '1') startLevel(-1, g.randSeed);
-      else if (lv >= 1 && lv <= LN.LEVELS.length) { g.lsel = lv - 1; startLevel(lv - 1, 0); }
+      else if (lv >= 1 && lv <= LN.LEVELS.length) { g.lsel = lv - 1; beginLevel(lv - 1, 0); }
       else enterTitle();
     },
     update: function () {
@@ -12094,7 +12352,7 @@
         if (startPressed(I) || I.pressed(BTN.A)) {
           AU.sfx('lines_ok');
           if (g.sel === 0) enterSelect();
-          else if (g.sel === 1) startLevel(-1, g.randSeed);
+          else if (g.sel === 1) beginLevel(-1, g.randSeed);
           else enterHelp();
         }
       } else if (g.mode === 'help') {
@@ -12104,15 +12362,22 @@
         g.t++;
         var d2 = dpad(I);
         if (d2) moveSel(d2);
-        if (startPressed(I) || I.pressed(BTN.A)) { AU.sfx('lines_ok'); startLevel(g.lsel, 0); }
+        if (startPressed(I) || I.pressed(BTN.A)) { AU.sfx('lines_ok'); beginLevel(g.lsel, 0); }
         else if (I.pressed(BTN.B)) enterTitle();
+      } else if (g.mode === 'tutor') {
+        g.t++;
+        if (g.t > 10 && (startPressed(I) || I.pressed(BTN.A))) {
+          var seen = CT.load('lines', 'seen', {}) || {};
+          seen[g.tutor] = 1; CT.save('lines', 'seen', seen);
+          AU.sfx('lines_ok'); if (g.tutorNext === -2) enterTitle(); else beginLevel(g.tutorNext, g.tutorSeed);
+        }
       } else if (g.mode === 'clear') {
         g.t++; g.clearT++;
         if (g.clearT > 20) {
           if (I.pressed(BTN.A) || startPressed(I)) {
             var P = g.P;
             if (P.idx < 0) { g.randSeed = (g.randSeed + 1) >>> 0; startLevel(-1, g.randSeed); }
-            else if (P.idx + 1 < LN.LEVELS.length) { g.lsel = P.idx + 1; startLevel(P.idx + 1, 0); }
+            else if (P.idx + 1 < LN.LEVELS.length) { g.lsel = P.idx + 1; beginLevel(P.idx + 1, 0); }
             else startLevel(P.idx, 0);
           } else if (I.pressed(BTN.B)) { if (g.P.idx >= 0) g.lsel = g.P.idx; enterSelect(); }
         }
@@ -12126,9 +12391,9 @@
     },
     state: function () {
       var P = g.P, done = 0;
-      if (P && g.mode !== 'title' && g.mode !== 'select' && g.mode !== 'help') for (var k = 0; k < P.ncol; k++) if (complete(k)) done++;
+      if (P && g.mode !== 'title' && g.mode !== 'select' && g.mode !== 'help' && g.mode !== 'tutor') for (var k = 0; k < P.ncol; k++) if (complete(k)) done++;
       return {
-        mode: g.mode, sel: g.sel, lsel: g.lsel, paused: g.paused, t: g.t, queue: g.q.length + g.qa.length,
+        mode: g.mode, sel: g.sel, lsel: g.lsel, tutor: g.mode === 'tutor' ? g.tutor : null, paused: g.paused, t: g.t, queue: g.q.length + g.qa.length,
         level: P ? P.idx : null, w: P ? P.w : 0, h: P ? P.h : 0, ncol: P ? P.ncol : 0, links: done,
         pen: g.pen, cx: g.cx, cy: g.cy, time: g.time, hints: g.hints, stars: g.stars, cleared: g.cleared,
         cheatUsed: g.cheatUsed, goalSet: Object.keys(g.goalSet).map(Number), undo: g.undo.length,
@@ -12147,7 +12412,8 @@
     g: function () { return g; }, start: function (i, seed) { startLevel(i, seed || 0); }, title: function () { enterTitle(); },
     select: function () { enterSelect(); }, paths: function () { return g.paths; }, sol: function () { return g.P && g.P.sol; },
     solved: function () { return solved(); }, cellLook: function (c) { return cellLook(c, occupancy()); }, puzzle: function () { return g.P; },
-    occupancy: function () { return occupancy(); }
+    occupancy: function () { return occupancy(); }, begin: function (i) { beginLevel(i, 0); }, tutor: function (k) { enterTutor(k, -2, 0); },
+    selPos: function (i) { return selPos(i); }, refresh: function () { drawBoard(); hud(); }
   };
   if (CT.register) CT.register(GAME);
 })();
@@ -12624,12 +12890,16 @@
   function beats(a, b) { return (a - b + 3) % 3 === 1; }
 
   /* ---------------- 名稱表影子 + 差異佇列 ---------------- */
+  // fix-r7-shell（qa-r7 P3-5 HUD 貼頂）：HUD 兩列從第 1 / 2 列（畫面 y = 0）下移到第 2 / 3 列（y = 8 起）；
+  // 原本第 3 列的上框線讓給 HUD，改畫在第 1 列（只是裝飾線），左右框從第 2 列起把 HUD 一起框住
+  var HUD_ROW = 2;
   function bgTile(c, r) {
-    if (r === 3) return art.t('BH');
+    if (r === HUD_ROW - 1) return art.t('BH');
     if (r === 26) return art.t('BHB');
-    if (r < 4 || r > 25) return 0;
+    if (r < HUD_ROW || r > 25) return 0;
     if (c === 0) return art.t('BV');
     if (c === 31) return art.t('BVR');
+    if (r < 4) return 0;
     if (g.mode === 'num' || (c > 3 && c < 28)) return 0;   // 星點只撒在左右兩側（數字盤 / 文字區易讀）
     var h = ((c * 2654435761) ^ (r * 40503) ^ 0x5a17) >>> 0;
     if (h % 13 === 3) return art.t('ST1');
@@ -12668,7 +12938,7 @@
       ppu.clearSprites(); g.sprUsed = 0;
     });
   }
-  function drawField() { for (var r = 3; r <= 26; r++) for (var c = 0; c < 32; c++) put(c, r, bgTile(c, r)); }
+  function drawField() { for (var r = HUD_ROW - 1; r <= 26; r++) for (var c = 0; c < 32; c++) put(c, r, bgTile(c, r)); }
   function big(col, row, word) {
     for (var i = 0; i < word.length; i++) {
       var ch = word.charAt(i), x = col + i * 2;
@@ -12757,9 +13027,9 @@
   }
   function say(s, t) { g.msg = s; g.msgT = t || 60; }
   function frame() {
-    for (var c = 0; c < 32; c++) put(c, 3, art.t('BH'));
+    for (var c = 0; c < 32; c++) put(c, HUD_ROW - 1, art.t('BH'));
     for (c = 0; c < 32; c++) put(c, 26, art.t('BHB'));
-    for (var r = 4; r <= 25; r++) { put(0, r, art.t('BV')); put(31, r, art.t('BVR')); }
+    for (var r = HUD_ROW; r <= 25; r++) { put(0, r, art.t('BV')); put(31, r, art.t('BVR')); }
   }
 
   /* ================================================================ 1 星數密碼 */
@@ -12869,9 +13139,9 @@
   }
   function hudNum() {
     var R = g.run, rg = numRange();
-    text(1, 1, padR('NUMBER CODE ' + GAMES[0].lv[R.lvl], 22) + (R.cheated ? '$' : ' ') + padL(mmss(R.time), 7));
-    if (R.lvl === 3) text(1, 2, padR('RANGE ' + pad(rg[0], 3) + '-' + pad(rg[1], 3) + ' CPU TRY ' + pad(R.ctries, 2) + (R.mine ? ' YOU ' + pad(R.mine, 3) : ''), 30));
-    else text(1, 2, padR('RANGE ' + pad(rg[0], 3) + '-' + pad(rg[1], 3) + '  TRY ' + pad(R.tries, 2) + (R.maxT ? '/' + pad(R.maxT, 2) : '   '), 30));
+    text(1, HUD_ROW, padR('NUMBER CODE ' + GAMES[0].lv[R.lvl], 22) + (R.cheated ? '$' : ' ') + padL(mmss(R.time), 7));
+    if (R.lvl === 3) text(1, HUD_ROW + 1, padR('RANGE ' + pad(rg[0], 3) + '-' + pad(rg[1], 3) + ' CPU TRY ' + pad(R.ctries, 2) + (R.mine ? ' YOU ' + pad(R.mine, 3) : ''), 30));
+    else text(1, HUD_ROW + 1, padR('RANGE ' + pad(rg[0], 3) + '-' + pad(rg[1], 3) + '  TRY ' + pad(R.tries, 2) + (R.maxT ? '/' + pad(R.maxT, 2) : '   '), 30));
   }
 
   /* ================================================================ 2 星塵猜拳大會 */
@@ -12981,8 +13251,8 @@
   }
   function hudRps() {
     var R = g.run;
-    text(1, 1, padR('STAR CUP ' + GAMES[1].lv[R.lvl], 20) + (R.cheated ? '$' : ' ') + 'MATCH ' + (Math.min(R.opp, 2) + 1) + '/3');
-    text(1, 2, padR('YOU ' + R.you + ' - ' + R.cpu + ' ' + OPP[Math.min(R.opp, 2)].name, 20) + 'ROUND ' + pad(R.rounds, 2) + ' ');
+    text(1, HUD_ROW, padR('STAR CUP ' + GAMES[1].lv[R.lvl], 20) + (R.cheated ? '$' : ' ') + 'MATCH ' + (Math.min(R.opp, 2) + 1) + '/3');
+    text(1, HUD_ROW + 1, padR('YOU ' + R.you + ' - ' + R.cpu + ' ' + OPP[Math.min(R.opp, 2)].name, 20) + 'ROUND ' + pad(R.rounds, 2) + ' ');
   }
 
   /* ================================================================ 3 星牌高低 */
@@ -13103,8 +13373,8 @@
   function hudHl() {
     var R = g.run, h = '';
     for (var i = 0; i < 4; i++) h += i < R.lives ? '^' : ' ';
-    text(1, 1, padR('HIGH OR LOW ' + GAMES[2].lv[R.lvl], 22) + (R.cheated ? '$' : ' ') + ' ' + h);
-    text(1, 2, padR('CARD ' + pad(R.pos + 1, 2) + '/52  OK ' + pad(R.ok, 2) + '  STREAK ' + pad(R.streak, 2), 30));
+    text(1, HUD_ROW, padR('HIGH OR LOW ' + GAMES[2].lv[R.lvl], 22) + (R.cheated ? '$' : ' ') + ' ' + h);
+    text(1, HUD_ROW + 1, padR('CARD ' + pad(R.pos + 1, 2) + '/52  OK ' + pad(R.ok, 2) + '  STREAK ' + pad(R.streak, 2), 30));
   }
 
   /* ================================================================ 結算 / GAME OVER */
@@ -13398,7 +13668,7 @@
   var T = { WALL: 0, FLOOR: 1, KEY: 2, DOOR: 3, SWITCH: 4, GATE_A: 5, GATE_B: 6, SHIFT0: 7, SHIFT1: 8, EXIT: 9, SHARD: 10, LAMP: 11 };
   var DX = [0, 1, 0, -1], DY = [-1, 0, 1, 0];
 
-  /* 9 層固定種子（主題 0 星苔洞窟 / 1 餘燼窯 / 2 虛空花園）。r1 / r2 = 明亮 / 微光半徑（px） */
+  /* 9 層固定種子（主題 0 星苔洞窟 / 1 餘燼窯 / 2 虛空花園）。r1 / r2 = 明亮 / 微光半徑（px）；fix-r7-maze：最小 32 / 48（F7~F9 原 28 / 24） */
   var FLOORS = [
     { n: 1, name: 'GLOW GROTTO', w: 15, h: 11, doors: 0, gates: 0, shift: 0, shards: 3, loops: 2, lamp: 0, r1: 40, r2: 56, theme: 0, seed: 1101 },
     { n: 2, name: 'ECHO HALL', w: 19, h: 13, doors: 1, gates: 0, shift: 0, shards: 3, loops: 3, lamp: 0, r1: 40, r2: 56, theme: 0, seed: 2202 },
@@ -13406,9 +13676,9 @@
     { n: 4, name: 'EMBER STAIR', w: 25, h: 17, doors: 1, gates: 0, shift: 4, shards: 4, loops: 5, lamp: 0, r1: 36, r2: 52, theme: 1, seed: 4404 },
     { n: 5, name: 'SHIFTING KILN', w: 27, h: 19, doors: 1, gates: 1, shift: 6, shards: 4, loops: 6, lamp: 1, r1: 32, r2: 48, theme: 1, seed: 5505 },
     { n: 6, name: 'ASH VAULT', w: 29, h: 21, doors: 2, gates: 1, shift: 6, shards: 5, loops: 7, lamp: 1, r1: 32, r2: 48, theme: 1, seed: 6606 },
-    { n: 7, name: 'VOID GARDEN', w: 31, h: 23, doors: 2, gates: 2, shift: 8, shards: 5, loops: 8, lamp: 1, r1: 28, r2: 44, theme: 2, seed: 7707 },
-    { n: 8, name: 'STAR SPINE', w: 31, h: 23, doors: 3, gates: 2, shift: 10, shards: 5, loops: 8, lamp: 1, r1: 24, r2: 40, theme: 2, seed: 8808 },
-    { n: 9, name: 'HEART OF NIGHT', w: 31, h: 23, doors: 3, gates: 3, shift: 12, shards: 6, loops: 9, lamp: 1, r1: 24, r2: 40, theme: 2, seed: 9909 }
+    { n: 7, name: 'VOID GARDEN', w: 31, h: 23, doors: 2, gates: 2, shift: 8, shards: 5, loops: 8, lamp: 1, r1: 32, r2: 48, theme: 2, seed: 7707 },
+    { n: 8, name: 'STAR SPINE', w: 31, h: 23, doors: 3, gates: 2, shift: 10, shards: 5, loops: 8, lamp: 1, r1: 32, r2: 48, theme: 2, seed: 8808 },
+    { n: 9, name: 'HEART OF NIGHT', w: 31, h: 23, doors: 3, gates: 3, shift: 12, shards: 6, loops: 9, lamp: 1, r1: 32, r2: 48, theme: 2, seed: 9909 }
   ];
   // 隨機模式（?seed= / 標題 RANDOM）：用第 7~9 層的參數輪替
   function randomSpec(seed) {
@@ -14163,6 +14433,8 @@
  *   - **視野 = 屬性表**：每個 16×16 屬性區依「到露明的距離」選 BG 調色盤 2（明亮）/ 1（微光）/ 0（全黑 $0F×3）；
  *     同一塊磁磚在三組調色盤下就是亮 / 暗 / 看不見。露明每移動 16 px 才有一圈屬性改變（實測每幀 ≤ 20 byte）。
  *     頭燈閃爍 = 每 8~12 幀換一次明亮調色盤的一色（3 byte）。
+ *     fix-r7-maze：走過記憶——探索過的區塊（g.kb）離開頭燈後維持微光組 1、沒去過的才是 0（只換寫入的值，位元組量不增加）；
+ *     狀態列在第 2 / 3 列（不貼 y = 0）；新機關第一次出現的樓層開場先出說明卡（mode 'intro'，CT.save seen 位元；?hint=0 跳過）。
  *   - **小地圖（SELECT）= 第二張名稱表**：探索到的格子邊走邊寫進 nt1（一塊磁磚 = 2×2 格，16 種四分格 + 物件標記），
  *     按 SELECT 只是把捲動基底切到 nt1 ⇒ 開地圖 0 byte。
  *   - 所有名稱表 / 屬性寫入走影子表 + 差異佇列（屬性 → nt0 → nt1 的順序），每幀 ≤ 140 byte；
@@ -14260,7 +14532,7 @@
     return {
       mode: 'title', t: 0, row: 0, selFloor: 1, seed: 12345, paused: false, map: false,
       run: null, lv: null, im: null, W: 0, H: 0, OX: 0, OY: 0,
-      sw: 0, dm: 0, km: 0, got: null, known: null, shiftSt: null, shiftPend: null,
+      sw: 0, dm: 0, km: 0, got: null, known: null, kb: null, introT: 0, intro: null, shiftSt: null, shiftPend: null,
       p: { cx: 0, cy: 0, x: 0, y: 0, moving: false, dir: 2, face: 2, tx: 0, ty: 0, step: 0 },
       lastDir: -1, ft: 0, r1: 40, r2: 56, boostT: 0, lampOn: false, compass: COMPASS_N, compT: 0, compDir: 0,
       spark: null, msg: '', msgT: 0, clearT: 0, flick: 0, flickT: 0, lightKey: '', shards: 0, exitAnim: 0,
@@ -14315,7 +14587,7 @@
 
   /* ============================== 開局 / 樓層 ============================== */
   function startRun(kind, n, seed) {
-    var keep = { bot: g.bot, row: g.row, selFloor: g.selFloor, seed: g.seed };
+    var keep = { bot: g.bot, row: g.row, selFloor: g.selFloor, seed: g.seed, noHint: g.noHint };
     g = newState();
     for (var k in keep) g[k] = keep[k];
     g.run = { kind: kind, floor: n || 1, seed: seed || g.seed, total: 0, cleared: 0, cheated: false, startFloor: n || 1 };
@@ -14331,7 +14603,7 @@
     g.lv = lv; g.im = Gen.indexMaps(lv);
     g.W = lv.W; g.H = lv.H; g.OX = (31 - lv.W) >> 1; g.OY = 4 + ((23 - lv.H) >> 1);
     var N = lv.W * lv.H;
-    g.sw = 0; g.dm = 0; g.km = 0; g.got = new Uint8Array(N); g.known = new Uint8Array(N);
+    g.sw = 0; g.dm = 0; g.km = 0; g.got = new Uint8Array(N); g.known = new Uint8Array(N); g.kb = new Uint8Array(240);
     g.shiftSt = new Uint8Array(N); g.shiftPend = new Uint8Array(N);
     lv.shifts.forEach(function (s) { g.shiftSt[s.c] = s.ph === 0 ? 2 : 0; });
     var sx = lv.start % lv.W, sy = (lv.start / lv.W) | 0;
@@ -14340,8 +14612,47 @@
     g.spark = null; g.shards = 0; g.mode = 'play'; g.paused = false; g.map = false; g.clearT = 0; g.lightKey = '';
     g.bot.plan = null;
     g.msg = (lv.spec.n ? 'FLOOR ' + lv.spec.n + '  ' : '') + lv.spec.name; g.msgT = 150;
-    drawFloor();
     AU.play(THEMES[lv.spec.theme].song);
+    var need = g.noHint ? [] : introList(lv);
+    if (need.length) enterIntro(need); else drawFloor();
+  }
+
+  /* ============== fix-r7-maze P3-3：新機關第一次出現 ⇒ 開場說明卡（畫面示意 + 兩行字，A 開始；存檔只播一次） ============== */
+  var HINTS = [
+    { bit: 1, has: function () { return true; }, icons: ['EXIT', 'SHARD'], l1: 'FIND THE STAR GATE', l2: 'SHARDS GIVE A STAR' },
+    { bit: 2, has: function (lv) { return lv.doors.length > 0; }, icons: ['KEY', 'DOOR', 'DOOR_O'], l1: 'A KEY OPENS A DOOR', l2: 'ONE KEY PER DOOR' },
+    { bit: 4, has: function (lv) { return lv.gates.length > 0; }, icons: ['SW_S', 'GA_O', 'GB_C'], l1: 'STEP ON ☼/☾ SWITCH', l2: 'SUN/MOON GATES SWAP' },
+    { bit: 8, has: function (lv) { return lv.shifts.length > 0; }, icons: ['SH_O', 'SH_W', 'SH_C'], l1: 'TIDE WALLS RISE AND', l2: 'FALL. HALF = WARNING' },
+    { bit: 16, has: function (lv) { return lv.lamp >= 0; }, icons: ['LAMP'], l1: 'STAR LAMP WIDENS', l2: 'YOUR HEADLAMP' }
+  ];
+  function seenMask() { return CT.load('labyrinth', 'seen', 0) | 0; }
+  function introList(lv) { var seen = seenMask(); return HINTS.filter(function (h) { return !(seen & h.bit) && h.has(lv); }); }
+  function enterIntro(list) {
+    g.mode = 'intro'; g.introT = 0; g.intro = list;
+    var ppu = nes0.ppu, th = theme(), lv = g.lv;
+    CT.blank(nes0, function () {
+      ppu.split(null); ppu.scroll(0, 0, 0); ppu.mirroring('v');
+      resetShadow(); clearSpr();
+      ppu.setBackdrop(0x0F);
+      ppu.setBgPalette(0, PAL_DARK); ppu.setBgPalette(1, th.dim); ppu.setBgPalette(2, th.lit); ppu.setBgPalette(3, PAL_HUD);
+      wantA.fill(3);
+      text(0, 2, 2, padR((lv.spec.n ? 'F' + lv.spec.n + ' ' : '') + lv.spec.name, 23) + (list.length > 1 || list[0].bit !== 1 ? ' NEW!' : ' TIPS'));
+      list.forEach(function (h, i) {
+        var r = 4 + i * 5;                                     // 每項 5 列：字在 r / r+2，示意磁磚在中間那列（明亮組 2），項與項之間空兩列
+        h.icons.forEach(function (n, j) { put(0, 2 + j * 2, r + 1, art.t(n)); });
+        for (var bx = 1; bx <= 4; bx++) wantA[((r + 1) >> 1) * 16 + bx] = 2;
+        text(0, 11, r, h.l1); text(0, 11, r + 2, h.l2);
+      });
+      text(0, 2, 28, 'A: START');
+      syncAll();
+    });
+  }
+  function closeIntro() {
+    var m = seenMask();
+    g.intro.forEach(function (h) { m |= h.bit; });
+    CT.save('labyrinth', 'seen', m);
+    g.intro = null; g.mode = 'play';
+    drawFloor();
   }
   function theme() { return THEMES[g.lv.spec.theme]; }
   function idx(x, y) { return y * g.W + x; }
@@ -14378,7 +14689,8 @@
       ppu.setBgPalette(0, PAL_DARK); ppu.setBgPalette(1, th.dim); ppu.setBgPalette(2, th.lit); ppu.setBgPalette(3, PAL_HUD);
       ppu.setSprPalette(0, SPR_P); ppu.setSprPalette(1, SPR_FX);
       for (var y = 0; y < g.H; y++) for (var x = 0; x < g.W; x++) put(0, g.OX + x, g.OY + y, cellTile(idx(x, y)));
-      for (var c = 0; c < 32; c++) put(0, c, 3, art.t('FR_H'));
+      // fix-r7-maze P3-5：狀態列下移一列（第 2 / 3 列，不貼 y = 0）；原第 3 列的外框線讓給狀態列
+      var c;
       wantA.fill(0);
       for (c = 0; c < 16; c++) { wantA[c] = 3; wantA[16 + c] = 3; wantA[14 * 16 + c] = 3; }
       drawHud(true);
@@ -14432,14 +14744,14 @@
   function drawHud(full) {
     var lv = g.lv;
     if (g.paused) {
-      text(0, 1, 1, padR('PAUSED', 30));
-      text(0, 1, 2, padR('B: RETRY FLOOR   START: RESUME', 30));
+      text(0, 1, 2, padR('PAUSED', 30));
+      text(0, 1, 3, padR('B: RETRY FLOOR   START: RESUME', 30));
       text(0, 0, 28, padR(' HOLD START+SELECT: MENU', 32));
       return;
     }
     var name = (lv.spec.n ? 'F' + lv.spec.n + ' ' : '') + lv.spec.name;
-    text(0, 1, 1, padR(name, 19) + '⚿' + keysHeld() + '  ✦' + g.shards + '/' + lv.shards.length + '  ');
-    text(0, 1, 2, 'TIME ' + mmss(g.ft) + ' PAR ' + mmss(lv.par * 60) + '  ◎' + g.compass + ' ' + (lv.switches.length ? (g.sw ? '☼' : '☾') : ' ') + ' ');
+    text(0, 1, 2, padR(name, 19) + '⚿' + keysHeld() + '  ✦' + g.shards + '/' + lv.shards.length + '  ');
+    text(0, 1, 3, 'TIME ' + mmss(g.ft) + ' PAR ' + mmss(lv.par * 60) + '  ◎' + g.compass + ' ' + (lv.switches.length ? (g.sw ? '☼' : '☾') : ' ') + ' ');
     var line = g.msgT > 0 ? g.msg : 'SELECT MAP   B COMPASS';
     text(0, 0, 28, ' ' + padR(line, 31));
   }
@@ -14455,7 +14767,8 @@
     for (var by = 2; by <= 13; by++) {
       for (var bx = 0; bx < 16; bx++) {
         var dx = bx * 16 + 8 - pcx, dy = by * 16 + 8 - pcy, d = dx * dx + dy * dy;
-        var pal = d <= R1 ? 2 : (d <= R2 ? 1 : 0);
+        // fix-r7-maze P2-3：走過記憶——已探索的區塊離開頭燈後維持微光組 1（不降回 0），只有沒去過的才全黑
+        var pal = d <= R1 ? 2 : (d <= R2 ? 1 : (g.kb[by * 16 + bx] ? 1 : 0));
         putA(bx, by, pal);
         if (pal) markBlock(bx, by);
       }
@@ -14465,6 +14778,7 @@
     for (var q = 0; q < 4; q++) {
       var cx = bx * 2 + (q & 1) - g.OX, cy = by * 2 + (q >> 1) - g.OY;
       if (cx < 0 || cy < 0 || cx >= g.W || cy >= g.H) continue;
+      g.kb[by * 16 + bx] = 1;                                  // 這塊有迷宮格 ⇒ 記成「去過」
       var c = idx(cx, cy);
       if (!g.known[c]) { g.known[c] = 1; mapDirty(c); }
     }
@@ -14653,7 +14967,7 @@
       if (r.best) text(0, 6, 20, 'BEST     ' + mmss(r.best.t) + '  ' + starStr(r.best.s));
       if (run.kind === 'adv') text(0, 6, 22, 'TOTAL    ' + mmss(run.total));
       var last = run.kind !== 'rand' && (run.kind === 'one' || r.n >= 9);
-      text(0, 6, 24, last ? 'A: FINISH' : 'A: NEXT FLOOR   START: TITLE');
+      text(0, 6, 24, last ? 'A: FINISH' : 'A: NEXT   START: TITLE');   // fix-r7-maze P3-4：原 28 字超出 32 欄
       wantA.fill(0);
       for (c = 0; c < 16; c++) { wantA[2 * 16 + c] = 1; wantA[8 * 16 + c] = 3; }
       syncAll();
@@ -14740,6 +15054,7 @@
       if (g.row !== 0) return (B.t % 16 === 8) ? BTN.UP : 0;
       return (B.t % 40 === 20) ? BTN.START : 0;
     }
+    if (g.mode === 'intro') return (g.introT > 30 && B.t % 20 === 10) ? BTN.A : 0;
     if (g.mode === 'clear') return (g.clearT > 70 && B.t % 30 === 15) ? BTN.A : 0;
     if (g.mode === 'end') return (g.endT > 90 && B.t % 40 === 20) ? BTN.START : 0;
     if (g.mode !== 'play') return 0;
@@ -14787,6 +15102,7 @@
       GAME.backTile = { tile: art.s('BACK'), pal: 1 };       // §6-4：實心金星（8×8）
       AU.init(nes);
       g = newState();
+      g.noHint = !!(CT.query && CT.query('hint') === '0');    // 測試 / 量測用：?hint=0 跳過說明卡
       var qs = CT.query ? CT.query('seed') : null, qf = CT.query ? CT.query('floor') : null;
       if (qs) g.seed = Math.max(1, parseInt(qs, 10) || 1);
       if (qf) { var fn = Math.max(1, Math.min(9, parseInt(qf, 10) || 1)); g.selFloor = fn; startRun('one', fn); }
@@ -14803,6 +15119,7 @@
           g.boostT = 1200; g.lightKey = '';
           g.km |= 1 << (8 + (g.cheats & 7));               // 萬用鑰匙（虛擬位元，不會和真鑰匙撞）
           for (var c = 0; c < g.known.length; c++) if (!g.known[c]) { g.known[c] = 1; mapDirty(c); }
+          for (var bb = 2 * 16; bb < 14 * 16; bb++) markBlock(bb & 15, bb >> 4);   // 走過記憶也全開（頭燈收回後整張圖保持微光）
           g.msg = 'STAR SIGHT! MAP + LIGHT + KEY'; g.msgT = 90; AU.sfx('labyrinth_lamp');
         }
       }
@@ -14820,6 +15137,8 @@
           AU.sfx('labyrinth_ok');
           if (g.row === 0) startRun('adv', 1); else if (g.row === 1) startRun('one', g.selFloor); else startRun('rand', 1, g.seed);
         }
+      } else if (g.mode === 'intro') {
+        if (++g.introT > 20 && (I.pressed(BTN.A) || I.pressed(BTN.START)) && !I.held(BTN.SELECT)) { AU.sfx('labyrinth_ok'); closeIntro(); }
       } else if (g.mode === 'play') updatePlay();
       else if (g.mode === 'clearing') { if (++g.clearT >= 60) enterResult(); }
       else if (g.mode === 'clear') {
@@ -14848,6 +15167,7 @@
         r1: g.r1, r2: g.r2, boost: g.boostT, compass: g.compass, cleared: g.run ? g.run.cleared : 0, floorsCleared: g.floorsCleared,
         result: g.result, cheated: g.cheated, cheats: g.cheats, maxLine: g.maxLine, writes: wstat.last, writePeak: wstat.peak,
         attrPeak: wstat.attrPeak, backlogPeak: wstat.backlogPeak, queue: qA.length + qT[0].length + qT[1].length,
+        intro: g.intro ? g.intro.map(function (h) { return h.bit; }) : null, seen: seenMask(), kb: g.kb ? g.kb.reduce(function (a, b) { return a + b; }, 0) : 0,
         bot: { replans: g.bot.replans, waits: g.bot.waits }, goal: !!(g.goalHit && !g.cheated)
       };
     },
@@ -15547,7 +15867,53 @@
     return arr.length - cyc;
   }
 
+  /* ---------------- 內容等價（相同圖面的片可互換） ---------------- */
+  // cls[片號] = 與該片圖面（16 磁磚 + 4 屬性）完全相同的最小片號；完成判定 = 每格放的片與該格「同類」
+  function solvedEq(arr, cls) {
+    if (!cls) return solvedArr(arr);
+    for (var i = 0; i < arr.length; i++) if (cls[arr[i]] !== cls[i]) return false;
+    return true;
+  }
+  // 依內容重新編號：已經「同類到位」的片改標成該格的號碼，其餘同類片依序分配剩下的號碼 ⇒ 之後照一般解題器解。
+  // slideN > 0（滑塊）：重新編號若改變奇偶（不可解），就把同類兩片的號碼對調（同類片外觀相同，對調不影響畫面）。
+  function canon(arr, cls, slideN) {
+    if (!cls) return arr.slice();
+    var N = arr.length, out = new Array(N), used = new Uint8Array(N), p, q;
+    for (p = 0; p < N; p++) if (cls[arr[p]] === cls[p]) { out[p] = p; used[p] = 1; }
+    for (p = 0; p < N; p++) {
+      if (out[p] !== undefined) continue;
+      var c = cls[arr[p]];
+      for (q = 0; q < N; q++) if (!used[q] && cls[q] === c) break;
+      out[p] = q; used[q] = 1;
+    }
+    if (slideN && !slideSolvable(out, slideN)) {
+      var blank = N - 1, best = null;
+      for (p = 0; p < N && !best; p++) for (q = p + 1; q < N; q++) {
+        if (out[p] === blank || out[q] === blank || cls[out[p]] !== cls[out[q]]) continue;
+        if (out[p] !== p && out[q] !== q) { best = [p, q]; break; }
+        if (!best) best = [p, q];
+      }
+      if (best) { var t = out[best[0]]; out[best[0]] = out[best[1]]; out[best[1]] = t; }
+    }
+    return out;
+  }
+  // 片像素陣列 → cls：兩片「不同的像素 ≤ tol」就算同一類（併查集，取最小片號當代表）；skip = 不參與合併的片號（滑塊的空格）
+  function classes(pix, tol, skip) {
+    var n = pix.length, par = [], i, j;
+    for (i = 0; i < n; i++) par.push(i);
+    function find(x) { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; }
+    for (i = 0; i < n; i++) for (j = i + 1; j < n; j++) {
+      if (i === skip || j === skip) continue;
+      var a = pix[i], b = pix[j], d = 0;
+      for (var k = 0; k < a.length && d <= tol; k++) if (a[k] !== b[k]) d++;
+      if (d <= tol) { var ri = find(i), rj = find(j); if (ri !== rj) { if (ri < rj) par[rj] = ri; else par[ri] = rj; } }
+    }
+    var cls = []; for (i = 0; i < n; i++) cls.push(find(i));
+    return cls;
+  }
+
   SL.Solve = {
+    solvedEq: solvedEq, canon: canon, classes: classes,
     rng: rng, permParity: permParity, solved: solvedArr, slideSolvable: slideSolvable, misplaced: misplaced,
     scrambleSlide: scrambleSlide, scrambleSwap: scrambleSwap, scrambleRotate: scrambleRotate,
     rotate: rotate, windowCells: windowCells, slideMove: slideMove,
@@ -15603,6 +15969,27 @@
     ROT: ['..333...', '.3...3..', '3.....3.', '3.....3.', '3...333.', '.3...3..', '..3.....', '........'],
     DOT: ['........', '..33....', '.3333...', '.3333...', '..33....', '........', '........', '........']
   };
+
+  // 片號輔助（P2-4）：N1..N25，黑底（色 1）白字（色 3）的 3×5 小數字，一顆精靈放得下兩位數
+  var DIG = ['111', '101', '101', '101', '111',  '010', '110', '010', '010', '111',  '111', '001', '111', '100', '111',
+             '111', '001', '111', '001', '111',  '101', '101', '111', '001', '001',  '111', '100', '111', '001', '111',
+             '111', '100', '111', '101', '111',  '111', '001', '010', '010', '010',  '111', '101', '111', '101', '111',
+             '111', '101', '111', '001', '111'];
+  function numTile(v) {
+    var s = String(v), rows = [], x0 = s.length === 1 ? 1 : 0;
+    for (var y = 0; y < 7; y++) {
+      var r = ['1', '1', '1', '1', '1', '1', '1', '1'];
+      if (s.length === 1) { r[0] = '.'; r[6] = '.'; r[7] = '.'; }
+      if (y >= 1 && y <= 5) for (var k = 0; k < s.length; k++) {
+        var d = DIG[(+s.charAt(k)) * 5 + y - 1], cx = x0 + 1 + k * 4;
+        for (var j = 0; j < 3; j++) if (d.charAt(j) === '1') r[cx + j] = '3';
+      }
+      rows.push(r.join(''));
+    }
+    rows.push('........');
+    return rows;
+  }
+  for (var nn = 1; nn <= 25; nn++) SPR['N' + nn] = numTile(nn);
 
   var sprBank = null, picBanks = {};
   function ensureSpr() { if (!sprBank) sprBank = CHR.bank('slide_spr', SPR); return sprBank; }
@@ -15815,14 +16202,14 @@
   var AU = SL.Audio, SV = SL.Solve;
   var BTN = (NES.Input && NES.Input.BTN) || { A: 1, B: 2, SELECT: 4, START: 8, UP: 16, DOWN: 32, LEFT: 64, RIGHT: 128 };
 
-  var FLUSH_LIMIT = 140, REP_DELAY = 12, REP_RATE = 4, PEEK_HOLD = 20, HINT_HOLD = 30, ANIM_HALF = 3, ANIM_FULL = 2;
+  var EQ_PX = 12, FLUSH_LIMIT = 140, REP_DELAY = 12, REP_RATE = 4, PEEK_HOLD = 20, HINT_HOLD = 30, ANIM_HALF = 3, ANIM_FULL = 2;
   var MODES = [
     { key: 'SLIDE', sizes: [3, 4, 5] },
     { key: 'SWAP', sizes: [3, 4, 5] },
     { key: 'ROTATE', sizes: [3, 4] }
   ];
   var ROT_SCRAMBLE = { 3: 8, 4: 14 };
-  var SPR_PAL = [[0x30, 0x28, 0x30], [0x28, 0x27, 0x38], [0x2C, 0x21, 0x30], [0x16, 0x27, 0x30]];
+  var SPR_PAL = [[0x30, 0x28, 0x30], [0x28, 0x27, 0x38], [0x0F, 0x21, 0x30], [0x16, 0x27, 0x30]];   // 組 2 色 1 = 黑（片號底）
   var DX = { U: 0, R: 1, D: 0, L: -1 }, DY = { U: -1, R: 0, D: 1, L: 0 };
   var DORDER = ['U', 'R', 'D', 'L'];
   var DBTN = { U: BTN.UP, R: BTN.RIGHT, D: BTN.DOWN, L: BTN.LEFT };
@@ -15834,7 +16221,8 @@
       want: new Int16Array(960), have: new Int16Array(960), wantA: new Int8Array(240), haveA: new Int8Array(240), q: [], qa: [],
       rep: { U: 0, R: 0, D: 0, L: 0 }, bHold: 0, selHold: 0, selTaint: false, selHeld: false, peek: false,
       n: 3, arr: null, cr: 0, cc: 0, pickPos: -1, moves: 0, time: 0, par: 0, hints: 0, undo: [], anim: null, pending: [],
-      done: false, stars: 0, doneT: 0, seedBase: 0, runs: 0, goalDone: {}, spark: 0, sparkPos: -1, bot: { q: [] }, picLoaded: -1
+      done: false, stars: 0, doneT: 0, seedBase: 0, runs: 0, goalDone: {}, spark: 0, sparkPos: -1, bot: { q: [] }, picLoaded: -1,
+      cls: null, nums: !!CT.load('slide', 'nums', 0)
     };
   }
   function pad(n, w) { var s = String(Math.max(0, n | 0)); while (s.length < w) s = '0' + s; return s; }
@@ -15842,6 +16230,42 @@
   function mmss(f) { var s = Math.floor(f / 60); return pad(Math.min(99, Math.floor(s / 60)), 2) + ':' + pad(s % 60, 2); }
   function modeKey() { return MODES[g.m].key; }
   function sizeOf() { return MODES[g.m].sizes[Math.min(g.sizeI, MODES[g.m].sizes.length - 1)]; }
+  // 片內容鍵（16 個磁磚 + 4 個屬性）⇒ 內容相同的片視為同一類（P2-4：完全相同的太空片互換也算完成）
+  // 片的畫面像素（P2-4）：每個像素 = 磁磚色號經該區調色盤換成 NES 色（色 0 = 背景黑 $0F），32×32 = 1024 個
+  function piecePix(B, v, n, o) {
+    var P = B.pic, hr = Math.floor(v / n), hc = v % n, k = [];
+    for (var dy = 0; dy < 4; dy++) for (var dx = 0; dx < 4; dx++) {
+      var ty = o + hr * 4 + dy, tx = o + hc * 4 + dx, t = P.tiles[P.map[ty][tx]], pal = P.pal[P.blockPal[ty >> 1][tx >> 1]];
+      for (var i = 0; i < 64; i++) k.push(t[i] ? pal[t[i] - 1] : 0x0F);
+    }
+    return k;
+  }
+  // 內容等價類：畫面上只差 ≤ EQ_PX 個像素（散落的星點 / 網點，肉眼分不出）的片視為同一片，互換也算拼好
+  function pieceClasses(pic, n, slide) {
+    var B = SL.Art.pic(pic), o = (20 - 4 * n) >> 1, pix = [];
+    for (var v = 0; v < n * n; v++) pix.push(piecePix(B, v, n, o));
+    return SV.classes(pix, EQ_PX, slide ? n * n - 1 : -1);
+  }
+  function canonArr() { return SV.canon(g.arr, g.cls, modeKey() === 'SLIDE' ? g.n : 0); }
+  // 解題計畫：同類片的編號每次重算可能不同 ⇒ 解一次後記住「每一步之前的盤面」，照著計畫走就不重算（提示 / 機器人 / 密技共用）
+  function applyMove(a, m) {
+    var mk = modeKey();
+    if (mk === 'SLIDE') SV.slideMove(a, g.n, m);
+    else if (mk === 'SWAP') { var t = a[m[0]]; a[m[0]] = a[m[1]]; a[m[1]] = t; }
+    else SV.rotate(a, g.n, m.r, m.c, m.cw);
+  }
+  function solvePlan() {
+    var key = g.arr.join(','), i;
+    if (g.plan) { i = g.plan.keys.indexOf(key); if (i >= 0) return g.plan.seq.slice(i); }
+    var mk = modeKey(), n = g.n, ca = canonArr(), seq;
+    if (mk === 'SLIDE') seq = SV.slide(ca, n) || [];
+    else if (mk === 'SWAP') seq = SV.swap(ca);
+    else seq = SV.rotateSolve(ca, n) || [];
+    var a = g.arr.slice(), keys = [];
+    for (i = 0; i < seq.length; i++) { keys.push(a.join(',')); applyMove(a, seq[i]); }
+    g.plan = { keys: keys, seq: seq };
+    return seq.slice();
+  }
 
   /* ---------------- 名稱表影子 + 差異佇列 ---------------- */
   function put(c, r, t) { if (c < 0 || c > 31 || r < 0 || r > 29) return; var k = r * 32 + c; if (g.want[k] === t) return; g.want[k] = t; g.q.push(k); }
@@ -15920,19 +16344,18 @@
   function picStars(i) { var s = CT.load('slide', 'stars', []) || []; return s[i] | 0; }
 
   /* ---------------- 標題 ---------------- */
-  var ROWS = [5, 9, 13];
+  var ROWS = [4, 7, 10, 14];
   function enterTitle() {
     g.mode = 'title'; g.t = 0; g.paused = false; g.peek = false; g.done = false;
     var o = 0;
     redraw(function () {
-      center(1, '$ STAR SLIDE $');
+      center(2, '$ STAR SLIDE $');
       g.n = 5; drawFrame(2, 4, 20, 20);
       for (var p = 0; p < 25; p++) { var xy = [2 + (p % 5) * 4, 4 + Math.floor(p / 5) * 4]; drawPiece(p, xy[0], xy[1], 5, o); }
       titlePanel();
-      text(2, 25, 'A/START PLAY  B RULES');
+      text(2, 25, 'A PLAY  B RULES');
+      text(20, 25, 'C/$ = CHEAT');
       text(2, 27, 'HOLD START+SELECT: MENU');
-      text(25, 25, 'C/$ =');
-      text(25, 27, 'CHEAT');
     });
     AU.play('slide_title');
   }
@@ -15942,9 +16365,10 @@
     text(23, ROWS[1], 'SIZE'); text(23, ROWS[1] + 1, padR(n + 'X' + n, 8));
     text(23, ROWS[2], 'PICTURE'); text(23, ROWS[2] + 1, padR((g.pic + 1) + '/' + SL.Pics.count + ' ' + '$$$'.substring(0, picStars(g.pic)), 8));
     text(23, ROWS[2] + 2, padR(SL.Pics.PICS[g.pic].short, 9));
-    text(23, 18, 'BEST');
-    text(23, 19, padR(rec ? mmss(rec.time) : '--:--', 8));
-    text(23, 20, padR(rec ? pad(rec.moves, 4) + 'MV' : '', 8));
+    text(23, ROWS[3], 'NUMBERS'); text(23, ROWS[3] + 1, g.nums ? 'ON ' : 'OFF');
+    text(23, 17, 'BEST');
+    text(23, 18, padR(rec ? mmss(rec.time) : '--:--', 8));
+    text(23, 19, padR(rec ? pad(rec.moves, 4) + 'MV' : '', 8));
   }
   function enterRules() {
     g.mode = 'rules'; g.t = 0;
@@ -15952,7 +16376,7 @@
       center(2, 'HOW TO PLAY');
       var L = ['SLIDE: A PUSHES THE PIECE', '  (A WHOLE ROW IF IN LINE)', 'SWAP: A PICK, A SWAP',
                'ROTATE: A TURN RIGHT', '  B TURN LEFT  (2X2 FRAME)', 'B TAP: HINT   HOLD B: PEEK',
-               'ROTATE HINT: HOLD SELECT', 'SELECT: UNDO  START: PAUSE', 'FEWER MOVES = MORE STARS'];
+               'ROTATE HINT: HOLD SELECT', 'PIECE NUMBERS: HOLD SELECT', 'SELECT: UNDO  START: PAUSE', 'FEWER MOVES = MORE STARS'];
       for (var i = 0; i < L.length; i++) text(3, 5 + i * 2, L[i]);
       center(25, 'HOLD START+SELECT: MENU');
       center(27, 'PUSH START');
@@ -15967,16 +16391,21 @@
     var seed = ((qs ? (parseInt(qs, 10) >>> 0) : 0x5EED) + g.runs * 7919 + n * 131 + g.m * 17) >>> 0;
     if (qs && g.runs === 1) seed = parseInt(qs, 10) >>> 0;
     g.seed = seed;
-    if (mk === 'SLIDE') { g.arr = SV.scrambleSlide(n, seed); g.par = SV.slide(g.arr, n).length; }
-    else if (mk === 'SWAP') { g.arr = SV.scrambleSwap(n, seed); g.par = SV.swapPar(g.arr); }
-    else { var r = SV.scrambleRotate(n, seed, ROT_SCRAMBLE[n]); g.arr = r.arr; g.par = Math.min(r.moves.length, SV.rotateSolve(g.arr, n).length); }
-    g.start = g.arr.slice();
+    g.cls = pieceClasses(g.pic, n, mk === 'SLIDE');
+    for (var tries = 0; tries < 16; tries++, seed = (seed + 1) >>> 0) {      // 打亂後若「按內容」已經是完成圖就換下一個 seed
+      if (mk === 'SLIDE') { g.arr = SV.scrambleSlide(n, seed); g.par = SV.slide(SV.canon(g.arr, g.cls, n), n).length; }
+      else if (mk === 'SWAP') { g.arr = SV.scrambleSwap(n, seed); g.par = SV.swapPar(SV.canon(g.arr, g.cls, 0)); }
+      else { var r = SV.scrambleRotate(n, seed, ROT_SCRAMBLE[n]); g.arr = r.arr; g.par = Math.min(r.moves.length, SV.rotateSolve(SV.canon(g.arr, g.cls, 0), n).length); }
+      if (!SV.solvedEq(g.arr, g.cls) && g.par > 0) break;
+    }
+    g.seed = seed;
+    g.start = g.arr.slice(); g.plan = null;
     g.cr = 0; g.cc = 0; g.pickPos = -1; g.moves = 0; g.time = 0; g.hints = 0; g.undo = []; g.anim = null; g.pending = [];
     g.done = false; g.stars = 0; g.peek = false; g.paused = false; g.msg = ''; g.msgT = 0; g.levelCheat = false; g.bot.q = [];
     if (mk === 'SLIDE') { var b = g.arr.indexOf(n * n - 1); g.cr = Math.floor(b / n); g.cc = b % n; }
     g.mode = 'play';
     redraw(function () {
-      center(1, 'STAR SLIDE  ' + SL.Pics.PICS[g.pic].name);
+      center(2, 'STAR SLIDE  ' + SL.Pics.PICS[g.pic].name);
       drawFrame(ox(), oy(), 4 * n, 4 * n);
       drawBoard();
       panel();
@@ -16048,25 +16477,29 @@
     for (var i = 0; i < 4; i++) drawCell(w[i]);
     AU.sfx('slide_rot'); checkDone();
   }
+  function toggleNums() {
+    g.nums = !g.nums; CT.save('slide', 'nums', g.nums ? 1 : 0);
+    AU.sfx('slide_pick'); say(g.nums ? 'PIECE NUMBERS ON' : 'PIECE NUMBERS OFF', 40);
+  }
   function sparkAt(p) { g.spark = 16; g.sparkPos = p; }
   function hint() {
     var mk = modeKey(), n = g.n;
     if (mk === 'SLIDE') {
-      var s = SV.slide(g.arr, n); if (!s || !s.length) return;
+      var s = solvePlan(); if (!s.length) return;
       g.cr = Math.floor(s[0] / n); g.cc = s[0] % n; sparkAt(s[0]);
     } else if (mk === 'SWAP') {
-      var w = SV.swap(g.arr); if (!w.length) return;
-      if (g.pickPos >= 0 && g.arr[g.pickPos] !== g.pickPos) { var tgt = g.arr.indexOf(g.pickPos); g.cr = Math.floor(tgt / n); g.cc = tgt % n; sparkAt(tgt); }
+      var w = solvePlan(); if (!w.length) return;
+      if (g.pickPos >= 0 && (w[0][0] === g.pickPos || w[0][1] === g.pickPos)) { var tgt = w[0][0] === g.pickPos ? w[0][1] : w[0][0]; g.cr = Math.floor(tgt / n); g.cc = tgt % n; sparkAt(tgt); }
       else { g.pickPos = -1; g.cr = Math.floor(w[0][0] / n); g.cc = w[0][0] % n; sparkAt(w[0][1]); }
     } else {
-      var r = SV.rotateSolve(g.arr, n); if (!r || !r.length) return;
+      var r = solvePlan(); if (!r.length) return;
       g.cr = r[0].r; g.cc = r[0].c; sparkAt(r[0].r * n + r[0].c); say(r[0].cw ? 'HINT: TURN RIGHT (A)' : 'HINT: TURN LEFT (B)', 60);
     }
     g.hints++; AU.sfx('slide_hint');
     if (mk !== 'ROTATE') say('HINT USED', 30);
   }
   function checkDone() {
-    if (g.anim || g.pending.length || !SV.solved(g.arr)) return;
+    if (g.anim || g.pending.length || !SV.solvedEq(g.arr, g.cls)) return;
     g.done = true; g.mode = 'done'; g.doneT = 0;
     var mk = modeKey(), n = g.n;
     var stars = (!g.hints && g.moves <= g.par) ? 3 : (g.moves <= g.par * 2 ? 2 : 1);
@@ -16119,6 +16552,15 @@
       } else {
         box(X + g.cc * 32, Y + g.cr * 32, 32, 32, 0);
         if (g.pickPos >= 0) box(X + (g.pickPos % g.n) * 32 + 4, Y + Math.floor(g.pickPos / g.n) * 32 + 4, 24, 24, blink ? 1 : 3);
+      }
+    }
+    // 片號輔助（P2-4）：每片左側中段一顆 8×8 精靈（片號 = 正解位置 1..n²）；一列最多 5 顆，與游標角 / 選取框錯開掃描線
+    if (g.nums && g.mode === 'play' && !g.paused && !g.peek && g.arr) {
+      var NX = ox() * 8, NY = oy() * 8, bl = blankId();
+      for (var p = 0; p < g.n * g.n; p++) {
+        var v = g.arr[p];
+        if (v === bl || (g.anim && (p === g.anim.from || p === g.anim.to))) continue;
+        spr(NX + (p % g.n) * 32 + 2, NY + Math.floor(p / g.n) * 32 + 12, art.s('N' + (v + 1)), 2);
       }
     }
     if (g.spark > 0 && g.sparkPos >= 0 && (g.mode === 'play' || g.mode === 'done')) {
@@ -16195,6 +16637,7 @@
     var sa = selectAct(I);
     if (sa === 'tap') doUndo();
     else if (sa === 'hold' && mk === 'ROTATE') hint();
+    else if (sa === 'hold') toggleNums();
     var d = dpad(I);
     if (d) {
       var lim = mk === 'ROTATE' ? n - 1 : n, nr = g.cr + DY[d], nc = g.cc + DX[d];
@@ -16215,9 +16658,9 @@
     g.cheatUsed = true; g.levelCheat = true;
     g.pending = []; if (g.anim) { g.anim = null; }
     var mk = modeKey(), n = g.n, i;
-    if (mk === 'SLIDE') { var s = SV.slide(g.arr, n) || []; for (i = 0; i < Math.min(10, s.length); i++) { SV.slideMove(g.arr, n, s[i]); g.moves++; } }
-    else if (mk === 'SWAP') { var w = SV.swap(g.arr); for (i = 0; i < Math.min(3, w.length); i++) { var t = g.arr[w[i][0]]; g.arr[w[i][0]] = g.arr[w[i][1]]; g.arr[w[i][1]] = t; g.moves++; } }
-    else { var r = SV.rotateSolve(g.arr, n) || []; for (i = 0; i < Math.min(10, r.length); i++) { SV.rotate(g.arr, n, r[i].r, r[i].c, r[i].cw); g.moves++; } }
+    if (mk === 'SLIDE') { var s = solvePlan(); for (i = 0; i < Math.min(10, s.length); i++) { SV.slideMove(g.arr, n, s[i]); g.moves++; } }
+    else if (mk === 'SWAP') { var w = solvePlan(); for (i = 0; i < Math.min(3, w.length); i++) { var t = g.arr[w[i][0]]; g.arr[w[i][0]] = g.arr[w[i][1]]; g.arr[w[i][1]] = t; g.moves++; } }
+    else { var r = solvePlan(); for (i = 0; i < Math.min(10, r.length); i++) { SV.rotate(g.arr, n, r[i].r, r[i].c, r[i].cw); g.moves++; } }
     g.pickPos = -1;
     drawBoard(); say('STAR BOOST! 10 MOVES', 50); AU.sfx('slide_hint');
     checkDone();
@@ -16243,7 +16686,7 @@
     if (g.mode !== 'play') { q.push(0); return; }
     if (g.paused) { tap(q, BTN.START, 2); return; }
     if (g.anim || g.pending.length) { q.push(0); return; }
-    var n = g.n, s = SV.slide(g.arr, n);
+    var n = g.n, s = solvePlan();
     if (!s || !s.length) { q.push(0); return; }
     var m = s[0];
     moveTo(q, g.cr, g.cc, Math.floor(m / n), m % n);
@@ -16284,12 +16727,13 @@
       if (g.mode === 'title') {
         g.t++;
         var d = dpad(I);
-        if (d === 'U' || d === 'D') { g.row = (g.row + (d === 'D' ? 1 : 2)) % 3; AU.sfx('slide_move'); }
+        if (d === 'U' || d === 'D') { g.row = (g.row + (d === 'D' ? 1 : ROWS.length - 1)) % ROWS.length; AU.sfx('slide_move'); }
         if (d === 'L' || d === 'R') {
           var s = d === 'R' ? 1 : -1;
           if (g.row === 0) { g.m = (g.m + s + MODES.length) % MODES.length; g.sizeI = Math.min(g.sizeI, MODES[g.m].sizes.length - 1); titlePanel(); }
           else if (g.row === 1) { var L = MODES[g.m].sizes.length; g.sizeI = (g.sizeI + s + L) % L; titlePanel(); }
-          else { g.pic = (g.pic + s + SL.Pics.count) % SL.Pics.count; enterTitle(); }
+          else if (g.row === 2) { g.pic = (g.pic + s + SL.Pics.count) % SL.Pics.count; enterTitle(); }
+          else { g.nums = !g.nums; CT.save('slide', 'nums', g.nums ? 1 : 0); titlePanel(); }
           AU.sfx('slide_move');
         }
         if (startPressed(I) || I.pressed(BTN.A)) { AU.sfx('slide_ok'); startGame(); }
@@ -16314,7 +16758,7 @@
         mode: g.mode, row: g.row, smode: modeKey(), size: g.mode === 'title' ? sizeOf() : g.n, pic: g.pic, paused: g.paused, t: g.t,
         queue: g.q.length + g.qa.length, arr: g.arr ? g.arr.slice() : null, cr: g.cr, cc: g.cc, pick: g.pickPos, moves: g.moves,
         time: g.time, par: g.par, hints: g.hints, anim: !!g.anim, pending: g.pending.length, done: g.done, stars: g.stars,
-        peek: g.peek, cheatUsed: g.cheatUsed, undo: g.undo.length, seed: g.seed, goalDone: Object.keys(g.goalDone).map(Number), goal: goalOk()
+        peek: g.peek, nums: g.nums, cheatUsed: g.cheatUsed, undo: g.undo.length, seed: g.seed, goalDone: Object.keys(g.goalDone).map(Number), goal: goalOk()
       };
     },
     exit: function () { AU.stop(); },
@@ -16333,7 +16777,8 @@
     g: function () { return g; }, start: function (m, size, pic) {
       g.m = m || 0; g.sizeI = Math.max(0, MODES[g.m].sizes.indexOf(size || 3)); if (pic !== undefined) g.pic = pic; startGame();
     },
-    title: function () { enterTitle(); }, off: function () { return off(); }, origin: function () { return [ox(), oy()]; }
+    title: function () { enterTitle(); }, off: function () { return off(); }, origin: function () { return [ox(), oy()]; },
+    classes: function (pic, n, slide) { return pieceClasses(pic, n, slide); }, nums: function (on) { g.nums = !!on; }
   };
   if (CT.register) CT.register(GAME);
 })();
@@ -16351,8 +16796,8 @@
  *   logo「星塵益智 8 合 1」= Noto Sans CJK TC Bold 15px 點陣（SIL OFL）+ 立體描邊，**萊姆綠**（卡帶一火色、卡帶二冰藍、本卡綠）；
  *   邊框青綠 $1B（卡帶一藍 $11、卡帶二紫 $13）；
  *   8 槽圖示 16×16 手繪（R7_BRIEF §2 ①~⑧；收工前依各款截圖再對一次）：
- *     merge 帶環行星 + 小星（12 階天體的頂端）、sudoku 3×3 宮格、mines 星晶雷 + 小旗、gomoku 棋盤與黑白子、
- *     slide 缺一格的滑塊盤 + 移動箭頭、lines 同色點之間的連線、labyrinth 黑暗迷宮裡的提燈、party 比 V 的手套 + 星；
+ *     （fix-r7-shell 依 qa-r7 P3-1 對照各款修正後的遊戲畫面重畫）merge 恆星、sudoku 青 / 暗交錯宮 + 白字、mines 星晶雷 + 小旗、
+ *     gomoku 金框藍格 + 金日石 / 白月石、slide 缺一片的燈塔拼圖、lines 甜甜圈星珠 + 星橋、labyrinth 苔綠牆迷宮 + 頭燈露明、party 比 V 的手套 + 星；
  *   選單曲「思考庭園」：G 大調、speed 6（≈ 150 BPM）、A A' B C 四段 × 2 小節後回 A（輕快、跳音、適合想事情）。
  */
 (function () {
@@ -16435,44 +16880,44 @@
     };
   }
 
-  /* 8 槽（R7_BRIEF §2 ①~⑧）+ 原創 16×16 圖示（. 1 2 3；pal 2 = 暖：洋紅 / 金橘 / 淡黃、pal 3 = 冷綠：藍 / 萊姆 / 淡綠） */
+  /* 8 槽（R7_BRIEF §2 ①~⑧）+ 原創 16×16 圖示（. 1 2 3；各圖示用哪組調色盤見下方 palettes.bg 註解） */
   var SLOTS = [
-    // 帶環行星（合星的高階天體）+ 右上小星、左下星塵
-    { id: 'merge', order: 1, name: '星塵合星', legacy: ['2048.html'], icon: { pal: 3, art: [
+    // 恆星（合星 goal 第 8 階；fix-r7-shell 對照 fix-r7-number 新配色）：黃日面、紅黃光芒、淡青白核心（pal 2 = merge 恆星組 $16/$28/$31）
+    { id: 'merge', order: 1, name: '星塵合星', legacy: ['2048.html'], icon: { pal: 2, art: [
       '................',
-      '.............3..',
-      '............333.',
-      '.......11....3..',
-      '.....112211.....',
-      '....12222221....',
-      '33.1233222221...',
-      '..33232222221...',
-      '..122223222221..',
-      '..122222333221..',
-      '...12222222333..',
-      '...1222222221.33',
-      '....12222221....',
-      '.33..112211.....',
-      '..3....11.......',
+      '.......11.......',
+      '..1....22....1..',
+      '...2..2222..2...',
+      '....22222222....',
+      '....22233222....',
+      '...2223333222...',
+      '.11222333322211.',
+      '.11222333322211.',
+      '...2223333222...',
+      '....22233222....',
+      '....22222222....',
+      '...2..2222..2...',
+      '..1....22....1..',
+      '.......11.......',
       '................'] } },
-    // 3×3 宮格，格內亮點 = 已填的數字
-    { id: 'sudoku', order: 2, name: '星塵數獨', legacy: ['sudoku.html', 'sudoku-game.html', 'sudoku-challenge.html'], icon: { pal: 3, art: [
+    // 2×2 宮：亮青宮（$1C，= sudoku 宮底）與暗宮交錯，白字數字（pal 0）
+    { id: 'sudoku', order: 2, name: '星塵數獨', legacy: ['sudoku.html', 'sudoku-game.html', 'sudoku-challenge.html'], icon: { pal: 0, art: [
       '................',
-      '.11111111111111.',
-      '.1...1....1...1.',
-      '.1.331.22.1.331.',
-      '.1.331.22.1.331.',
-      '.11111111111111.',
-      '.1...1....1...1.',
-      '.1.221.33.1.2.1.',
-      '.1.221.33.1.2.1.',
-      '.1...1....1...1.',
-      '.11111111111111.',
-      '.1...1....1...1.',
-      '.1.331.22.1.331.',
-      '.1.331.22.1.331.',
-      '.11111111111111.',
-      '................'] } },
+      '.222.222........',
+      '.232.222.333.3..',
+      '.232.222...3.3..',
+      '.232.222..33.3..',
+      '........3....3..',
+      '.222.222.333.3..',
+      '.222.233........',
+      '........222.222.',
+      '.33.3...222.222.',
+      '..3.3...222.222.',
+      '.3..333.222.222.',
+      '.3....3.........',
+      '.333..3.222.222.',
+      '........232.222.',
+      '........222.222.'] } },
     // 紅色帶刺「星塵雷」（不是灰磚笑臉）+ 右上探測信標旗（對齊 mines/art.js）
     { id: 'mines', order: 3, name: '星塵探雷', legacy: ['minesweeper.html'], icon: { pal: 2, art: [
       '................',
@@ -16491,77 +16936,77 @@
       '..2.22122.2.....',
       '......2.........',
       '......2.........'] } },
-    // 棋盤格線 + 黑白子（亮 = 白子、萊姆 = 黑子）
-    { id: 'gomoku', order: 4, name: '星塵五子棋', legacy: ['gomoku.html', 'tic-tac-toe.html'], icon: { pal: 3, art: [
-      '.1..1..1..1..1..',
+    // 金框藍格（= gomoku PAL_BG[1] $12/$28/$30）+ 金太陽石 ×2、白月亮石 ×2（pal 1）
+    { id: 'gomoku', order: 4, name: '星塵五子棋', legacy: ['gomoku.html', 'tic-tac-toe.html'], icon: { pal: 1, art: [
+      '3333333333333333',
+      '3111111111111113',
+      '31.333....222.13',
+      '3132333..2222213',
+      '3133333112222213',
+      '3133333..2221213',
+      '31.333....222.13',
+      '31..1......1..13',
+      '31..1......1..13',
+      '31.222....333.13',
+      '3122222..3233313',
+      '3122222113333313',
+      '3122212..3333313',
+      '31.222....333.13',
+      '3111111111111113',
+      '3333333333333333'] } },
+    // 藍框金角的 3×3 拼片缺右下一片；片上是燈塔圖（白塔金燈 + 光束、月、海浪、金色岸）（pal 1）
+    { id: 'slide', order: 5, name: '星塵拼圖', legacy: ['sliding-puzzle.html', 'jigsaw-puzzle.html', 'puzzle.html'], icon: { pal: 1, art: [
+      '3111111111111113',
+      '11333.3333.11111',
+      '11111.3333.13311',
+      '11111.1221.11111',
+      '11111.1221.11111',
+      '1..............1',
+      '11111.1221.11111',
+      '11111.1221.1.221',
+      '1.2.2.1111.12..1',
+      '12.2..1221.12..1',
+      '1............221',
+      '11111.1221.....1',
+      '11111.1111.....1',
+      '13333.1221.....1',
+      '13333.3333.....1',
+      '3111111111111113'] } },
+    // 甜甜圈星珠兩對（紅直線、黃橫線），中央白欄杆紅柱的星橋：黃線走橋面、紅線從底下鑽過（pal 2）
+    { id: 'lines', order: 6, name: '星塵連線', legacy: ['connect-lines.html'], icon: { pal: 2, art: [
+      '.......11.......',
+      '......1..1......',
+      '......1..1......',
+      '.......11.......',
+      '.......11.......',
+      '.......11.......',
+      '.22..133331..22.',
+      '2..2222222222..2',
+      '2..2222222222..2',
+      '.22..133331..22.',
+      '.......11.......',
+      '.......11.......',
+      '.......11.......',
+      '......1..1......',
+      '......1..1......',
+      '.......11.......'] } },
+    // 黑底苔綠牆（$1B = labyrinth MOSS 亮組）+ 青衣露明戴白頭燈、右下出口光點（pal 0）
+    { id: 'labyrinth', order: 7, name: '星塵迷宮探索', legacy: ['maze-game.html'], icon: { pal: 0, art: [
       '1111111111111111',
-      '.1..1..1..1..1..',
-      '.1..3..1..2..1..',
-      '1113331112221111',
-      '.1..3..1..2..1..',
-      '.1..1..2..1..1..',
-      '1111112221111111',
-      '.1..1..2..1..1..',
-      '.1..3..1..3..1..',
-      '1113331113331111',
-      '.1..3..1..3..1..',
-      '.1..1..1..1..3..',
-      '1111111111113331',
-      '.1..1..1..1..3..',
-      '.1..1..1..1..1..'] } },
-    // 3×3 滑塊盤缺右下一格 + 移動十字
-    { id: 'slide', order: 5, name: '星塵拼圖', legacy: ['sliding-puzzle.html', 'jigsaw-puzzle.html', 'puzzle.html'], icon: { pal: 2, art: [
-      '................',
-      '.3333.3333.3333.',
-      '.3221.3221.3221.',
-      '.3221.3221.3221.',
-      '.3111.3111.3111.',
-      '................',
-      '.3333.3333.3333.',
-      '.3221.3221.3221.',
-      '.3221.3221.3221.',
-      '.3111.3111.3111.',
-      '................',
-      '.3333.3333......',
-      '.3221.3221...3..',
-      '.3221.3221..333.',
-      '.3111.3111...3..',
-      '................'] } },
-    // 兩組同色端點，中間一條轉折連線
-    { id: 'lines', order: 6, name: '星塵連線', legacy: ['connect-lines.html'], icon: { pal: 3, art: [
-      '................',
-      '.333.........1..',
-      '.333......11111.',
-      '.333......1..1..',
-      '..2.......1111..',
-      '..2.........111.',
-      '..222222.....1..',
-      '.......2........',
-      '.......2........',
-      '.......2........',
-      '.......2222222..',
-      '.............2..',
-      '...1........333.',
-      '..111.......333.',
-      '...1........333.',
-      '................'] } },
-    // 黑暗迷宮俯視 + 中央提燈的光、右下出口光點
-    { id: 'labyrinth', order: 7, name: '星塵迷宮探索', legacy: ['maze-game.html'], icon: { pal: 2, art: [
-      '1111111111111111',
-      '1..1.......1...1',
-      '1..1.......1...1',
-      '1..1...111.1...1',
-      '1..1.2.1...1...1',
-      '1..1.3.1...1...1',
-      '1..13331...1...1',
-      '1..1.3.1...1...1',
-      '1..1.2.1...1...1',
-      '1..12.21...1...1',
-      '1..1...1...1...1',
-      '1......1...1...1',
-      '1......1.......1',
-      '1..1...1.....2.1',
-      '1..1...1.....3.1',
+      '1.....1........1',
+      '1.....1........1',
+      '1.11..1..1111..1',
+      '1..1..1.....1..1',
+      '1..1..1111..1..1',
+      '1..1........1..1',
+      '1..1111..3..1..1',
+      '1.......323.1..1',
+      '111111..232.1..1',
+      '1.......222.1..1',
+      '1..1111.2.2.1111',
+      '1.....1........1',
+      '1.....1..1111..1',
+      '1.....1.......31',
       '1111111111111111'] } },
     // 星塵派對：比 V（剪）的手套 + 右上星（與 party 遊戲內玩家手套同造型）
     { id: 'party', order: 8, name: '星塵派對', legacy: ['guessing-game.html', 'rock-paper-scissors.html'], icon: { pal: 2, art: [
@@ -16595,10 +17040,11 @@
     song: song,
     palettes: {
       backdrop: 0x0F,
-      bg: [[0x1B, 0x10, 0x30],     // 一般：邊框青綠 / 灰字 / 白字
-           [0x1B, 0x00, 0x28],     // 選中行：黃字
-           [0x15, 0x27, 0x38],     // 暖色圖示：洋紅 / 金橘 / 淡黃
-           [0x11, 0x2A, 0x39]],    // 綠：logo（藍陰影 / 萊姆 / 淡綠高光）+ 冷色圖示（藍線 / 萊姆 / 淡綠）
+      // fix-r7-shell（qa-r7 P3-1）：圖示配色改成「照各款修正後的遊戲畫面」，色 1 / 色 2 沒被字用到的位置拿來給圖示
+      bg: [[0x1B, 0x1C, 0x30],     // 一般：邊框青綠 / 青（星點 / 開機底線）/ 白字；圖示 sudoku（亮青宮 + 暗宮 + 白字）、labyrinth（$1B 苔牆 + 青藍衣露明 + 白頭燈）
+           [0x12, 0x30, 0x28],     // 選中行：黃字（字只用色 3）；圖示 gomoku（= gomoku PAL_BG[1] 藍格 / 白月石 / 金日石）、slide（藍框 / 白燈塔 / 金光束）
+           [0x16, 0x28, 0x31],     // 暖色圖示：紅 / 黃 / 淡青白（= merge 恆星組）；merge、lines（紅線 + 黃線 + 白欄杆星橋）、mines、party
+           [0x11, 0x2A, 0x39]],    // 綠：logo（藍陰影 / 萊姆 / 淡綠高光）
       spr: [[0x15, 0x27, 0x38],    // 游標 / 開機大星
             [0x2A, 0x39, 0x30],    // 閃光
             [0x15, 0x27, 0x38],

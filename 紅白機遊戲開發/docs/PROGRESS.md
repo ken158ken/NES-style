@@ -4929,3 +4929,474 @@ C6-1：① `slash` 星塵忍者斬《STAR BLADE》+ ② `laser` 星塵雷射防�
 ### 5. 留給後續
 - 頂球多了 `lost`（掉了幾顆）可以列進結算畫面；目前只在 `state()` 裡。
 - 氣球的黑「雷雲氣球」在靛藍夜空帶的對比偏低（灰 0x00 對 0x02）。不過氣球大多在紫 / 橘帶被打掉，要的話可以給氣球關另一組精靈調色盤（例如高光 0x2C 閃電色）。
+
+## qa-r7（R7，2026-11-13）
+- 驗收卡帶三《星塵益智 8 合 1》的 8 款、選單，以及 cart1 / cart2 迴歸。報告寫在 `docs/QA_REPORT.md` 的 `# R7 qa-r7（2026-11-13）`，截圖 16 張在 `shots/qa-r7/`。
+- 結果：**P1 × 0、P2 × 4、P3 × 7**。
+  - P2：
+    - lines 的星橋 / 星門幾乎看不見，第一次遇到也沒有教學。
+    - lines 選關第 31 ~ 36 關被說明文字蓋掉。
+    - labyrinth 畫面 88 ~ 93% 全黑，走過的地方不會留下記憶。
+    - slide 星鯨有完全相同的拼片，5×5 也有幾乎相同的拼片，SWAP / ROTATE 可能出現「圖完整卻不算完成」。
+  - P3：選單圖示 5 款對不上、數獨宮界只靠底色、labyrinth / merge 新機制沒有提示、slide 標題和 labyrinth 結算文字溢出、5 款 HUD 貼頂、merge 天體同色系、lines 星橋規則和 Flow Free: Bridges 相同。
+- 觸控（iPhone 13 直 / 橫）、硬限制極端情境（overFrames 0、每線 ≤ 4）、cart1 / cart2 迴歸都沒有發現問題。報告末尾有 fix-r7 分卡建議。沒有改程式、沒有 git。
+
+## fix-r7-maze（R7，2026-11-13）
+
+### 1. 做了什麼（依 `docs/QA_REPORT.md` `# R7 qa-r7`，只動 `games/cart3/labyrinth/{main,gen}.js`、`games/cart3/test_labyrinth.py`）
+- **P2-3 太黑**：
+  - 走過記憶：`light()` 多一張區塊表 `g.kb`（16×15，有迷宮格且曾進入微光圈就記 1）；離開頭燈後已探索的區塊維持微光組 1（牆暗色、地板黑），沒去過的才是 0。主畫面上等於自己畫出來的地圖。只換寫入的值，沒有多寫位元組。密技地圖全開時 `kb` 也全開。
+  - 照明半徑：F7~F9 的 r1 / r2 從 28/44、24/40、24/40 改回 **32 / 48**（隨機模式沿用 F7~F9 參數，一起變）。PAR 由步數推算，不受影響。
+  - 試過把微光地板改成暗色（$0C / $08 / $01），但 NES 沒有比明亮地板（$0A / $07 / $02）更暗的同色階，頭燈圈會消失、F9 的整片會變亮藍，所以**不採用**，維持黑地板。
+- **P3-3 新機關第一次提示**：新增 mode `'intro'` 說明卡。開局時，如果這一層有沒看過的機關，先整片重畫一張卡（`CT.blank`），每項是示意磁磚（用該主題的明亮組）加兩行字，按 A / START 開始，計時不跑，密技無效。看過的機關記成 `CT.save('labyrinth','seen')` 位元，之後只播一次。
+  - 基本（EXIT / SHARD）：`FIND THE STAR GATE` / `SHARDS GIVE A STAR`
+  - 鑰匙門：`A KEY OPENS A DOOR` / `ONE KEY PER DOOR`
+  - 日月門：`STEP ON ☼/☾ SWITCH` / `SUN/MOON GATES SWAP`
+  - 潮汐牆：`TIDE WALLS RISE AND` / `FALL. HALF = WARNING`，示意磁磚是 SH_O → SH_W → SH_C
+  - 星燈：`STAR LAMP WIDENS` / `YOUR HEADLAMP`
+  - 從選關直接開較深的層，會把沒看過的機關全部列出（F5 共 5 項）。暫停重來不會再出卡。`?hint=0` 可以跳過（測試、量測用）。機器人在說明卡上會按 A。
+- **P3-4**：過關畫面改成 `A: NEXT   START: TITLE`，第 6 ~ 27 欄，不再被截成 `START: TIT`。
+- **P3-5**：狀態列從第 1 / 2 列下移到第 2 / 3 列（畫面 y = 8 起），第 0 / 1 列全空。原本第 3 列的金色外框線讓出來給狀態列。暫停畫面的兩列也一起下移。
+
+### 2. 驗證數字
+| 項目 | 結果 |
+|---|---|
+| `games/cart3/test_labyrinth.py` | **67 / 67**（原 60 項全保留，其中 3 項改列號 / 改 URL；新增 7 項：HUD 第 0 / 1 列空、走過記憶屬性、F1~F9 半徑 ≥ 32 / 48、說明卡出現 / 內容 / 只播一次、冒險模式結算列完整） |
+| 驗證器 | 9 層 + 隨機 40 種子全過，「拿掉鑰匙 / 開關 → 不可解」仍成立 |
+| `playthrough_cart.py --page cart3.html --game labyrinth` | goal **1828 幀**（原 1732，多了 F1~F3 三張說明卡）/ 每線 **2** / overFrames **0** / 尖峰 **27 byte**（與修前同） |
+| 機器人從標題連過 3 層（含說明卡）/ 續跑全 9 層 | 1826 幀 goal / 10337 幀到結局；每線 2、overFrames 0、尖峰 27 / **52**（修前 59） |
+| VBlank 極端情境 | F9 密技地圖全開 + 20 秒頭燈結束：尖峰 **140**、overFrames 0（與 qa-r7 實測 140 相同；記憶只改寫入的值，不增加量） |
+| 全黑比例（遊玩區 y 20~210，機器人 `?floor=N` 單層） | 400 幀：F1 88.3 → 86.5%、F4 89.8 → **79.4%**、F9 93.3 → **85.2%**<br>800 幀：F1 92.2 → 85.4%、F4 91.8 → **74.9%**、F9 93.9 → **74.8%**<br>只算迷宮範圍內（800 幀）：F1 76.5 → 55.6%、F4 85.7 → 55.3%、F9 93.8 → 73.3%<br>（F1 迷宮只占遊玩區約 2 成，所以整體比例降得少；修前的數字是暫時關掉記憶、半徑改回舊值後量的） |
+| 說明卡畫面 | lint 綠（5 ~ 6 色） |
+| 截圖 | `shots/fix-r7-maze/dark_before_after_800f.png`（上排修前、下排修後：F1 / F4 / F9）、`intro_hud_result.png`（F1 / F3 / F5 說明卡、F5 遊玩 HUD、F1 結算）；單張在同一資料夾，`before400_* / before800_* / after_* / after800_* / intro_f* / play_f5_hud / result_f1` |
+| `run_all.sh --quick` | **總結：PASS**（全部測試與 8 個入口的 build --check 都綠，包含正在進行的 cart4 各款） |
+
+### 3. 偏離
+- 說明卡只在「開場」出現，沒有做「第一次接近時」再提示。理由：開場的卡已經涵蓋同一層所有新機關，接近時再提示會在黑暗中佔用訊息列。
+- 狀態列下方原本的金色外框線拿掉了。理由：屬性區是 16×16，第 4 列和迷宮最上一列共用同一塊屬性，外框線會跟著視野一起變暗或全黑，所以沒有地方可以放。
+
+### 4. 跨檔需求
+- fix-r7-shell（`games/cart3/cart.js` 的 P3-1 選單圖示）：labyrinth 的畫面要對照 `shots/fix-r7-maze/dark_before_after_800f.png` 的下排，也就是黑底、苔綠牆、藍衣露明，走過的地方留下暗綠牆線。
+- 總控：新存檔鍵是 `nes.cart3.labyrinth.seen`（位元遮罩）。新的查詢參數 `?hint=0` 是測試用。
+
+### 5. 留給後續
+- 微光地板目前維持全黑。如果之後想讓「記憶」區更明顯，可以考慮在已探索的地板用變體磁磚（多幾個點），代價是要多寫名稱表。
+- 照明三星 PAR 沒有調整。qa 說明亮度改善後 PAR 會變得比較寬鬆，可以等實際玩過再看。
+
+## cart4-memory（R8，2026-11-13）
+
+### 1. 做了什麼
+- **① `cards` 星塵翻牌 STAR CARDS**（order 1，`games/cart4/cards/{art,song,main}.js`；舊 memory-card / card-memory / memory-match / memory-matching 只取玩法）
+  - **18 種原創牌面圖**（16×16，程式化幾何 + 自動描邊）：暖色組 太陽臉 / 火箭 / 彗星 / 五角星 / 火焰 / 王冠，冷色組 新月 / 飛碟 / 人造衛星 / 冰晶 / 太空頭盔 / 閃電，綠色組 外星人 / 環行星 / 機器人 / 漩渦星系 / 寶石 / 星芽。同組 6 張剪影全不同（色弱靠形狀分）。
+  - **PPU 規劃**：一張牌 = 4×4 磁磚 = 32×32 = 恰好 2×2 屬性區塊、一律擺偶數欄列 ⇒ 一張牌一組 BG 調色盤（0 牌背 / UI、1 暖、2 冷、3 綠，每組「深描邊 / 主色 / 白底」）；牌框 / 配對框 / 牌背 / 半寬 / 側邊共用磁磚，bg bank 約 220 塊。
+  - **翻牌動畫** 5 格（牌背 → 半寬牌背 → 側邊 → 半寬白面 → 牌面，每格 3 幀，翻回反向），配對成功換成色 2 粗框 + 四角小星 + 精靈閃光。
+  - 盤面 4×3 / 4×4 / 5×4 / 6×4 / 6×5；**CLASSIC** 步數上限 16/24/30/36/45（評價 ≤1.5n ★★★、≤2n ★★，清盤後 A = 下一個盤面）、**TIME ATTACK** 40/60/80/100/130 秒（配對 +2 秒、剩餘秒數換分）、**VS PIPPO** 6×5（15 對不會平手）輪流翻、配對可再翻。連對加分 100 × 連對數。
+  - **CPU 噗波記憶力 4 級**：只在牌完整翻到正面那一刻記住（`seen()`），DOZY / NORMAL / SHARP / PERFECT = 容量 2 / 5 / 10 / 30 張、每次決策想起率 60 / 80 / 94 / 100%；游標一格一格走（7 幀一格）、想 30 幀。
+  - 開局發牌動畫（每 3 幀一張）+ `READY 3...` 90 幀，期間不收輸入；B 偷看（每盤 1 次，60 幀，經典上限 -4 / 限時 -8 秒；VS 不能）。
+  - BGM 5 首（星牌邀請 / 記憶迴廊 / 對弈星桌 / 全部翻開 / 下次再翻）+ 音效 10 個。
+- **③ `flash` 星塵閃記 STAR FLASH**（order 3，`games/cart4/flash/{art,song,main}.js`；舊 flash-memory / flash-memory-master / pattern-match / pattern-rush / memory-pattern-race）
+  - **PATTERN** 12 級（3×3 亮 3 → 5×5 亮 12；展示 40+10k 幀，RELAX ×1.5 / NORMAL / EXPERT ×0.7 且分數 ×2）；點錯即扣命、漏掉的格畫空心星、同級換新圖重來。
+  - **SEQUENCE** 長度 = 級 + 2（3×3 → 第 5 級起 4×4），每格亮星 + 五聲音階音高（`flash_t0..15`），BGM `flash_seq` 只用三角 + 雜訊把 p2 讓給格子音；靜音也能只看亮格玩。
+  - **SPOT CHANGE** 8 形 × 4 色符號，展示 → 蓋牌 30 幀 → 翻開找 1 / 2 / 3 處變化（出現 / 消失 / 換形；第 4 級起才會「只換色」）。
+  - **RACE ZIPPY** 雙盤 4×4 小格（16×16 = 1 屬性區塊），同圖同時閃，先正確點完得 1 分、點錯出局，先到 5 分；CPU EASY / NORMAL / HARD = 16 / 11 / 6 幀一格、想 30 / 22 / 12 幀、每格記住率 78 / 90 / 98%（記不得就換成錯格 ⇒ 會點錯出局）。
+  - 格子 5 狀態（空 / 亮 / 你點的 / 點錯 / 漏掉）= **調色盤 + 形狀**雙重區分（點、實心星、菱形、叉、空心星）。READY 90 幀 / LEVEL n 45 幀；**B 重看**每級 1 次（該級得分減半、不扣命）。
+  - BGM 6 首（閃光序曲 / 腦內星圖 / 心跳節拍 / 追星賽 / 記住了！/ 忘光光）+ 音效 9 個 + 格子音 16 個。
+- 兩款共通：§6 全套（密技原地續關、標題 / 結算密技無效、用過密技 goal false、暫停 `pause()/resume()`、`exit()` 存分、`backTile`、`HOLD START+SELECT: MENU`、`C/★ = CHEAT`、段落空列）；`bestText` 右對齊 6 字元分數；`?seed=` 可重現、`?pmode=&plvl=&direct=1` 直開模式。
+- **機器人只讀畫面**：`cards` 每幀讀每張牌「牌面圖左上那格」的名稱表磁磚 → 認圖記住、「框左上那格」→ 已配對 / 翻開中；`flash` 展示階段每幀讀每格中央磁磚（找差異加讀屬性表）記下亮格 / 亮起順序 / 符號，輸入時等格子區畫面穩定 2 幀 + `lag` 幀。十字鍵每 6 幀一按、按 1 幀放開。
+
+### 2. 驗證數字
+| 項目 | 結果 |
+|---|---|
+| `run_all.sh --quick` | **總結 PASS**（含 test_cart 740、test_touch 712、cart4 五款測試、build --check cart4.html） |
+| `test_cards.py` | **56/56** |
+| `test_flash.py` | **64/64** |
+| `playthrough_cart.py --page cart4.html --game cards` | goal **1305 幀**、每線 **4**、overFrames **0**、VBlank 尖峰 **49**（`--hint` 1304 / 4 / 0 / 49） |
+| 同上 `--game flash` | goal **2350 幀**、每線 **2**、overFrames **0**、尖峰 **81**（`--hint` 2349 / 2 / 0 / 81） |
+| cards 反應延遲 | lag 0 / 12 / 24：1041 / 1304 / 1592 幀達成，12~13 步（上限 24）；3 種子都過；限時 4×4 lag 24 剩 51 秒 |
+| flash 反應延遲 | lag 0 / 12 / 24：2237 / 2349 / 2445 幀過第 8 級；EXPERT + lag 24 也過；機器人一路 12 級全破 |
+| 機器人誠實度（Proxy 監看隱藏答案） | cards `run.cards`、flash `lit / seq / changes / before / after` 在 bot() 期間讀取 **0 次**；序列 / 找差異也靠讀畫面過第 6 級 |
+| VS / 競速 | cards 機器人 vs NORMAL 15:0、vs PERFECT 6:9（CPU 也吃到你翻開的資訊）；flash 競速 EASY / NORMAL 不論 lag 12/24 都 5:0，HARD lag 12 5:0、lag 24 0~1:5 |
+| lint | 標題 / 遊玩 / 偷看 / 5×5 / 找差異 / 競速 全 PASS（≤ 11 色） |
+
+截圖（`shots/agent_cart4-memory/`）：`c_peek.png`（6×5 偷看，15 種牌面）、`c_vs.png`（VS PIPPO，翻牌中的側邊格 + 配對框 + CPU 粉紅游標）、`f_show3.png`（找差異展示）。
+
+### 3. 偏離
+1. brief 的「CPU 有可調記憶力」做成 4 級（容量 × 想起率兩個參數），不是單一百分比。
+2. flash goal 定義為「PATTERN 通過（清掉）第 8 級」，比「到達第 8 級」嚴一級；RELAX 速度不算 goal。
+3. 「與 CPU 競速」做成雙盤同圖對打（先到 5 分），沒有做計時排行。
+4. 競速是純速度比拚，結果很兩極（機器人延遲 12 對 HARD 5:0、延遲 24 就 0:5）；沒加 CPU 時間抖動。
+
+### 4. 跨檔需求
+- 無。只動自己的檔 + `cart4.html` 標記內 6 行 script；`games/cart4/cart.js` 已由 C8-0 註冊 cards = 槽 1、flash = 槽 3，選單圖示（藍金牌背 + 白面星牌 / 藍格黃格）與遊戲內一致。
+
+### 5. 留給後續
+- flash 競速可加 CPU 每步 ±2 幀抖動讓勝負不那麼兩極。
+- cards VS 結算可顯示 PIPPO 的記憶命中率；PERFECT 對完美記憶機器人仍佔上風（設計如此）。
+
+## fix-r7-number（R7，2026-11-13）
+
+### 1. 做了什麼
+- **P3-2 數獨宮界**（`games/cart3/sudoku/main.js` `PAL_BG`）：兩種宮底拉開亮度差，亮青 `$1C` 對深藍 `$02`（相對亮度比約 2.8，修前 `$0C`/`$02` 約 1.1）；同數字高亮由紫藍 `$13` 改成洋紅 `$14`（不再和藍宮同色系）；錯誤暗紅 `$06` 不變。9×9 / 6×6 都適用（同一套 `boxPal`）。磁磚變體方案評估後放棄：每個數字 / 筆記的右、下、右下磚都要加亮線變體，約多 89 磚，bank 只剩 75 磚。
+- **P3-6 合星天體配色**（`games/cart3/merge/{art,main}.js`）：4 組調色盤重新規劃成「每組 3 個不同色相」，12 階各佔一個槽位當主色（`TIERS[].hue`），相鄰階色相都不同：
+  - pal 0 灰 `$00` / 銀 `$10` / 白 `$30`（HUD 不變）：石礫 = 灰（加黑坑）、星系 = 銀旋臂、星塵 = 白。
+  - pal 1 洋紅 `$14` / 橘 `$27` / 米黃 `$37`：星系團 = 洋紅、巨行星 = 橘身 + 米黃條紋 + 洋紅風暴眼、月 = 米黃。黑洞吸積盤也用這一組。
+  - pal 2 藍 `$11` / 綠 `$1A` / 青 `$2C`：行星 = 藍身 + 青條紋、環行星 = 綠球 + 青環、彗星 = 青。
+  - pal 3 紅 `$16` / 黃 `$28` / 淡青白 `$31`：超新星 = 紅尖刺、恆星 = 黃日面（不打暗面）、脈衝星 = 淡青白光束 + 紅磁環。
+  - 作法是先照原本的「1 暗 / 2 本體 / 3 亮」畫，再用 `recolor()` 換成該階的主色。形狀沒有變（彗星尾巴改成青色為主）。
+- **P3-3 合星 HOLE 說明**：
+  - 第一次進 HOLE 模式時，盤面區先出說明卡：黑洞圖示加上 `BLACK HOLE / BLOCKS SLIDES / EATS DUST/PEBBLE / FOR +5 EACH / JUMPS EVERY 24 MOVES / A: GOT IT`。按 A 或 START 關閉，並用 `CT.save('merge','seenHole')` 記住。說明卡顯示期間不計時、不能滑動、不畫精靈，訊息列寫 `NEW!`。
+  - 標題選到 HOLE 時，第 24 列改成 `HOLE EATS DUST  JUMPS/24`。
+  - 遊戲中每次吞噬，訊息列寫 `GULP +5`。
+  - `renderPlay` 每幀先把盤面區清成 0（影子表比對過，沒變的格子不會真的寫入），說明卡或暫停字殘留在間隔磚上的問題也一起修掉。`state()` 多了 `intro`。
+
+### 2. 驗證數字
+| 項目 | 結果 |
+|---|---|
+| `test_merge.py` | **63/63**（原 54，+9：12 階主色兩兩不同、每階實際最多的 NES 色號 12 種都不同、相鄰不同、標題 HOLE 說明列、第一次進入出說明卡、說明期間不滑不計時、A 關閉並存檔、第二次不出現、吞噬訊息 GULP +5） |
+| `test_sudoku.py` | **58/58**（原 54，+4：宮底對比 ≥ 2.5、高亮是洋紅系、9×9 / 6×6 宮界兩側屬性交錯） |
+| `playthrough_cart.py --page cart3.html --game merge` | goal **892 幀**，每線 **3**，overFrames **0**，尖峰 140 |
+| 同上 `--game sudoku` | goal **1063 幀**，每線 **2**，overFrames **0**，尖峰 46 |
+| 截圖 lint | 合星 5×5 十二階全上 13 色、HOLE 說明卡 7 色、數獨 8 色，全部 PASS |
+
+截圖在 `shots/agent_fix-r7-number/`：
+- `merge_12tiers_5x5.png`：12 階兩輪並排。
+- `merge_hole_intro.png`：HOLE 說明卡。
+- `sudoku_mobile_p.png`：iPhone 13 直向。
+
+### 3. 偏離
+- P3-2 沒有做宮界加亮線的磁磚變體（CHR 放不下，理由見上）。只靠調色盤，手機直向截圖已經可以一眼分出九宮。
+- 巨行星配色沒有照 QA 建議的米黃 `$27/$37` 為主，改成橘身配米黃條紋，因為米黃已經留給月。
+
+### 4. 跨檔需求
+- 給 fix-r7-shell（P3-1）：選單圖示要對照新配色。merge 的恆星是黃日面、紅黃光芒、淡青白核心；sudoku 的宮是亮青 / 深藍交錯，同數字高亮是洋紅。
+
+### 5. 留給後續
+- 如果 CHR 之後有空間（例如把標題大字改成精靈或共用字型），可以再補宮界亮線變體。
+- 合星的 `hue` 欄位可以拿來做色盲輔助（例如 HUD 顯示階名時加形狀記號）。
+
+## cart4-shell+color（R8，2026-11-13）
+
+### 1. 做了什麼
+- **卡帶設定 `games/cart4/cart.js`**（`CT.CART_CFG`）：標題「星塵節奏 8 合 1」，用 Bold 15px 點陣做 logo，霓虹粉紅（$04 / $24 / $34）。邊框是玫瑰紅 $15，跟前三卡（藍框火色 / 紫框冰藍 / 青綠框萊姆）明顯不同。
+  - 副標 `RHYTHM 8 IN 1  CART-4`。8 槽照 LEGACY_MAP 順序：cards / simon / flash / tune / rhythm / reflex / brain / color。
+  - 槽名點陣 19 字：Regular 16px 門檻 90，用跟前三卡相同的參數重產。比對既有的「星」「塵」逐位元相同；超出 16 列的字整字上移，不裁切。
+  - 原創選單曲「節拍星港」`cart4_menu`：A 小調、speed 5、A B A' C。
+  - 8 槽原創 16×16 圖示。cards / simon / flash / tune / rhythm 先看了各款的 art.js 檔頭和調色盤，再對齊遊戲內造型：
+    - cards：靛藍牌背 $02 + 金星徽，疊一張白牌。
+    - simon：十字排列的星 / 月 / 環行星 / 彗星。
+    - flash：靛藍暗格 + 金色亮格。
+    - tune：星軌垂下的星鐘管。
+    - rhythm：星十字（星核 + 四軌 + 星籽）。
+    - reflex / brain 還沒做完，先依 brief 畫信號燈 + 閃電、雙半腦。
+- **工具 / 文件整合（只用 Edit 插入）**：
+  - `test_cart.py` PAGES 加 cart4（8 槽 id），存檔隔離清單加 cart4。
+  - `run_all.sh` 加 `build --check cart4.html`，冒煙測試加 cart4 選單。
+  - `build.py`：`cart4.html → dist/星塵節奏8合1.html`。
+  - `stamp.py` / `test_touch.py` 的 PAGES 加 cart4（判定和空殼遊戲沿用 cart2）。
+  - `README.md` / `index.html` / `CLAUDE.md` 加入口。
+  - `apu_render.py` 在 R7 已經支援 cartN，不需要改。
+  - `cart4.html` 標記內插入 color 的 3 行 script。
+- **`color` 星塵色感 HUE SENSE**（`games/cart4/color/{art,song,main}.js`）。6 個色鍵固定對應手把，各有形狀：↑ 紅● $16、→ 藍■ $12、↓ 綠▲ $2A、← 黃★ $28、B 粉◆ $24、A 白✚ $30。說明頁和遊玩畫面都畫成手把對照圖。三個模式：
+  1. **INK OR WORD 色字干擾**：5 級 × 8 題，共 40 題。
+     - 4 色 → 6 色（LV3 起 B / A 加入）；LV4 起字的位置會跳動；LV5 有 INK / WORD 規則切換。
+     - 限時 180 / 150 / 150 / 120 / 120 幀；5 條命。
+     - 得分 = 50 + 速度分 + 連對分。
+     - **字先藏起來寫進名稱表**（第 3 組 BG 調色盤全黑），佇列清空那一幀才換上墨色並開始計時，所以反應時間是從看得到那幀算起，用 ms 顯示。
+  2. **COLOR RUSH 色塊衝刺**：3606 幀 = 60.0 秒，題型有 SAME?（A / B）和 BRIGHTER?（← / →，亮度 = 色碼的列）。
+     - 答錯扣 180 幀。
+     - 每答對 6 題難度 +1：色相差從 4 格縮到 1 格，亮度差從 2 列縮到 1 列。
+  3. **HUE MIXER 調色**：10 回合，轉盤是色相 12 格循環 × 亮度 4 列；計分 1000 − 250 × 色相差 − 300 × 亮度差，再加時間分。
+     - 第 6 回合起是記憶回合：目標只顯示 120 幀就蓋上灰色問號。
+     - B 可以重看一次（60 幀，扣 150 分）。
+  - **SHAPE ASSIST**（色弱模式，標題切換並存檔）：色字兩側顯示墨色的形狀標記；衝刺在色塊下顯示色碼；調色顯示目標的色相編號。
+  - §6 第一版全做：
+    - 密技：遊玩中 = +2 命 / +10 秒 / 公開目標；色字 GAME OVER 時 = 原地續關（同一題、命補滿）。標題 / 說明 / 結算按密技無效；用過密技不存紀錄、goal 為 false。
+    - 暫停：BGM 用 pause / resume，**同時把題目藏起來**，暫停時不能偷看。
+    - exit 存最高分；backTile；HOLD START+SELECT: MENU；C/★ = CHEAT；段落之間空一列。
+    - READY 3-2-1-GO 倒數 160 幀。
+  - 5 首原創 BGM、7 個音效。
+  - 機器人預設反應延遲 18 幀（`&lag=N`），從**畫面上的 BG 調色盤**讀墨色 / 色塊；調色的記憶回合只在目標顯示期間讀。
+  - goal = INK OR WORD 一局結束時 ≥ 3000 分，且沒用密技。
+
+### 2. 驗證數字
+| 項目 | 結果 |
+|---|---|
+| `games/cart4/test_color.py` | 74 / 74 |
+| `tools/test_cart.py --page cart4.html` | 150 / 150（當時已註冊 cards / simon / flash / rhythm / color） |
+| `tools/test_touch.py --only cart4` | 93 / 93 |
+| `playthrough_cart.py --page cart4.html --game color` | goal 2561 幀 / 每線峰值 1 / overFrames 0 / VBlank 尖峰 81 byte |
+| 機器人延遲 0 / 18 / 24 / 36 / 60 幀（色字 40 題） | 全部達成 goal：5725 / 5461 / 5381 / 5213 / 4869 分；延遲 18 時每題反應 ≥ 18 幀（不偷跑） |
+| SHAPE ASSIST 開（形狀標記精靈） | 每線 2、over 0 |
+| 衝刺機器人（延遲 18） | 28800 分、每線 1、over 0 |
+| 調色機器人（延遲 18） | 10871 分（S）、每線 1、over 0 |
+| `apu_render.py --game cart4/color,cart4/menu` | 6 首 42 / 42 PASS |
+| 截圖 lint | 選單 / 標題 / 說明 / 三個模式全部 PASS（≤ 13 色） |
+| `bash tools/run_all.sh --quick` | 總結 PASS（test_cart 740、test_touch 712、cart4 五支測試全綠、build --check cart4 PASS） |
+
+截圖：`shots/agent_cart4-shell/menu_icons.png`（選單 8 槽圖示，未完成的 tune / reflex / brain 用空殼代入）、`ink_lv3.png`（6 色鍵對照圖）、`help.png`（說明頁）。
+
+### 3. 偏離
+- goal 分數 3000 刻意定得寬鬆（友善版）：延遲 60 幀（1 秒）的機器人也有 4869 分，大約 75% 答對就能過。
+- SHAPE ASSIST 預設關閉。開了之後色字題可以靠形狀作答（Stroop 干擾變弱），這是色弱模式的取捨。調色模式的輔助只公開目標的色相編號，亮度還是要靠眼睛。
+- 色塊衝刺「時間到」視為正常結算，不是失敗，所以結算畫面按密技無效；遊玩中按密技是 +10 秒。
+
+### 4. 跨檔需求
+- 無。engine / registry / shell / cart1~3 都沒動。共用工具都只插入 cart4 的一列 / 一行。
+
+### 5. 留給後續
+- reflex / brain / tune 收工後，要對照截圖再看一次 `games/cart4/cart.js` 的圖示（brief「遊戲做完後再修一次」）：reflex 現在是信號燈 + 閃電（調色盤 2 靛 / 金 / 白），brain 是雙半腦（粉紅）。
+- rhythm 圖示的線條比較細，可以把星核放大。
+
+## cart4-beat（R8，2026-11-13）
+
+### 1. 做了什麼
+- **⑤ `rhythm` 星塵節奏 STAR BEAT**（`games/cart4/rhythm/{song,chart,art,main}.js`，order 5，全域 `CT.Rhythm`）
+  - **6 首原創曲**（`song.js`）：STAR LINE（C、speed 7）/ COMET PARADE（G、6）/ NEBULA FUNK（Dm、6、切分）/ AURORA DREAM（F、8）/ MOON ROCK（Em、5）/ SUPERNOVA（Am、5、琶音）。每首 = 數拍 2 小節（p2 拍點 + 輕擊，畫面 `READY` → `3 2 1 GO!`）+ 曲式 A B A C（各 4 小節，旋律手寫、低音 / 和聲 / 鼓由和弦與風格表生成）+ 收尾 1 小節，`loop:false`。另有標題「星圖序曲」、過關、失敗 3 首；音效 17 個（四軌命中音 C6 / E6 / G6 / C7、EAR 預告音 ×4、MISS、斬擊等）。
+  - **譜面 = 曲子本身**（`chart.js`）：從 p1 旋律 note-on、noi 大鼓 / 小鼓（HARD 再加 p2 和聲）抽 onset，依難度 grid（每拍 / 八分 / 十六分）+ 最小間距（26 / 11 / 7 幀）取音；軌道依旋律走向（上跳 ≥ 3 半音 ↑、下跳 ↓、其餘 ← → 交替、同軌連 3 改左右）。`validate()` 驗 onset 對位、數拍小節無音符、間距、精靈配額。4 模式 × 3 難度 × 6 首 = 72 份全綠。
+  - **同步**：`songFrame = rowsPlayed × speed + rowFrame − 1`（driver tick 後讀，= 這一幀發聲的是全曲第幾幀），音符幀 = row × speed。暫停用 `driver.pause()`，譜面一起凍結；曲子 `loop:false` 自己 stop 後才改用每幀 +1 收尾。全檔沒有 `Date.now` / `performance.now`。
+  - **判定**（幀）：PERFECT ≤ 2、GREAT ≤ 5、GOOD ≤ 8，過 8 幀 MISS；提早 9~16 幀不判定；空按（該軌 ±16 幀沒有音符）能量 −1（防狂按）。連擊加分、能量（60 起，P +2 / G +1 / MISS −3/−5/−7）、ACC → S95 / A85 / B70 / C55 / D，能量歸零 = FAILED。
+  - **4 模式**：CROSS「星十字」（十字鍵 4 軌，星籽從畫面四邊沿點線星軌飛進中央脈動星核外的環形星門，四角是資訊面板，星門旁畫方向鍵圖）、DUO（只用左右臂，B ← / A →，十字鍵左右也可）、ORBIT「繞行」（單鍵，衛星每小節繞圓軌一圈，軌道上預先亮出星標）、BLADE「節拍武士」（側視月面，原創「斬丸 ZAN」光刃機器浪人，左右兩個高度飛來刺刺隕 / 星翼蝠，←/B 斬左、→/A 斬右）。外觀刻意不用箭頭板、透視指板、黑白磚。
+  - **SIGHT**：FULL / FADE（飛到 45% 以內隱形）/ EAR（看不到音符，每顆音符前一拍有該軌音高的預告音 = brief §1-4「只靠聲音」進階模式）。
+  - 標題（模式 / 曲 / 難度 / SIGHT 四列 + 最佳分與評價 + 按鍵對照列）、結算（P / G / GOOD / MISS、最大連擊、ACC、大字評價、NEW!、A 重玩）、存檔 `sc_<模式>_<曲>_<難度>` / `rk_…` / `best`。
+  - §6：密技 遊玩中 = 能量補滿；FAILED = 原地續關（`driver.resume` 從同一 row 接續、能量 60）；失敗結算 = 同首重來；標題 / 通關結算無效；用過 ⇒ 本次開機 goal false。暫停 BGM 停 + 第 27 列 `PAUSE  HOLD START+SELECT: MENU`；exit 存分；backTile = 實心星。
+- **⑥ `reflex` 星塵反應 STAR REFLEX**（`games/cart4/reflex/{song,art,main}.js`，order 6，全域 `CT.Reflex`）
+  - 場景「星港訊號站」：48×48 訊號燈（換調色盤變色、中央 16×16 形狀標記）、四個 32×32 訊號艙、32×32 大箭頭精靈（實心 / 空心兩套）。
+  - SIMPLE 5 次（按 A 開始 → 紅燈等 60~210 幀 → 綠燈 + 星標 + 嗶）、CHOICE 10 次（四艙亮一個，按錯 = ERROR）、COLOR 12 次（目標色隨機，7 目標 + 5 干擾洗牌；目標按 = OK、干擾按 = ERR、目標 60 幀沒按 = MISS、干擾忍住 = OK HOLD；5 色各配一個形狀 ● ■ ▲ ✕ ◆）、ARROW 15 次三級（1~5 中央、6~10 上下左右且 90% 與方向衝突、11~15 加 45% 空心紅箭頭 = 反方向）。
+  - 反應 = 按下那幀 − 亮燈那幀（update 先讀鍵再推進燈號 ⇒ 同幀不可能按到）；顯示 ms = 幀 × 1000 / 60.0988；亮燈前按 = FALSE START、亮燈後 < 6 幀（100 ms）= TOO SOON（ANTICIPATION），都算偷跑、該次重測；SLOW 以逾時幀計入平均。
+  - 結算列出每次 ms、平均（含幀數）、最佳、偷跑 / 錯誤、稱號（≤ 12 PULSAR / 15 COMET / 18 METEOR / 21 ROCKET / 26 SATELLITE / MOONWALKER）。測驗中 BGM 是無鼓的長音（不給可猜的節拍）。
+  - §6：密技 測驗中 = 偷跑歸零 + 本次重來；結算 = 原地續關（刪最差一次回去補測）；標題 / 按 A 開始前無效；暫停 = 音樂停、該次重新等待不算偷跑；exit 存最佳平均。
+- `cart4.html` 在 `cart4:games` 標記內插入 7 行 script（rhythm 4 + reflex 3）。
+
+### 2. 驗證數字
+| 項目 | 結果 |
+|---|---|
+| `games/cart4/test_rhythm.py` | **53/53**（契約 / 6 曲四聲道 / 72 份譜面驗證 / 全曲每顆音符那幀 driver 正在發該 row / 判定 +0 P、+3 G、−7 GOOD、不按 MISS / 暫停凍結 / EAR / FADE / 能量耗盡續關 / 機器人人類模型 / 狂按 / 各模式 HARD / goal） |
+| `games/cart4/test_reflex.py` | **50/50**（幀計時 rt = 15 / 20、ms 顯示、偷跑兩種、SLOW、暫停、CHOICE / COLOR 四種結果 / ARROW 三級、續關、延遲 0 / 12 / 18 / 24 對 goal） |
+| `playthrough_cart.py --page cart4.html --game rhythm` | goal **6077 幀**（從標題選 3 首 CROSS NORMAL，各 A），每線 **6**，overFrames **0**，尖峰 **27**；`--hint` 相同 |
+| `--game reflex` | goal **984 幀**（SIMPLE 平均 18 幀 = 300 ms、0 偷跑），每線 **2**，overFrames **0**，尖峰 **25**；`--hint` 相同 |
+| rhythm 機器人（NEBULA FUNK NORMAL） | lag 0 / jit 0 = 88/88 PERFECT（S）；lag 12 / ±3 = A 92%；lag 24 / ±6 = B 77%；狂按（每 2 幀換方向）= FAILED |
+| rhythm HARD（lag 12） | DUO 曲 4 A 92% / ORBIT 曲 5 A 92% / BLADE 曲 6 A 91%（每線 8）/ CROSS 曲 6 A 92%（每線 6），overFrames 全 0、尖峰 ≤ 26 |
+| reflex 延遲 vs goal（門檻 20 幀 = 333 ms） | lag 12 → 平均 12 幀 goal ✓；lag 18 → 18 幀 goal ✓；lag 24 → 24 幀（400 ms）✗（設計上屬「慢」）；lag 0 → 下一幀就按 = 1 幀 < 6 幀 ⇒ 全判 ANTICIPATION 偷跑 ✗（人類不可能） |
+| `apu_render.py --game cart4/rhythm` | 9 首 **63/63**；`cart4/reflex` 3 首 **21/21**（只含五聲道成分） |
+| `run_all.sh --quick` | **總結 PASS**（含 cart4 七款測試、build --check cart4.html） |
+| 截圖 lint | 全部 PASS（≤ 18 色） |
+
+截圖：`shots/agent_cart4-beat/rhythm_cross.png`（星十字 NORMAL）、`rhythm_blade.png`（節拍武士）、`rx_arrow.png`（方向挑戰第 3 級空心反向箭頭）。
+
+### 3. 偏離
+1. brief「四軌下落」做成**四方匯入**（音符從上下左右四邊飛向中央星門）：十字鍵方向 = 音符來的方向，比單向下落更直覺，也避開 DDR / Piano Tiles 的直向軌道外觀。
+2. 譜面不手寫，而是從曲子 onset 程式化產生（同一份資料保證與 row 對位），再用驗證器保證精靈配額；「難度 3 級」= 取音格點 + 間距 + 飛行時間 + 扣能量。
+3. reflex 的 goal 門檻定 20 幀（333 ms）：延遲 24 幀的機器人**不會**過（400 ms），延遲 0 會被判偷跑——這是刻意的（brief：以 18 幀設計門檻）。
+4. 機器人讀的是畫面上看得到的資料（音符時間 = 位置、燈號 / 亮艙 / 箭頭），沒有改用 PPU 認圖；rhythm EAR 模式以預告音那一拍為「看到」。
+
+### 4. 跨檔需求
+- 無。只改 `games/cart4/{rhythm,reflex}/**`、`games/cart4/test_{rhythm,reflex}.py`、`cart4.html` 標記內 7 行。
+- 給 C8-0：選單圖示請對照 `shots/agent_cart4-beat/` —— rhythm 主視覺 = 中央洋紅星核 + 四色星籽（青 / 綠 / 橘 / 粉），reflex = 綠色訊號燈 + 白星標 / 四方訊號艙。
+
+### 5. 留給後續
+- rhythm 沒有長按音符與雙押（十字鍵相對方向不能同按）；HARD 的 AURORA DREAM 靠和聲 onset 補密度。
+- BLADE 主角斬丸是 16×32 細長造型，可再加寬或加斬擊殘影。
+- reflex 的成績只存各模式最佳平均；可加歷次紀錄折線（BG）。
+
+## cart4-sound（R8，2026-11-13）
+
+### 1. 做了什麼
+- **② `simon` 星塵跟我做 STAR ECHO**（`games/cart4/simon/{art,song,main}.js`，全域 `CT.Simon`，order 2）
+  - 外觀原創：**不是圓盤四色扇形**。四顆分開的「星標」天體十字排列，每顆形狀不同（↑ 五角星 青 / → 新月 金 / ↓ 環行星 洋紅 / ← 彗星 綠），中央核心框顯示 WATCH / PLAY / 步數。也避開了 PS 手把那種 △○□× 幾何符號。
+  - 亮燈 = 換那顆的 BG 調色盤（3 byte），加四角星芒精靈；第二組（OCTET 的 B + 方向）改成粉彩色 +「B」徽章 + 兩顆繞行小星。
+  - 8 個鍵音的音高和音色都不同：音高 ↓ < ← < → < ↑；音色分別是 12.5% 撥弦衰減、25% 延遲顫音、50% 平穩、25/50% 交替加尾端下滑。第二組再疊八度快速琶音。
+  - 5 模式：CLASSIC / EAR（展示時不亮燈，只靠聲音）/ EYE（全程靜音）/ REVERSE / OCTET。3 條命；按錯或 360 幀沒按 = MISS，會亮出正解並重放同一串。SELECT（4 鍵模式也可按 B）= 重看一次，每回合一次，扣分不扣命。READY 倒數 120 幀。
+  - 展示節奏（幀）：1~5 步 30+12、6~9 步 24+10、10~13 步 19+8、14 步起 15+7。
+  - goal = CLASSIC 完成 15 步。之後可以一路挑戰到 99 步，結束時給星等稱號。
+- **④ `tune` 星塵旋律 STAR MELODY**（`games/cart4/tune/{art,song,main}.js`，全域 `CT.Tune`，order 4）
+  - 鍵盤原創：8 根從星軌垂下的「星鐘管」，越低音越長。每根寬 16 px（剛好 1 個屬性區塊），亮燈 = 改屬性（5 byte）。管下標唱名（上下交錯兩列）、方向、B，標題也有同一張對照圖。
+  - 按鍵：← ↓ ↑ → = DO RE MI FA；按住 B + ← ↓ ↑ → = SO LA TI 高 DO。
+  - 題目旋律每題用規則當場產生，所以是原創：級進為主、起在 DO / MI / SO、收在主音、不連三同音、可用 `?seed=` 重現。題目本身是一首用 driver 播放的小曲：前置 4 下拍點 + p1 鐘琴旋律 + tri 主音持續音。
+  - 3 模式：
+    - REPLAY：8 級，音數 3 → 8，音域 DO-MI → 全 8 音，第 5 級起要彈對節奏。
+    - HIGH-LOW：8 級，音程從 7~12 半音縮到 1 半音，第 3 級起多「一樣」選項。
+    - ODD NOTE：8 級，先播原句再播改了一個音的版本，用 ←→ 選出改掉的音、按 A 作答。
+  - HINT ON / OFF：在標題按 ←→ 切換。OFF 是「只靠聲音」的進階模式，星鐘管不亮、時間軸只畫節奏點，分數 ×2。
+  - 同步：畫面上「現在亮哪根、時間軸畫到哪」都由 driver 的 `row / rowFrame` 推回，沒有用 Date.now。
+  - 節奏判定（幀）：
+    - 先依玩家彈的總長換算速度（容許 0.8~1.25 倍）；
+    - 每個音距的誤差要 ≤ max(6 幀, 30%)；
+    - 全部 ≤ 4 幀算 PERFECT；
+    - 平均誤差換算成毫秒顯示。
+  - goal = REPLAY 第 6 級過關。
+- **聲道分工（兩款相同）**：遊玩時的 BGM **只用 tri + noi**（simon_play、tune_beat 節拍器），鍵音固定走 p1（priority 6），系統音效走 p2。所以鍵音和 BGM 同時在響，互相不搶聲道（測試有量：p1 owner = 鍵音時，BGM 仍在播，row 持續前進）。
+- **機器人只讀畫面 / 聲音**：
+  - 看：simon 讀 PPU BG 調色盤，tune 讀屬性表。
+  - 聽：讀 APU 方波 1 的實際 timer → 頻率 → 半音。EAR、HINT OFF、HIGH-LOW、ODD 都靠這個。
+  - 只在亮起 / 響起的上升緣記下一顆；tune 另外記下幀號，照同樣的音距彈回去（±2 幀誤差）。
+  - `&lag=N`：反應延遲（預設 14）。
+  - 防偷看驗證：測試把隱藏答案（`g.seq` / 題目物件）包成 Proxy，bot() 執行期間讀取 0 次。
+- §6 規則全做：密技在遊玩中 = 命 +1，在 GAME OVER = 原地續關（同步數 / 同級同題，命補 3），在標題無效，用過後 goal 為 false；暫停用 `pause / resume`；`exit` 存紀錄；`backTile`；`HOLD START+SELECT: MENU`；`C/★ = CHEAT`。bestText：simon `07STEP`、tune `  LV06`。
+- `cart4.html` 只在 `cart4:games` 標記之間插入 6 行 script。
+
+### 2. 驗證數字
+| 項目 | 結果 |
+|---|---|
+| `run_all.sh --quick` | **總結 PASS**（全綠，含 cart4 八款測試）。第一次跑時 cart3 `test_gomoku` 的「AI 每幀 ≤ 15 ms」量到 15.2 ms 紅了（牆鐘量測，當時同機並跑我的測試；不是本卡的檔），重跑就綠了 |
+| `games/cart4/test_simon.py` | **51/51** |
+| `games/cart4/test_tune.py` | **60/60** |
+| `playthrough_cart.py --page cart4.html --game simon`（含 `--hint`） | goal **7096 幀**，每線 **2**，overFrames **0**，VBlank 尖峰 **48** |
+| `playthrough_cart.py --page cart4.html --game tune`（含 `--hint`） | goal **6090 幀**，每線 **2**，overFrames **0**，VBlank 尖峰 **53** |
+| simon 延遲 0 / 14 / 24 幀 | 5521 / 7096 / 8296 幀達成 goal，0 失誤、0 重看；EAR（純聽音）/ REVERSE / OCTET 都 0 失誤完成 8 步 |
+| tune 延遲 0 / 14 / 24 幀 | 5874 / 6042 / 6162 幀達成 goal，0 失誤；HINT OFF / HIGH-LOW / ODD / HIGH-LOW HINT OFF 都 0 失誤過 4 級（HIGH-LOW、ODD 另外實測過 6 級，約 10400 幀） |
+| `apu_render.py --game cart4/simon` / `cart4/tune` | 28/28、35/35 PASS（simon_play / tune_beat 只有 tri + noi） |
+| 截圖 lint | 標題 / 遊玩 / 亮燈 / HIGH-LOW / ODD 全部 PASS（≤ 13 色）；`shots/agent_cart4-sound/` 留 3 張 |
+
+### 3. 偏離
+1. brief §1-5 寫「展示階段可用 B 重看一次」。simon 的 OCTET 和 tune 的 B 是換組鍵，所以重看一律用 **SELECT**；simon 的 4 鍵模式 B 也可以用。
+2. tune 的「十字鍵 + A / B 組合」採用 brief §1-3 的「十字鍵 + 按住 B 換第二組」，和 simon OCTET 一致。A 只在 ODD NOTE 當確認鍵。
+3. tune 的 goal 取比較嚴的「第 6 級**過關**」，不是「進入第 6 級」。
+4. HIGH-LOW 在 HINT ON 時，兩顆音標的高度直接畫出音高（每半音 2.5 px），這樣聽障玩家也能玩。真正考耳朵的是 HINT OFF（分數 ×2）。
+
+### 4. 跨檔需求
+- 無。沒有動 engine / registry / shell / cart1~3。順帶一提（不需要改）：`NES.Music` 是門面，曲子位置要從 `nes.music._default.row` 讀。tune 已經用 `_default || d` 處理。
+
+### 5. 留給後續
+- simon 的星標高光在暗燈時也是白點，對比可以再拉大（例如暗燈時色 3 改淡色），但這要給文字另外配一組調色盤。
+- tune 可以加「自由彈奏」練習模式（彈任意音 + 錄音重播）。
+- 兩款的手機觸控沿用 engine 的十字鍵 + B 多指，只用桌機驗過按鍵契約，沒有另外用 mobile_shot 實測 B + 方向兩指同按。
+
+## fix-r7-slide（R7，2026-11-13）
+
+### 1. 做了什麼
+- **P2-1 lines 星橋 / 星門看不清、沒教學**
+  - 背景色 1 從暗灰 $00 改成亮灰 $10（格點、有線經過時的機關結構）。空的機關改用亮色，而且三種機關各用一組調色盤的色 3：星橋 = 白欄杆紅柱（組 0），星門 = 青色傳送環（組 2），星鏡 = 金色斜鏡（組 1）。
+  - 星橋重畫成「從上往下看的橋」：橫線走在橋面上，上下各留 1 px 黑邊；直線從兩道欄杆底下鑽過，一眼看得出立體交叉。還沒被兩條線填滿時，欄杆每 32 幀閃一次：空橋白↔灰，只過一條線時灰↔該線色。這是另一組 `B..x` 磁磚，走差異佇列，只送變了的格子。
+  - 新增教學頁 `tutor` 模式：每種機關第一次出現的關卡（第 11 關星橋、第 21 關星門、第 26 關星鏡，RANDOM 也算）開場先跳一頁。內容是「EMPTY → SOLVED」兩張用真格子磁磚畫的示意盤，加三行說明，按 A 關閉。看過的機關存在 `CT.save('lines','seen')`，只跳一次。
+  - RULES 頁重排成每列 ≤ 31 欄。範例圖改用遊戲內同一組格子磁磚，空的機關和有線經過的樣子並排（橋 / 門 / 鏡各一組）。
+  - 全部連成、但還有星橋沒被兩條線穿過時，訊息列顯示 `EACH BRIDGE NEEDS 2 LINES`。
+- **P2-2 lines 選關畫面**：關卡號表格改排在第 4~14 列，說明改到第 17 / 19 / 21 列（LV / 章名 / 星數、尺寸 / 對數、機關名稱），圖例在第 23 / 25 列，`A PLAY B BACK` 在第 27 列。36 關全部看得到。
+- **P2-4 slide 拼片相同**
+  - 完成判定改成「內容等價」：每片換成畫面上的 1024 個 NES 色像素（磁磚色號經該區調色盤換色）。兩片只差 ≤ 12 px（散落的星點 / 網點，肉眼分不出）就用併查集歸成同一類；`SV.solvedEq(arr, cls)` 比的是類別，不是片號。SLIDE 的空格自成一類。
+  - 解題器先 `SV.canon` 依內容重新編號再解。SLIDE 如果因為重新編號變成奇偶不可解，就把同類兩片的號碼對調。標準步數 / 提示 / 密技 / 機器人都走同一份「解題計畫」快取，避免同類片每次重算時編號不同、機器人來回推。
+  - 打亂後如果按內容已經算拼好，就換下一個 seed。
+  - 片號輔助開關：標題新增 `NUMBERS ON/OFF` 列；SLIDE / SWAP 遊玩中長按 SELECT 30 幀也能切換（ROTATE 的長按 SELECT 仍是提示，改從標題切）。設定存 `CT.save('slide','nums')`。
+  - 片號用精靈畫：每片左側中段放 1 顆 8×8 黑底白字的 3×5 小數字（N1~N25）。一列最多 5 顆，和游標角 / 選取框錯開掃描線；精靈組 2 的色 1 改成黑 $0F。
+- **P3-4**：slide 標題改成 `A PLAY  B RULES` 和 `C/★ = CHEAT` 同一列分開寫（第 25 列，第 2 欄 / 第 20 欄），`HOLD START+SELECT: MENU` 單獨一列，不再黏成 `MENUCHEAT`。
+- **P3-5 HUD 下移**
+  - slide：標題 / 遊玩的第一列文字改到第 2 列。
+  - lines：標題 / 時間在第 2 列；連線 / 填滿 / 提示數移到盤面下方第 23 列。9×9 的盤框在第 3 列，和第 2 列 HUD 不重疊。訊息在第 25 列，操作說明在第 26 / 27 列。
+- **P3-7 lines 自創機關「星鏡 MIRROR」**
+  - 規則：格子裡有一面斜鏡（/ 或 \），線碰到一定照鏡面反彈 90°。「/」只准左↔上、右↔下，「\」只准上↔右、左↔下。鏡格要被一條線經過，不能當端點。
+  - 和「隨便轉彎」不同，鏡面朝向決定了從哪一側進、就從哪一側出。
+  - 實作：`gen.js` 的圖模型加 `mir` / `mirE`，解題器傳播加「成對兩邊同開同關」。產生器用 `spec.mirrors` 只放在內部格，走進鏡格時強制反彈，反彈出去的那格要還空著。關卡字串加第 6 欄 `x,y,t`，舊關卡字串不變。
+  - 遊戲中走進鏡格後，只能往鏡面指定的方向出去，其他方向會擋下並提示 `THE MIRROR SENDS IT UP` 之類；面向牆的方向也會擋。完成判定另外檢查鏡面規則。
+  - 關卡：第 26~30 關改成新章 **STAR MIRRORS**（8×8，雙鏡，28~30 加 1 座橋）。第 31~36 關 NEBULA HEART 重新產生：9×9，橋 1~2、門 1、鏡 2。RANDOM 改成 7×7 橋 + 門 + 鏡。
+  - 第 1~25 關一個字都沒動（goal 不受影響），舊存檔的星數照舊。
+
+### 2. 驗證數字
+| 項目 | 結果 |
+|---|---|
+| `test_slide.py` | **57 / 57**（原 47 + 10）：星鯨 4×4 第 12/13 片、5×5 第 20/21 片同類；SWAP 星鯨 4×4 只差 12↔13 ⇒ 判定完成；ROTATE 星鯨 4×4 只差 12↔13 ⇒ 完成；滑塊 48 盤依內容重新編號後解到內容完成；片號開關 + 存檔；5×5 片號全開每線 ≤ 8；標題無 `MENUCHEAT`；第 1 列空 |
+| `test_lines.py` | **63 / 63**（原 41 + 22）：36 關唯一解；星鏡 11 關、第一面在第 26 關、正解都照鏡面反彈；解題器 vs 獨立暴力列舉 223 盤計數一致（含 0 / 1 / 多解 10 盤）；產生器 `mirrors` 可重現 + 編碼來回一致；遊戲中鏡格擋錯方向；色 1 = $10；空橋閃爍 B00↔B00x、空門組 2、空鏡組 1；bank 251 ≤ 256；第 11 / 21 / 26 關教學頁 + 看過不再跳；選關 36 個關卡號都在名稱表上；HUD 第 1 列空；機器人照解題器解第 26、36 關 |
+| `playthrough_cart --page cart3.html --game slide` | goal **1367 幀**、每線峰值 **2**、overFrames **0**、VBlank 尖峰 60 |
+| `playthrough_cart --page cart3.html --game lines` | goal **2127 幀**、每線峰值 **3**、overFrames **0**、VBlank 尖峰 93 |
+| `run_all.sh --quick` | **總結 PASS**（全部測試 + 8 入口 build --check 綠；cart4 / 其他卡帶的測試也綠） |
+| 產生器速度（node） | 8×8 雙鏡一關約 35 ms；9×9 橋 + 門 + 雙鏡約 0.7 s、雙橋約 2 s（只在烘關卡 / 測試重跑時用；RANDOM 是 7×7） |
+| 截圖 | `shots/agent_fix-r7-slide/lines_lv34_bridge_gate_mirror.png`（星橋交叉 + 閃爍兩相、青色星門、金色星鏡）、`lines_tutor_rules_select.png`（3 張教學頁 + RULES + 選關第 36 關）、`slide_numbers_title.png`（星鯨 SWAP 4×4 片號 + 標題），lint 全綠（≤ 11 色） |
+
+### 3. 偏離
+- P2-4「內容相同」用「畫面像素差 ≤ 12 px 視為同一片」，不是嚴格相同。實測星鯨 4×4 第 12 / 13 片在目前的圖檔還差 10 px（右上角幾顆暗藍網點），嚴格比對抓不到 QA 回報的這組。差 13~40 px 的片（例如星鯨 5×5 (3,0)/(3,1) 差 23 px）不合併，交給片號輔助。
+- 片號用精靈不用背景：盤面磁磚要跟著片走，疊數字磁磚會改到片的圖面和屬性。一片一顆精靈、一列 ≤ 5 顆，不影響「盤面走名稱表」。
+- ROTATE 模式長按 SELECT 已經是提示，所以這個模式只能從標題切片號。
+- P3-7 選了「星鏡」，沒做單向格 / 必經星：它和星橋 / 星門一樣能用「節點 + 邊約束」放進唯一解驗證，畫面也直觀。後段放在第 26~36 關，沒有照 QA 建議提前到第 2 章，因為 brief 指定後段。第 26~30 關原本的 DEEP SKY（8×8 橋 + 門）被 STAR MIRRORS 取代，星門關剩 11 關（21~25、31~36）。
+
+### 4. 跨檔需求
+- 無。`games/cart3/cart.js` 的 lines 圖示（P3-1，fix-r7-shell）可參考新截圖：甜甜圈星珠 + 粗色線；招牌機關可用金色斜鏡或白欄杆星橋。
+
+### 5. 留給後續
+- 星門目前每關最多 1 對；之後可以做 2 對，用顏色或記號區分成對。
+- 片號輔助可以改成只在「近似片」上顯示（現在是全部顯示）。
+- lines 的背景 bank 已用 251 / 256，再加機關要先精簡字型（`%()^'*>` 之類沒用到的字）。
+
+## cart4-brain（R8，2026-11-13）
+
+### 1. 做了什麼
+- **⑦ `brain` 星塵腦力 STAR BRAIN**（`games/cart4/brain/{art,song,core,dual,multi,track,tilt,main}.js`，order 7，全域只掛 `CT.Brain`；CHR / 曲 / 音效一律 `brain_` 前綴）。舊作 dual-hand-sync / multitask-challenge / time-space-tracker / gravity-sense 只取玩法。
+  - 共用框架（`main.js` + `core.js`）：標題（4 模式 + 各自最佳評價）→ **說明頁**（規則 + 手把對照圖：十字鍵 / SEL STA / B A 下方寫各鍵用途 + 起始等級選擇，只能選已到過的等級）→ 每級 `READY 3 2 1`（A 可跳過）→ 遊玩 → 合格 / GAME OVER → **結算大字評價 S~D + 稱號**（評價只在未用密技時存檔；不是從第 1 級開始的那局最高 B）。名稱表 / 屬性全走差異佇列（每幀 ≤ 140 byte）、OAM 只用 0..61。
+  - **TWIN SYNC 雙手同步**（`dual.js`，8 級 × 20 秒）：左半十字鍵開星艇在 3 條跑道閃隕石（每排保證留一條相鄰空道，第 2 級起兩顆並排）、撿星屑；右半 A / B 把晶礦 GEM / 廢渣 JUNK 在分揀區（兩條虛線間）分進左右槽，**第 5 級起兩槽規則對調**（先閃 2 秒預告）。分錯 / 漏分 / 被撞 −1 心（5 心，每級回 1）；分揀區外按鍵不算錯（友善）。
+    - **PPU**：一層背景 + 一條 split。line 0..143 = 流動場地（名稱表列 0..18 每列相同 ⇒ 週期 8 px，主捲動 y 7→0 循環，跑道 / 星塵流線 / 中央柱往下流）；split(144) 以下捲動 y = 152 ⇒ 畫面列 18..28 顯示名稱表列 19..29（固定的星艇甲板、分揀區、閘門、收集槽、底部 HUD，SMB3 式底部狀態列）。分區靠屬性：左半組 1 / 中央柱組 3 / 右半組 2 / HUD 組 0。
+  - **JUGGLE 多工**（`multi.js`）：2×2 四格控制台，每格 16×12 磚 = 8×6 屬性區塊，**待命格組 0（灰）、運作格組 1 / 2、失誤閃組 3（紅）**；split(32) 讓 HUD 固定、失誤時場地橫震 ±2 px。DRIFT（←→ 抵抗會變的風，風向 / 風力畫在軌道上）、PUMP（A 打油，漏油 + 破洞加倍，空 / 滿出都失誤；只認按下邊緣）、SIGNAL（↑↓ 照箭頭按，第 4 級起一次兩個）、SHIELD（流星進護盾環按 B，空揮冷卻 30 幀）。時間軸 0~20 秒 2 件 / 20~45 秒 3 件 / 45~90 秒 4 件，**90 秒（5409 幀）= 任務達成 = goal**，之後 OVERTIME 兩級加速到 150 秒結算；新任務開放前 3 秒待命格閃 NEXT 並寫出用鍵。
+  - **TRACER 時空追蹤**（`track.js`，8 級 × 3 回合）：星格盤（每格 16×16 = 一個屬性區塊，4×4 → 6×6）上 1~3 個物件（金彗星 / 青晶礦 / 粉雙環——**顏色 + 形狀**雙重區分）一步一步走；題型 NOW / START / STEP n；第 5、8 級 **CLOAK 盲段**：物件隱形、只在提示框給箭頭（第 8 級一次只顯示一個）；第 6 級兩物件同時走。十字鍵移選格框 + A 作答，**B = 重看一次（扣這題一半分數，不扣心）**，限時 10 秒；答錯 −1 心（3 心，每級回 1）。產生器保證同一步兩物件不重疊、不立刻折返。
+  - **TILT 重力感應**（`tilt.js`，8 張原創星盤）：16×12 個 16×16 金屬塊（**每塊 = 一個屬性區塊**：地板 / 洞 / 起點 / 星屑組 1、牆組 2、星門 / 冰 / 輸送帶組 3）；傾斜時 split(32) 以下星盤往傾斜方向位移 ±2 px（假透視，名稱表 1 與最下兩列鋪牆磚）、HUD 水平儀氣泡。**物理全整數（1/256 px）**：傾斜慣性（每幀 ±1、最大 12）、a = tilt × 3、摩擦 v × 14/256（冰 2/256）、輸送帶 +20、撞牆該軸 × −110/256、每幀拆 ≤ 2 px 子步逐軸查 6×6 碰撞盒四角、洞 / 星門 9 px 內吸力、≤ 5 px 落入。洞 = −1 心回起點；時間到 = −1 心重新計時（友善版，不直接結束）。FIRST ROLL（無洞）/ TWO WELLS / ZIGZAG / ICE LAKE / CONVEYOR / BRIDGE / SPIRAL / GAUNTLET。
+  - 音樂 7 首（思緒星雲 / 左右對稱（p1 問 p2 答）/ 四方運轉 / 軌跡殘影（全音音階）/ 滾動星珠 / 合格 / 思緒中斷）+ 音效 14 個；暫停用 `pause()/resume()`。
+  - §6：遊玩中密技 = 愛心補滿 + 模式加料（TWIN 清場 + 無敵、JUGGLE 全部任務回安全狀態、TRACER 作答計時重置 + 可再重看、TILT 時間補滿）；GAME OVER = **原地續關**（同一級 / JUGGLE 同一階段起點，愛心補滿、分數保留）；標題 / 說明 / 結算無效；用過那局 goal false。暫停 BGM 停、HUD 第 3 列 `PAUSE  HOLD START+SELECT: MENU`；標題 / 說明頁 `HOLD START+SELECT: MENU`、`C/$ = CHEAT`；exit 存最高分；backTile = 實心星（spr STARS）。
+  - **機器人**（`?bot=1`，`&botmode=1..4` 選模式、預設 2 = JUGGLE；`&lag=N` 預設 15）：每幀記一份「畫面上看得到的東西」（`M.observe()`），策略只讀 L 幀前那份；自己的手（跑道 / 游標）與自己按過的鍵（打油次數、剛擊碎的流星、TILT 的傾斜輸入）用目前值補（= 人的本體感覺 / 內部模型）。TRACER 只記 SHOW 當下看到的物件位置與提示框箭頭；TILT 用 Dijkstra（洞旁加權）+ 9 方向 × 2 按法各模擬 28 幀挑最安全的。
+- `cart4.html` 在 `cart4:games` 標記內插入 8 行 script（art / song / core / dual / multi / track / tilt / main）。
+
+### 2. 驗證數字
+| 項目 | 結果 |
+|---|---|
+| `games/cart4/test_brain.py` | **78/78**（約 70 秒；`--quick` 略過長跑機器人）：契約 / 資產、四模式等級遞增、TWIN 排距 ≥ 40 px、JUGGLE 時間軸 5409 幀、TILT 8 盤 BFS 可達、標題 / 4 張說明頁文字、起始等級鎖、TWIN split(144)+y152 與捲動 0..7、流動區每列相同、四區屬性、分揀正誤 / 漏分 / 撞擊 / 換跑道 / 第 5 級對調、JUGGLE 四格屬性與 20 秒開放、PUMP 按住只算 1 下 / 溢出、SIGNAL 正誤、SHIELD 冷卻 / 擊碎、DRIFT 整數、TRACER 200 回合軌跡合法、作答時物件隱藏、B 只能重看一次 / 半分、答錯扣心、TILT 傾斜慣性、8 盤 × 1500 幀亂按不穿牆且全整數、洞落入回起點、split 位移 ±2 + nt1 牆、屬性 = 金屬塊、暫停 / BGM / 提示字、續關、密技 goal false、exit 存分、評價存檔 / B 上限、名稱表 == 影子、機器人 lag 15 / 0 / 24 goal、四模式機器人打到結算、觀察不含未來計時 |
+| `playthrough_cart.py --page cart4.html --game brain` | goal **5585 幀**（標題 → 說明頁 → JUGGLE 90 秒），每線 **2**，overFrames **0**，VBlank 尖峰 **106**；`--hint` 5584 / 2 / 0 / 106 |
+| 同上 `--query lag=0 / 12 / 24 / 30` | 全部 goal 5585 幀、每線 2、over 0 |
+| TWIN `--hint --query "botmode=1&gmode=1"` 12000 幀 | 每線 **8**（設計上限：雙顆隕石 4 + 星艇 2 + 晶礦 2；頂端 y16 帶最多 6 + 提示 2）、over 0、尖峰 51 |
+| 四模式機器人打到結算（lag 0 / 15 / 24） | TWIN 11543 幀 S 0 失誤（三種延遲同）；JUGGLE 9255 幀 S 0 失誤；TRACER 9394 / 9754 / 9970 幀 S 0 失誤；TILT 3988 / 4108 / 4180 幀 S 0 失誤；每線 8 / 2 / 4 / 1，over 全 0 |
+| `apu_render.py --game cart4/brain` | 7 首 **49/49** PASS |
+| 截圖 lint | 標題 10 色、TWIN 23 色、JUGGLE 13 色、TRACER 12 色、TILT 18 色、說明頁 8 色，全部 PASS |
+
+截圖：`shots/agent_cart4-brain/dual.png`（TWIN 第 6 級，對調後）、`multi.png`（JUGGLE 第 3 階段四格全開）、`tilt.png`（GAUNTLET）。
+
+### 3. 偏離
+1. TWIN 的 HUD 放在**畫面下方**：一條 split 只能切成「上 / 下」兩段捲動，要讓場地流動又要固定的甲板 / 閘門 / 收集槽，只能「上段流動、下段固定」，HUD 跟著進下段（SMB3 式底部狀態列）。其他三模式 HUD 在上方。
+2. 「雙手同步」右半不是第二個跑道，而是**決策型**分揀（A / B 二選一 + 第 5 級起規則對調），讓左右兩手是不同性質的認知任務。
+3. JUGGLE 不提供起始等級選擇（等級 = 時間階段，goal 要從 0 秒撐到 90 秒）；其餘三模式可從已到過的等級開始，但評價上限 B。
+4. 機器人在四個模式都不會失誤（含 lag 24）：機器人沒有「注意力切換」成本，這四款的難點對人是分心 / 記憶 / 手感，機器人量不出來。難度以「最快 / 最密時的反應窗口 ≥ 32 幀」（TWIN 第 8 級分揀區 34 幀、JUGGLE SHIELD 第 5 級 ≥ 36 幀、SIGNAL ≥ 80 幀）與 TILT 慣性參數設計，給 QA 用人實測再調。
+
+### 4. 跨檔需求
+- 無。只改 `games/cart4/brain/**`、`games/cart4/test_brain.py`、`cart4.html` 標記內 8 行。
+- 給 C8-0：選單圖示目前是「左右兩半的腦」，遊戲主視覺可對照 `shots/agent_cart4-brain/`（標題洋紅大字、TWIN 左藍右綠中灰柱、JUGGLE 青 / 金四格、TILT 綠盤金牆黑洞紅球）。
+
+### 5. 留給後續
+- TWIN 可加「左右對調」關（星艇改 A/B、分揀改十字鍵）與雙人模式（左右各一人）。
+- JUGGLE 150 秒後可開無盡模式 + 排行；四件任務可再加第五種（例如 SELECT 用的「記住數字」）。
+- TILT 可加移動障礙（精靈）與「蒐集全部星屑才開星門」的關；目前星屑只加分。
+- TRACER 可加「倒帶」題型（從終點反推起點）。
+
+## fix-r7-shell（R7，2026-11-13）
+
+### 1. 做了什麼（依 `docs/QA_REPORT.md` `# R7 qa-r7`；只動 `games/cart3/cart.js`、`games/cart3/party/main.js`、`games/cart3/mines/main.js`（HUD 位置）、`test_party.py`、`test_mines.py`）
+- **P3-1 選單圖示**：先用 `cart3.html?game=<id>&bot=1&debug=1` 實拍 8 款修正後的遊戲畫面（`shots/agent_fix-r7-shell/ref_*.png`），再逐一重畫。選單調色盤重新分配（圖示一格 16×16 = 一塊屬性 = 3 色；字只用色 3，所以 BG0 / BG1 的色 1、色 2 可以給圖示）：
+  - BG0 `$1B / $1C / $30`（邊框青綠、星點改青、白字）；BG1 `$12 / $30 / $28`（選中行黃字不變；= gomoku `PAL_BG[1]`）；BG2 `$16 / $28 / $31`（= merge 恆星組）；BG3 logo 不動。
+  - merge（BG2）：恆星——黃日面、紅黃光芒、淡青白核心（對照 fix-r7-number 新配色）。
+  - sudoku（BG0）：2×2 宮，亮青宮（$1C = 遊戲宮底）與暗宮交錯，白字數字。
+  - gomoku（BG1）：金框藍格，金太陽石 ×2、白月亮石 ×2（帶高光 / 藍邊點）。
+  - slide（BG1）：藍框金角、3×3 拼片缺右下一片，片上是白塔金燈燈塔、光束、月、海浪、金色岸。
+  - lines（BG2）：兩對甜甜圈星珠（紅直、黃橫），中央白欄杆紅柱的星橋——黃線走橋面、紅線從底下鑽過。
+  - labyrinth（BG0）：黑底苔綠牆（$1B = MOSS 亮組）+ 戴白頭燈的露明、右下出口光點（對照 `shots/fix-r7-maze/dark_before_after_800f.png` 下排）。
+  - mines / party：造型不動，換到 BG2（紅身黃刺星塵雷 + 淡色信標旗；手套紅框黃身）。
+- **P3-5 HUD 貼頂**
+  - party：三種模式的 HUD 從第 1 / 2 列（畫面 y = 0）移到第 2 / 3 列（`HUD_ROW = 2`）。原本第 3 列的上框線讓給 HUD，改畫在第 1 列（純裝飾），左右框從第 2 列起把 HUD 一起框住。其他版面（盤面、手、牌）不動。
+  - mines：`hudRow()`——盤框頂在第 5 列以下時 HUD 用第 2 / 3 列。EASY（10 列）本來就有空；NORMAL（11 列）盤面 `oy` 由 4 改 6（盤框第 5~28 列，第 28 列的操作說明讓位，同 HARD）。HARD（12 列，盤框第 3~28 列）沒有空列，維持第 1 / 2 列。
+
+### 2. 驗證數字
+| 項目 | 結果 |
+|---|---|
+| `games/cart3/test_party.py` | **68 / 68**（原 67 + 1：遊玩中第 1 列空、STAR CUP 在第 2 列、YOU 在第 3 列） |
+| `games/cart3/test_mines.py` | **43 / 43**（原 42 + 1：EASY / NORMAL 第 1 列空、HUD 圖示在第 2 列、盤框 ≥ 第 4 列、NORMAL oy 6；HARD 維持第 1 列） |
+| `tools/test_cart.py --page cart3.html` | 189 / 189 |
+| `playthrough_cart --page cart3.html --game party` | goal **1203 幀**、每線 3、overFrames 0、VBlank 尖峰 26（與修前相同） |
+| `playthrough_cart --page cart3.html --game mines` | goal **443 幀**、每線 2、overFrames 0、尖峰 140 |
+| 截圖 lint | 選單 14 色 PASS；party 三模式、mines 三難度 PASS |
+| `run_all.sh --quick` | **總結 PASS**（全部測試 + 8 入口 build --check 綠，含進行中的 cart4） |
+
+截圖在 `shots/agent_fix-r7-shell/`：`menu.png`（選單 3×）、`icons_vs_game.png`（8 個圖示放大 + 下方對應遊戲實拍）、`party_hud.png`（三模式）、`mines_hud.png`（EASY / NORMAL / HARD）、`ref_*.png`（各款實拍）。
+
+### 3. 偏離
+- sudoku 圖示沒有洋紅高亮：選單 4 組調色盤有 3 組被字 / 邊框 / logo 各佔掉 1~3 色，sudoku 只能用 BG0（青綠 / 青 / 白），暗宮畫成黑底。
+- slide 燈塔是白塔藍條紋，不是遊戲的紅白條紋（BG1 給了 gomoku 的藍白金；換成紅就沒有藍框藍海）。party 手套從洋紅框橘身變成紅框黃身（BG2 給 merge 恆星組）。
+- mines HARD 的 HUD 仍在第 1 列（沒有空列，qa-r7 允許）；NORMAL 為了下移 HUD，盤面整體下移 2 列、底部操作說明不顯示（HARD 本來就不顯示）。
+- party 的上框線移到第 1 列（畫面 y = 0~3 的裝飾線），HUD 本身從 y = 8 開始。
+
+### 4. 跨檔需求
+- 無（cart1/2/4、shell、registry、engine、其他 cart3 遊戲都沒動）。選單 BG0 色 2 由灰 $10 改青 $1C，只影響 cart3 的兩顆星點與開機底線。
+
+### 5. 留給後續
+- 若之後 shell 支援「圖示用精靈疊色」或每槽 2 組屬性，sudoku 可補洋紅高亮、slide 補紅白燈塔。
+- mines HARD 若要統一，可考慮把 HUD 壓成一列（訊息出現時暫代統計列），或縮小盤框。
+- 2026-11-13 cart5-text（R9 C9-0）：**CT.Text 可用**——`cart5.html` 已載 `games/cart5/glyphs.js` + `text.js`；用法 ENGINE_API §17：`CT.Text.reserve(bankObj, N)` → `T = CT.Text.create(nes, {bank})` → `T.box({x,y,w,h}).say(text, {name, onClose})`（逐字、▼ 翻頁、A 加速、自動斷行 / 分頁不截斷）/ `T.menu({x,y,items,onChoose})` / `T.scroll({x,y,w,h}).setText()` / `T.print()`，每幀 `T.update()`；字形上傳每磚 16 byte 計 VBlank 預算；改文字後跑 `$PY tools/cjk_glyphs.py`（文字放 `games/cart5/<id>/text_*.js` 字串常值）；範例 `?game=textdemo`。

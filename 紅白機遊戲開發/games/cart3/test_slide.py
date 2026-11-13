@@ -206,6 +206,42 @@ def main():
     r = page.evaluate("""() => { const m0 = GAME.state().s.moves; const c = CT.cheat(); __nes.step(2); const s = GAME.state().s; return { c, moved: s.moves - m0, cheat: s.cheatUsed, goal: GAME.state().goal }; }""")
     ok('§6-1 遊玩中密技 = 解題器代走 10 步；用過之後 goal 一律 false', r['c'] and r['moved'] == 10 and r['cheat'] and r['goal'] is False, r)
 
+    # ---------------- fix-r7：內容等價 / 片號輔助 / 標題文字 / HUD 不貼頂 ----------------
+    r = page.evaluate("""() => { const d = CT.Slide.dev; return { c4: d.classes(5, 4, false), c5: d.classes(5, 5, false), s4: d.classes(5, 4, true) }; }""")
+    ok('P2-4 內容等價：星鯨 4×4 第 12/13 片、5×5 第 20/21 片同類（畫面像素只差 ≤ 12 px）', r['c4'][12] == r['c4'][13] and r['c5'][20] == r['c5'][21], (r['c4'], r['c5']))
+    ok('P2-4 滑塊的空格片自成一類（不和別片合併）', r['s4'][15] == 15 and r['s4'].count(15) == 1, r['s4'])
+    page.evaluate('() => { CT.Slide.dev.start(1, 4, 5); __nes.step(2); }')
+    r = page.evaluate("""() => { const g = CT.Slide.dev.g(); const a = [...Array(16).keys()]; a[12] = 13; a[13] = 12; a[0] = 1; a[1] = 0; g.arr = a; g.pickPos = -1; g.plan = null;
+        g.cr = 0; g.cc = 0; NES.Input.inject(1, 1); __nes.step(2); g.cr = 0; g.cc = 1; NES.Input.inject(1, 1); __nes.step(3);
+        const s = GAME.state().s; return { mode: s.mode, arr: s.arr.slice(12, 14), exact: CT.Slide.Solve.solved(s.arr) }; }""")
+    ok('P2-4 SWAP 星鯨 4×4：第 12/13 片互換、其餘拼好 ⇒ 判定完成', r['mode'] == 'done' and r['arr'] == [13, 12] and not r['exact'], r)
+    page.evaluate('() => { CT.Slide.dev.start(2, 4, 5); __nes.step(2); }')
+    r = page.evaluate("""() => { const g = CT.Slide.dev.g(), S = CT.Slide.Solve; const a = [...Array(16).keys()]; a[12] = 13; a[13] = 12; S.rotate(a, 4, 1, 1, false); g.arr = a; g.plan = null;
+        g.cr = 1; g.cc = 1; NES.Input.inject(1, 1); __nes.step(3); return GAME.state().s.mode; }""")
+    ok('P2-4 ROTATE 星鯨 4×4：第 12/13 片互換仍判定完成', r == 'done', r)
+    r = page.evaluate("""() => { const S = CT.Slide.Solve, d = CT.Slide.dev; let ok = 0, bad = [];
+        for (const pic of [0, 3, 5]) for (const n of [4, 5]) { const cls = d.classes(pic, n, true);
+          for (let s = 1; s <= 8; s++) { const a = S.scrambleSlide(n, s * 97 + pic), c = S.canon(a, cls, n), m = S.slide(c, n), b = a.slice();
+            if (m) for (const x of m) S.slideMove(b, n, x); if (m && S.solvedEq(b, cls)) ok++; else bad.push([pic, n, s]); } }
+        return { ok, bad }; }""")
+    ok('P2-4 滑塊：依內容重新編號後仍可解（奇偶修正）、解題器解到「內容完成」（48 盤）', r['ok'] == 48 and not r['bad'], r)
+    page.evaluate('() => { CT.Slide.dev.start(0, 5, 0); __nes.step(2); }')
+    r = page.evaluate("""() => { const n0 = GAME.state().s.nums; NES.Input.inject(4, 32); for (let i = 0; i < 32; i++) __nes.step(1); NES.Input.inject(0, 1); __nes.step(2);
+        const s = GAME.state().s;
+        let ml = 0; for (let f = 0; f < 40; f++) { NES.Input.inject(f % 8 === 0 ? 128 : 0, 1); __nes.step(1); ml = Math.max(ml, __nes.stats().maxSpritesLine | 0); }
+        return { n0, n1: s.nums, undo: s.undo, saved: CT.load('slide', 'nums', 0), ml }; }""")
+    ok('片號輔助：SLIDE / SWAP 長按 SELECT 切換（不算復原）、設定存檔', r['n0'] is False and r['n1'] is True and r['undo'] == 0 and r['saved'] == 1, r)
+    ok('片號輔助 5×5 開啟：每線精靈 ≤ 8（一列 5 顆片號 + 游標錯開掃描線）', 0 < r['ml'] <= 8, r)
+    page.evaluate('() => { CT.Slide.dev.title(); __nes.step(2); }')
+    rows = screen()
+    txt = '\n'.join(rows)
+    ok('P3-4 標題：C/★ = CHEAT 完整一段、不再黏成 MENUCHEAT', 'C/$ = CHEAT' in txt and 'MENUCHEAT' not in txt.replace(' ', ''), [r_ for r_ in rows if 'CHEAT' in r_])
+    ok('標題有 NUMBERS 開關列', 'NUMBERS' in txt)
+    top_title = rows[1].strip()
+    page.evaluate('() => { CT.Slide.dev.start(0, 3, 0); __nes.step(2); }')
+    rows = screen()
+    ok('P3-5 HUD 不貼頂：標題 / 遊玩畫面第 1 列（y=0）留空、標題字在第 2 列', top_title == '' and rows[1].strip() == '' and 'STAR SLIDE' in rows[2], (top_title, rows[1], rows[2]))
+
     # ---------------- 機器人 ----------------
     fresh(page, '&bot=1')
     rr = page.evaluate(RUN, {'n': 30000, 'until': 'goal'})

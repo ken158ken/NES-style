@@ -275,6 +275,38 @@ def main():
     ok('機器人沒用復原（解題器自己走）', r['s']['undos'] == 0, r['s']['undos'])
     page.evaluate('() => __nes.render()')
 
+    # fix-r7 P3-6：12 階主色各不相同、相鄰階不同調色盤槽位
+    fresh(page)
+    hues = page.evaluate('() => CT.Merge.TIERS.slice(1).map(t => t.hue)')
+    ok('P3-6 12 階主色兩兩不同（12 種）', len(set(hues)) == 12, hues)
+    dom = page.evaluate("""() => { const A = CT.Merge.Art.make(), out = [];
+        for (let t = 1; t <= 12; t++) { const cnt = [0, 0, 0, 0];
+          for (let j = 0; j < 9; j++) { const px = NES.CHR.getBank('merge_bg').tiles[A.tierTile(t, j)]; for (let k = 0; k < 64; k++) cnt[px[k]]++; }
+          const c = [1, 2, 3].sort((a, b) => cnt[b] - cnt[a])[0];
+          out.push(__nes.nes().ppu.getBgPalette(CT.Merge.TIERS[t].pal)[c - 1 + 1] ); }
+        return out; }""")
+    ok('P3-6 每階實際最多的顏色（NES 色號）12 種都不同', len(set(dom)) == 12, dom)
+    ok('P3-6 相鄰階最多的顏色都不同', all(dom[i] != dom[i + 1] for i in range(11)), dom)
+    # fix-r7 P3-3：黑洞模式第一次進入的說明卡
+    tap(page, RIGHT); tap(page, RIGHT); tap(page, RIGHT)
+    tt = page.evaluate("""() => { const p = __nes.nes().ppu, A = CT.Merge.Art.make(); let s = '';
+        for (let c = 0; c < 32; c++) { const t = p.getTile(0, c, 24); let ch = ' '; if (t) for (const k of 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/') if (A.ch(k) === t) { ch = k; break; } s += ch; } return s; }""")
+    ok('P3-3 標題選 HOLE：說明列改成 HOLE EATS DUST  JUMPS/24', S(page)['menu'] == 3 and 'HOLE EATS DUST  JUMPS/24' in tt, tt)
+    tap(page, A, 8)
+    st = S(page)
+    ok('P3-3 第一次進 HOLE：先出說明卡（intro）、計時不跑、滑動無效', st['intro'] and st['gameMode'] == 'hole', st['intro'])
+    m0 = S(page)['moves']
+    tap(page, LEFT); tap(page, UP)
+    ok('P3-3 說明卡期間十字鍵不滑動、時間 0', S(page)['moves'] == m0 and S(page)['time'] == 0)
+    tap(page, A)
+    ok('P3-3 按 A 關閉說明卡並記住（seenHole）', not S(page)['intro'] and page.evaluate('() => CT.load("merge", "seenHole", 0)') == 1)
+    page.evaluate('() => { __nes.step(6); }')
+    start(page, 3, 9)
+    ok('P3-3 第二次進 HOLE 不再出現說明卡', not S(page)['intro'])
+    setc(page, [0] * 12 + [-1, 1, 0, 0, 0] + [0] * 8)
+    tap(page, LEFT)
+    ok('P3-3 吞噬時訊息列寫 GULP +5', S(page)['msg'] == 'GULP +5' and S(page)['swallowed'] == 1, S(page)['msg'])
+
     ok('全程沒有頁面錯誤', not errs, errs[:3])
     browser.close()
     pw.stop()

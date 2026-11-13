@@ -70,12 +70,16 @@
   function beats(a, b) { return (a - b + 3) % 3 === 1; }
 
   /* ---------------- 名稱表影子 + 差異佇列 ---------------- */
+  // fix-r7-shell（qa-r7 P3-5 HUD 貼頂）：HUD 兩列從第 1 / 2 列（畫面 y = 0）下移到第 2 / 3 列（y = 8 起）；
+  // 原本第 3 列的上框線讓給 HUD，改畫在第 1 列（只是裝飾線），左右框從第 2 列起把 HUD 一起框住
+  var HUD_ROW = 2;
   function bgTile(c, r) {
-    if (r === 3) return art.t('BH');
+    if (r === HUD_ROW - 1) return art.t('BH');
     if (r === 26) return art.t('BHB');
-    if (r < 4 || r > 25) return 0;
+    if (r < HUD_ROW || r > 25) return 0;
     if (c === 0) return art.t('BV');
     if (c === 31) return art.t('BVR');
+    if (r < 4) return 0;
     if (g.mode === 'num' || (c > 3 && c < 28)) return 0;   // 星點只撒在左右兩側（數字盤 / 文字區易讀）
     var h = ((c * 2654435761) ^ (r * 40503) ^ 0x5a17) >>> 0;
     if (h % 13 === 3) return art.t('ST1');
@@ -114,7 +118,7 @@
       ppu.clearSprites(); g.sprUsed = 0;
     });
   }
-  function drawField() { for (var r = 3; r <= 26; r++) for (var c = 0; c < 32; c++) put(c, r, bgTile(c, r)); }
+  function drawField() { for (var r = HUD_ROW - 1; r <= 26; r++) for (var c = 0; c < 32; c++) put(c, r, bgTile(c, r)); }
   function big(col, row, word) {
     for (var i = 0; i < word.length; i++) {
       var ch = word.charAt(i), x = col + i * 2;
@@ -203,9 +207,9 @@
   }
   function say(s, t) { g.msg = s; g.msgT = t || 60; }
   function frame() {
-    for (var c = 0; c < 32; c++) put(c, 3, art.t('BH'));
+    for (var c = 0; c < 32; c++) put(c, HUD_ROW - 1, art.t('BH'));
     for (c = 0; c < 32; c++) put(c, 26, art.t('BHB'));
-    for (var r = 4; r <= 25; r++) { put(0, r, art.t('BV')); put(31, r, art.t('BVR')); }
+    for (var r = HUD_ROW; r <= 25; r++) { put(0, r, art.t('BV')); put(31, r, art.t('BVR')); }
   }
 
   /* ================================================================ 1 星數密碼 */
@@ -315,9 +319,9 @@
   }
   function hudNum() {
     var R = g.run, rg = numRange();
-    text(1, 1, padR('NUMBER CODE ' + GAMES[0].lv[R.lvl], 22) + (R.cheated ? '$' : ' ') + padL(mmss(R.time), 7));
-    if (R.lvl === 3) text(1, 2, padR('RANGE ' + pad(rg[0], 3) + '-' + pad(rg[1], 3) + ' CPU TRY ' + pad(R.ctries, 2) + (R.mine ? ' YOU ' + pad(R.mine, 3) : ''), 30));
-    else text(1, 2, padR('RANGE ' + pad(rg[0], 3) + '-' + pad(rg[1], 3) + '  TRY ' + pad(R.tries, 2) + (R.maxT ? '/' + pad(R.maxT, 2) : '   '), 30));
+    text(1, HUD_ROW, padR('NUMBER CODE ' + GAMES[0].lv[R.lvl], 22) + (R.cheated ? '$' : ' ') + padL(mmss(R.time), 7));
+    if (R.lvl === 3) text(1, HUD_ROW + 1, padR('RANGE ' + pad(rg[0], 3) + '-' + pad(rg[1], 3) + ' CPU TRY ' + pad(R.ctries, 2) + (R.mine ? ' YOU ' + pad(R.mine, 3) : ''), 30));
+    else text(1, HUD_ROW + 1, padR('RANGE ' + pad(rg[0], 3) + '-' + pad(rg[1], 3) + '  TRY ' + pad(R.tries, 2) + (R.maxT ? '/' + pad(R.maxT, 2) : '   '), 30));
   }
 
   /* ================================================================ 2 星塵猜拳大會 */
@@ -427,8 +431,8 @@
   }
   function hudRps() {
     var R = g.run;
-    text(1, 1, padR('STAR CUP ' + GAMES[1].lv[R.lvl], 20) + (R.cheated ? '$' : ' ') + 'MATCH ' + (Math.min(R.opp, 2) + 1) + '/3');
-    text(1, 2, padR('YOU ' + R.you + ' - ' + R.cpu + ' ' + OPP[Math.min(R.opp, 2)].name, 20) + 'ROUND ' + pad(R.rounds, 2) + ' ');
+    text(1, HUD_ROW, padR('STAR CUP ' + GAMES[1].lv[R.lvl], 20) + (R.cheated ? '$' : ' ') + 'MATCH ' + (Math.min(R.opp, 2) + 1) + '/3');
+    text(1, HUD_ROW + 1, padR('YOU ' + R.you + ' - ' + R.cpu + ' ' + OPP[Math.min(R.opp, 2)].name, 20) + 'ROUND ' + pad(R.rounds, 2) + ' ');
   }
 
   /* ================================================================ 3 星牌高低 */
@@ -549,8 +553,8 @@
   function hudHl() {
     var R = g.run, h = '';
     for (var i = 0; i < 4; i++) h += i < R.lives ? '^' : ' ';
-    text(1, 1, padR('HIGH OR LOW ' + GAMES[2].lv[R.lvl], 22) + (R.cheated ? '$' : ' ') + ' ' + h);
-    text(1, 2, padR('CARD ' + pad(R.pos + 1, 2) + '/52  OK ' + pad(R.ok, 2) + '  STREAK ' + pad(R.streak, 2), 30));
+    text(1, HUD_ROW, padR('HIGH OR LOW ' + GAMES[2].lv[R.lvl], 22) + (R.cheated ? '$' : ' ') + ' ' + h);
+    text(1, HUD_ROW + 1, padR('CARD ' + pad(R.pos + 1, 2) + '/52  OK ' + pad(R.ok, 2) + '  STREAK ' + pad(R.streak, 2), 30));
   }
 
   /* ================================================================ 結算 / GAME OVER */

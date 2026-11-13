@@ -22,14 +22,14 @@
   var AU = SL.Audio, SV = SL.Solve;
   var BTN = (NES.Input && NES.Input.BTN) || { A: 1, B: 2, SELECT: 4, START: 8, UP: 16, DOWN: 32, LEFT: 64, RIGHT: 128 };
 
-  var FLUSH_LIMIT = 140, REP_DELAY = 12, REP_RATE = 4, PEEK_HOLD = 20, HINT_HOLD = 30, ANIM_HALF = 3, ANIM_FULL = 2;
+  var EQ_PX = 12, FLUSH_LIMIT = 140, REP_DELAY = 12, REP_RATE = 4, PEEK_HOLD = 20, HINT_HOLD = 30, ANIM_HALF = 3, ANIM_FULL = 2;
   var MODES = [
     { key: 'SLIDE', sizes: [3, 4, 5] },
     { key: 'SWAP', sizes: [3, 4, 5] },
     { key: 'ROTATE', sizes: [3, 4] }
   ];
   var ROT_SCRAMBLE = { 3: 8, 4: 14 };
-  var SPR_PAL = [[0x30, 0x28, 0x30], [0x28, 0x27, 0x38], [0x2C, 0x21, 0x30], [0x16, 0x27, 0x30]];
+  var SPR_PAL = [[0x30, 0x28, 0x30], [0x28, 0x27, 0x38], [0x0F, 0x21, 0x30], [0x16, 0x27, 0x30]];   // 組 2 色 1 = 黑（片號底）
   var DX = { U: 0, R: 1, D: 0, L: -1 }, DY = { U: -1, R: 0, D: 1, L: 0 };
   var DORDER = ['U', 'R', 'D', 'L'];
   var DBTN = { U: BTN.UP, R: BTN.RIGHT, D: BTN.DOWN, L: BTN.LEFT };
@@ -41,7 +41,8 @@
       want: new Int16Array(960), have: new Int16Array(960), wantA: new Int8Array(240), haveA: new Int8Array(240), q: [], qa: [],
       rep: { U: 0, R: 0, D: 0, L: 0 }, bHold: 0, selHold: 0, selTaint: false, selHeld: false, peek: false,
       n: 3, arr: null, cr: 0, cc: 0, pickPos: -1, moves: 0, time: 0, par: 0, hints: 0, undo: [], anim: null, pending: [],
-      done: false, stars: 0, doneT: 0, seedBase: 0, runs: 0, goalDone: {}, spark: 0, sparkPos: -1, bot: { q: [] }, picLoaded: -1
+      done: false, stars: 0, doneT: 0, seedBase: 0, runs: 0, goalDone: {}, spark: 0, sparkPos: -1, bot: { q: [] }, picLoaded: -1,
+      cls: null, nums: !!CT.load('slide', 'nums', 0)
     };
   }
   function pad(n, w) { var s = String(Math.max(0, n | 0)); while (s.length < w) s = '0' + s; return s; }
@@ -49,6 +50,42 @@
   function mmss(f) { var s = Math.floor(f / 60); return pad(Math.min(99, Math.floor(s / 60)), 2) + ':' + pad(s % 60, 2); }
   function modeKey() { return MODES[g.m].key; }
   function sizeOf() { return MODES[g.m].sizes[Math.min(g.sizeI, MODES[g.m].sizes.length - 1)]; }
+  // 片內容鍵（16 個磁磚 + 4 個屬性）⇒ 內容相同的片視為同一類（P2-4：完全相同的太空片互換也算完成）
+  // 片的畫面像素（P2-4）：每個像素 = 磁磚色號經該區調色盤換成 NES 色（色 0 = 背景黑 $0F），32×32 = 1024 個
+  function piecePix(B, v, n, o) {
+    var P = B.pic, hr = Math.floor(v / n), hc = v % n, k = [];
+    for (var dy = 0; dy < 4; dy++) for (var dx = 0; dx < 4; dx++) {
+      var ty = o + hr * 4 + dy, tx = o + hc * 4 + dx, t = P.tiles[P.map[ty][tx]], pal = P.pal[P.blockPal[ty >> 1][tx >> 1]];
+      for (var i = 0; i < 64; i++) k.push(t[i] ? pal[t[i] - 1] : 0x0F);
+    }
+    return k;
+  }
+  // 內容等價類：畫面上只差 ≤ EQ_PX 個像素（散落的星點 / 網點，肉眼分不出）的片視為同一片，互換也算拼好
+  function pieceClasses(pic, n, slide) {
+    var B = SL.Art.pic(pic), o = (20 - 4 * n) >> 1, pix = [];
+    for (var v = 0; v < n * n; v++) pix.push(piecePix(B, v, n, o));
+    return SV.classes(pix, EQ_PX, slide ? n * n - 1 : -1);
+  }
+  function canonArr() { return SV.canon(g.arr, g.cls, modeKey() === 'SLIDE' ? g.n : 0); }
+  // 解題計畫：同類片的編號每次重算可能不同 ⇒ 解一次後記住「每一步之前的盤面」，照著計畫走就不重算（提示 / 機器人 / 密技共用）
+  function applyMove(a, m) {
+    var mk = modeKey();
+    if (mk === 'SLIDE') SV.slideMove(a, g.n, m);
+    else if (mk === 'SWAP') { var t = a[m[0]]; a[m[0]] = a[m[1]]; a[m[1]] = t; }
+    else SV.rotate(a, g.n, m.r, m.c, m.cw);
+  }
+  function solvePlan() {
+    var key = g.arr.join(','), i;
+    if (g.plan) { i = g.plan.keys.indexOf(key); if (i >= 0) return g.plan.seq.slice(i); }
+    var mk = modeKey(), n = g.n, ca = canonArr(), seq;
+    if (mk === 'SLIDE') seq = SV.slide(ca, n) || [];
+    else if (mk === 'SWAP') seq = SV.swap(ca);
+    else seq = SV.rotateSolve(ca, n) || [];
+    var a = g.arr.slice(), keys = [];
+    for (i = 0; i < seq.length; i++) { keys.push(a.join(',')); applyMove(a, seq[i]); }
+    g.plan = { keys: keys, seq: seq };
+    return seq.slice();
+  }
 
   /* ---------------- 名稱表影子 + 差異佇列 ---------------- */
   function put(c, r, t) { if (c < 0 || c > 31 || r < 0 || r > 29) return; var k = r * 32 + c; if (g.want[k] === t) return; g.want[k] = t; g.q.push(k); }
@@ -127,19 +164,18 @@
   function picStars(i) { var s = CT.load('slide', 'stars', []) || []; return s[i] | 0; }
 
   /* ---------------- 標題 ---------------- */
-  var ROWS = [5, 9, 13];
+  var ROWS = [4, 7, 10, 14];
   function enterTitle() {
     g.mode = 'title'; g.t = 0; g.paused = false; g.peek = false; g.done = false;
     var o = 0;
     redraw(function () {
-      center(1, '$ STAR SLIDE $');
+      center(2, '$ STAR SLIDE $');
       g.n = 5; drawFrame(2, 4, 20, 20);
       for (var p = 0; p < 25; p++) { var xy = [2 + (p % 5) * 4, 4 + Math.floor(p / 5) * 4]; drawPiece(p, xy[0], xy[1], 5, o); }
       titlePanel();
-      text(2, 25, 'A/START PLAY  B RULES');
+      text(2, 25, 'A PLAY  B RULES');
+      text(20, 25, 'C/$ = CHEAT');
       text(2, 27, 'HOLD START+SELECT: MENU');
-      text(25, 25, 'C/$ =');
-      text(25, 27, 'CHEAT');
     });
     AU.play('slide_title');
   }
@@ -149,9 +185,10 @@
     text(23, ROWS[1], 'SIZE'); text(23, ROWS[1] + 1, padR(n + 'X' + n, 8));
     text(23, ROWS[2], 'PICTURE'); text(23, ROWS[2] + 1, padR((g.pic + 1) + '/' + SL.Pics.count + ' ' + '$$$'.substring(0, picStars(g.pic)), 8));
     text(23, ROWS[2] + 2, padR(SL.Pics.PICS[g.pic].short, 9));
-    text(23, 18, 'BEST');
-    text(23, 19, padR(rec ? mmss(rec.time) : '--:--', 8));
-    text(23, 20, padR(rec ? pad(rec.moves, 4) + 'MV' : '', 8));
+    text(23, ROWS[3], 'NUMBERS'); text(23, ROWS[3] + 1, g.nums ? 'ON ' : 'OFF');
+    text(23, 17, 'BEST');
+    text(23, 18, padR(rec ? mmss(rec.time) : '--:--', 8));
+    text(23, 19, padR(rec ? pad(rec.moves, 4) + 'MV' : '', 8));
   }
   function enterRules() {
     g.mode = 'rules'; g.t = 0;
@@ -159,7 +196,7 @@
       center(2, 'HOW TO PLAY');
       var L = ['SLIDE: A PUSHES THE PIECE', '  (A WHOLE ROW IF IN LINE)', 'SWAP: A PICK, A SWAP',
                'ROTATE: A TURN RIGHT', '  B TURN LEFT  (2X2 FRAME)', 'B TAP: HINT   HOLD B: PEEK',
-               'ROTATE HINT: HOLD SELECT', 'SELECT: UNDO  START: PAUSE', 'FEWER MOVES = MORE STARS'];
+               'ROTATE HINT: HOLD SELECT', 'PIECE NUMBERS: HOLD SELECT', 'SELECT: UNDO  START: PAUSE', 'FEWER MOVES = MORE STARS'];
       for (var i = 0; i < L.length; i++) text(3, 5 + i * 2, L[i]);
       center(25, 'HOLD START+SELECT: MENU');
       center(27, 'PUSH START');
@@ -174,16 +211,21 @@
     var seed = ((qs ? (parseInt(qs, 10) >>> 0) : 0x5EED) + g.runs * 7919 + n * 131 + g.m * 17) >>> 0;
     if (qs && g.runs === 1) seed = parseInt(qs, 10) >>> 0;
     g.seed = seed;
-    if (mk === 'SLIDE') { g.arr = SV.scrambleSlide(n, seed); g.par = SV.slide(g.arr, n).length; }
-    else if (mk === 'SWAP') { g.arr = SV.scrambleSwap(n, seed); g.par = SV.swapPar(g.arr); }
-    else { var r = SV.scrambleRotate(n, seed, ROT_SCRAMBLE[n]); g.arr = r.arr; g.par = Math.min(r.moves.length, SV.rotateSolve(g.arr, n).length); }
-    g.start = g.arr.slice();
+    g.cls = pieceClasses(g.pic, n, mk === 'SLIDE');
+    for (var tries = 0; tries < 16; tries++, seed = (seed + 1) >>> 0) {      // 打亂後若「按內容」已經是完成圖就換下一個 seed
+      if (mk === 'SLIDE') { g.arr = SV.scrambleSlide(n, seed); g.par = SV.slide(SV.canon(g.arr, g.cls, n), n).length; }
+      else if (mk === 'SWAP') { g.arr = SV.scrambleSwap(n, seed); g.par = SV.swapPar(SV.canon(g.arr, g.cls, 0)); }
+      else { var r = SV.scrambleRotate(n, seed, ROT_SCRAMBLE[n]); g.arr = r.arr; g.par = Math.min(r.moves.length, SV.rotateSolve(SV.canon(g.arr, g.cls, 0), n).length); }
+      if (!SV.solvedEq(g.arr, g.cls) && g.par > 0) break;
+    }
+    g.seed = seed;
+    g.start = g.arr.slice(); g.plan = null;
     g.cr = 0; g.cc = 0; g.pickPos = -1; g.moves = 0; g.time = 0; g.hints = 0; g.undo = []; g.anim = null; g.pending = [];
     g.done = false; g.stars = 0; g.peek = false; g.paused = false; g.msg = ''; g.msgT = 0; g.levelCheat = false; g.bot.q = [];
     if (mk === 'SLIDE') { var b = g.arr.indexOf(n * n - 1); g.cr = Math.floor(b / n); g.cc = b % n; }
     g.mode = 'play';
     redraw(function () {
-      center(1, 'STAR SLIDE  ' + SL.Pics.PICS[g.pic].name);
+      center(2, 'STAR SLIDE  ' + SL.Pics.PICS[g.pic].name);
       drawFrame(ox(), oy(), 4 * n, 4 * n);
       drawBoard();
       panel();
@@ -255,25 +297,29 @@
     for (var i = 0; i < 4; i++) drawCell(w[i]);
     AU.sfx('slide_rot'); checkDone();
   }
+  function toggleNums() {
+    g.nums = !g.nums; CT.save('slide', 'nums', g.nums ? 1 : 0);
+    AU.sfx('slide_pick'); say(g.nums ? 'PIECE NUMBERS ON' : 'PIECE NUMBERS OFF', 40);
+  }
   function sparkAt(p) { g.spark = 16; g.sparkPos = p; }
   function hint() {
     var mk = modeKey(), n = g.n;
     if (mk === 'SLIDE') {
-      var s = SV.slide(g.arr, n); if (!s || !s.length) return;
+      var s = solvePlan(); if (!s.length) return;
       g.cr = Math.floor(s[0] / n); g.cc = s[0] % n; sparkAt(s[0]);
     } else if (mk === 'SWAP') {
-      var w = SV.swap(g.arr); if (!w.length) return;
-      if (g.pickPos >= 0 && g.arr[g.pickPos] !== g.pickPos) { var tgt = g.arr.indexOf(g.pickPos); g.cr = Math.floor(tgt / n); g.cc = tgt % n; sparkAt(tgt); }
+      var w = solvePlan(); if (!w.length) return;
+      if (g.pickPos >= 0 && (w[0][0] === g.pickPos || w[0][1] === g.pickPos)) { var tgt = w[0][0] === g.pickPos ? w[0][1] : w[0][0]; g.cr = Math.floor(tgt / n); g.cc = tgt % n; sparkAt(tgt); }
       else { g.pickPos = -1; g.cr = Math.floor(w[0][0] / n); g.cc = w[0][0] % n; sparkAt(w[0][1]); }
     } else {
-      var r = SV.rotateSolve(g.arr, n); if (!r || !r.length) return;
+      var r = solvePlan(); if (!r.length) return;
       g.cr = r[0].r; g.cc = r[0].c; sparkAt(r[0].r * n + r[0].c); say(r[0].cw ? 'HINT: TURN RIGHT (A)' : 'HINT: TURN LEFT (B)', 60);
     }
     g.hints++; AU.sfx('slide_hint');
     if (mk !== 'ROTATE') say('HINT USED', 30);
   }
   function checkDone() {
-    if (g.anim || g.pending.length || !SV.solved(g.arr)) return;
+    if (g.anim || g.pending.length || !SV.solvedEq(g.arr, g.cls)) return;
     g.done = true; g.mode = 'done'; g.doneT = 0;
     var mk = modeKey(), n = g.n;
     var stars = (!g.hints && g.moves <= g.par) ? 3 : (g.moves <= g.par * 2 ? 2 : 1);
@@ -326,6 +372,15 @@
       } else {
         box(X + g.cc * 32, Y + g.cr * 32, 32, 32, 0);
         if (g.pickPos >= 0) box(X + (g.pickPos % g.n) * 32 + 4, Y + Math.floor(g.pickPos / g.n) * 32 + 4, 24, 24, blink ? 1 : 3);
+      }
+    }
+    // 片號輔助（P2-4）：每片左側中段一顆 8×8 精靈（片號 = 正解位置 1..n²）；一列最多 5 顆，與游標角 / 選取框錯開掃描線
+    if (g.nums && g.mode === 'play' && !g.paused && !g.peek && g.arr) {
+      var NX = ox() * 8, NY = oy() * 8, bl = blankId();
+      for (var p = 0; p < g.n * g.n; p++) {
+        var v = g.arr[p];
+        if (v === bl || (g.anim && (p === g.anim.from || p === g.anim.to))) continue;
+        spr(NX + (p % g.n) * 32 + 2, NY + Math.floor(p / g.n) * 32 + 12, art.s('N' + (v + 1)), 2);
       }
     }
     if (g.spark > 0 && g.sparkPos >= 0 && (g.mode === 'play' || g.mode === 'done')) {
@@ -402,6 +457,7 @@
     var sa = selectAct(I);
     if (sa === 'tap') doUndo();
     else if (sa === 'hold' && mk === 'ROTATE') hint();
+    else if (sa === 'hold') toggleNums();
     var d = dpad(I);
     if (d) {
       var lim = mk === 'ROTATE' ? n - 1 : n, nr = g.cr + DY[d], nc = g.cc + DX[d];
@@ -422,9 +478,9 @@
     g.cheatUsed = true; g.levelCheat = true;
     g.pending = []; if (g.anim) { g.anim = null; }
     var mk = modeKey(), n = g.n, i;
-    if (mk === 'SLIDE') { var s = SV.slide(g.arr, n) || []; for (i = 0; i < Math.min(10, s.length); i++) { SV.slideMove(g.arr, n, s[i]); g.moves++; } }
-    else if (mk === 'SWAP') { var w = SV.swap(g.arr); for (i = 0; i < Math.min(3, w.length); i++) { var t = g.arr[w[i][0]]; g.arr[w[i][0]] = g.arr[w[i][1]]; g.arr[w[i][1]] = t; g.moves++; } }
-    else { var r = SV.rotateSolve(g.arr, n) || []; for (i = 0; i < Math.min(10, r.length); i++) { SV.rotate(g.arr, n, r[i].r, r[i].c, r[i].cw); g.moves++; } }
+    if (mk === 'SLIDE') { var s = solvePlan(); for (i = 0; i < Math.min(10, s.length); i++) { SV.slideMove(g.arr, n, s[i]); g.moves++; } }
+    else if (mk === 'SWAP') { var w = solvePlan(); for (i = 0; i < Math.min(3, w.length); i++) { var t = g.arr[w[i][0]]; g.arr[w[i][0]] = g.arr[w[i][1]]; g.arr[w[i][1]] = t; g.moves++; } }
+    else { var r = solvePlan(); for (i = 0; i < Math.min(10, r.length); i++) { SV.rotate(g.arr, n, r[i].r, r[i].c, r[i].cw); g.moves++; } }
     g.pickPos = -1;
     drawBoard(); say('STAR BOOST! 10 MOVES', 50); AU.sfx('slide_hint');
     checkDone();
@@ -450,7 +506,7 @@
     if (g.mode !== 'play') { q.push(0); return; }
     if (g.paused) { tap(q, BTN.START, 2); return; }
     if (g.anim || g.pending.length) { q.push(0); return; }
-    var n = g.n, s = SV.slide(g.arr, n);
+    var n = g.n, s = solvePlan();
     if (!s || !s.length) { q.push(0); return; }
     var m = s[0];
     moveTo(q, g.cr, g.cc, Math.floor(m / n), m % n);
@@ -491,12 +547,13 @@
       if (g.mode === 'title') {
         g.t++;
         var d = dpad(I);
-        if (d === 'U' || d === 'D') { g.row = (g.row + (d === 'D' ? 1 : 2)) % 3; AU.sfx('slide_move'); }
+        if (d === 'U' || d === 'D') { g.row = (g.row + (d === 'D' ? 1 : ROWS.length - 1)) % ROWS.length; AU.sfx('slide_move'); }
         if (d === 'L' || d === 'R') {
           var s = d === 'R' ? 1 : -1;
           if (g.row === 0) { g.m = (g.m + s + MODES.length) % MODES.length; g.sizeI = Math.min(g.sizeI, MODES[g.m].sizes.length - 1); titlePanel(); }
           else if (g.row === 1) { var L = MODES[g.m].sizes.length; g.sizeI = (g.sizeI + s + L) % L; titlePanel(); }
-          else { g.pic = (g.pic + s + SL.Pics.count) % SL.Pics.count; enterTitle(); }
+          else if (g.row === 2) { g.pic = (g.pic + s + SL.Pics.count) % SL.Pics.count; enterTitle(); }
+          else { g.nums = !g.nums; CT.save('slide', 'nums', g.nums ? 1 : 0); titlePanel(); }
           AU.sfx('slide_move');
         }
         if (startPressed(I) || I.pressed(BTN.A)) { AU.sfx('slide_ok'); startGame(); }
@@ -521,7 +578,7 @@
         mode: g.mode, row: g.row, smode: modeKey(), size: g.mode === 'title' ? sizeOf() : g.n, pic: g.pic, paused: g.paused, t: g.t,
         queue: g.q.length + g.qa.length, arr: g.arr ? g.arr.slice() : null, cr: g.cr, cc: g.cc, pick: g.pickPos, moves: g.moves,
         time: g.time, par: g.par, hints: g.hints, anim: !!g.anim, pending: g.pending.length, done: g.done, stars: g.stars,
-        peek: g.peek, cheatUsed: g.cheatUsed, undo: g.undo.length, seed: g.seed, goalDone: Object.keys(g.goalDone).map(Number), goal: goalOk()
+        peek: g.peek, nums: g.nums, cheatUsed: g.cheatUsed, undo: g.undo.length, seed: g.seed, goalDone: Object.keys(g.goalDone).map(Number), goal: goalOk()
       };
     },
     exit: function () { AU.stop(); },
@@ -540,7 +597,8 @@
     g: function () { return g; }, start: function (m, size, pic) {
       g.m = m || 0; g.sizeI = Math.max(0, MODES[g.m].sizes.indexOf(size || 3)); if (pic !== undefined) g.pic = pic; startGame();
     },
-    title: function () { enterTitle(); }, off: function () { return off(); }, origin: function () { return [ox(), oy()]; }
+    title: function () { enterTitle(); }, off: function () { return off(); }, origin: function () { return [ox(), oy()]; },
+    classes: function (pic, n, slide) { return pieceClasses(pic, n, slide); }, nums: function (on) { g.nums = !!on; }
   };
   if (CT.register) CT.register(GAME);
 })();

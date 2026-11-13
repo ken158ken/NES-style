@@ -17,7 +17,8 @@ import sys
 from playwright.sync_api import sync_playwright
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
-BASE = (ROOT / 'cart3.html').as_uri() + '?debug=1&scale=1&mute=1&game=labyrinth'
+BASE0 = (ROOT / 'cart3.html').as_uri() + '?debug=1&scale=1&mute=1&game=labyrinth'
+BASE = BASE0 + '&hint=0'          # fix-r7-maze：一般測試跳過「新機關說明卡」；說明卡 / 機器人另用 BASE0
 VERBOSE = '-v' in sys.argv
 results = []
 
@@ -28,8 +29,8 @@ def ok(name, cond, detail=''):
         print(('  PASS ' if cond else '  FAIL ') + name + (('  — ' + str(detail)) if detail else ''))
 
 
-def fresh(page, query=''):
-    page.goto(BASE + query)
+def fresh(page, query='', base=None):
+    page.goto((base or BASE) + query)
     page.wait_for_function('() => !!window.__nes && !!window.CT && !!CT.Labyrinth && !!CT.Labyrinth.dev')
     page.evaluate('() => { Object.keys(localStorage).filter(k => k.indexOf("nes.cart3.labyrinth.") === 0).forEach(k => localStorage.removeItem(k)); __nes.step(1); }')
 
@@ -152,7 +153,9 @@ def main():
     fresh(page, '&floor=3')
     s = st(page)
     ok('?floor=3 直接開第 3 層（TWIN LOCKS 23×15）', s['mode'] == 'play' and s['floor'] == 3 and s['W'] == 23 and s['H'] == 15 and s['name'] == 'TWIN LOCKS', s)
-    ok('HUD 寫著層名、標準時間、鑰匙 / 星屑 / 羅盤', page.evaluate(JS_ROW_HAS, {'s': 'F3 TWIN LOCKS', 'r': 1}) and page.evaluate(JS_ROW_HAS, {'s': 'PAR 00:', 'r': 2}))
+    ok('HUD 寫著層名、標準時間、鑰匙 / 星屑 / 羅盤', page.evaluate(JS_ROW_HAS, {'s': 'F3 TWIN LOCKS', 'r': 2}) and page.evaluate(JS_ROW_HAS, {'s': 'PAR 00:', 'r': 3}))
+    r = page.evaluate("() => { const p = __nes.nes().ppu; let n = 0; for (let y = 0; y < 2; y++) for (let x = 0; x < 32; x++) if (p.getTile(0, x, y)) n++; return n; }")
+    ok('fix-r7-maze P3-5：狀態列下移一列（第 0 / 1 列全空，不貼 y = 0）', r == 0, r)
     r = page.evaluate("""() => { const g = CT.Labyrinth.dev.g(), p = __nes.nes().ppu, bx = (g.p.x + 4) >> 4, by = (g.p.y + 4) >> 4;
         const pal = (x, y) => p.getAttr(0, x, y), far = [];
         for (let y = 2; y <= 13; y++) for (let x = 0; x < 16; x++) { const dx = x - bx, dy = y - by; if (dx * dx + dy * dy >= 16) far.push(pal(x, y)); }
@@ -169,6 +172,14 @@ def main():
     ok('邊走邊更新視野：屬性真的有變、每幀屬性寫入 ≤ 40、整幀 ≤ 140 byte、overFrames 0',
        r['changed'] > 5 and r['maxA'] <= 40 and r['maxW'] <= 140 and r['over'] == 0, r)
     ok('走過的格子記進探索紀錄（≥ 40 格）', r['known'] >= 40, r['known'])
+    page.evaluate(JS_TP, page.evaluate("() => { const lv = CT.Labyrinth.dev.g().lv; return { x: lv.exit % lv.W, y: (lv.exit / lv.W) | 0 }; }"))
+    page.evaluate('() => __nes.step(6)')                 # 瞬移到出口（遠離剛才走過的地方），讓佇列寫完
+    r = page.evaluate("""() => { const g = CT.Labyrinth.dev.g(), p = __nes.nes().ppu, R2 = g.r2 * g.r2;
+        let mem = 0, memBad = 0, dark = 0, darkBad = 0;
+        for (let y = 2; y <= 13; y++) for (let x = 0; x < 16; x++) { const dx = x * 16 + 8 - g.p.x - 4, dy = y * 16 + 8 - g.p.y - 4; if (dx * dx + dy * dy <= R2) continue;
+          const a = p.getAttr(0, x, y); if (g.kb[y * 16 + x]) { mem++; if (a !== 1) memBad++; } else { dark++; if (a !== 0) darkBad++; } }
+        return { mem, memBad, dark, darkBad }; }""")
+    ok('fix-r7-maze P2-3 走過記憶：頭燈外「去過」的區塊維持微光組 1、沒去過的才是 0', r['mem'] >= 8 and r['memBad'] == 0 and r['dark'] > 0 and r['darkBad'] == 0, r)
 
     # ---------------- 小地圖 ----------------
     r = page.evaluate("""() => { const g = CT.Labyrinth.dev.g(), p = __nes.nes().ppu; let n = 0;
@@ -257,6 +268,10 @@ def main():
     ok('星等：到出口 ★ + 時間 ≤ PAR ★（機器人沒撿星屑 ⇒ 2 星）', r['res'] and r['res']['stars'] == 2 and r['res']['t'] <= r['res']['par'] * 60, r['res'])
     ok('紀錄：每層最佳時間 / 星等存檔、解鎖下一層', r['rec'] and r['rec']['s'] == 2 and r['rec']['t'] == r['res']['t'] and r['reach'] == 2, r)
     ok('結算畫面寫著 CLEAR! 與 A: FINISH（單層模式）', page.evaluate(JS_ROW_HAS, {'s': 'CLEAR!', 'r': 5}) and page.evaluate(JS_ROW_HAS, {'s': 'A: FINISH', 'r': 24}))
+    r = page.evaluate("""() => { const dev = CT.Labyrinth.dev; dev.start('adv', 1); __nes.step(2); dev.clear(); __nes.step(70); const p = __nes.nes().ppu;
+        let last = -1; for (let x = 0; x < 32; x++) if (p.getTile(0, x, 24)) last = x; return { mode: GAME.state().s.mode, last }; }""")
+    ok('fix-r7-maze P3-4：冒險模式結算列「A: NEXT   START: TITLE」完整（不截斷成 START: TIT、最後一字 ≤ 第 28 欄）',
+       r['mode'] == 'clear' and page.evaluate(JS_ROW_HAS, {'s': 'A: NEXT   START: TITLE', 'r': 24}) and 0 < r['last'] <= 28, r)
     r = page.evaluate("() => { const c = CT.cheat(); return { c, cheats: GAME.state().s.cheats }; }")
     ok('結算畫面按密技無效', not r['c'] and r['cheats'] == 0, r)
 
@@ -273,7 +288,7 @@ def main():
         return { p: g.paused, frozen: ft === g.ft, mp, ft }; }""")
     ok('§6-2 START 暫停：計時凍結、BGM 暫停', r['p'] and r['frozen'] and r['mp'], r)
     ok('§6-5 暫停畫面寫著 HOLD START+SELECT: MENU 與 B: RETRY FLOOR', page.evaluate(JS_ROW_HAS, {'s': 'HOLD START+SELECT: MENU', 'r': 28})
-       and page.evaluate(JS_ROW_HAS, {'s': 'B: RETRY FLOOR', 'r': 2}))
+       and page.evaluate(JS_ROW_HAS, {'s': 'B: RETRY FLOOR', 'r': 3}))
     r = page.evaluate("() => { __nes.tap('start', 1); __nes.step(2); return { p: CT.Labyrinth.dev.g().paused, mp: NES.Music.isPaused(), playing: NES.Music.state().playing }; }")
     ok('再按 START 恢復、BGM 接續', not r['p'] and not r['mp'] and r['playing'], r)
     r = page.evaluate("""() => { const g = CT.Labyrinth.dev.g(), lv = g.lv; __nes.step(30); __nes.tap('start', 1); __nes.step(1); __nes.tap('b', 1); __nes.step(2);
@@ -301,9 +316,27 @@ def main():
         if not (r['ok'] and r['colors'] <= 25 and r['over'] == 0):
             bad.append((n, r))
     ok('9 層開局畫面全部 lint 綠（≤ 25 色）、overFrames 0', not bad, bad)
+    r = page.evaluate("() => CT.Labyrinth.Gen.FLOORS.map(f => [f.r1, f.r2])")
+    ok('fix-r7-maze P2-3：照明半徑最小 32 / 48 px（F7~F9 不再縮到 24 / 40）', all(a >= 32 and b >= 48 for a, b in r) and r[8] == [32, 48], r)
+
+    # ---------------- fix-r7-maze P3-3：新機關第一次出現 ⇒ 開場說明卡 ----------------
+    fresh(page, '&floor=1', base=BASE0)
+    r = page.evaluate("""() => { const dev = CT.Labyrinth.dev; dev.start('one', 5); __nes.step(25); const s = GAME.state().s, c = CT.cheat(), l = __nes.lint();
+        return { mode: s.mode, intro: s.intro, ft: s.ft, cheat: c, lint: l.ok, over: __nes.stats().budget.overFrames }; }""")
+    ok('說明卡：沒看過的機關（F5 直開 = 基本 + 鑰匙門 + 日月門 + 潮汐牆 + 星燈）開場先出卡、計時不跑、密技無效、lint 綠',
+       r['mode'] == 'intro' and r['intro'] == [1, 2, 4, 8, 16] and r['ft'] == 0 and not r['cheat'] and r['lint'] and r['over'] == 0, r)
+    ok('說明卡畫面：示意磁磚 + 兩行字（潮汐牆 / 日月門）、A: START',
+       page.evaluate(JS_ROW_HAS, {'s': 'TIDE WALLS RISE AND', 'r': 19}) and page.evaluate(JS_ROW_HAS, {'s': 'FALL. HALF = WARNING', 'r': 21})
+       and page.evaluate(JS_ROW_HAS, {'s': 'STEP ON ☼/☾ SWITCH', 'r': 14}) and page.evaluate(JS_ROW_HAS, {'s': 'A: START', 'r': 28})
+       and page.evaluate("() => { const p = __nes.nes().ppu, A = CT.Labyrinth.Art.make(); return p.getTile(0, 2, 20) === A.t('SH_O') && p.getTile(0, 4, 20) === A.t('SH_W') && p.getAttr(0, 1, 10) === 2; }"))
+    r = page.evaluate("""() => { __nes.tap('a', 1); __nes.step(3); const s = GAME.state().s; const a = { mode: s.mode, seen: s.seen, saved: +localStorage.getItem('nes.cart3.labyrinth.seen') };
+        CT.Labyrinth.dev.start('one', 9); __nes.step(3); a.again = GAME.state().s.mode; localStorage.setItem('nes.cart3.labyrinth.seen', '1');
+        CT.Labyrinth.dev.start('one', 3); __nes.step(3); a.f3 = GAME.state().s.intro; return a; }""")
+    ok('按 A 進入遊玩、看過的機關存檔（seen = 31）；之後同樣的機關不再出卡；只看過基本 → F3 出「鑰匙門 + 日月門」',
+       r['mode'] == 'play' and r['seen'] == 31 and r['saved'] == 31 and r['again'] == 'play' and r['f3'] == [2, 4], r)
 
     # ---------------- 機器人：從標題開始，過 3 層（goal） ----------------
-    fresh(page, '&bot=1')
+    fresh(page, '&bot=1', base=BASE0)        # 機器人：說明卡照常出現，由機器人按 A 關掉
     hl = page.evaluate("""() => { let ml = 0, peak = 0, i;
         for (i = 0; i < 12000; i++) { __nes.step(1); const s = __nes.stats(); ml = Math.max(ml, s.maxSpritesLine); peak = Math.max(peak, s.budget.used); if (CT.get('labyrinth').goal()) break; }
         const s = GAME.state().s; return { frames: i, goal: CT.get('labyrinth').goal(), ml, peak, over: __nes.stats().budget.overFrames, cleared: s.cleared, cheats: s.cheats, bot: s.bot, attrPeak: s.attrPeak }; }""")

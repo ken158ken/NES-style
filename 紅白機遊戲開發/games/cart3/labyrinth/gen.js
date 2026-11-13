@@ -27,7 +27,7 @@
   var T = { WALL: 0, FLOOR: 1, KEY: 2, DOOR: 3, SWITCH: 4, GATE_A: 5, GATE_B: 6, SHIFT0: 7, SHIFT1: 8, EXIT: 9, SHARD: 10, LAMP: 11 };
   var DX = [0, 1, 0, -1], DY = [-1, 0, 1, 0];
 
-  /* 9 層固定種子（主題 0 星苔洞窟 / 1 餘燼窯 / 2 虛空花園）。r1 / r2 = 明亮 / 微光半徑（px） */
+  /* 9 層固定種子（主題 0 星苔洞窟 / 1 餘燼窯 / 2 虛空花園）。r1 / r2 = 明亮 / 微光半徑（px）；fix-r7-maze：最小 32 / 48（F7~F9 原 28 / 24） */
   var FLOORS = [
     { n: 1, name: 'GLOW GROTTO', w: 15, h: 11, doors: 0, gates: 0, shift: 0, shards: 3, loops: 2, lamp: 0, r1: 40, r2: 56, theme: 0, seed: 1101 },
     { n: 2, name: 'ECHO HALL', w: 19, h: 13, doors: 1, gates: 0, shift: 0, shards: 3, loops: 3, lamp: 0, r1: 40, r2: 56, theme: 0, seed: 2202 },
@@ -35,9 +35,9 @@
     { n: 4, name: 'EMBER STAIR', w: 25, h: 17, doors: 1, gates: 0, shift: 4, shards: 4, loops: 5, lamp: 0, r1: 36, r2: 52, theme: 1, seed: 4404 },
     { n: 5, name: 'SHIFTING KILN', w: 27, h: 19, doors: 1, gates: 1, shift: 6, shards: 4, loops: 6, lamp: 1, r1: 32, r2: 48, theme: 1, seed: 5505 },
     { n: 6, name: 'ASH VAULT', w: 29, h: 21, doors: 2, gates: 1, shift: 6, shards: 5, loops: 7, lamp: 1, r1: 32, r2: 48, theme: 1, seed: 6606 },
-    { n: 7, name: 'VOID GARDEN', w: 31, h: 23, doors: 2, gates: 2, shift: 8, shards: 5, loops: 8, lamp: 1, r1: 28, r2: 44, theme: 2, seed: 7707 },
-    { n: 8, name: 'STAR SPINE', w: 31, h: 23, doors: 3, gates: 2, shift: 10, shards: 5, loops: 8, lamp: 1, r1: 24, r2: 40, theme: 2, seed: 8808 },
-    { n: 9, name: 'HEART OF NIGHT', w: 31, h: 23, doors: 3, gates: 3, shift: 12, shards: 6, loops: 9, lamp: 1, r1: 24, r2: 40, theme: 2, seed: 9909 }
+    { n: 7, name: 'VOID GARDEN', w: 31, h: 23, doors: 2, gates: 2, shift: 8, shards: 5, loops: 8, lamp: 1, r1: 32, r2: 48, theme: 2, seed: 7707 },
+    { n: 8, name: 'STAR SPINE', w: 31, h: 23, doors: 3, gates: 2, shift: 10, shards: 5, loops: 8, lamp: 1, r1: 32, r2: 48, theme: 2, seed: 8808 },
+    { n: 9, name: 'HEART OF NIGHT', w: 31, h: 23, doors: 3, gates: 3, shift: 12, shards: 6, loops: 9, lamp: 1, r1: 32, r2: 48, theme: 2, seed: 9909 }
   ];
   // 隨機模式（?seed= / 標題 RANDOM）：用第 7~9 層的參數輪替
   function randomSpec(seed) {

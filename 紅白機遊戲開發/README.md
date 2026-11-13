@@ -14,10 +14,12 @@
 | 《星塵 8 合 1》 | 合輯卡帶一：動作小品 8 款（迷宮 / 方塊 / 打磚塊 / 彈珠台 / 貪食蟲 / 賽車 / 飛鳥 / 塔防） | 舊作網頁小遊戲的玩法概念（原創重做，見 `docs/LEGACY_MAP.md`） | `cart1.html` | https://ken158ken.github.io/NES-style/紅白機遊戲開發/cart1.html |
 | 《星塵反應 8 合 1》 | 合輯卡帶二：動作反應 8 款（忍者斬 / 雷射防衛 / 躲避 / 跳繩 / 接球 / 泡泡 / 射擊場 / 連打；R6 製作中，未完成的槽顯示「準備中」） | 舊作網頁小遊戲的玩法概念（原創重做，見 `docs/LEGACY_MAP.md`） | `cart2.html` | https://ken158ken.github.io/NES-style/紅白機遊戲開發/cart2.html |
 | 《星塵益智 8 合 1》 | 合輯卡帶三：益智 8 款（合星 / 數獨 / 探雷 / 五子棋 / 拼圖 / 連線 / 迷宮探索 / 派對；R7 製作中，未完成的槽顯示「準備中」） | 舊作網頁小遊戲的玩法概念（原創重做，見 `docs/LEGACY_MAP.md`） | `cart3.html` | https://ken158ken.github.io/NES-style/紅白機遊戲開發/cart3.html |
+| 《星塵節奏 8 合 1》 | 合輯卡帶四：記憶 / 節奏 / 反應 8 款（翻牌 / 跟我做 / 閃記 / 旋律 / 節奏 / 反應 / 腦力 / 色感；R8 製作中，未完成的槽顯示「準備中」） | 舊作網頁小遊戲的玩法概念（原創重做，見 `docs/LEGACY_MAP.md`） | `cart4.html` | https://ken158ken.github.io/NES-style/紅白機遊戲開發/cart4.html |
+| 《星塵文創 6 合 1》 | 合輯卡帶五：文字 / 創作 6 款（冒險 / 密室 / 問答 / 字謎 / 打字 / 畫室；中文字為 16×16 點陣、逐字寫入圖樣表；R9 製作中，未完成的槽顯示「準備中」） | 舊作網頁小遊戲的玩法概念（原創重做，見 `docs/LEGACY_MAP.md`） | `cart5.html` | https://ken158ken.github.io/NES-style/紅白機遊戲開發/cart5.html |
 | 《星塵測試室》 | 引擎測試房 | — | `game.html` | https://ken158ken.github.io/NES-style/紅白機遊戲開發/game.html |
 操作：方向鍵 / WASD、Z = A、X = B、Enter = START、Shift = SELECT、F 全螢幕；手機有觸控搖桿。單檔版在 `dist/`。
 《星塵機甲》操作：← → 走、A 跳（按住跳更高、放開立刻停止上升）、↓ + A 滑行、B 射擊（按住蓄力）、↑ ↓ 爬梯、**START = 武器選單**（↑ ↓ 換武器、B 用 E 罐）；8 格選關畫面本輪開放 FROST PLANT 與 BLAZE FURNACE 兩關，打倒機器人頭目會取得牠的武器，拿去打另一關的頭目 3 發就倒（武器剋制環）。
-《星塵 8 合 1》操作：開機選單 ↑ ↓（或 SELECT）選、A / START 進入；未完成的槽顯示「準備中」；**遊戲中按住 START + SELECT 1 秒回選單**（畫面上方兩顆方塊往中間收攏提示），游標會停在剛玩的那款；各款最高分顯示在選單右側。直接開某款：`cart1.html?game=maze`。卡帶二《星塵反應 8 合 1》（`cart2.html`）操作與選單相同，存檔獨立（`nes.cart2.*`），直接開某款：`cart2.html?game=slash`。卡帶三《星塵益智 8 合 1》（`cart3.html`）同上，存檔 `nes.cart3.*`，直接開某款：`cart3.html?game=party`。
+《星塵 8 合 1》操作：開機選單 ↑ ↓（或 SELECT）選、A / START 進入；未完成的槽顯示「準備中」；**遊戲中按住 START + SELECT 1 秒回選單**（畫面上方兩顆方塊往中間收攏提示），游標會停在剛玩的那款；各款最高分顯示在選單右側。直接開某款：`cart1.html?game=maze`。卡帶二《星塵反應 8 合 1》（`cart2.html`）操作與選單相同，存檔獨立（`nes.cart2.*`），直接開某款：`cart2.html?game=slash`。卡帶三《星塵益智 8 合 1》（`cart3.html`）同上，存檔 `nes.cart3.*`，直接開某款：`cart3.html?game=party`。卡帶四《星塵節奏 8 合 1》（`cart4.html`）同上，存檔 `nes.cart4.*`，直接開某款：`cart4.html?game=color`。卡帶五《星塵文創 6 合 1》（`cart5.html`）同上，存檔 `nes.cart5.*`，直接開某款：`cart5.html?game=paint`；中文文字系統示範：`cart5.html?game=textdemo`。
 秘技（一鍵）：三款都是 **遊戲中按 C 鍵（電腦）或手把上的紫色「★密技」鍵（手機）**，不必暫停，立刻補強（巡航艦：SPEED / MISSILE / 2 OPTION / 護盾；勇者：命補到 9 + 無敵 20 秒；機甲：命補到 9 + 血 / E 罐全滿 + 全武器解鎖 + 無敵 20 秒），**GAME OVER 畫面按同一鍵直接 3 條命續關**，皆不限次數。另保留 START 暫停 → SELECT 的兩步版。巡航艦另保留考據自原作的指令：暫停中輸入 ↑↑↓↓←→←→BA（也接受 ↑↑↓↓←←→→AB / ABAB），一場一次、打掉魔王多一次；GAME OVER 輸入同指令續關。
 
 ## 目錄

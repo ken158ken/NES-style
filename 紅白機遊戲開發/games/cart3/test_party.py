@@ -221,6 +221,9 @@ def main():
     ok('開局 = VS 畫面、BGM party_cup', run(page)['phase'] == 'vs' and st(page)['music'] == 'party_cup', run(page))
     vs = '\n'.join(page.evaluate(SCREEN))
     ok('VS 畫面寫出對手名與口頭禪（可學習的習慣提示）', 'VS ROCKO' in vs and 'STONE IS THE BEST' in vs)
+    hud = page.evaluate(SCREEN)
+    ok('qa-r7 P3-5：HUD 不貼頂（第 1 列沒有字、STAR CUP 在第 2 列、YOU x - y 在第 3 列）',
+       hud[1].strip() == '' and hud[2].strip().startswith('STAR CUP') and hud[3].strip().startswith('YOU 0 - 0'), hud[1:4])
     step(page, 25)
     press(page, A)
     ok('A ⇒ 進入對戰（choose）', run(page)['phase'] == 'choose', run(page))

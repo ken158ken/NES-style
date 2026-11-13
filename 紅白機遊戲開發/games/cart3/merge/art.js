@@ -22,11 +22,19 @@
   var CHARMAP = (CHR && CHR.DEMO && CHR.DEMO.CHARMAP) || {};
 
   var TIERS = [null,
-    { key: 'DUST', zh: '星塵', pal: 0 }, { key: 'PEBBLE', zh: '石礫', pal: 1 }, { key: 'COMET', zh: '彗星', pal: 2 },
-    { key: 'MOON', zh: '月', pal: 0 }, { key: 'PLANET', zh: '行星', pal: 2 }, { key: 'RINGED', zh: '環行星', pal: 1 },
-    { key: 'GIANT', zh: '巨行星', pal: 1 }, { key: 'STAR', zh: '恆星', pal: 3 }, { key: 'NOVA', zh: '超新星', pal: 3 },
-    { key: 'PULSAR', zh: '脈衝星', pal: 2 }, { key: 'GALAXY', zh: '星系', pal: 2 }, { key: 'CLUSTER', zh: '星系團', pal: 3 }
+    { key: 'DUST', zh: '星塵', pal: 0, hue: 'white' }, { key: 'PEBBLE', zh: '石礫', pal: 0, hue: 'gray' },
+    { key: 'COMET', zh: '彗星', pal: 2, hue: 'cyan' }, { key: 'MOON', zh: '月', pal: 1, hue: 'beige' },
+    { key: 'PLANET', zh: '行星', pal: 2, hue: 'blue' }, { key: 'RINGED', zh: '環行星', pal: 2, hue: 'green' },
+    { key: 'GIANT', zh: '巨行星', pal: 1, hue: 'orange' }, { key: 'STAR', zh: '恆星', pal: 3, hue: 'yellow' },
+    { key: 'NOVA', zh: '超新星', pal: 3, hue: 'red' }, { key: 'PULSAR', zh: '脈衝星', pal: 3, hue: 'paleblue' },
+    { key: 'GALAXY', zh: '星系', pal: 0, hue: 'silver' }, { key: 'CLUSTER', zh: '星系團', pal: 1, hue: 'magenta' }
   ];
+  // fix-r7 P3-6：12 階的「主色」= 4 組調色盤 × 3 色的 12 個槽位各用一次（相鄰階色相都不同）。
+  //   pal 0 = 灰 $00 / 銀 $10 / 白 $30（也是 HUD）：石礫 = 灰、星系 = 銀、星塵 = 白
+  //   pal 1 = 洋紅 $14 / 橘 $27 / 米黃 $37：星系團 = 洋紅、巨行星 = 橘（米黃條紋）、月 = 米黃（黑洞吸積盤也用這組）
+  //   pal 2 = 藍 $11 / 綠 $1A / 青 $2C：行星 = 藍、環行星 = 綠、彗星 = 青
+  //   pal 3 = 紅 $16 / 黃 $28 / 淡青白 $31：超新星 = 紅、恆星 = 黃、脈衝星 = 淡青白
+  // 每顆先用「1 暗 / 2 本體 / 3 亮」畫，再用 recolor 把角色換成該階的主色槽位。
   MG.TIERS = TIERS;
 
   function canvas(w, h) { var a = []; for (var y = 0; y < h; y++) { a.push([]); for (var x = 0; x < w; x++) a[y].push(0); } return a; }
@@ -62,6 +70,9 @@
     }
   }
   function dot(px, x, y, c, big) { S(px, x, y, c); if (big) { S(px, x + 1, y, c); S(px, x, y + 1, c); S(px, x + 1, y + 1, c); } }
+  function recolor(px, map) {
+    for (var y = 0; y < px.length; y++) for (var x = 0; x < px[0].length; x++) px[y][x] = map[px[y][x]];
+  }
   function line(px, x0, y0, x1, y1, c) {
     var n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0)) | 0;
     for (var i = 0; i <= n; i++) S(px, x0 + (x1 - x0) * i / (n || 1), y0 + (y1 - y0) * i / (n || 1), c);
@@ -74,16 +85,18 @@
     },
     2: function (px) {   // 石礫：兩顆凹凸小石
       sphere(px, 10, 13, 5.2); sphere(px, 16, 9, 3.4);
-      [[9, 15], [12, 12], [8, 12]].forEach(function (p) { S(px, p[0], p[1], 1); });
+      recolor(px, [0, 1, 1, 2]);    // 灰身 + 銀高光
+      [[9, 15], [12, 12], [8, 12], [11, 16], [15, 10]].forEach(function (p) { S(px, p[0], p[1], 0); });   // 黑色坑洞
       S(px, 5, 12, 0); S(px, 14, 17, 0); S(px, 19, 8, 0);
     },
     3: function (px) {   // 彗星：亮頭 + 往左下拖的尾
       for (var i = 0; i < 14; i++) {
         var t = i / 13;
-        line(px, 14 - i, 9 + i * 0.9, 14 - i - 1, 9 + i * 0.9 + 3 * (1 - t), i < 6 ? 2 : 1);
+        line(px, 14 - i, 9 + i * 0.9, 14 - i - 1, 9 + i * 0.9 + 3 * (1 - t), i < 10 ? 2 : 1);
       }
-      line(px, 13, 12, 3, 21, 1); line(px, 15, 13, 7, 21, 1);
+      line(px, 13, 12, 3, 21, 2); line(px, 15, 13, 7, 21, 1);
       sphere(px, 16, 8, 4.2);
+      recolor(px, [0, 1, 3, 3]);    // 青頭青尾、藍邊
       S(px, 15, 6, 3); S(px, 14, 7, 3);
     },
     4: function (px) {   // 月：新月 + 隕石坑
@@ -94,9 +107,12 @@
         if (d2 <= 81 && e2 > 56) px[y][x] = (d2 > 66) ? 3 : 2;
       }
       S(px, 7, 13, 1); S(px, 8, 13, 1); S(px, 9, 17, 1); S(px, 6, 9, 1); S(px, 12, 19, 1);
+      recolor(px, [0, 2, 3, 2]);    // 米黃月面 + 橘邊 / 橘坑
     },
     5: function (px) {   // 行星：條紋球
-      sphere(px, 12, 12, 8.6, { bands: 4 });
+      sphere(px, 12, 12, 8.6);
+      recolor(px, [0, 1, 1, 3]);    // 藍身 + 青高光
+      for (var y = 5; y < 21; y += 4) for (var x = 0; x < 24; x++) if (px[y][x] === 1 && px[y][x - 1] && px[y][x + 1]) px[y][x] = 3;   // 青條紋
       S(px, 8, 7, 3); S(px, 9, 7, 3); S(px, 8, 8, 3);
     },
     6: function (px) {   // 環行星：球 + 斜環（後半被球擋住）
@@ -108,12 +124,18 @@
       }
       back.forEach(function (p) { px[p[1]][p[0]] = 1; });
       sphere(px, 12, 12, 6.2);
+      for (y = 5; y < 19; y++) for (x = 5; x < 19; x++) {   // 綠色球體：暗面只留最外一圈藍邊
+        var qx = x + 0.5 - 12, qy = y + 0.5 - 12;
+        if (px[y][x] === 1 && qx * qx + qy * qy < 5.1 * 5.1) px[y][x] = 2;
+      }
       front.forEach(function (p) { px[p[1]][p[0]] = 3; });
     },
     7: function (px) {   // 巨行星：大球 + 寬條紋 + 風暴眼
-      sphere(px, 12, 12, 10.6, { bands: 3 });
-      for (var y = 13; y <= 15; y++) for (var x = 13; x <= 17; x++) if (!((y === 13 || y === 15) && (x === 13 || x === 17))) px[y][x] = 3;
-      px[14][15] = 1;
+      sphere(px, 12, 12, 10.6);
+      recolor(px, [0, 2, 2, 3]);    // 橘身 + 米黃高光
+      for (var by = 4; by < 22; by += 4) for (var bx = 0; bx < 24; bx++) if (px[by][bx] === 2 && px[by][bx - 1] && px[by][bx + 1]) px[by][bx] = 3;   // 米黃條紋
+      for (var y = 13; y <= 15; y++) for (var x = 13; x <= 17; x++) if (!((y === 13 || y === 15) && (x === 13 || x === 17))) px[y][x] = 1;   // 洋紅風暴眼
+      px[14][15] = 3;
     },
     8: function (px) {   // 恆星：核心 + 8 道光芒 + 日冕點
       var k;
@@ -121,8 +143,10 @@
         var a = k * Math.PI / 4, l = (k & 1) ? 9 : 11;
         line(px, 12 + Math.cos(a) * 7, 12 + Math.sin(a) * 7, 12 + Math.cos(a) * l, 12 + Math.sin(a) * l, (k & 1) ? 1 : 2);
       }
-      sphere(px, 12, 12, 6.4);
-      for (var y = 0; y < 24; y++) for (var x = 0; x < 24; x++) if (px[y][x] === 2 && Math.abs(x - 12) + Math.abs(y - 12) < 5) px[y][x] = 3;
+      for (var y = 0; y < 24; y++) for (var x = 0; x < 24; x++) {   // 黃色日面（不打暗面）+ 淡白核心
+        var dx = x + 0.5 - 12, dy = y + 0.5 - 12;
+        if (dx * dx + dy * dy <= 6.4 * 6.4) px[y][x] = (Math.abs(x - 12) + Math.abs(y - 12) < 4) ? 3 : 2;
+      }
     },
     9: function (px) {   // 超新星：不規則尖刺 + 外圈震波
       var k, L = [11, 7, 10, 8, 11, 6, 10, 9, 11, 7, 9, 8];
@@ -136,6 +160,7 @@
       }
       sphere(px, 12, 12, 3.6);
       for (var y = 9; y <= 15; y++) for (var x = 9; x <= 15; x++) if (px[y][x] === 2) px[y][x] = 3;
+      recolor(px, [0, 2, 1, 3]);    // 紅尖刺 + 黃震波點 + 淡白核
     },
     10: function (px) {  // 脈衝星：小亮核 + 兩道錐形光束 + 磁環
       var i, x, y;
@@ -151,15 +176,16 @@
         if (e > 0.8 && e < 1.05 && px[y][x] === 0) px[y][x] = 1;
       }
       sphere(px, 12, 12, 3.1);
-      px[11][11] = 3; px[11][12] = 3; px[12][11] = 3;
+      recolor(px, [0, 1, 3, 3]);    // 淡青白光束 + 紅磁環
+      px[11][11] = 2; px[11][12] = 2; px[12][11] = 2;
     },
     11: function (px) {  // 星系：雙旋臂
       var t, arm;
       for (arm = 0; arm < 2; arm++) for (t = 0; t < 70; t++) {
         var th = t * 0.11 + arm * Math.PI, r = 1.6 + t * 0.15;
         var x = 12 + Math.cos(th) * r, y = 12 + Math.sin(th) * r * 0.78;
-        S(px, x, y, r < 4.5 ? 3 : (r < 8 ? 2 : 1));
-        if (r < 7) S(px, x + 1, y, 2);
+        S(px, x, y, r < 3.5 ? 3 : (r < 9.5 ? 2 : 1));   // 銀色旋臂為主
+        if (r < 9) S(px, x + 1, y, r < 3.5 ? 3 : 2);
       }
       sphere(px, 12, 12, 2.6);
       px[11][11] = 3; px[11][12] = 3; px[12][12] = 3; px[12][11] = 3;
@@ -168,7 +194,7 @@
       function mini(cx, cy, r, tilt) {
         for (var y = 0; y < 24; y++) for (var x = 0; x < 24; x++) {
           var dx = x + 0.5 - cx, dy = y + 0.5 - cy, ry = dy - dx * tilt, e = dx * dx / (r * r) + ry * ry / (r * r * 0.3);
-          if (e <= 1) px[y][x] = e < 0.25 ? 3 : (e < 0.6 ? 2 : 1);
+          if (e <= 1) px[y][x] = e < 0.15 ? 3 : (e < 0.35 ? 2 : 1);   // 洋紅小星系為主
         }
       }
       mini(6, 6, 4, 0.5); mini(18, 6, 3.6, -0.6); mini(5, 17, 3.4, -0.4); mini(18, 18, 4.2, 0.4);
