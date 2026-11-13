@@ -7,7 +7,7 @@
  *   待命格 = 組 0（灰）、運作中 = 組 1（青，左上 / 右下）或組 2（金，右上 / 左下）、失誤閃 = 組 3（紅）。
  *   split(32)：HUD 以下的場地用第二組捲動值，失誤時整片場地橫向震 ±2 px（HUD 不動）。
  * 四件任務（各用不同的鍵，彼此獨立）：
- *   DRIFT  左上 ←→  星艇在軌道上被風吹，留在中央亮區；碰到軌道盡頭 = 失誤（風向 / 風力畫在軌道上方）
+ *   DRIFT  左上 ←→  星艇在軌道上被風吹，留在中央亮區；碰到軌道盡頭彈回（BUMP），再撞或沒拉回 = 失誤（風向 / 風力畫在軌道上方）
  *   PUMP   右上 A   油槽一直漏，按 A 打油（每下 +6 px）；空了或滿出來 = 失誤（綠區記號 24~52）
  *   SIGNAL 左下 ↑↓  信號燈亮出箭頭（第 4 級起一次兩個），在倒數條用完前按對應方向；按錯 / 逾時 = 失誤
  *   SHIELD 右下 B   流星從右邊飛向行星，進到護盾環（兩條虛線之間）時按 B 擊碎；撞上行星 = 失誤；空揮冷卻 30 幀
@@ -27,12 +27,16 @@
   var STAGE = [0, C.sec(20), C.sec(45), C.sec(90), C.sec(120), C.sec(150)];
   var OPENS = [0, 0, 1, 2];                       // 任務 i 在第幾級開放（DRIFT / PUMP / SIGNAL / SHIELD）
   // 每級參數（8.8 定點）
+  // fix-r8（qa-r8 P2-4）：DRIFT 第 1~3 級推力 24 → 14、風力 5/7/9 → 4/5/6、阻尼 dv/16 → dv/12；
+  //   撞到盡頭改成彈回（BUMP）：bumpT 幀內拉回亮區就沒事，期間再撞一次或沒拉回才算失誤；每進入下一個 STAGE 回 1 心。
+  //   OVERTIME（第 4、5 級，90 秒 goal 之後）留給高手：風 11 / 13（同修前）、推力 18 / 20、阻尼 dv/14（較滑）、BUMP 窗 50 幀。
+  //   以真人模型（tools/human_filter.js：lag 20 + 抖動 N(3,3) + 換組 10~20 幀）回測，見 test_brain.py「真人模型」段與 PROGRESS。
   var LV = [
-    { wind: 5, thrust: 24, leak: 18, tap: 6, sigWin: 150, sigGap: [90, 160], sig2: 0, met: 112, metGap: [150, 230] },
-    { wind: 7, thrust: 24, leak: 22, tap: 6, sigWin: 140, sigGap: [80, 150], sig2: 0, met: 120, metGap: [140, 220] },
-    { wind: 9, thrust: 24, leak: 26, tap: 6, sigWin: 120, sigGap: [70, 140], sig2: 0, met: 128, metGap: [130, 200] },
-    { wind: 11, thrust: 26, leak: 30, tap: 6, sigWin: 130, sigGap: [70, 130], sig2: 1, met: 160, metGap: [110, 180] },
-    { wind: 13, thrust: 28, leak: 36, tap: 6, sigWin: 120, sigGap: [60, 120], sig2: 1, met: 192, metGap: [100, 160] }
+    { wind: 4, thrust: 14, damp: 12, bumpT: 60, leak: 18, tap: 6, sigWin: 150, sigGap: [90, 160], sig2: 0, met: 112, metGap: [150, 230] },
+    { wind: 5, thrust: 14, damp: 12, bumpT: 60, leak: 22, tap: 6, sigWin: 140, sigGap: [80, 150], sig2: 0, met: 120, metGap: [140, 220] },
+    { wind: 6, thrust: 14, damp: 12, bumpT: 60, leak: 26, tap: 6, sigWin: 120, sigGap: [70, 140], sig2: 0, met: 128, metGap: [130, 200] },
+    { wind: 11, thrust: 18, damp: 14, bumpT: 50, leak: 30, tap: 6, sigWin: 130, sigGap: [70, 130], sig2: 1, met: 160, metGap: [110, 180] },
+    { wind: 13, thrust: 20, damp: 14, bumpT: 50, leak: 36, tap: 6, sigWin: 120, sigGap: [60, 120], sig2: 1, met: 192, metGap: [100, 160] }
   ];
   var Q = [{ c: 0, r: 4, pal: 1 }, { c: 16, r: 4, pal: 2 }, { c: 0, r: 16, pal: 2 }, { c: 16, r: 16, pal: 1 }];
   var NAMES = ['DRIFT', 'PUMP', 'SIGNAL', 'SHIELD'];
@@ -51,8 +55,9 @@
   };
 
   var M = {
+    hudShift: true,
     key: 'JUGGLE', name: 'JUGGLE', short: 'JUGGLE', sub: '4 TASKS AT ONCE', song: 'brain_juggle',
-    levels: 5, hearts: 5, levelSelect: false, pal: PAL, heartPerLevel: 0,
+    levels: 5, hearts: 5, levelSelect: false, pal: PAL, heartPerLevel: 0,   // 回心在 tick 換 STAGE 時做（本模式不經 afterLevel）
     levelNote: 'STAGES 1-5 BY TIME',
     finalMsg: '150 SEC! ALL STAGES CLEAR',
     rules: [
@@ -62,7 +67,7 @@
       'PUMP   KEEP FUEL IN MARKS',
       'SIGNAL PRESS THE ARROW',
       'SHIELD B WHEN IN THE RING',
-      'NEW TASK EVERY STAGE'
+      'NEW STAGE: TASK + HEART'
     ],
     pad: { d: ['L/R DRIFT', 'U/D SIGNAL'], b: 'SHIELD', a: 'PUMP' }, goalLine: 'SURVIVE 90 SEC = CLEAR',
     overWhy: 'OUT OF HEARTS'
@@ -124,7 +129,7 @@
 
   /* ---------------- 任務狀態 ---------------- */
   function resetTask(s, i) {
-    if (i === 0) { s.dp = 0; s.dv = 0; s.wind = 0; s.windT = 0; s.windTo = 0; s.windHold = 60; }
+    if (i === 0) { s.dp = 0; s.dv = 0; s.wind = 0; s.windT = 0; s.windTo = 0; s.windHold = 60; s.bump = 0; }
     else if (i === 1) { s.fuel = 40 * 256; s.crack = 0; s.crackWait = 400; }
     else if (i === 2) { s.sig = null; s.sigWait = 60; }
     else { s.mets = []; s.metWait = 80; s.cool = 0; s.burst = null; }
@@ -166,6 +171,7 @@
     if (lv !== s.lv) {
       s.lv = lv; C.g.run.lv = lv;
       for (i = 0; i < 4; i++) if (!s.on[i] && OPENS[i] <= lv) openTask(s, i);
+      C.heal(1);                                   // fix-r8：每進入下一個 STAGE 回 1 心
       if (lv >= 3) C.say('OVERTIME! EVERYTHING FASTER', 120);
       else AU.sfx('brain_ok');
     }
@@ -207,10 +213,25 @@
     s.dv += s.wind;
     if (I.held(BTN.LEFT) && !I.held(BTN.RIGHT)) s.dv -= p.thrust;
     if (I.held(BTN.RIGHT) && !I.held(BTN.LEFT)) s.dv += p.thrust;
-    s.dv -= (s.dv / 16) | 0;
+    s.dv -= (s.dv / p.damp) | 0;
     s.dp += s.dv;
-    if (Math.abs(s.dp) > TR_EDGE * 256) { fail(s, 0, 'DRIFT HIT THE END!'); return; }
+    var E = TR_EDGE * 256;
+    if (Math.abs(s.dp) > E) {
+      // 撞到盡頭：彈回 + 閃紅；BUMP 期間再撞一次 = 失誤
+      if (s.bump > 0) { fail(s, 0, 'DRIFT HIT THE END TWICE!'); return; }
+      var sg = s.dp > 0 ? 1 : -1;
+      s.dp = sg * E; s.dv = -sg * Math.max(Math.abs(s.dv) >> 1, 96);
+      s.bump = p.bumpT; s.bumps = (s.bumps | 0) + 1;
+      quadAttr(0, 3); s.alert[0] = Math.max(s.alert[0], 2);
+      C.say('BUMP! PULL BACK TO THE GLOW', 60);
+      AU.sfx('brain_ng');
+    }
     s.inZone = Math.abs(s.dp) <= TR_SAFE * 256;
+    if (s.bump > 0) {
+      if (s.inZone) { s.bump = 0; quadAttr(0, Q[0].pal); }
+      else if (--s.bump === 0) { fail(s, 0, 'DRIFT STUCK AT THE END!'); return; }
+      else if (s.alert[0] < 2) s.alert[0] = 2;     // 拉回亮區前一直保持紅色
+    }
     if (s.inZone && s.t % 60 === 30) C.addScore(2);
     // 風向指示（第 7 列 3 格）：一格 = 1/3 最大風
     var str = Math.min(3, Math.ceil(Math.abs(s.wind) * 3 / Math.max(1, p.wind)));
@@ -259,6 +280,9 @@
   }
   function tickSignal(s, p, I) {
     var up = I.pressed(BTN.UP), dn = I.pressed(BTN.DOWN);
+    // fix-r8（qa-r8 P2-7）：斜方向擋掉——↑↓ 的按下邊緣若同一幀也有 ←→ 的按下邊緣（觸控偏到斜區），不判定（不算錯，等下一次單一方向）
+    if ((up || dn) && (I.pressed(BTN.LEFT) || I.pressed(BTN.RIGHT))) { up = false; dn = false; }
+    if (up && dn) { up = false; dn = false; }
     if (!s.sig) {
       if (--s.sigWait <= 0) {
         var n = (p.sig2 && C.rint(2) === 0) ? 2 : 1, dirs = [];
@@ -314,8 +338,8 @@
   M.draw = function (mode) {
     var s = sub(), ppu = C.nes.ppu, i;
     var sx = s.shake > 0 ? ((s.shake & 2) ? 2 : -2) : 0;
-    ppu.scroll(0, 0);
-    ppu.split(32, { x: (sx + 512) & 511, y: 32, nt: 0 });
+    ppu.scroll(0, -C.SHIFT);                       // HUD 名稱表列 1~3 顯示在畫面列 2~4
+    ppu.split(32 + C.SHIFT, { x: (sx + 512) & 511, y: 32, nt: 0 });
     void mode;
     if (s.on[0]) {
       var x = TR_X0 + (s.dp >> 8) - 8 - sx;
@@ -399,9 +423,9 @@
       if (f < 34) { var ta = tap(BTN.A); if (ta) { m |= ta; mem.pumps.push(now); } }
     }
     if (o.on[2] && !o.fr[2] && o.sig) {
-      // 同一個信號、同一格只按一次（等畫面更新到下一格再按）
+      // 同一個信號、同一格只按一次（等畫面更新到下一格再按；按了 1.5 秒畫面都沒反應才再按——人記得自己按過）
       var key = o.t - 0;
-      if (mem.sigIdx !== o.sig.idx || mem.sigLen !== o.sig.dirs.length || mem.sigT === undefined || o.t - mem.sigT > 30) {
+      if (mem.sigIdx !== o.sig.idx || mem.sigLen !== o.sig.dirs.length || mem.sigT === undefined || o.t - mem.sigT > 90) {
         var b = o.sig.dirs[o.sig.idx] === 0 ? BTN.UP : BTN.DOWN;
         var tb = tap(b);
         if (tb) { m |= tb; mem.sigIdx = o.sig.idx; mem.sigLen = o.sig.dirs.length; mem.sigT = o.t; }

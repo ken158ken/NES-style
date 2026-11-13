@@ -19,11 +19,15 @@
  * | simon_over   | 星光散去 | 9     | 1    | GAME OVER（不 loop） |
  *
  * 8 個鍵音（音高 + 音色都不同；音高順序 下 < 左 < 右 < 上，第二組 = 按住 B）：
- *   k0 ↑ 星   A5  占空比 12.5%、撥弦式衰減（亮、細）
- *   k1 → 月   E5  占空比 25%、延遲顫音（柔）
- *   k2 ↓ 行星 A4  占空比 50%、平穩（空心、低）
- *   k3 ← 彗星 C#5 25% / 50% 交替（嗡嗡聲）+ 尾端下滑（彗尾）
- *   k4..k7 = B + ↑→↓←：G#5 / F#5 / B4 / D5，音色同方向那一組，再疊 **八度快速琶音**（閃爍感）
+ *   fix-r8 P3-7：舊版四音 A4 / C#5 / E5 / A5 是 A 大三和弦（與原版 Simon 常見說法同一個和弦），改成原創的
+ *   **四度堆疊**（降 B 五聲音階的子集，不含任何大 / 小三和弦）：第一組 G4 / C5 / F5 / A#5，相鄰都差 5 半音
+ *   （比舊版最小 3 半音更好分辨）；第二組 D5 / G5 / C6 / F6，同樣四度堆疊、與第一組交錯；八度閃爍後的音
+ *   （D6 / G6 / C7 / F7）也不和任何一顆撞音高 ⇒ 聽音辨位一對一。
+ *   k0 ↑ 星   A#5 占空比 12.5%、撥弦式衰減（亮、細）
+ *   k1 → 月   F5  占空比 25%、延遲顫音（柔）
+ *   k2 ↓ 行星 G4  占空比 50%、平穩（空心、低）
+ *   k3 ← 彗星 C5  25% / 50% 交替（嗡嗡聲）+ 尾端下滑（彗尾）
+ *   k4..k7 = B + ↑→↓←：F6 / C6 / D5 / G5，音色同方向那一組，再疊 **八度快速琶音**（閃爍感）
  */
 (function () {
   'use strict';
@@ -110,14 +114,14 @@
   /* ---------------- 8 個鍵音（p1） ---------------- */
   // KEYS[k] = {note, midi, duty, kind}；k = 方向（0 ↑ 1 → 2 ↓ 3 ←）+ 4 × 組別（B 按住 = 1）
   var KEYS = [
-    { note: 'A-5', midi: 81, duty: 0, kind: 'pluck' },
-    { note: 'E-5', midi: 76, duty: 1, kind: 'vib' },
-    { note: 'A-4', midi: 69, duty: 2, kind: 'flat' },
-    { note: 'C#5', midi: 73, duty: 1, kind: 'buzz' },
-    { note: 'G#5', midi: 80, duty: 0, kind: 'pluck', shimmer: true },
-    { note: 'F#5', midi: 78, duty: 1, kind: 'vib', shimmer: true },
-    { note: 'B-4', midi: 71, duty: 2, kind: 'flat', shimmer: true },
-    { note: 'D-5', midi: 74, duty: 1, kind: 'buzz', shimmer: true }
+    { note: 'A#5', midi: 82, duty: 0, kind: 'pluck' },
+    { note: 'F-5', midi: 77, duty: 1, kind: 'vib' },
+    { note: 'G-4', midi: 67, duty: 2, kind: 'flat' },
+    { note: 'C-5', midi: 72, duty: 1, kind: 'buzz' },
+    { note: 'F-6', midi: 89, duty: 0, kind: 'pluck', shimmer: true },
+    { note: 'C-6', midi: 84, duty: 1, kind: 'vib', shimmer: true },
+    { note: 'D-5', midi: 74, duty: 2, kind: 'flat', shimmer: true },
+    { note: 'G-5', midi: 79, duty: 1, kind: 'buzz', shimmer: true }
   ];
   var VIB = [0, 1, 2, 1, 0, -1, -2, -1];
   function midiName(m) { var N = ['C-', 'C#', 'D-', 'D#', 'E-', 'F-', 'F#', 'G-', 'G#', 'A-', 'A#', 'B-']; return N[m % 12] + (Math.floor(m / 12) - 1); }

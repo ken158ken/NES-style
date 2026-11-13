@@ -29,15 +29,16 @@
   var LANES = [12, 48, 84];                 // 星艇 / 隕石左緣 x（16 寬；中心 20 / 56 / 92）
   var SHIP_Y = 160, SPLIT = 144;
   var CHUTE_X = 192, ZONE_Y0 = 144, ZONE_Y1 = 184, GATE_Y = 188;
+  // fix-r8（qa-r8 建議表）：真人模型 A（lag 20 + 換組）在第 6 級隕石 448 處斷崖式失誤 ⇒ 第 6~8 級隕石速度 448/512/576 → 400/448/496（−11~14%）
   var LV = [
     { rv: 256, gap: 64, dbl: 0, iv: 160, igap: 120, flip: 0 },
     { rv: 288, gap: 58, dbl: 20, iv: 176, igap: 110, flip: 0 },
     { rv: 320, gap: 52, dbl: 35, iv: 192, igap: 100, flip: 0 },
     { rv: 352, gap: 48, dbl: 45, iv: 208, igap: 92, flip: 0 },
     { rv: 384, gap: 44, dbl: 50, iv: 224, igap: 86, flip: 1 },
-    { rv: 448, gap: 40, dbl: 55, iv: 240, igap: 80, flip: 1 },
-    { rv: 512, gap: 36, dbl: 60, iv: 272, igap: 74, flip: 1 },
-    { rv: 576, gap: 32, dbl: 65, iv: 304, igap: 68, flip: 1 }
+    { rv: 400, gap: 40, dbl: 55, iv: 240, igap: 80, flip: 1 },
+    { rv: 448, gap: 36, dbl: 60, iv: 272, igap: 74, flip: 1 },
+    { rv: 496, gap: 32, dbl: 65, iv: 304, igap: 68, flip: 1 }
   ];
   var PAL = {
     bd: 0x0F,
@@ -314,19 +315,24 @@
       (rows[r.row] = rows[r.row] || { y: y, lanes: [] }).lanes.push(r.lane);
     });
     var list = Object.keys(rows).map(function (k) { return rows[k]; }).sort(function (a, b) { return b.y - a.y; });
-    var want = s.lane;
+    // fix-r8：「傳出副本」——人記得自己剛按了換道，在手還沒反映到畫面前（≤ 40 幀）以「按下去之後的跑道」思考，不會連按兩次衝過頭
+    var lane = s.lane;
+    if (mem.pend !== undefined) { if (s.lane === mem.pend || now - mem.pendT > 40) mem.pend = undefined; else lane = mem.pend; }
+    var want = lane;
     if (list.length) {
       var r0 = list[0], free0 = [0, 1, 2].filter(function (q) { return r0.lanes.indexOf(q) < 0; });
       var r1 = list[1], free1 = r1 ? [0, 1, 2].filter(function (q) { return r1.lanes.indexOf(q) < 0; }) : [0, 1, 2];
       var best = null, bd = 99;
       free0.forEach(function (q) {
-        var d = Math.abs(q - s.lane) * 2 + (free1.indexOf(q) >= 0 ? 0 : 1);
+        var d = Math.abs(q - lane) * 2 + (free1.indexOf(q) >= 0 ? 0 : 1);
         if (r0.y < SHIP_Y - 70 && free1.indexOf(q) < 0) d += 2;
         if (d < bd) { bd = d; best = q; }
       });
       if (best !== null) want = best;
     }
-    if (want < s.lane) m |= tap(BTN.LEFT); else if (want > s.lane) m |= tap(BTN.RIGHT);
+    var lt = 0;
+    if (want < lane) lt = tap(BTN.LEFT); else if (want > lane) lt = tap(BTN.RIGHT);
+    if (lt) { m |= lt; mem.pend = lane + (lt === BTN.LEFT ? -1 : 1); mem.pendT = now; }
     // 右：預測目前位置（看到的 + 速度 × 延遲），在分揀區中段才按
     for (var i = 0; i < o.items.length; i++) {
       var it = o.items[i], cy = it.y + ((o.iv * lag) >> 8) + 8;

@@ -360,6 +360,30 @@ def main():
     ok('機器人調色（延遲 18，記憶回合只在展示時讀）：10 回合打完、≥ 9500（S）、每線 ≤ 8、over 0',
        rr['s']['mode'] == 'result' and rr['s']['run']['score'] >= 9500 and rr['ml'] <= 8 and rr['over'] == 0, (rr['s']['mode'], rr['s']['run']['score'], rr['f'], rr['ml'], rr['over']))
 
+    # ---------------- fix-r8-shell（qa-r8 P3-2）：HUD / 標題不貼 y = 0（名稱表第 0、1 列全空 ⇒ 第一列亮像素 ≥ 8） ----------------
+    TOP = "() => { const p = __nes.nes().ppu, o = []; for (const r of [0, 1]) for (let c = 0; c < 32; c++) if (p.getTile(0, c, r)) o.push([c, r]); return o; }"
+    fresh(page)
+    step(page, 3)
+    ok('P3-2 標題：第 0 / 1 列全空（大字從 y = 8 起）', not page.evaluate(TOP), page.evaluate(TOP))
+    press(page, B)
+    step(page, 3)
+    ok('P3-2 說明頁：第 0 / 1 列全空', st(page)['mode'] == 'help' and not page.evaluate(TOP), page.evaluate(TOP))
+    for m, nm in ((0, 'INK OR WORD'), (1, 'COLOR RUSH'), (2, 'HUE MIXER')):
+        fresh(page)
+        start(page, m)
+        ask(page)
+        step(page, 2)
+        tt = page.evaluate(SCREEN)
+        ok('P3-2 %s：HUD 在第 2 / 3 列、第 0 / 1 列全空、框頂在第 4 列' % nm,
+           not page.evaluate(TOP) and tt[2].strip().startswith(nm) and tt[3].strip() and tt[4].strip() == '',
+           (page.evaluate(TOP)[:4], tt[1:5]))
+    fresh(page)
+    start(page, 0)
+    ask(page)
+    step(page, 30)
+    wr = page.evaluate("() => { const p = __nes.nes().ppu, n = r => { let k = 0; for (let c = 1; c < 31; c++) if (p.getTile(0, c, r)) k++; return k; }; return [n(4), n(6), n(7), n(8)]; }")
+    ok('P3-2 色字：框頂第 4 列滿版、第 6 列空、題目大字在第 7~8 列', wr[0] == 30 and wr[1] == 0 and wr[2] > 0 and wr[3] > 0, wr)
+
     ok('全程沒有 pageerror', not errs, errs[:3])
     browser.close()
     pw.stop()

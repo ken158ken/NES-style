@@ -64,6 +64,7 @@
   function text(c, r, s) { S.text(c, r, s, A.ch); }
   function dimText(c, r, s) { S.text(c, r, s, A.dim); }
   function starAt(c, r) { var h = Math.imul(c * 73856093 ^ r * 19349663, 2654435761) >>> 0; h = (h >>> 13) % 23; return h === 0 ? A.t('ST1') : (h === 1 ? A.t('ST2') : 0); }
+  function touchDev() { return !!(NES.Touch && NES.Touch.available); }
   function wpmOf(chars, frames) { return frames > 0 ? Math.round(chars * 60 * 60.0988 / 5 / frames) : 0; }
 
   /* ============================== 狀態 ============================== */
@@ -92,7 +93,7 @@
   }
   function toTitle() {
     g.mode = 'title'; g.paused = false;
-    Phys.setActive(false);
+    Phys.release();
     refreshScreen();
     Au.stop(); Au.play('typing_title');
   }
@@ -268,7 +269,7 @@
   }
   function finish(clear) {
     g.mode = 'result'; g.endT = 0; g.over = !clear; g.paused = false; g.lock = -1;
-    Phys.setActive(false);
+    Phys.release();
     var key = Phys.used > g.keyUsed, r = { clear: clear, key: key };
     if (g.game === 0) {
       r.title = clear ? 'ALL CLEAR!' : 'BASE DOWN';
@@ -310,7 +311,19 @@
     else if (g.game === 1) sentenceChar(ch);
     else { if (ch === ' ') return; taChar(ch); }
   }
+  // fix-r9-type P3-6：觸控直接點畫面鍵盤 = 游標跳過去 + 按 A
+  function tapInput() {
+    var q = TY.Kbd.Tap.drain();
+    for (var i = 0; i < q.length; i++) {
+      var k = KB.hit(q[i].x, q[i].y);
+      if (!k) continue;
+      g.cur = k.id; g.rep.reset();
+      if (k.id === 'shift') toggleCase();
+      else { var c = keyChar(k); if (c !== null) feed(c); }
+    }
+  }
   function updateInput() {
+    tapInput();
     var d = g.rep.step();
     if (d) { var nk = KB.move(KB.byId[g.cur], d); if (nk) { g.cur = nk.id; sfx('typing_move'); } }
     if (pressed(BTN.SELECT) && !held(BTN.START)) toggleCase();
@@ -421,7 +434,7 @@
     attrRows(10, 10, 2);
     text(2, 23, center('A/START: GO   C/$ = CHEAT', 28));
     text(2, 25, center('HOLD START+SELECT: MENU', 28));
-    text(2, 27, (g.blink >> 5) & 1 ? center('PC: TYPE ON YOUR KEYBOARD', 28) : center('PUSH START', 28));
+    text(2, 27, (g.blink >> 5) & 1 ? center(touchDev() ? 'PHONE: TAP THE KEYS' : 'PC: TYPE ON YOUR KEYBOARD', 28) : center('PUSH START', 28));
   }
   var HELP = [
     ['METEOR RAIN', ['WORDS FALL TOWARD THE BASE.', 'TYPE A WORD TO BLAST IT.', 'THE FIRST LETTER LOCKS ON', 'TO THE LOWEST MATCHING WORD.']],
@@ -438,8 +451,8 @@
     text(2, 14, 'D-PAD MOVE    A TYPE KEY');
     text(2, 16, 'B ' + pad(g.sel === 0 ? 'UNLOCK' : 'BACKSPACE', 12) + 'SELECT aA');
     text(2, 18, 'START PAUSE   C/$ = CHEAT');
-    text(2, 20, 'PC: JUST TYPE  ESC PAUSE');
-    text(2, 22, 'PC CHEAT: PAUSE, THEN C');
+    if (touchDev()) text(2, 20, 'PHONE: TAP A KEY TO TYPE IT');   // P3-6
+    else { text(2, 20, 'PC: JUST TYPE  ESC PAUSE'); text(2, 22, 'PC CHEAT: PAUSE, THEN C'); }
     text(2, 24, 'HOLD START+SELECT: MENU');
     attrRows(13, 13, 2);
     text(2, 27, center('A START    B BACK', 28));
@@ -722,7 +735,7 @@
       drawSprites();
     },
     exit: function (nes) {
-      Phys.setActive(false);
+      Phys.release();
       if (g && g.game === 0 && (g.mode === 'play' || g.mode === 'ready') && g.runCheats === 0) saveBest(g.score);
       Au.stop();
     },

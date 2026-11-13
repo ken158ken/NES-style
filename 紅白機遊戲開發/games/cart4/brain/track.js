@@ -43,6 +43,7 @@
   };
 
   var M = {
+    hudShift: true,
     key: 'TRACER', name: 'TRACER', short: 'TRACER', sub: 'TRACK TIME AND SPACE', song: 'brain_trace',
     levels: 8, hearts: 3, levelSelect: true, pal: PAL, heartPerLevel: 1,
     finalMsg: 'LEVEL 8 CLEAR! TIME LORD',
@@ -270,7 +271,7 @@
   /* ---------------- 繪製 ---------------- */
   M.draw = function () {
     var s = sub(), p = P(), ppu = C.nes.ppu;
-    ppu.split(null); ppu.scroll(0, 0);
+    ppu.split(null); ppu.scroll(0, -C.SHIFT);      // 整片下移 8 px：HUD 不貼 y = 0
     if (s.phase === 'watch' || s.phase === 'show') {
       s.objs.forEach(function (o, k) {
         if (!o.vis) return;
@@ -373,9 +374,14 @@
     }
     if (now - mem.waitT < 10) { mem.prev = 0; return 0; }
     var a = mem.answer;
-    if (s.cx < a.x) m |= tap(BTN.RIGHT); else if (s.cx > a.x) m |= tap(BTN.LEFT);
-    else if (s.cy < a.y) m |= tap(BTN.DOWN); else if (s.cy > a.y) m |= tap(BTN.UP);
-    else m |= tap(BTN.A);
+    // fix-r8：「傳出副本」——剛按的方向還沒反映到游標前（≤ 40 幀）以按下去之後的位置思考；游標停穩 6 幀才按 A
+    var cx = s.cx, cy = s.cy;
+    if (mem.pend) { if ((s.cx === mem.pend.x && s.cy === mem.pend.y) || now - mem.pend.t > 40) { mem.pend = null; mem.still = now; } else { cx = mem.pend.x; cy = mem.pend.y; } }
+    var b = 0, nx = cx, ny = cy;
+    if (cx < a.x) { b = BTN.RIGHT; nx++; } else if (cx > a.x) { b = BTN.LEFT; nx--; }
+    else if (cy < a.y) { b = BTN.DOWN; ny++; } else if (cy > a.y) { b = BTN.UP; ny--; }
+    if (b) { if (!mem.pend) { var tb = tap(b); if (tb) { m |= tb; mem.pend = { x: nx, y: ny, t: now }; } } }
+    else if (!mem.pend && now - (mem.still || 0) >= 6) m |= tap(BTN.A);
     mem.prev = m;
     return m;
   };

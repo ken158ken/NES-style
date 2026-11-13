@@ -11,6 +11,7 @@
 結束碼：0 全過 / 1 有失敗 / 2 環境錯誤
 """
 import json
+import os
 import pathlib
 import sys
 from collections import deque
@@ -20,7 +21,7 @@ from playwright.sync_api import sync_playwright
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 BASE = (ROOT / 'cart4.html').as_uri() + '?debug=1&scale=1&mute=1&game=brain'
 VERBOSE = '-v' in sys.argv
-QUICK = '--quick' in sys.argv
+QUICK = '--quick' in sys.argv or os.environ.get('NES_QUICK') == '1'   # run_all.sh --quick 設 NES_QUICK=1
 results = []
 
 
@@ -65,6 +66,47 @@ RUN = r"""
   return r;
 }
 """
+
+# ---------------- 真人模型（qa-r8 的 tools/human_filter.js）----------------
+# 在 CT.current.bot 外面包一層：機器人自己的 &lag= 當基本反應延遲；每次按下另加 N(mj, sj) 幀抖動；
+# 換到另一組鍵（120 幀內）再加 U(sw0, sw1) 幀切換成本；lapse 機率分心 +lapseF 幀；兩次按下最少隔 refr 幀；按住長度不變。
+HUMAN_JS = (ROOT / 'tools' / 'human_filter.js').read_text(encoding='utf-8')
+HUM_GROUPS = {1: {'1': 16 | 32 | 64 | 128, '2': 1 | 2}, 2: {'0': 64 | 128, '1': 1, '2': 16 | 32, '3': 2}, 3: {'1': 255}, 4: {'1': 255}}
+HUM_RUN = r"""
+(o) => {
+  const r = { f: 0, ml: 0, over0: __nes.stats().budget.overFrames | 0, lvHurts: [], h90: null, end: null };
+  let lv = -1;
+  for (let i = 0; i < o.n; i++) {
+    __nes.step(1); r.f++;
+    r.ml = Math.max(r.ml, __nes.stats().maxSpritesLine | 0);
+    const g = GAME.state().s;
+    if (g.run && g.run.lv !== lv) { lv = g.run.lv; r.lvHurts.push([lv, g.run.hurts]); }
+    if (r.h90 === null && g.sub && g.run && g.run.m === 1 && g.sub.t >= 5409) r.h90 = { hurts: g.run.hurts, fails: g.sub.fails.slice() };
+    if (o.until === 'goal' && GAME.state().goal) { r.end = 'goal'; break; }
+    if (g.mode === 'over' || g.mode === 'result') { r.end = g.mode; break; }
+  }
+  r.over = (__nes.stats().budget.overFrames | 0) - r.over0;
+  const g = GAME.state(); r.goal = g.goal; r.run = g.s.run; r.sub = g.s.sub; r.msg = g.s.msg; r.hum = window.__hum ? { n: __hum.n, sw: __hum.sw } : null;
+  return r;
+}
+"""
+
+
+def hum_run(page, mode, lag, seed, n, until=None, mj=3, sj=3, sw=(10, 20), lapse=0.0):
+    fresh(page, '&bot=1&botmode=%d&gmode=%d&lag=%d&seed=%d' % (mode, mode, lag, seed))
+    page.evaluate('() => {' + HUMAN_JS + '}')
+    o = dict(groups=HUM_GROUPS[mode], swWin=120, refr=4, lapseF=30, seed=seed * 7 + 3, mj=mj, sj=sj, sw0=sw[0], sw1=sw[1], lapse=lapse)
+    page.evaluate('(o) => { o.on = function () { var s = CT.current.state(); return s && s.mode === "play"; }; __humInstall(o); }', o)
+    return page.evaluate(HUM_RUN, {'n': n, 'until': until})
+
+
+def hurts_before(r, lv):
+    """第 lv 級（0 起算）開始時累計的失誤數（沒到過 = None）。"""
+    for l, h in r['lvHurts']:
+        if l == lv:
+            return h
+    return None
+
 
 NT_MATCH = r"""
 () => { const C = CT.Brain.C, p = __nes.nes().ppu; let bad = 0;
@@ -161,6 +203,38 @@ def main():
         ok('說明頁 %d：規則 + 手把對照（按鍵用途）+ HOLD START+SELECT: MENU，規則每列 ≤ 26 字' % (m + 1),
            all(p in t2 for p in info['pad'] if p != '-') and 'HOLD START+SELECT: MENU' in t2 and long_ok and 'A GO' in t2, rows[20:27])
     ok('說明頁按密技無效', page.evaluate("() => CT.get('brain').cheat()") is False)
+    # fix-r8 P3-2 / P3-3：標題 / 說明頁外框從名稱表列 2 起（可見區第 1 列空著）；標題模式一列一個、之間空列、副標只寫選中的
+    page.evaluate('() => { CT.Brain.dev.g().sel = 1; CT.Brain.dev.title(); __nes.step(2); }')
+    rows = page.evaluate(SCREEN)
+    nt01 = page.evaluate('() => { const p = __nes.nes().ppu; let n = 0; for (let r = 0; r < 2; r++) for (let c = 0; c < 32; c++) if (p.getTile(0, c, r)) n++; return n; }')
+    ok('fix-r8 P3-2 標題：名稱表列 0~1 全空（外框從列 2 起，不貼可見區 y = 0）', nt01 == 0, rows[:3])
+    blank = lambda r: rows[r].strip() == ''
+    ok('fix-r8 P3-3 標題：4 個模式在列 11/13/15/17、之間空列；副標只寫選中的一項（列 19）、前後空列',
+       all('BEST' in rows[r] for r in (11, 13, 15, 17)) and all(blank(r) for r in (10, 12, 14, 16, 18, 20)) and '4 TASKS AT ONCE' in rows[19]
+       and sum(1 for r in rows if 'TASKS AT ONCE' in r or 'TRACK TIME' in r or 'GRAVITY SENSE' in r) == 1, rows[9:22])
+    page.evaluate('() => { NES.Input.inject(32, 1); __nes.step(3); }')
+    rows2 = page.evaluate(SCREEN)
+    ok('fix-r8 P3-3 標題：↓ 換模式，副標列跟著換', 'TRACK TIME AND SPACE' in rows2[19] and 'TASKS' not in rows2[19], rows2[19])
+    page.evaluate('() => CT.Brain.dev.howto(1)')
+    page.evaluate('() => __nes.step(2)')
+    nt01 = page.evaluate('() => { const p = __nes.nes().ppu; let n = 0; for (let r = 0; r < 2; r++) for (let c = 0; c < 32; c++) if (p.getTile(0, c, r)) n++; return n; }')
+    ok('fix-r8 P3-2 說明頁：名稱表列 0~1 全空', nt01 == 0, nt01)
+    # HUD 在上方的三個模式：主捲動 y = -8（名稱表列 1 的 HUD 顯示在畫面列 2）、split 線 +8；TWIN HUD 在下方不受影響
+    hud = []
+    for m in range(4):
+        hud.append(page.evaluate('''(m) => { CT.Brain.dev.start(m, 0); CT.Brain.dev.begin(); __nes.step(3); const p = __nes.nes().ppu, sc = p.getScroll(), sp = p._split;
+            let top = 0; for (let c = 0; c < 32; c++) if (p.getTile(0, c, 0)) top++;
+            return { m, y: sc.y, split: sp && sp.line, oy: CT.Brain.C.oy, row0: top }; }''', m))
+    ok('fix-r8 P3-2 遊玩 HUD：JUGGLE / TRACER / TILT 主捲動 y = -8、split 32→40、精靈 +8；HUD 第一列落在可見區 y = 8',
+       0 <= hud[0]['y'] <= 7 and hud[0]['split'] == 144 and hud[0]['oy'] == 0 and all(h['y'] == -8 and h['oy'] == 8 and h['row0'] == 0 for h in hud[1:]) and hud[1]['split'] == 40 and hud[3]['split'] == 40 and hud[2]['split'] is None, hud)
+    # 觸控十字鍵：TILT 8 方向，其他 4 方向；exit 設回 8；API 不存在時不報錯
+    r = page.evaluate('''() => { const log = []; const T = NES.Touch, old = T && T.setWays; if (T) T.setWays = (n) => { log.push(n); return n; };
+        CT.Brain.dev.title(); CT.Brain.dev.start(1, 0); CT.Brain.dev.start(3, 0); CT.Brain.dev.start(2, 0); CT.get('brain').exit(__nes.nes());
+        if (T) T.setWays = old; let err = null; const sv = NES.Touch; try { NES.Touch = undefined; CT.Brain.dev.title(); CT.Brain.dev.start(1, 0); CT.get('brain').exit(__nes.nes()); } catch (e) { err = String(e); }
+        NES.Touch = sv; return { log, err }; }''')
+    ok('fix-r8 P2-7 觸控：標題 / TWIN / JUGGLE / TRACER setWays(4)、TILT setWays(8)、exit setWays(8)；沒有 NES.Touch 也不報錯',
+       r['log'] == [4, 4, 8, 4, 8] and r['err'] is None, r)
+    page.evaluate('() => { CT.Brain.dev.title(); __nes.step(2); }')
     # 起始等級：沒到過只能選 1，存檔到達第 4 級後可以選到 4
     r = page.evaluate("""() => { CT.Brain.dev.howto(0); __nes.step(2); NES.Input.inject(128, 1); __nes.step(2); const a = CT.Brain.dev.g().howLv;
         CT.save('brain', 'reach_TWIN', 3); CT.Brain.dev.howto(0); __nes.step(2); const b = CT.Brain.dev.g().howLv;
@@ -227,6 +301,36 @@ def main():
     r = page.evaluate("""() => { const s = CT.Brain.C.g.sub; s.freeze[0] = 0; s.dp = 0; s.dv = 0; s.wind = 0; s.windTo = 0; s.windHold = 9999;
         NES.Input.inject(128, 30); __nes.step(30); const a = s.dp; NES.Input.inject(64, 60); __nes.step(60); return { a, b: s.dp, int: Number.isInteger(s.dp) && Number.isInteger(s.dv) }; }""")
     ok('JUGGLE DRIFT：→ 推右、← 推回（8.8 定點整數）', r['a'] > 0 and r['b'] < r['a'] and r['int'], r)
+    # fix-r8 P2-4：DRIFT 推力 / 風 / 阻尼 / 撞端彈回 / 每 STAGE 回心
+    ok('fix-r8 JUGGLE DRIFT 參數：第 1~3 級推力 14、風 4/5/6、阻尼 dv/12、BUMP 60 幀；OVERTIME 推力 18/20、風 11/13、dv/14、BUMP 50 幀',
+       [x['thrust'] for x in ML] == [14, 14, 14, 18, 20] and [x['wind'] for x in ML] == [4, 5, 6, 11, 13]
+       and [x['damp'] for x in ML] == [12, 12, 12, 14, 14] and [x['bumpT'] for x in ML] == [60, 60, 60, 50, 50], [(x['thrust'], x['wind'], x['damp'], x['bumpT']) for x in ML])
+    r = page.evaluate("""() => { const s = CT.Brain.C.g.sub; s.freeze[0] = 0; s.dp = 46 * 256 - 50; s.dv = 200; s.wind = 0; s.windTo = 0; s.windHold = 9999; s.bump = 0;
+        const f0 = s.fails[0], h0 = GAME.state().s.run.hearts; NES.Input.inject(0, 0); __nes.step(1);
+        const a = { bump: s.bump, dv: s.dv, dp: s.dp >> 8, fails: s.fails[0] - f0, attr: CT.Brain.C.wantA[3 * 16 + 2] };
+        NES.Input.inject(64, 80); for (let i = 0; i < 80 && s.bump > 0; i++) __nes.step(1);
+        const b = { bump: s.bump, fails: s.fails[0] - f0, inZone: s.inZone, attr: CT.Brain.C.wantA[3 * 16 + 2], dh: h0 - GAME.state().s.run.hearts };
+        NES.Input.inject(0, 0); return { a, b }; }""")
+    ok('fix-r8 DRIFT 撞到盡頭 = 彈回（速度反向）+ 閃紅、不扣心；60 幀內拉回亮區 = 沒事、回原色',
+       r['a']['bump'] > 0 and r['a']['dv'] < 0 and r['a']['fails'] == 0 and r['a']['attr'] == 3 and r['b']['bump'] == 0 and r['b']['fails'] == 0
+       and r['b']['inZone'] and r['b']['attr'] == 1 and r['b']['dh'] == 0, r)
+    r = page.evaluate("""() => { const s = CT.Brain.C.g.sub; s.freeze[0] = 0; s.dp = 46 * 256 - 50; s.dv = 200; s.wind = 0; s.windTo = 0; s.windHold = 9999; s.bump = 0;
+        const f0 = s.fails[0]; NES.Input.inject(0, 0); __nes.step(1); const b1 = s.bump; s.dp = 45 * 256; s.dv = 300; __nes.step(1);
+        const twice = s.fails[0] - f0; s.freeze[0] = 0; s.dp = 46 * 256 - 50; s.dv = 200; s.bump = 0; __nes.step(1); const b2 = s.bump;
+        for (let i = 0; i < 70 && s.fails[0] - f0 < 2; i++) { s.dp = 30 * 256; s.dv = 0; s.wind = 0; s.windTo = 0; __nes.step(1); }
+        return { b1, b2, twice, stuck: s.fails[0] - f0 - twice, msg: GAME.state().s.msg }; }""")
+    ok('fix-r8 DRIFT 彈回後 60 幀內再撞 = 失誤；或 60 幀沒拉回亮區 = 失誤', r['b1'] > 0 and r['b2'] > 0 and r['twice'] == 1 and r['stuck'] == 1, r)
+    r = page.evaluate("""() => { CT.Brain.dev.start(1, 0); CT.Brain.dev.begin(); const g = CT.Brain.dev.g(), s = g.sub; g.run.hearts = 3;
+        s.t = 1200; for (let i = 0; i < 4; i++) __nes.step(1); const a = g.run.hearts; s.t = 2702; for (let i = 0; i < 4; i++) __nes.step(1);
+        return { a, b: g.run.hearts, lv: s.lv }; }""")
+    ok('fix-r8 JUGGLE 每進入下一個 STAGE 回 1 心（3 → 4 → 5）', r == {'a': 4, 'b': 5, 'lv': 2}, r)
+    r = page.evaluate("""() => { const s = CT.Brain.C.g.sub; s.freeze[2] = 0; s.sig = { dirs: [1], idx: 0, left: 100, max: 100 }; const f0 = s.fails[2], k0 = s.okSig;
+        NES.Input.inject(16 | 128, 1); __nes.step(2); const a = { fails: s.fails[2] - f0, ok: s.okSig - k0, sig: !!s.sig };
+        NES.Input.inject(0, 0); __nes.step(1); NES.Input.inject(32, 1); __nes.step(2); return { a, ok: s.okSig - k0, fails: s.fails[2] - f0 }; }""")
+    ok('fix-r8 SIGNAL 斜方向（↑+→ 同一幀按下）不判定、不算錯；之後單按 ↓ 照常成功', r['a'] == {'fails': 0, 'ok': 0, 'sig': True} and r['ok'] == 1 and r['fails'] == 0, r)
+    r = page.evaluate("""() => { const s = CT.Brain.C.g.sub; s.freeze[2] = 0; s.sig = { dirs: [0], idx: 0, left: 100, max: 100 }; const k0 = s.okSig;
+        NES.Input.inject(0, 0); NES.Input.inject(128, 5); NES.Input.inject(128 | 16, 1); __nes.step(8); NES.Input.inject(0, 0); return { ok: s.okSig - k0 }; }""")
+    ok('fix-r8 SIGNAL：按住 → 推 DRIFT 時再按 ↑（鍵盤雙手）仍然算數', r['ok'] == 1, r)
 
     # ================= TRACER =================
     gen = page.evaluate("""() => { let bad = 0, n = 0, ansBad = 0; const T = CT.Brain.Track;
@@ -275,7 +379,7 @@ def main():
     ok('TILT：洞口 3 px 被吸進去 → −1 心、回起點', r['fell'] and r['dh'] == 1 and r['back'] == r['start'], r)
     r = page.evaluate("""() => { const p = __nes.nes().ppu, s = CT.Brain.C.g.sub; NES.Input.inject(128 | 32, 30); __nes.step(30);
         const sp = p._split; const nt1 = p.getTile(1, 5, 10) === CT.Brain.Art.make().t('MT_WALL_0'); NES.Input.inject(0, 0); return { line: sp.line, x: sp.x, y: sp.y, nt1 }; }""")
-    ok('TILT：傾斜時 split(32) 以下的星盤位移 ±2 px（x 511/510 = 往右、y 30）、名稱表 1 鋪牆', r['line'] == 32 and r['x'] in (510, 511) and r['y'] in (30, 31) and r['nt1'], r)
+    ok('TILT：傾斜時 split(40) 以下的星盤位移 ±2 px（x 511/510 = 往右、y 30）、名稱表 1 鋪牆', r['line'] == 40 and r['x'] in (510, 511) and r['y'] in (30, 31) and r['nt1'], r)
     r = page.evaluate("""() => { const C = CT.Brain.C, s = CT.Brain.C.g.sub; let bad = 0; const want = { '#': 2, '.': 1, 'o': 1, 'G': 3, 'S': 1, '*': 1, '~': 3 };
         s.grid.forEach((row, y) => row.forEach((c, x) => { if (want[c] !== undefined && C.wantA[(2 + y) * 16 + x] !== want[c]) bad++; })); return bad; }""")
     ok('TILT：每個金屬塊 = 一個屬性區塊（牆組 2 / 地板組 1 / 星門冰組 3）', r == 0, r)
@@ -335,6 +439,27 @@ def main():
            {'f': r['f'], 'ml': r['ml'], 'grade': r['s']['run'] and r['s']['run']['grade'], 'hurts': r['s']['run'] and r['s']['run']['hurts']})
         r = page.evaluate("() => __nes.lint()")
         ok('結算畫面 lint 綠', r.get('ok'), r)
+    # ================= 真人模型（fix-r8：不再只靠 0 失誤的完美機器人） =================
+    # 模型 A = 一般玩家：反應 lag 20 + 每次按下 N(3,3) 抖動 + 換組 10~20 幀；模型 B = 分心玩家：lag 25 + 換組 + 3% 分心 +30 幀。
+    if not QUICK:
+        def brief(r):
+            R = r['run'] or {}
+            return {'end': r['end'], 'f': r['f'], 'lvHurts': r['lvHurts'], 'hurts': R.get('hurts'), 'grade': R.get('grade'), 'h90': r['h90'],
+                    'fails': (r['sub'] or {}).get('fails'), 'ml': r['ml'], 'over': r['over'], 'hum': r['hum']}
+        jug = [hum_run(page, 2, 20, sd, 5700, 'goal') for sd in (1, 2, 3)]
+        ok('真人模型 A：JUGGLE 撐過 90 秒（goal）≥ 3 / 3 局（目標 ≥ 70%）', sum(1 for r in jug if r['goal']) >= 3 and all(r['ml'] <= 8 and r['over'] == 0 for r in jug),
+           [brief(r) for r in jug])
+        ok('真人模型 A：JUGGLE 90 秒內 DRIFT 失誤 ≤ 1（qa-r8 修前 = 全部死在 DRIFT）', all(r['h90'] and r['h90']['fails'][0] <= 1 for r in jug), [r['h90'] for r in jug])
+        jb = [hum_run(page, 2, 25, sd, 9300, None, lapse=0.03) for sd in (1, 2)]
+        ok('真人模型 B：JUGGLE 也撐過 90 秒；但 150 秒結算有挑戰（OVERTIME 失誤 ≥ 2 或 GAME OVER，拿不到 S）',
+           all(r['goal'] for r in jb) and all(r['end'] == 'over' or (r['run']['hurts'] - r['h90']['hurts']) >= 2 for r in jb), [brief(r) for r in jb])
+        tw = hum_run(page, 1, 20, 1, 16000)
+        ok('真人模型 A：TWIN 前段友善（第 1~3 級 0 失誤）、後段有挑戰（第 5 級起有失誤或 GAME OVER）',
+           hurts_before(tw, 3) == 0 and (tw['end'] == 'over' or (tw['run']['hurts'] - (hurts_before(tw, 4) or 0)) >= 2) and tw['ml'] <= 8 and tw['over'] == 0, brief(tw))
+        trc = hum_run(page, 3, 25, 1, 16000, None, mj=4, sj=4, sw=(0, 0), lapse=0.03)
+        ok('真人模型 B：TRACER 前段友善（第 1~2 級 0 失誤）、打得到第 5 級以上', hurts_before(trc, 2) == 0 and max(l for l, h in trc['lvHurts']) >= 4, brief(trc))
+        tl = hum_run(page, 4, 25, 1, 12000, None, mj=4, sj=4, sw=(0, 0))
+        ok('真人模型 C（lag 25 + 抖動 N(4,4)，同 qa-r8）：TILT 前段友善（第 1~2 張 0 失誤）、打得完 8 張', hurts_before(tl, 2) == 0 and tl['end'] == 'result', brief(tl))
     # 機器人公平性：觀察裡沒有「還沒出現」的內部狀態
     fresh(page, '&gmode=2')
     page.evaluate('() => CT.Brain.dev.begin()')

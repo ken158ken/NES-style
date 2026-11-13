@@ -766,3 +766,68 @@ Edit 插入 `tools/{test_cart.py,run_all.sh,build.py,stamp.py,test_touch.py}`（
 
 **機器人規則**：`?bot=1&botmode=1..4`（預設 2）、`&lag=N`（預設 15）；外界只讀 L 幀前的畫面觀察（`M.observe()`），自己的手與按過的鍵用目前值；記憶類只記展示當下看得到的位置 / 箭頭。
 **驗收（已達成）**：`test_brain.py` 78/78；`playthrough_cart.py --page cart4.html --game brain` goal 5585 幀 / maxLine 2 / over 0 / peak 106（`--hint` 相同；lag 0 / 12 / 24 / 30 都 goal）；TWIN `--hint` 每線 8；四模式機器人 lag 0 / 15 / 24 都打到結算；`apu_render.py --game cart4/brain` 49/49。
+
+### C9-0 cart5-text（R9，2026-11-13）— 中文文字系統 `CT.Text` + 卡帶五設定 / 工具整合 + textdemo
+**所有權**：`games/cart5/text.js`、`games/cart5/glyphs.js`（自動產生）、`games/cart5/cart.js`、`games/cart5/textdemo/**`（text_demo / main）、`games/cart5/test_text.py`、`tools/cjk_glyphs.py`；`cart5.html` 在 `cart5:games` 標記**最前面** 4 行 script（glyphs → text → textdemo 兩檔）。
+共用檔只做插入 / 參數化：`tools/run_all.sh`（build --check cart5、`cjk_glyphs.py --check`、cart5 選單冒煙）、`tools/build.py`（→ `dist/星塵文創6合1.html`）、`tools/stamp.py`、`tools/test_touch.py`（cart5 + 空殼佔 `adventure`）、`tools/test_cart.py`（cart5 6 槽；「8」改 `len(DEFAULT_IDS)`、cart5 bestText 另允許 `%`）、`README.md` / `index.html` / `CLAUDE.md` 入口、`docs/ENGINE_API.md` §17。
+| 項目 | 驗收 |
+|---|---|
+| `CT.Text` 契約 | ENGINE_API §17：`reserve(obj, N)` → `create(nes, {bank})` → `box / menu / scroll / print`，每幀 `T.update()`；字形上傳每磚 16 byte + 每格 1 byte 計 VBlank 預算（每幀 ≤ `min(136, budget.left() − 16)`）；分頁依框寬 + 池容量、不截斷 |
+| 字形 | `tools/cjk_glyphs.py` 掃描 `games/cart5/**/*.js` 字串常值（註解 / cart.js / glyphs.js 除外）+ `text*.txt|json`；Noto Sans CJK TC 15px 點陣；`--check` 進 run_all |
+| 卡帶設定 | 「星塵文創 6 合 1」、6 槽圖示、選單曲 `cart5_menu`「星塵手稿」、紫 logo + 橄欖金邊框（與前四卡不同） |
+| 第二批（adventure / escape / quiz）使用規則 | 文字放 `games/cart5/<id>/text_*.js`、改完重跑 `$PY tools/cjk_glyphs.py`；畫面上同時存在的字（標題 + 對話 + 選單）要放得進自己 reserve 的池；`test_<id>.py` 應驗 `CT.Text.missing()` 空、`T.stats().overflow` 0 |
+
+### C9-1 cart5-paint（R9，2026-11-13）— 《星塵畫室 STAR PAINT》（槽 6，id = `paint`）
+**所有權**：`games/cart5/paint/**`（art / core / pics / song / main）、`games/cart5/test_paint.py`；`cart5.html` 在 `cart5:games` 標記內插入 5 行 script（art → core → pics → song → main）。
+| 項目 | 驗收 |
+|---|---|
+| 畫布 | 128×128 px = 名稱表第 2~17 欄 × 第 4~19 列；`paint_cv` bank 前 78 塊釘住（實心 / 字 / 框 / 10 個工具圖示），後 178 塊是**動態 CHR 池**：依 8×8 內容去重、參考計數、獨佔的原地改寫；磁磚上傳 `budget.use(16)` + 名稱表 1 byte，每幀做到剩不到 17 byte 為止（上限 150）⇒ 大填色 / 復原 / 清除 / 讀檔分幀完成，底部 `FILL ####__ 60%` 進度條 + `CHR 用量/178`；池滿用最接近的磁磚暫代（`CHR FULL!` 閃），有空位自動重排 |
+| 顏色 | 模型存「真正選的色」（碼 0 紙 + 4 組 × 3 色）；16×16 屬性 = 區內最多的那組（NES 色彩衝突照實呈現，說明頁第 3 頁教）；對已選色票再按 A = 改色（←→ 色相 14 格含黑、↑↓ 亮度）即時 `setBgPalette` / `setBackdrop`；面板文字自動挑「第 3 色對紙最對比」的那組 |
+| 工具 | 筆 / 橡皮 / 填色桶（4 連通）/ 直線 / 方框 / 實心方塊 / 橢圓（A 起 A 終，同點取消，≤ 8 顆精靈預覽）/ 筆刷 1~3 px / 復原 / 重做各 24 步；游標按住前 8 幀 1 px 之後 3 px、B 精細；SELECT 單按畫布 ↔ 面板、SELECT+←→ 復原重做、SELECT+↑↓ 換工具 |
+| 模式 | FREE DRAW（存檔 4 格 + 分享碼 `SP1…` 變長 RLE + CRC16，複製到剪貼簿 / prompt 貼上）、COLOR BOOK 8 張原創線稿（封閉區全塗 ≥ 90% = 完成）、COPY CHALLENGE 8 張範例 120 秒（32×32 格 F1^1.5 × 顏色，S ≥ 90 / A ≥ 80 / B ≥ 65）、QUICK GUESS 6 回合 × 25 秒（極座標 DFT 形狀分類器：LINE / CIRCLE / TRIANGLE / SQUARE / STAR / CROSS） |
+| goal / 機器人 | goal = 同一次遊玩著色本完成 1 張 + 臨摹 ≥ B（皆未用密技）；機器人只讀 `ppu.indexFrame`（看畫面前先把游標移開）、每次按鍵前等 12 幀 |
+**驗收（已達成）**：`test_paint.py` 61/61；`playthrough_cart.py --page cart5.html --game paint` goal 1971 幀 / maxLine 5 / over 0 / peak 150（`--hint` 同）；機器人策略 8 張範例全部 S（98~100 分、1010~1808 幀）。
+
+### C9-2 cart5-type（R9，2026-11-13）— ⑤ `typing` 星塵打字 + ④ `words` 星塵字謎
+**所有權**：`games/cart5/typing/**`（dict / kbd / art / song / main）、`games/cart5/words/**`（art / gen / song / main）、`games/cart5/test_typing.py`、`games/cart5/test_words.py`；`cart5.html` 在 `cart5:games` 標記內插入 9 行 script（typing 5 行在前，words 4 行在後——words 依賴 typing 的 `dict.js` / `kbd.js`）。全域只掛 `CT.Typing`、`CT.Words`；CHR / 曲 / 音效一律 `typing_` / `words_` 前綴。
+共用模組（兩款都用，放在 typing 資料夾）：`CT.Typing.DICT`（原創常用英文字表 423 字 / 5 級、探測答案池、找字盤 8 主題、24 句原創句子）、`CT.Typing.Kbd`（小寫 26 字 8×8 字型、QWERTY 畫面鍵盤版面 + 框線切磚、游標連發、實體鍵盤 `Phys`、影子名稱表 `Shadow`、人類節奏 `Tapper`）。
+| 款 | 驗收 |
+|---|---|
+| ⑤ `typing`（order 5） | 畫面 QWERTY（大小寫 / 空白 / 退格；鍵距 2 磚、上下排錯開 1 磚）+ 十字鍵一格一格（剛按下立刻走、按住首延遲 12 幀之後每 4 幀）、A 打字、B 退格 / 解除鎖定、SELECT 或 aA 鍵換大小寫、下一個要打的鍵亮金色；三模式：METEOR RAIN 單字落下（10 級，第一個字母鎖定最低的字、打完雷射擊落、5 護盾，**goal = 從第 1 級打到第 5 級、未用密技**）、SENTENCE RUN 句子計時（3 級 × 8 句、WPM / 正確率 / 評價，手把與鍵盤門檻分開、CASE EASY / EXACT）、TIME ATTACK 限時（60 秒、每字 +1 秒、每 5 字加長） |
+| ④ `words`（order 4） | STAR PROBE 5 字母猜字（7 次；**回饋 = 字母下方的符號精靈 ★ / ◎ / ·，字格不上色**；鍵盤只標「不在 / 在字裡」；SELECT 掃描 1 格）、STAR SHUFFLE 重組字（10 字 4 → 7 字母、每字 40 秒、3 命、同字母另一個真字也算對、提示鎖字）、WORD HUNT 找字盤（10×10 字格 = 1 屬性區塊、EASY 6 字 → ↓ / NORMAL 8 字 + 斜 / HARD 10 字 8 方向；**A 按住拖曳或 A 點兩端拉選**、倒著選也算；**goal = 找字盤完成 1 盤、未用密技**） |
+| 實體鍵盤 | 只在打字狀態收字（a-z、Shift 大寫、空白 , . '、Backspace、Enter、Esc = 暫停）；期間 `NES.Input.remap` 暫時移除 W A S D Z X / Enter / Shift 的手把對應（等那些鍵都放開才套用，避免卡鍵），離開打字狀態 / 暫停 / exit 立即還原；打字狀態下 C 是字母（攔下 registry 的 C 密技，PC 密技 = 暫停後按 C） |
+| §6 | 密技：遊玩中補強（METEOR 全擊落 + 護盾滿 / SENTENCE 打完當前字 / TIME +15 秒 / PROBE 掃描再充 + 2 次 / SHUFFLE 時間滿 + 命 / HUNT 找出 1 字）、失敗結算 = 原地續關；標題 / 說明無效；用過那局 goal false；暫停 BGM pause/resume；exit 存最高分；bestText 6 字元（`000000` / `STK 00`）；backTile = 實心星 |
+**機器人規則**：`?bot=1&lag=N`（預設 15）。typing 只讀畫面上落下的字（lag 幀前的觀察選目標）、用 `kbd.path` 一格一格走到鍵、每鍵「按 4 放 4」；words 只讀畫面上的字母盤與題目自己找字，找到一個字先等 lag + 90 + 10×字長 幀（掃視時間）再走游標。
+**驗收（已達成）**：`test_typing.py` 63/63、`test_words.py` 64/64；`playthrough_cart.py --page cart5.html --game typing` goal 4414 幀 / maxLine 4 / over 0 / peak 25（lag 0：4154、lag 24：4675；`--hint` 同）；`--game words` goal 1444 幀 / maxLine 2 / over 0 / peak 140（lag 0：1339、lag 24：1507；`--hint` 同）。
+
+### C9-5 cart5-quiz（R9，2026-11-13）— 《星塵問答》快問快答 + 心算（槽 3，id = `quiz`）
+**所有權**：`games/cart5/quiz/**`（text_bank / text_ui / art / math / song / main）、`games/cart5/test_quiz.py`；`cart5.html` 在 `cart5:games` 標記內插入 6 行 script；`games/cart5/glyphs.js` 只經 `tools/cjk_glyphs.py` 重產。
+| 項目 | 驗收 |
+|---|---|
+| 題庫 | 原創繁中 216 題 = 6 類 × 3 級 × 12；四選一互不相同、題目不重複、≤ 3 行 × 26 欄、選項 ≤ 22 欄、一題用字 ≤ 字形池、抽樣答案對照表 |
+| 模式 | 限時連答（60 秒、速度 / 難度 / 連對加分、答錯 −5 秒）、生存（3 心 × 每題 12 秒）、對戰電腦（10 題搶答、3 級 CPU）、心算衝刺（8 級程式出題、數字鍵盤、+1 秒 / 連對） |
+| 文字 | 題目 / 選項 / 說明 / 結算走 CT.Text（池 176 磚、0 overflow、0 缺字）；HUD 自有 8×8 |
+| §6 / 聲音 | 密技補強 + 原地續關、標題無效、goal false；暫停 BGM pause + 題目隱藏；exit 存分；bestText 6 字元；backTile；BGM 3 首 + 結算 2 段 + 音效 10 |
+| goal / 機器人 | goal = 限時連答（全部分類、未用密技）一局 ≥ 3000 分；機器人反應 ≥ 12 幀、讀題時間依題長、正確率 80% 模型 |
+**驗收（已達成）**：`test_quiz.py` 87/87；`playthrough_cart.py --page cart5.html --game quiz` goal 4090 幀 / maxLine 1 / over 0 / peak 144。
+
+### C9-3 cart5-adventure（R9，2026-11-13）— 《星塵冒險　消失的星燈》指令選單式文字冒險（槽 1，id = `adventure`）
+**所有權**：`games/cart5/adventure/**`（text_story / art / song / main）、`games/cart5/test_adventure.py`；`cart5.html` 在 `cart5:games` 標記內插入 4 行 script；`games/cart5/glyphs.js` 只經 `tools/cjk_glyphs.py` 重產。全域只掛 `CT.Adv`；CHR bank `adventure_bg` / `adventure_spr`、曲 / 音效一律 `adv_` 前綴。
+| 項目 | 驗收 |
+|---|---|
+| 畫面 | 上半場景圖 144×112（10 地點 + 標題 + 6 變體，換場景時在 CT.blank 內寫進 bank 的 84 塊 PIC 保留區）+ 人物 / 道具精靈；右欄位置名 + T.menu 指令選單（7 指令、子選單 ≤ 7 項、每項 ≤ 6 格）；下方 T.box 對話框（名牌、逐字、▼）；選擇題問句一行 + 右欄選項 |
+| 內容 | 原創繁中劇情約 7,500 字、8 物品、旗標、跟隨角色、提示 12 段、3 格存檔、5 結局（真 / 另一 / 一般 / 壞 ×2）+ 結局一覽 + 片尾名單；BGM 5 首 + 音效 9 |
+| §6 | 暫停 BGM pause；說明頁 HOLD START+SELECT: MENU、C/★ = CHEAT；密技 = 立即提示、壞結局回到上一個決策點；標題無效；用過密技 goal false；bestText `ED n/5`；backTile 實心星 |
+| goal / 機器人 | goal = 未用密技看到真結局；機器人只讀選單文字 / 游標 / ▼■，29 步最短路線、A 前等 lag（預設 14） |
+**驗收（已達成）**：`test_adventure.py` 58/58；`playthrough_cart.py --page cart5.html --game adventure` goal 5487 幀 / maxLine 4 / over 0 / peak 136（lag 0：3817、lag 24：6650；`--hint` 同）。
+
+### C9-4 cart5-escape（R9，2026-11-13）— 《星塵密室》點選式密室逃脫（槽 2，id = `escape`）
+**所有權**：`games/cart5/escape/**`（text_rooms / text_ui / logic / art / song / main）、`games/cart5/test_escape.py`；`cart5.html` 在 `cart5:games` 標記內插入 6 行 script；`games/cart5/glyphs.js` 只經 `tools/cjk_glyphs.py` 重產。全域只掛 `CT.Escape`；CHR bank `escape_bg` / `escape_spr`、曲 / 音效一律 `escape_` 前綴。
+| 項目 | 驗收 |
+|---|---|
+| 畫面 / 操作 | HUD（房名 / 朝向 / 剩餘時間）+ 256×128 房間畫面（每面牆一個 bank）+ 7 格物品欄 + T.box 訊息框；十字鍵游標（1 → 3 px、B 微調）、放大鏡 / 手游標、箭頭或推邊轉身、物品拿起 / 使用 / 組合 / 放下 |
+| 內容 | 3 間 × 4 面牆、環節 10 / 10 / 11、5 種機關特寫（撥盤 / 九燈 / 太陽系儀 / 管線 / 光路 + 望遠鏡視野）、每環節 3 段提示（+30 秒）、時限 + S/A/B/C 評價 + 最佳紀錄、選擇房間、故事（開場 / 過場 / 結局）+ 教學；BGM 3 首 + 結算 2 段 + 音效 12 |
+| 正確性 | 宣告式謎題資料；Python 獨立解題器證明三間可解、全部可達狀態都能脫出（無死局）、撥盤答案可由線索推出 |
+| §6 | 密技 = 解開目前環節 / 特寫中解開機關 / 時間到原地續關；標題無效；用過 goal false、不留紀錄；暫停 BGM pause；exit 停音樂；bestText 6 字元；backTile 實心點 |
+| goal / 機器人 | goal = 未用密技脫出第一室；機器人照 JS 解題器的最短路線用游標操作，對準後等 12 幀才按 A、讀訊息 14 幀 |
+**驗收（已達成）**：`test_escape.py` 85/85；`playthrough_cart.py --page cart5.html --game escape` goal 3421 幀 / maxLine 3 / over 0 / peak 137（`--hint` 同）。

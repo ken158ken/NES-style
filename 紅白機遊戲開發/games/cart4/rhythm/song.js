@@ -21,6 +21,8 @@
  * | rhythm_fail  | 能量耗盡     | 8     |       |      | 失敗（不 loop） |
  * 音效（搶 p2 / noi）：rhythm_hit0..3（四軌各自音高 C6 / E6 / G6 / C7，可分辨）、rhythm_cue0..3（只靠聽覺模式的預告音）、
  *   rhythm_miss / slash / move / ok / ready / go / fail
+ * fix-r8：rhythm_cue0..3 改走 p1、vol 13、8 幀、四種輪廓（上行 / 下行 / 低音單擊 / 高音雙擊）；rhythm_tick（EAR 命中音，雜訊）；
+ *   rhythm_click / click_hi（校正與聲音檢查的節拍器）；rhythm_sN_ear = 旋律音量減半的 EAR 版（row 與原曲相同）。
  */
 (function () {
   'use strict';
@@ -228,14 +230,46 @@
   };
   LANE_NOTE.forEach(function (n, i) {
     SFX['rhythm_hit' + i] = { priority: 2, data: { p2: sq([[n, 2, 7, 2], [n, 2, 4, 2]]) } };
-    SFX['rhythm_cue' + i] = { priority: 2, data: { p2: sq([[n, 3, 6, 0]]) } };
   });
+  // ---- EAR（只靠聲音）預告音 —— fix-r8 qa-r8 P2-2 ----
+  // 走 p1（EAR 時旋律在 p1 且音量減半；預告音搶 p1 的那 8 幀旋律讓位 ⇒ 不會被旋律蓋掉），音量 13、長 8 幀，
+  // 四軌靠「輪廓 + 音色」分辨，不必有絕對音感：↑ 上行琶音（50%）、↓ 下行琶音（50%）、← 低音單擊（12.5% 嗡聲）、→ 高音雙擊（25%）。
+  // EAR 模式的命中音改成無音高的雜訊短擊 rhythm_tick ⇒ 不會和預告音混淆（舊版預告音和命中音同音高同聲道）。
+  function frames(notes, vols, duty) {
+    var out = [];
+    for (var j = 0; j < vols.length; j++) {
+      var f = { vol: vols[j], duty: duty };
+      if (j === 0 || notes[j] !== notes[j - 1]) { f.note = notes[j]; f.retrigger = j === 0; }
+      out.push(f);
+    }
+    out.push({ off: true });
+    return out;
+  }
+  var CUE_DEF = [
+    { name: 'RISE', notes: ['G-3', 'B-3', 'D-4', 'G-4', 'B-4', 'D-5', 'G-5', 'G-5'], vols: [13, 13, 13, 13, 13, 12, 11, 8], duty: 2 },
+    { name: 'FALL', notes: ['G-5', 'D-5', 'B-4', 'G-4', 'D-4', 'B-3', 'G-3', 'G-3'], vols: [13, 13, 13, 13, 13, 12, 11, 8], duty: 2 },
+    { name: 'LOW', notes: ['C-4', 'C-4', 'C-4', 'C-4', 'C-4', 'C-4', 'C-4', 'C-4'], vols: [14, 13, 12, 11, 10, 9, 7, 5], duty: 0 },
+    { name: 'DOUBLE', notes: ['E-5', 'E-5', 'E-5', 'E-5', 'E-5', 'E-5', 'E-5', 'E-5'], vols: [13, 13, 13, 0, 0, 13, 13, 10], duty: 1 }
+  ];
+  CUE_DEF.forEach(function (c, i) { SFX['rhythm_cue' + i] = { priority: 3, data: { p1: frames(c.notes, c.vols, c.duty) } }; });
+  SFX.rhythm_tick = { priority: 2, data: { noi: nz([[2, 2, 10], [3, 2, 5]]) } };
+  // 校正 / 聲音檢查用的節拍器（p2，短而清楚）
+  SFX.rhythm_click = { priority: 4, data: { p2: sq([['A-5', 2, 13, 2], ['A-5', 2, 6, 2]]) } };
+  SFX.rhythm_click_hi = { priority: 4, data: { p2: sq([['A-6', 2, 13, 2], ['A-6', 2, 6, 2]]) } };
 
   var SONGS = {}, TRACKS = [];
   DEFS.forEach(function (d) {
     SONGS[d.key] = buildTrack(d);
     TRACKS.push({ key: d.key, title: d.title, zh: d.zh, speed: d.speed, bpm: Math.round(36000 / (d.speed * 4)) / 10, bars: SONGS[d.key].order.length, countIn: COUNT_IN });
   });
+  // EAR 版：同一首曲子（row / speed 完全相同 ⇒ 譜面同步不變），p1 旋律音量減半，讓預告音（vol 13）明顯站在前面
+  function earCopy(song) {
+    var s = JSON.parse(JSON.stringify(song));
+    s.name = song.name.replace('）', '・EAR）');
+    s.patterns.forEach(function (pt) { (pt.p1 || []).forEach(function (r) { if (r && r.vol !== undefined) r.vol = Math.max(3, Math.round(r.vol / 2)); }); });
+    return s;
+  }
+  TRACKS.forEach(function (t) { SONGS[t.key + '_ear'] = earCopy(SONGS[t.key]); t.earKey = t.key + '_ear'; });
   SONGS.rhythm_title = buildTitle();
   SONGS.rhythm_clear = jingle('過關（rhythm_clear）', 7, 'C6 E6 G6 C7 - - . -', 'E5 G5 C6 E6 - - . -', 'C3 - G2 - C2 - . -', 'k - h - s - h - x - - - - - - -');
   SONGS.rhythm_fail = jingle('能量耗盡（rhythm_fail）', 8, 'G5 - E5 - C5 - . -', 'E4 - C4 - G3 - . -', 'C2 - - - G1 - . -', 'k - - - - - - - k - - - - - - -');
@@ -287,4 +321,5 @@
   RH.TRACKS = TRACKS;
   RH.COUNT_IN = COUNT_IN;
   RH.LANE_NOTE = LANE_NOTE;
+  RH.CUE_DEF = CUE_DEF;
 })();

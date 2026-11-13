@@ -5400,3 +5400,665 @@ C6-1：① `slash` 星塵忍者斬《STAR BLADE》+ ② `laser` 星塵雷射防�
 - 若之後 shell 支援「圖示用精靈疊色」或每槽 2 組屬性，sudoku 可補洋紅高亮、slide 補紅白燈塔。
 - mines HARD 若要統一，可考慮把 HUD 壓成一列（訊息出現時暫代統計列），或縮小盤框。
 - 2026-11-13 cart5-text（R9 C9-0）：**CT.Text 可用**——`cart5.html` 已載 `games/cart5/glyphs.js` + `text.js`；用法 ENGINE_API §17：`CT.Text.reserve(bankObj, N)` → `T = CT.Text.create(nes, {bank})` → `T.box({x,y,w,h}).say(text, {name, onClose})`（逐字、▼ 翻頁、A 加速、自動斷行 / 分頁不截斷）/ `T.menu({x,y,items,onChoose})` / `T.scroll({x,y,w,h}).setText()` / `T.print()`，每幀 `T.update()`；字形上傳每磚 16 byte 計 VBlank 預算；改文字後跑 `$PY tools/cjk_glyphs.py`（文字放 `games/cart5/<id>/text_*.js` 字串常值）；範例 `?game=textdemo`。
+
+## cart5-text（R9，2026-11-13）
+
+### 1. 做了什麼
+- **① 中文文字系統 `CT.Text`**（`games/cart5/text.js`，用法 ENGINE_API §17）：遊戲背景 bank 用 `CT.Text.reserve(obj, N)` 預留 12 個框線磚 + N 磚字形池；執行期把當頁要用的字寫進池（全形 4 磚 / 半形 2 磚、同字共用、LRU 只回收畫面上沒格子在用的字），名稱表格子逐一追蹤參照。寫入走佇列，**每幀可用 = min(136, budget.left() − 16)**，每磚上傳 16 byte 用 `ppu.budget.use` 記帳、格子走 `setTile` 自動記帳 ⇒ 打字機逐字；`CT.blank` 內一次寫完。
+  元件：對話框 `T.box`（框線、左上名牌、逐字、句末停頓、右下 ▼ 翻頁 / ■ 結束閃爍、A 加速 / 翻頁 / 關閉、`\n` `\f`、英文整字換行、避頭避尾、**依框寬 + 池容量自動分頁、不截斷**）、選單 `T.menu`（▶ 游標、↑↓ 首延遲 12 / 每 4 幀、A 選 / B 取消、超寬超高超池 throw）、捲動 `T.scroll`（逐行捲、只重寫變動行、auto 片尾、最壞用量超池 throw）、低階 `print / frame / clear / call / flush / reset / release / stats / readLine`。半形 8×8 字身置中於 16 列行高。
+- **`tools/cjk_glyphs.py` + `games/cart5/glyphs.js`**：Noto Sans CJK TC Regular 15px 點陣（15px 讓字與字、行與行之間各留 1 px；16px 實測行間黏在一起）；原創 8×8 半形 95 字（大寫 / 數字沿用 DEMO.FONT 筆畫，小寫 / 符號新畫）。掃描 `games/cart5/**/*.js` 字串常值（極簡 JS 掃描器：略過註解 / 正規式、解 `\u`），另收 `text*.txt|json`；`--check` / `--list` / `--render`。目前 420 字（textdemo + typing + paint 的字串）。
+- **② 卡帶設定 `games/cart5/cart.js`**：「星塵文創 6 合 1」紫色立體 logo（手繪粗體「6」）、橄欖金邊框、6 槽原創圖示（藏寶路線圖 / 鑰匙孔門 / 問號泡泡 / 字母磚 / 鍵盤 / 調色盤）、選單曲「星塵手稿」（F 大調豎琴分解和弦，A B C D 四段）、槽名點陣（另收第二批可能用到的 8 字）。工具整合：`run_all.sh`（build --check cart5、`cjk_glyphs.py --check`、cart5 選單冒煙）、`build.py`（→ `dist/星塵文創6合1.html`）、`stamp.py`、`test_touch.py`、`test_cart.py`；README / index / CLAUDE.md 入口。
+- **③ 示範頁 `cart5.html?game=textdemo&debug=1`**（`games/cart5/textdemo/`，只在 `?game=textdemo` 時註冊，正式選單看不到）：對話框 + 名牌 → 選單（再聽一次 / 捲動文字 / 混排測試 / 長文播放）→ 捲動日誌 / 半形混排 / 2000 字原創短文（鐘樓故事）；機器人跑完長文 = goal。文字全部原創。
+
+### 2. 驗證數字
+| 項目 | 結果 |
+|---|---|
+| `games/cart5/test_text.py` | **74 / 74**（字形 419 字與 Noto 逐位元一致、執行期 CHR 像素逐位元一致、半形 95 字、工具 --check / 掃描約定、框線 / 名牌 / ▼ / ■、A 加速 14 幀寫完一頁、選單 ↑↓ 連發 / A / B / 超寬 throw、捲動、混排 / 斷行 / 避頭避尾、小池分頁、讓出遊戲已用預算、缺字 □、lint） |
+| 預算量測 | 打字中每幀 VBlank 峰值 **136**（= 兩個新全形字 2×68）、文字系統自己峰值 136；選單 5 幀畫完；捲動一行峰值 88；遊戲先寫 120 byte 時文字系統只補到 ≤ 144；**2000 字長文 53 頁 / 5466 幀、strict 模式不 throw、overFrames 0、overflow 0、LRU 回收 > 0、缺字 0**，畫面讀回逐頁 = 原文（2014 字含結尾句） |
+| `playthrough_cart.py --page cart5.html --game textdemo` | goal 5842 幀、每線 0、over 0、尖峰 136 |
+| `tools/test_cart.py --page cart5.html` | 111 / 111（已註冊 typing / paint 兩款；全滿 6 槽選單磁磚 ≤ 256、無缺字） |
+| `tools/test_touch.py --only cart5` | 93 / 93 |
+| `build.py --check --src cart5.html` | PASS（內嵌 29 檔） |
+| 截圖 | `shots/agent_cart5-text/menu.png`（選單 10 色 lint PASS）、`demo_b.png`（對話框 + 名牌）、`mixed_long.png`（混排頁 / 長文頁）；lint 全 PASS |
+
+### 3. 偏離
+- 全形字用 **15px**（brief 寫 16×16 點陣：格子仍是 16×16，只是字身 15px 留字距）；與 shell 選單 16px 的點陣不同套（選單沿用前四卡規格）。
+- 半形字放在 16 列行高的第 4~11 列（置中），不是貼上半或下半；每個半形字 2 磚（上傳 32 byte）。
+- `tools/test_cart.py` 原本把「8 槽」寫死，改成 `len(DEFAULT_IDS)`（cart1~4 行為不變）；cart5 的 bestText 另允許 `%`（paint 用 `--%`，否則 run_all 紅）。`test_touch.py` 的 cart5 空殼佔 id `adventure`（第二批還沒註冊時第 1 槽是準備中，START 進不去；真 adventure 註冊後會取代空殼）。
+- textdemo 用 `?game=textdemo` 判斷註冊（不是 `debug=1`），避免 `?debug=1` 的選單 / test_cart 多出一列。
+
+### 4. 跨檔需求
+- **第二批 adventure / escape / quiz**：文字放 `games/cart5/<id>/text_*.js`，改完跑 `$PY tools/cjk_glyphs.py`（`run_all` 的 `cjk_glyphs.py --check` 與 `test_text.py` 會在缺字時變紅——任何 cart5 agent 新增中文字串都要重跑一次）；畫面上同時存在的字要放得進自己 reserve 的池（對話框會自動分頁，標題 / 選單 / 捲動區要自己算）；測試請驗 `CT.Text.missing()` 空、`T.stats().overflow == 0`。
+- 總控：`cart5.html` 已被 stamp（`?v=`），我的 4 行 script 在 cart5:games 標記最前面。
+
+### 5. 留給後續
+- 行內變色標記（關鍵字換色）目前沒有：要換色就用另一個 style（`T.print(..., {style:{fg:2}})`）或另一組屬性。
+- 名牌固定在框左上；若要右側名牌 / 頭像，需要擴 `box` 參數。
+- 若第二批需要更大的同屏字量，可把 bank 自己的磁磚壓到 ≤ 40，池開到 ~200。
+
+## cart5-paint（R9，2026-11-13）
+
+### 1. 做了什麼
+- `paint` **星塵畫室 STAR PAINT**（槽 6；舊 coloring-game / precision-draw / quick-draw，只取玩法）：`games/cart5/paint/` 五檔 —
+  `art.js`（`paint_ui` 標題 / 說明 bank、`paint_cv` 畫布 bank：78 塊釘住 + **178 塊動態池**、`paint_spr`）、
+  `core.js`（Model 128×128 色碼 + Bresenham 原語 / 4 連通填色 / 復原重做 24 步；**Disp = CHR-RAM 模擬**：8×8 內容 key 去重、參考計數、獨佔原地改寫、池滿 Hamming 最近暫代；磁磚上傳 `budget.use(16)` 計 VBlank、每幀做到 150 byte 為止；屬性多數決；分享碼；臨摹評分；形狀分類器；著色區塊）、
+  `pics.js`（**8 張原創線稿**：STAR WHALE / ROCKET / COZY HOUSE / FLOWER POT / NIGHT OWL / SAILBOAT / PARTY CAKE / TIN ROBOT；**8 張臨摹範例**：GIFT BOX / SUNNY / TINY HOME / APPLE TREE / GOLD FISH / SKY ROCKET / HOT COCOA / STAR FORT，全部用繪圖指令即時畫）、
+  `song.js`（原創 4 首：畫架 / 午後畫室 / 速寫時間 / 完成 + 10 個音效）、`main.js`（流程 / UI / 機器人 / 註冊）。
+- 畫面：畫布 = 名稱表 2~17 欄 × 4~19 列；右面板 10 工具（筆 / 橡皮 / 填色桶 / 直線 / 方框 / 實心方塊 / 橢圓 / 筆刷 1~3 / 復原 / 重做）+ 4 組 × 3 色票 + 紙；底部進度條 `FILL ####__ 60%` + `CHR 用量/178`、模式資訊、操作提示；HUD 在第 2 列。
+- 調色盤：對已選色票再按 A 進改色，←→ 色相 14 格（含黑）、↑↓ 亮度 4 階，**當幀 `setBgPalette` / `setBackdrop`**（畫布即時變色），B 取消還原；自由畫調色盤記住；面板文字自動換到「第 3 色對紙最對比」的那組屬性（紙改黑也看得到字）。
+- 模式：FREE DRAW（暫停選單：存檔 4 格 / 讀檔 / 分享碼 COPY（剪貼簿）/ PASTE（prompt）/ 清除 / 離開）、COLOR BOOK（封閉區都塗 ≥ 90% = COMPLETE、記錄每頁完成）、COPY CHALLENGE（120 秒 = 7212 幀，右側 64×64 範例縮圖也走同一個動態 CHR 池，評分 S/A/B/C/D + 每張最佳）、QUICK GUESS（6 回合 × 25 秒，CPU 每 40 幀猜一次，猜中 100 + 剩餘秒 × 10）。每個模式開場有說明卡（新機制教學），說明頁 4 頁（操作 / 工具圖示 / 屬性規則 / 模式）。
+- §6 規則：密技（著色本 = 塗好最大的未完成區；臨摹 +30 秒，**結算畫面 = 原地續畫 30 秒**；快畫 = 這回合直接猜中，結算 = 追加一回合；標題 / 說明 / 清單 / 自由畫無效），用過密技不存紀錄、goal false；START 暫停 = BGM pause / resume；`exit` 存快畫最高分；`backTile` = 精靈點；暫停 HUD `PAUSE  HOLD START+SELECT: MENU`、標題 / 說明寫 `C/* = CHEAT`。
+- 機器人：只讀 `ppu.indexFrame`（先把游標移出畫布 / 縮圖再看）：著色本從畫面找紙色封閉區 → 選色票 → 填色桶；臨摹讀縮圖與色票顏色 → 8×8 格主色 → 橫向 + 縱向合併成方塊 → 依色用方塊工具畫 → FINISH NOW。每次按鍵前等 12 幀。
+- `cart5.html` 標記內插入 5 行 script。
+
+### 2. 驗證數字
+| 項目 | 結果 |
+|---|---|
+| `games/cart5/test_paint.py` | **61/61**（約 60 秒；`--quick` 略過 8 張範例機器人）：契約 / 資產、標題與說明文字（不貼邊、不截斷）、游標加速 / 精細、工具像素數、筆加速時不斷線、直線起終點 / 取消、面板換工具 / 色、改色即時寫 PPU + 取消、紙改黑 → 面板屬性換組、大填色分幀（首幀後 ≥ 40 格待傳、每幀 ≤ 150、有進度條）、**畫面 16384 px 與模型逐像素一致**、CHR 帳（圖樣內容 / 名稱表 / 參考計數 / 池用量）、同內容共用磁磚、屬性多數決、池滿暫代 + 收回、復原 24 步 + SELECT+←、分享碼往返 / 竄改拒收 / 空白 26 字、存檔 4 格往返、暫停 BGM、8 張線稿放得進池、著色本完成、著色密技、臨摹評分（照抄 100 / 空白 0 / 位移 3 px ≥ B / 錯色 < B / 整張塗滿 < B）、臨摹時限 + 結算續畫、分類器 22 個樣本全對、快畫一回合、seed 重現、exit 存分、7 種畫面 lint、機器人 goal / 硬限制 / 按鍵間隔 |
+| `playthrough_cart.py --page cart5.html --game paint` | goal **1971 幀**，每線 **5**，overFrames **0**，VBlank 尖峰 **150**；`--hint` 1970 幀 / 5 / 0 / 150 |
+| 機器人臨摹 8 張範例 | 全部 **S**（100 / 99 / 100 / 100 / 99 / 99 / 98 / 98），1010~1808 幀（時限 7212），動態池峰值 26~40 塊、暫代 0 |
+| 動態 CHR | 8 張線稿載入後池用量 ≤ 178 且暫代 0；3658 px 大填色 225 格 11 幀傳完（每幀 134~150 byte）；全畫布雜訊 → 池滿 178/178、暫代、over 0 |
+| 截圖 lint | 標題 9 色、說明 2 色、清單、自由畫 13~14 色、著色本 10~11 色、臨摹 5~7 色、快畫 3 色，全部 PASS、每線 ≤ 5 |
+| `run_all.sh --quick` | `cart5/test_paint.py` **61/61 PASS**；其他全部 PASS，只有 `cart5/test_text.py` 與 `cjk_glyphs.py --check` 紅（缺「謎」字，來自 `games/cart5/words/**`，非本卡；見 §4） |
+
+截圖：`shots/agent_cart5-paint/book_done.png`（著色本完成 + 暫停選單）、`copy_result.png`（臨摹結算 S）、`free_menu.png`（自由畫 + 暫停選單）。
+
+### 3. 偏離
+1. 文字只用 8×8 英文（brief 允許）；沒有接 `CT.Text`（畫布要把 178 塊池全留給畫，中文字也要吃同一張圖樣表）。
+2. `quick-draw.html` 舊作其實是「快槍手決鬥」反應遊戲；本卡照 brief 做成「快畫猜猜」（CPU 形狀分類器），分類 6 種形狀。
+3. 屬性限制：一個 16×16 區只能顯示一組色，採「區內用得最多的組」多數決；模型永遠存玩家選的色，評分 / 存檔 / 分享碼用模型，不因顯示衝突而失真（說明頁第 3 頁、自由畫第一次的說明卡都有教）。
+4. 換畫面（進入畫布、換線稿）走 `CT.blank` 整片重畫（等同 rendering 關閉）；畫布畫面內的一切更新（筆、填色、復原、讀檔、清除、快畫換題清畫布）都走 VBlank 預算分幀。
+5. 臨摹評分比較寬：32×32 格 + 1 格容差，機器人用 8×8 方塊照抄也拿 S；人用十字鍵 120 秒內畫 20~40 個方塊才是難點（給 QA 用人實測再調時限 / 門檻）。
+6. 分享碼匯入用 `window.prompt`（桌機 / 手機瀏覽器都有）；匯出寫剪貼簿並顯示字數（畫面上放不下整串碼）。
+
+### 4. 跨檔需求
+- 給 C9-0（`games/cart5/cart.js`）：選單槽 6 圖示請畫「畫筆 + 調色盤」或「畫架」；遊戲主視覺 = 白紙畫布、右側工具列 + 4×3 色票（見 `shots/agent_cart5-paint/`）。`bestText()` 回 `'   --%'` / `'  100%'`（臨摹最佳分數）。
+- `cjk_glyphs.py --check` 目前缺「謎」字（不是本卡的字串；本卡只有 `星塵畫室` 與曲名含中文，已在字表內），需要該字擁有者重跑 `tools/cjk_glyphs.py`。
+- 沒有改 engine / registry / shell / 其他卡的檔。
+
+### 5. 留給後續
+- 著色本可加「貼紙」（精靈圖章）與「線稿自己畫」（自由畫存成著色本頁）。
+- 快畫可加更多類別（心形、房子、箭頭），分類器可再加角點數特徵。
+- 動態 CHR 池可做「垃圾回收時重新排列」動畫，或把面板文字改成精靈省下約 40 塊給畫布。
+- 臨摹可加「描圖模式」（範例淡淡疊在畫布上，練習用、不計分）。
+
+## cart5-type（R9，2026-11-13）
+
+### 1. 做了什麼
+- **共用模組**（`games/cart5/typing/dict.js`、`kbd.js`；words 也用）：
+  - `CT.Typing.DICT`：本卡原創挑選的常用英文單字 **423 字**，依字長分 5 級（3 / 4 / 5 / 6 / 7~8 字母：75 / 93 / 131 / 71 / 53），不取自舊作清單；探測答案池 = 5 字母級 131 字；找字盤 8 個主題（SPACE / ANIMALS / FOOD / NATURE / HOME / WEATHER / SCHOOL / PLAY）；句子 3 級 × 8 句原創（只用畫面鍵盤打得出的字母 / 空白 / , .）。
+  - `CT.Typing.Kbd`：小寫 26 字 8×8 手繪（大寫 / 數字 / 標點沿用 engine 原創 DEMO.FONT，另加退格 / 大小寫 / Enter / ★ / ◎ / · 符號）；**QWERTY 畫面鍵盤**：一顆鍵 = 1 個鍵面磁磚，框線與 1 px 鍵面外擴畫在鄰格、由版面程式化切出並去重；鍵距 2 磚、上下排錯開 1 磚（= QWERTY 半鍵錯位）；鍵盤區所有調色盤共用色 1 / 色 2，只換色 3 ⇒ 每顆鍵所在的屬性區塊可單獨換字色（打字的「下一鍵提示」、字謎的「不在 / 在字裡」），框線不跟著變色。游標連發（剛按下立刻走、首延遲 12 幀、之後每 4 幀；同排繞回、上下到最近的鍵、BFS 最短路徑給機器人）。**實體鍵盤** `Phys`：只在打字狀態收字，期間 `NES.Input.remap` 暫時移除 W A S D Z X / Enter / Shift 的手把對應（等那些鍵放開才套用，避免卡鍵；離開打字狀態立即還原），所以直打不會動到游標 / 不會觸發 A B START SELECT；C 鍵在打字狀態是字母（攔下 registry 的 C 密技）。另有影子名稱表 `Shadow`（差異佇列每幀 ≤ 140 byte、文字超出 32 欄 console.error）與人類節奏 `Tapper`（按 4 放 4）。
+- **⑤ `typing` 星塵打字 STAR TYPER**（`typing/{art,song,main}.js`，order 5）：
+  - METEOR RAIN：帶火焰的隕石精靈拖著單字往小行星基地落（名稱表逐列下降），**打第一個字母鎖定最低的那個字**、已打的字母變暗、插入點閃爍；打完 = 基地雷射（每 8 線 1 顆精靈）擊落 + 爆炸；打錯 = MISS（不扣血、斷連擊）；B / DEL 解除鎖定。10 級（字長 3 → 8、每列落下 64 → 28 幀、同屏 2 → 4 字、每級 6 → 12 字升級），5 護盾，落地扣 1 + 背景閃紅；同屏的字首字母不重複。
+  - SENTENCE RUN：一回合 3 句（1~3 級），第一鍵開始計時，已打字變暗 + 插入點，打錯不前進只計 MISS；結算 WPM（5 字元 = 1 字、以 60.0988 Hz 換算）、正確率、評價 S~D（**手把 / 實體鍵盤門檻分開**，各自存最佳）；CASE EASY（預設，不分大小寫）/ EXACT（要按 SELECT 或 aA 鍵切大寫，提示鍵會改亮 aA）。
+  - TIME ATTACK：60 秒、一次一字 + 預告下一字，每打完 +1 秒，每 5 字升一階（字長變長），連擊加分。
+  - 共通：標題（3 模式 + 起始等級 / 句子等級 / CASE + 各自最佳）→ 說明頁（規則 + 按鍵 + PC 用法，行距空一列）→ READY 3 2 1 → 遊玩 → 結算；**下一個要打的鍵亮金色**（手把友善）；畫面鍵盤右上顯示 abc / ABC。
+  - 音樂 5 首（流星鍵盤 / 隕石雨 / 夜讀書房 / 全數擊落 / 基地失守）+ 音效 11 個。
+- **④ `words` 星塵字謎 STAR WORDS**（`words/{art,gen,song,main}.js`，order 4）：
+  - STAR PROBE（5 字母猜字，**原創回饋表現**）：7 次探測；每個字母**正下方**逐一揭曉探測符號精靈——金色 ★「對位」、青色 ◎「在字裡、別的位置」、灰色 ·「不在」；字母本身與字格**不上色**；畫面鍵盤只標兩種（不在 = 字變灰、在字裡 = 字變金）。SELECT「星塵掃描」每回合 1 次透露一格；7 次用完 SIGNAL LOST 顯示答案，連勝 / 勝場存檔。（沒有 6 次、綠黃灰格子、Wordle 名稱。）
+  - STAR SHUFFLE（重組字）：10 字（4 → 7 字母）、每字 40 秒、3 命；上排 2 倍大字格是打亂的字母（十字鍵 ←→ + A 拿、B 退回），下排答案槽；湊出原字或**字表裡同字母的另一個真字**都算對（LEMON / MELON…）；SELECT 提示從頭鎖定正確字母；打亂保證 ≠ 原字且不是字表裡的字。
+  - WORD HUNT（找字盤）：10×10 字格（每格 16×16 = 2 倍大字 = 1 屬性區塊 ⇒ 拉選中橘、找到玫瑰紅都是改屬性）、右側題目清單（找到變灰）；EASY 6 字（→ ↓）/ NORMAL 8 字（+ ↘ ↗）/ HARD 10 字（8 方向含倒寫）；產生器填頻率字母後驗證每字恰好出現一次；**游標拉選**：A 按住從字首拖到字尾放開，或 A 點字首、移過去再按 A（倒著選也算），十字鍵斜按 = 斜走；SELECT 提示字首閃爍；計時 + 評價 S~C + 各級最佳時間。
+  - 音樂 4 首（字母星座 / 思考星雲 / 解讀成功 / 訊號中斷）+ 音效 12 個。
+- §6：密技（遊玩中補強、失敗結算原地續關、標題 / 說明無效、用過那局 goal false）、暫停 BGM pause/resume + 暫停畫面寫 `HOLD START+SELECT: MENU`、exit 存最高分、`bestText` 6 字元（typing `000000`、words `STK 00`）、backTile = 實心星；HUD 一律從第 2 列起。
+- `cart5.html` 在 `cart5:games` 標記內插入 9 行（typing 5 行 → words 4 行）。
+
+### 2. 驗證數字
+| 項目 | 結果 |
+|---|---|
+| `games/cart5/test_typing.py` | **63/63**（字表 / 句子換行 / CHR 237 磚、游標 12/4 規格與繞回、METEOR 鎖定 / MISS / 解鎖 / 擊落 / 落地 / 升級 / GAME OVER / 續關、實體鍵盤 wasd 不動游標 / C 不觸發密技 / Esc 暫停還原對應、SENTENCE 計時 / EXACT / 提示鍵 / 評價、TIME ATTACK、exit 存分、文字不溢出、機器人 lag 0 / 15 / 24） |
+| `games/cart5/test_words.py` | **64/64**（探測回饋 vs Python 獨立實作 300 組、符號精靈在字母正下方 + 探測列屬性不變、字格 26 字不撞名、找字盤 3 級 × 12 盤 Python 驗恰好 1 次 + 方向、拉選兩種操作 + 倒選 + 非直線、重組字同字母另一真字、提示鎖字、扣命 / 續關、實體鍵盤、機器人 lag 0 / 15 / 24） |
+| `playthrough_cart.py --page cart5.html --game typing` | goal **4414 幀**（LV1 → LV5），每線 **4**，overFrames **0**，VBlank 尖峰 **25**；lag 0：4154、lag 24：4675；`--hint` 4413 / 4 / 0 / 25 |
+| `playthrough_cart.py --page cart5.html --game words` | goal **1444 幀**（EASY 一盤），每線 **2**，overFrames **0**，VBlank 尖峰 **140**（差異佇列上限）；lag 0：1339、lag 24：1507；`--hint` 1443 / 2 / 0 / 140 |
+| 難度剖面（typing 機器人 lag 15 連跑 40000 幀） | LV1~8 護盾不掉；LV9 開始掉護盾、LV10 被擊潰（手把機器人 8 幀一按的上限）；實體鍵盤玩家可一路打完 10 級 |
+| 截圖 lint | typing 標題 5 色 / METEOR 10 色 / 句子 8 色；words 標題 7 色 / PROBE 9 色 / SHUFFLE 6 色 / HUNT 7 色，全部 PASS |
+
+`bash tools/run_all.sh --quick`：65 項 PASS（含 test_typing / test_words / test_cart cart5 124/124 / build --check cart5.html）；FAIL 2 = `cjk_glyphs.py --check`（缺 224 字）與 `cart5/test_text.py` 的同一項——缺的字全部來自第二批 adventure / escape / quiz 正在寫的文字檔，本卡字串的 41 個非 ASCII 字都已在 glyphs.js（逐字比對過），重跑 `tools/cjk_glyphs.py` 即可。
+
+截圖：`shots/agent_cart5-type/typing_meteor.png`（LV5 鎖定 apple、下一鍵 e 亮金）、`words_probe.png`（★◎· 符號 + 鍵盤兩種標示）、`words_hunt.png`（拉選中 + 已找到）。
+
+### 3. 偏離
+1. 兩款共用的字表與鍵盤模組放在 `games/cart5/typing/`（`CT.Typing.DICT` / `CT.Typing.Kbd`），words 讀它（同一張卡、同一擁有者；cart5.html 裡 typing 先載入）。
+2. 「實體鍵盤也可直接打字」的做法：打字狀態期間用公開 API `NES.Input.remap` 暫時移除 W A S D Z X / Enter / Shift 的手把對應（engine 不改）；所以**打字狀態中鍵盤玩家要回選單得先 Esc 暫停**（暫停時對應已還原，Enter+Shift 照常）；PC 的密技是「暫停後按 C」（說明頁有寫），手把 / 觸控 ★ 不受影響。
+3. 星塵探測**接受任何 5 個字母**（友善版，不檢查是否為字典字）；重組字接受字表裡的同字母另一個字。
+4. 找字盤 goal 用 EASY（機器人預設選 EASY）；三級都可完成並各自存最佳時間。
+5. words 的 VBlank 尖峰 140 是差異佇列自己的上限（結算框 / 字盤大量換屬性時分 2~3 幀寫完），≤ 160。
+
+### 4. 跨檔需求
+- 給 C9-0（`games/cart5/cart.js` 圖示對照遊戲畫面）：typing = 深青鍵面（$0C）+ 青框（$1C）+ 白字、亮的那顆是**金字**（$28）；words = 深藍字格（$02）白色大字，拉選中橘（$27）黑字、找到玫瑰紅（$15）。目前「鍵盤一顆亮鍵」「兩塊字母磚」概念相符，顏色可再對一次。
+- 其餘無；engine / registry / shell / text.js 都沒動。
+
+### 5. 留給後續
+- METEOR 可加「炸彈字」（打完清全場）與「分裂字」；SENTENCE 可加使用者自訂句子（分享碼）。
+- STAR PROBE 可加「每日一字」（以日期為種子）與困難模式（已出現的線索必須用上）；WORD HUNT 可加限時模式與 12×12 盤。
+- 句子目前沒有撇號（畫面鍵盤沒有 ' 鍵）；要加的話鍵盤最下排可再放一顆。
+- 收工 `run_all.sh --quick`：除了 `cjk_glyphs.py --check` / `test_text.py` 兩項以外全部 PASS（test_cart 876/876、test_touch 805/805、cart5/test_typing 63/63、9 頁 build --check）。那兩項紅的原因是平行工作的 cart5 agent 在跑的期間多加了 1 個字；重跑 `tools/cjk_glyphs.py` 之後是 420 字，`--check` OK，test_text 74/74。
+
+## qa-r8（R8，2026-11-13）
+- 驗收卡帶四《星塵節奏 8 合 1》的 8 款和選單，以及 cart1~3 迴歸。報告寫在 `docs/QA_REPORT.md` 的 `# R8 qa-r8（2026-11-13）`，截圖 8 張在 `shots/qa-r8/`。
+- 結果：**P1 × 0、P2 × 7、P3 × 8**。
+- 重點是用真人模型重量難度：機器人外面包一層「真人濾鏡」（延遲 + 抖動 + 多工切換 10~20 幀 + 分心），rhythm 和 reflex 另做蒙地卡羅。
+- P2：
+  - rhythm 沒有延遲校正，窗口偏緊（P2-1）。
+  - rhythm EAR 預告音被蓋住（P2-2）。
+  - reflex goal 門檻偏嚴（P2-3）。
+  - brain JUGGLE 的 DRIFT 是唯一的瓶頸（P2-4）。
+  - flash 競速 CPU 超過人類手速（P2-5）。
+  - B + 方向沒有時間差容錯（P2-6）。
+  - 觸控斜方向在四方向遊戲裡會判錯（P2-7，要 engine 加四方向模式）。
+- P3：選單圖示 5 款對不上、HUD 貼頂、標題擁擠、simon goal 曲線、tune 節奏容錯、沒有聲音檢查、simon 鍵音和弦和原作相同、engine 的 APU 即時播放被推進兩次。
+- 報告附人類難度調整建議表和 fix-r8 分卡。沒有改程式、沒有 git。
+
+## cart5-quiz（R9，2026-11-13）
+C9-5：卡帶五槽 3《星塵問答》（id = `quiz`，全域 `CT.Quiz`）— 快問快答 + 心算。
+
+### 1. 做了什麼
+- **題庫** `games/cart5/quiz/text_bank.js`：原創繁中 **216 題** = 6 類（自然 / 地理 / 歷史 / 生活 / 語文 / 遊戲〔紅白機與遊戲常識，只寫公開事實、無商標圖像〕）× 3 級（初 / 中 / 高）× 每格 12 題；四選一、正解寫在第 1 個、執行期洗牌。答案逐題自查；有爭議的題目當場改寫或換掉（例：千島之國〔印尼 / 菲律賓都被這樣叫〕、北回歸線標誌位置、「第一台電腦」、造紙術誤答「埃及」〔紙莎草易混淆〕改「印加」、背景屬性誤答 32×32 改 64×64）。
+- **四模式**（`quiz/main.js`）：限時連答（60 秒，題目文字還在打字時不計時；答對 100 + 難度 + 速度〔5 秒內遞減〕+ 連對加分，答錯 −5 秒；1~6 題初級、7~14 中級、15 起高級；整局不重複題）／生存挑戰（3 心、每題 12 秒、答錯或超時 −1 心、每 5 題升級）／對戰電腦（10 題搶答，選項出完雙方同時作答，先答對 +1、答錯本題出局；電腦 3 級 = 作答 150~300 / 100~220 / 60~150 幀 + 難度×20、正確率 55 / 70 / 85%）／心算衝刺（`quiz/math.js` 程式產生 8 級：加減 → 九九 → 整除 → 混合 → 二位×一位 / 三位± → 括號與乘除混合；60 秒、答對 +1 秒、連對加分、每 5 題升級；畫面 3×4 數字鍵盤，十字鍵一格一格〔剛按下走一格、按住首延遲 12 幀之後每 4 幀〕、A 按鍵、B 刪一位、ＯＫ 送出）。標題 ←→ 選分類（全部 / 6 類）、電腦強度、心算起始級（已達最高級內）。
+- **CT.Text**：題目 / 選項 / 分類 / 標題 / 說明 / 結算全走 CT.Text（字形動態上傳計預算 ⇒ 題目逐字出現）；說明頁用 `T.box`（名牌 = 模式名、▼ 翻頁、依池自動分頁）；心算題目與鍵盤用全形數字 16×16。HUD / 狀態列用自有 8×8 字型（借 `CT.GLYPHS.ascii` 原創半形點陣做成背景磚，不佔字形池）。字形池 176 磚；題庫最壞一題 148 磚（題目 + 4 選項 + 分類名）。
+- **暫停**：START → BGM pause、題目整片拿掉換成暫停面板（不能暫停偷想），再按 START 原樣畫回、`resume` 接續播放。
+- **聲音**（`quiz/song.js`）：BGM 3 首（星塵學堂 title / 搶答時刻 play / 星算盤 math）+ 2 段結算曲 + 音效 10 個（move / menu / ok / ng / tick / lock / key / del / lv / go）。
+- **§6**：密技遊玩中 = 限時 / 心算 +15 秒、生存 +1 心（上限 5）、對戰 +1 分；失敗結算 = 原地續關（限時 / 心算 +30 秒、生存補 3 心同級、對戰加賽 3 題，分數保留）；標題 / 說明 / READY 無效；用過那局 goal false、不存紀錄；exit 存最高分；`bestText` = 限時連答最高分 6 字元；`backTile` = 精靈 BACK 星；說明 / 暫停 / 結算都有 `HOLD START+SELECT: MENU`、`C/★ = CHEAT`，段落空一列。
+- **機器人**（`?bot=1&lag=N&acc=N`）：反應延遲 = max(12, lag)，讀題時間 = 延遲 + 20 + 2×題長 + 0~40 幀；**可讀題庫答案但用正確率 80% 模型**（另一個 PRNG，`acc` 可調）；每次移動游標按 1 放 3 + 等 4 幀。心算機器人照數字鍵盤路徑一格一格走。
+- `cart5.html` 標記內插入 6 行（text_bank → text_ui → art → math → song → main）；跑 `$PY tools/cjk_glyphs.py` 重產 glyphs.js（工具掃描整個 games/cart5，不會刪別人的字）。
+
+### 2. 驗證數字
+| 項目 | 結果 |
+|---|---|
+| `games/cart5/test_quiz.py` | **87 / 87 PASS**（題庫格式 / 分類分級 / 不重複 / 版面 / 字形池 / 字形齊全 / 抽樣答案對照 20 題、心算 3200 題重算 + 整除、契約 §6、四模式流程、游標規格、暫停、機器人） |
+| 題庫統計 | 216 題；每類每級 12；題目 ≤ 3 行 × 26 欄、選項 ≤ 22 欄；最壞一題用字 148 / 176 磚 |
+| `playthrough_cart.py --page cart5.html --game quiz` | goal **4090 幀**（限時連答一局 ≥ 3000 分），每線 **1**，overFrames **0**，VBlank 尖峰 **144** |
+| 機器人分數（seed 1~3） | lag 12：6787 / 4381 / 4173；lag 15：6775 / 4373 / 4164；lag 24：6198 / 3673 / 4135；lag 40：5406 / 2670 / 3857（GOAL 3000）；正確率實測 75~87% |
+| CT.Text | 字形池 overflow 0、缺字 0、文字系統單幀尖峰 136 byte |
+| 截圖 lint | 標題 9 色、答題 / 對戰結算 PASS |
+| `bash tools/run_all.sh --quick` | **總結 PASS**（70 項 PASS / 0 FAIL：test_cart 928/928、test_touch 995/995、cart5 七款測試全綠、9 頁 build --check、`cjk_glyphs.py --check` 1589 字缺 0） |
+
+截圖：`shots/agent_cart5-quiz/01_title.png`、`02_quiz.png`、`05_math.png`。
+
+### 3. 偏離
+1. 選項顯示 / 判定回饋用精靈（▶ 游標、○ 正解、× 答錯、電腦臉），沒有改屬性換色（選項列不對齊 16×16 屬性區塊）。
+2. HUD / 狀態列（分數、時間、`GOOD! +150` 這類回饋）用 8×8 英數字，中文只放題目 / 選項 / 標題 / 說明 / 結算標題——為了讓一題 + 分類名一定放得進 176 磚字形池。
+3. 限時連答的 60 秒只在「作答中」流逝（打字中 / 判定中停表），比較公平；心算的 60 秒判定中照走。
+4. goal 限「全部分類」且未用密技；單一分類可玩但不算 goal。
+
+### 4. 跨檔需求
+- 給 C9-0（`games/cart5/cart.js` 圖示對照）：quiz 畫面主色 = 紫框（$13 / $23）+ 白字、HUD 金（$28）、游標金黃；目前「問號對話泡泡」概念相符，可再對顏色。
+- 其餘無；engine / registry / shell / text.js / 其他卡帶都沒動；glyphs.js 只經 `tools/cjk_glyphs.py` 更新。
+
+### 5. 留給後續
+- 題庫可再擴（每格 12 → 20），或加「自訂題組」；對戰可加雙人（2P 手把）。
+- 心算可加「↑↓ 調位數」第二種輸入法與倒數模式（湊 24 之類）。
+- 真人實測：機器人讀題約 1.5 秒 / 題；真人若 3~5 秒 / 題，60 秒約 12~18 題，3000 分需要高正確率 + 連對，QA 可依實測調 GOAL_SCORE。
+
+## fix-r8-shell（R8，2026-11-13）
+
+### 1. 完成
+- **P2-7（engine/touch.js，只插入、預設不變）**：新增 `NES.Touch.setWays(4|8)` / `getWays()`。`8` = 現狀（預設，8 扇區 45°、±6° 磁滯）；`4` = 只輸出單一正方向：`sectorOf4()` 取最近正方向（扇區 90°，只用偶數扇區 0/2/4/6），換扇區同樣 ±6° 磁滯（按住滑動偏過 51° 才換）。手指按著時切換會用最後座標立刻重算 mask（`lastPt`）。`4` 以外的值一律當 8；無 DOM 的殼也有 `setWays/getWays`（恆 8）。`sectorOf()` 開頭插一行「WAYS === 4 就走 sectorOf4」，8 方向路徑一個字元都沒改（diff 只有新增行）。registry 的 `CT.resetHW` 已由總控呼叫 `setWays(8)`。文件：ENGINE_API §16.2 表格 + 範例 + §16.6 測試數字。
+  - **給 fix-r8-beat / sound / brain**：四方向遊戲在 `init` 呼叫 `if (NES.Touch && NES.Touch.setWays) NES.Touch.setWays(4);`（不必在 exit 還原，resetHW 會還原）。rhythm 只在 CROSS 模式需要的話，可在進 CROSS 時 setWays(4)、回標題 setWays(8)。
+- **P3-1（games/cart4/cart.js 圖示）**：依 `cart4.html?game=<id>&bot=1&debug=1` 實拍重畫 8 款中的 7 款（cards 只換配色）。調色盤重配：BG1 `[$16 紅, $2A 綠, $28 黃]`（色 3 黃仍是選中行文字）、BG2 `[$12 藍, $27 橘, $30 白]`；BG0 / BG3（logo）不動。
+  | 款 | 新圖示 | 調色盤 |
+  |---|---|---|
+  | cards | 藍框牌背 + 橘太陽，疊一張白牌面（藍閃電） | BG2 |
+  | simon | 四顆天體放大、中間留空：↑ 黃星 / → 紅新月 / ↓ 紅環行星（黃環）/ ← 綠彗星 | BG1 |
+  | flash | 3×3 藍格 + 3 格橘亮格（白心）＝遊戲 LIT（PAL_MAIN[1] $17/$28 + 白星）；遊戲裡的青綠白菱形是玩家 MARK | BG2 |
+  | tune | 白星軌垂下 2 根橘（長）+ 2 根藍（短）星鐘管、管底白點 | BG2 |
+  | rhythm | 粗線：中央玫瑰星核（白心）+ 四個灰環星門 + 外側白 / 玫瑰星籽 | BG0 |
+  | reflex | 大圓燈：左半紅（等）/ 右半綠（按）+ 黃框、綠半邊黃十字 | BG1 |
+  | brain | 2×2 四格控制台：藍 DRIFT（漂浮艇）/ 橘 PUMP（油量條）/ 白 SIGNAL（↑↓）/ 白 SHIELD（環），中央白星 | BG2 |
+  | color | 紅● / 黃★ / 綠▲（三者都是遊戲色鍵原色 $16/$28/$2A） | BG1 |
+- **P3-2（color）**：遊玩 HUD 第 1~2 列 → **第 2~3 列**；框頂第 3 → 4 列、框內從第 5 列起；規則列（PRESS THE INK COLOR / LEVEL n）第 4 → 5 列；色字大字 `WORD_ROW` 6 → **7**（與規則列隔一列；屬性 3 改成第 3、4 屬性列的第 1~14 欄，順帶修掉原本左右框在第 6~7 列被染成題目色的小瑕疵）。標題拿掉第 1 列（y = 0）頂框，大字從 y = 8 起；說明頁 `HOW TO PLAY` 第 1 → 2 列、其後各行順移一列。結算 / GAME OVER 本來就從第 4 / 5 列起，不動。
+- **P3-8（APU 雙重推進）**：**調查確認、不修**（見 §3）。
+
+### 2. 驗證數字
+| 項目 | 結果 |
+|---|---|
+| `tools/test_touch.py`（9 頁 × 2 裝置 + 桌機） | **995 / 995 PASS**（新增每組 10 項 ways 檢查 + 卡帶頁回選單後 getWays = 8；預設 8 方向 72 點與修前公式逐點一致、4 方向 72 點最近正方向且單一、偏 ±25° / ±40°（上右下左 16 點）皆正方向、磁滯 上→偏 50° 仍上→偏 60° 換右、按住中 8→4→8 立刻重算（144 → 16 → 144，Input 也跟著）、切回 8 後逐點一致） |
+| `games/cart4/test_color.py` | **80 / 80 PASS**（74 → 80：標題 / 說明頁第 0~1 列全空、三模式 HUD 在第 2~3 列且框頂第 4 列、色字大字第 7~8 列且第 6 列空） |
+| `playthrough_cart.py --page cart4.html --game color` | goal 2561 幀、每線 1、overFrames 0、尖峰 81 |
+| 截圖 lint | 選單 14 色 PASS；color 標題 9 / 說明 7 / 色字 9 / 衝刺 5 / 調色 5 色全 PASS |
+| P3-8 實測 | Chromium + ScriptProcessor 實際接喇叭 3 秒：APU `clockOne` **3,581,028 次 / 秒 = 59,586 週期 / 幀**（應為 29,780），確認雙重推進 |
+| `run_all.sh --quick` | 除 **`cart4/test_flash.py` 2 項 FAIL** 外全綠（test_apu 116 / test_touch / test_color / 其他卡帶 / build --check 9 頁 / cjk_glyphs --check 都 PASS）。flash 的 2 項是 fix-r8-memory 施工中新加的測試（HUD 第 2~3 列、吱比抖動），不是本卡的檔 |
+
+截圖：`shots/fix-r8-shell/01_menu_icons_vs_ingame.png`（選單 + 8 款實拍對照，收工前最後一次拍）、`menu_icons.png`（選單 3×）、`color_after.png`（標題 / 說明 / 色字 / 衝刺 / 調色）、`color_ink_pair.png`、`color_before.png`（修前）。
+
+### 3. 偏離 / P3-8 判斷
+1. **rhythm「四色星籽」做不到**：一個 16×16 圖示只能用一組 BG 調色盤（3 色 + 底色），選單 4 組調色盤中 BG0 是文字、BG3 是 logo，只剩 2 組給 8 個圖示共用。rhythm 用 BG0（玫瑰 / 灰 / 白）換得「灰環星門 + 玫瑰星核」，星籽只能白 / 玫瑰兩色。
+2. **color 的藍■ 改綠▲**：QA 建議藍 $12，但藍放進 BG1 就沒有綠給 reflex 的綠燈；改用遊戲裡同樣存在的綠▲（$2A），三個形狀仍互異。simon 的星在遊戲裡是青色，圖示用黃（同理受限）。
+3. **P3-8 不修，理由**：
+   - 根因確認：`nes.js update()` 每幀 `apu.tick()`（推 29,780 週期、樣本丟棄），接喇叭後 `connect()` 的 ScriptProcessor `onaudioprocess` / Worklet `need` 又呼叫 `render()` 推同一個時鐘（apu.js 檔頭明寫「只能擇一」）。
+   - 「只插入、不改既有行為」做不到：真正的修法必須改**即時播放管線**——(a) 接喇叭後不 tick ⇒ APU 只在音訊回呼時以 1024 樣本（≈ 1.4 幀）或 Worklet 60~120 ms 一大塊推進，暫存器寫入全部擠在塊邊界，短音（rhythm 的 3 幀預告音、simon 鍵音）會被吃掉或拉長；(b) tick 產生的樣本進 ring buffer、回呼只取 buffer ⇒ 時序正確，但要處理 rAF 迴圈與音訊時鐘的漂移（欠載補靜音 / 溢出丟樣本、背景分頁 rAF 降速時整段靜音），還會**改變輸出延遲**——而 fix-r8-beat 正在依現在的延遲做 P2-1 的 OFFSET 預設值與校正，同時改兩邊會互相打架。
+   - 目前聽感：music.js 用 halt + 軟體音量包絡，每幀重寫音量 / 週期，雙倍推進只影響硬體 frame counter / sweep / 線性計數器（本專案曲目幾乎不用），所以聽起來正常；所有離線 APU / 音樂測試（mute / debug，不接喇叭）完全不受影響。
+   - **建議（R10 或總控收尾，派專責 audio agent + 真人聽測）**：採 (b)：`apu.tick()` 在 `this._node` 存在時把樣本推進 ring（目標水位 3 幀，低於 1 幀補靜音、高於 6 幀丟最舊），回呼只讀 ring、不再 `render()`；以 `connect(ctx, {ring: true})` 開關先灰度，`test_apu` 加「接喇叭 180 幀 clockOne = 29,780 × 180 ± 1 幀」。同時提供 `nes.audioLatencyFrames()` = `(baseLatency + outputLatency) × 60.0988 + ring 水位`，給 rhythm 當 OFFSET 預設值；在那之前 rhythm 的 OFFSET 預設值以「現行管線」量測為準。
+
+### 4. 跨檔需求
+- 無。只動了擁有檔：`engine/touch.js`（純插入）、`docs/ENGINE_API.md`（插入）、`tools/test_touch.py`（插入）、`games/cart4/cart.js`、`games/cart4/color/main.js`、`games/cart4/test_color.py`；registry / shell / 其他遊戲 / cart5 / apu.js / nes.js 都沒動。
+
+### 5. 留給後續
+- 其他 fix agent 若再改主色（例如 simon 星改色、flash LIT 改回青綠），cart.js 圖示配色要再對一次；最後一次對照圖：`shots/fix-r8-shell/01_menu_icons_vs_ingame.png`（拍攝時 flash LIT = 橘底白星、MARK = 青綠白菱形）。
+- P3-8 ring buffer + `audioLatencyFrames()`（見 §3-3）。
+
+## cart5-adventure（R9，2026-11-13）
+
+### 1. 做了什麼
+- **① `adventure` 星塵冒險《消失的星燈》**（槽 1，`games/cart5/adventure/{text_story,art,song,main}.js`，全域只掛 `CT.Adv`）：紅白機指令選單式文字冒險。舊作 text-adventure 只取「選擇 + 物品」玩法，故事 / 美術 / 音樂全部原創。
+  - **畫面**：上半 144×112 場景圖（18×14 格）+ 人物 / 道具精靈；右欄 = 位置名 + `T.menu` 指令選單（調查 / 移動 / 交談 / 拿取 / 使用 / 物品 / 系統，子選單同一欄、B 退回）；下方 `T.box` 對話框（逐字、名牌、▼ 翻頁）；選擇題 = 問句在對話框、選項在右欄（B 不能取消）。待命時框內打「要做什麼呢？」（寫完直接收掉狀態、不閃 ■）。
+  - **場景圖**：10 個地點（閣樓小屋 / 星港廣場 / 雲海碼頭 / 燈塔前 / 燈室 / 鐘錶店 / 天文台 / 森林入口 / 星石林地 / 星橋）+ 標題（大字 logo = CT.GLYPHS 點陣放大 2 倍描邊）＋ 變體（燈塔 / 燈室點亮、森林有燈、碼頭霧夜、閣樓早晨、星橋兩種結局）共 17 張；`art.js` 的 Painter 指令（多邊形 / 橢圓 / 星空 / 週期雲 / 木板 …）畫成 2bpp + 屬性表 → 8×8 去重；超過 84 槽就合併最相近的兩塊（每張 ≤ 24 次，測試驗）。**換場景時在 CT.blank 裡把磁磚寫進背景 bank 的 PIC0..83 保留區（CHR-RAM 式）**，所以每張圖都有自己的磁磚組；bank = 1 空白 + 84 PIC + 12 框線 + 159 字形池 = 256。
+  - **劇情**（繁中、全年齡，約 7,500 字）：星祭前夕燈塔的星核消失 → 見習郵差小羽送信拿鑰匙、用提燈收集星屑、修音樂盒、向觀星員借星圖、在森林以〈星之歌〉安撫掉下來的星之子「拾光」→ 送它從星橋回家。8 種物品、約 30 個旗標、跟隨的拾光在每個地點有閒聊。**5 種結局**：1 星燈與歸途（真）/ 2 星之旅人 / 3 燈亮了（搶回星核）/ 4 霧中的港口（壞：玻璃珠代替星核）/ 5 回籠覺（壞：開場回去睡），結局收集存檔 + 標題「結局一覽」。
+  - **提示系統**：系統 → 提示，依 12 段進度給第一個沒完成的；廣場的貓也會用眼神暗示。**存檔**：3 格（系統 → 存檔；標題 → 繼續遊戲），游標移動時框內顯示該格地點。
+  - **音樂**（`song.js`，原創）：星燈序曲 / 星港小鎮 / 夜之燈塔 / 星之歌（劇中搖籃曲，音樂盒與星橋）/ 霧夜 共 5 首 + 音效 9 個。
+  - §6：START 暫停（BGM pause、位置欄顯示暫停中、選單凍結）；說明頁寫 `HOLD START+SELECT: MENU`、`C/★ = CHEAT`（段落空一列）；密技 = 遊戲中選單開著時**立即提示**，**壞結局（霧中的港口 / 回籠覺）按密技 = 回到上一個決策點**（最後一次打開指令選單時的狀態）原地續玩；標題 / 說明無效；用過密技那局 goal false；exit 停音樂（沒有分數，最高紀錄 = 結局收集）；`bestText` = `ED n/5`；backTile = 實心星（精靈 pal 3）。
+  - 機器人：只讀選單文字 / 游標 / 對話框 ▼■，照 29 步最短路線用十字鍵 + A 操作指令選單；按 A 前等 lag（預設 14）、移動游標每 8 幀；打字中讀 20 幀才按 A 加速。
+- `cart5.html` 在 `cart5:games` 標記內插入 4 行；`glyphs.js` 只經 `tools/cjk_glyphs.py` 重產（工具掃描整個 games/cart5，別款的字不會被刪；目前 1589 字）。
+
+### 2. 驗證數字
+| 項目 | 結果 |
+|---|---|
+| `games/cart5/test_adventure.py` | **58/58**（契約 / bestText / backTile、標題 lint + 密技無效、說明頁文字 + overflow 0、17 張圖磁磚 ≤ 84 合併 ≤ 24、10 地點逐張 NES.Lint + 每線 ≤ 8、所有選單項 ≤ 6 格 ≤ 7 項、6 道選擇題格式、擋路 / 預設句、提示推進、密技立即提示、5 種結局全以真實按鍵走到 + 壞結局密技回決策點、密技局 goal false、存讀檔（重開頁面）、暫停、exit、音樂、機器人 lag 14 / 0 / 24） |
+| `playthrough_cart.py --page cart5.html --game adventure` | goal **5487 幀**，每線 **4**，overFrames **0**，VBlank 尖峰 **136**；`--hint` 5486 / 4 / 0；lag 0：3817、lag 24：6650 |
+| 字形池 | 機器人全程 overflow 0、缺字 0（池 159 磚；一頁 3 行 × 13 字，放不下時 T.box 自動提早翻頁） |
+| 截圖 nes_lint | `shots/agent_cart5-adventure/` 3 張（標題 / 燈塔點亮 + 跟隨的拾光 / 林地選擇題）全 PASS（≤ 15 色） |
+
+### 3. 偏離
+1. 選單文字一律 ≤ 3 個全形字（右欄寬 11 格），所以齒輪爺爺在交談選單叫「爺爺」（名牌仍是全名）、存檔格叫「第1格」（地點寫在對話框）。
+2. 存檔用 3 格（brief：密碼或存檔格擇一）。
+3. 場景圖是程式化像素畫（Painter 指令）而非手繪點陣字串；磁磚超過 84 時自動合併相近磁磚（部分場景合併 ≤ 20 塊，畫面上不易察覺）。
+4. 「提示文字寫完不閃 ■」靠直接把 `box.phase` 設回 `closed`（公開屬性，沒改 text.js）。
+
+### 4. 跨檔需求
+- 給 C9-0（`games/cart5/cart.js` 圖示）：遊戲主視覺是「夜晚的紅白燈塔 + 右側藍框指令選單」，目前的「藏寶路線圖」圖示可保留或改成燈塔；`bestText` 為 `ED 0/5`。
+- 其餘無；engine / registry / shell / text.js / 其他卡都沒動。
+
+### 5. 留給後續
+- 可加「訊息紀錄」（T.scroll 回看上一段對話）與文字速度設定。
+- 拾光跟隨時可在更多物件上加專屬反應；結局 3 / 4 可加各自的結局圖。
+- 第二輪（結局全收集後）可解鎖「霞婆婆的孫子阿海」番外。
+
+## cart5-escape（R9，2026-11-13）
+
+### 1. 做了什麼
+- **② `escape` 星塵密室《天文台的三道考驗》**（槽 2，`games/cart5/escape/{text_rooms,text_ui,logic,art,song,main}.js`，全域只掛 `CT.Escape`）：點選式密室逃脫。舊作 escape-room 只取「點選調查 / 拿物品 / 密碼鎖」玩法，房間、謎題、故事、美術、音樂全部原創。
+  - **畫面**：第 2~3 列 HUD（房名 / 朝向或「B 離開」/ 剩餘時間，自有 8×8 數字）→ 第 4~19 列房間畫面 256×128 → 第 20~21 列物品欄（7 格 16×16 圖示）→ 第 22~28 列 `T.box` 訊息框（2 行 × 13 字、打字機、▼■）。待命時框內顯示游標下的熱點名 / 物品名 + 說明 / 「拿著：…」。
+  - **操作**：十字鍵游標（R6 §1-4：前 8 幀 1 px、之後 3 px；按住 B = 1 px 微調）；游標停在熱點上變放大鏡、拿著物品變手；A 調查 / 使用；物品欄按 A 拿起、再按另一樣 = 組合、B 點一下放下；左右箭頭（或把游標推到邊上 20 幀）轉身；SELECT 提示；START 暫停。
+  - **三間密室**（難度遞增，四面牆可轉向）：① 觀星書房 10 環節（工具箱→小鏟子→挖盆栽→銅鑰匙開抽屜→手電筒；時鐘太高→搬椅子→電池；組合亮手電筒→照書桌底下看到規則「書背數字照彩虹顏色排」→ 密碼 7142）② 齒輪工坊 10 環節（螺絲起子開配電盤→**九燈開關**→符號鎖工具箱（齒輪由大到小 ▲●★）→齒輪 + 油壺組合→裝齒輪；把手裝閥門→**管線旋轉**；紅綠藍三燈全亮開鐵門）③ 穹頂星室 11 環節（黑板四條算式唯一解 4342 開玻璃櫃→霧鏡片 + 拭鏡布→修望遠鏡→看到「提燈座」藍白紅黃→**太陽系儀三圈**→兩個半星盤組合→放上座台引星光→**光路旋轉**→寶石鎖）。
+  - **機關特寫 5 種**（`logic.js` 規則 + 解法、十字鍵一格一格首延遲 12 / 每 4 幀）：撥盤鎖（數字 / 符號 / 顏色，值用 CT.Text 全形字）、九燈（按一顆 = 自己 + 上下左右）、太陽系儀（三按鈕各轉兩圈）、管線 / 光路（I / L 管旋轉、水流即時點亮）、望遠鏡視野（看線索）。
+  - **謎題資料全宣告式**（`text_rooms.js`：熱點規則 / 條件 / 動作 / 組合 / 機關 / 環節 + 3 段提示 + 密技動作）：遊戲、JS 解題器（BFS，機器人用）與測試裡的 Python 獨立解題器讀同一份資料。撥盤鎖有 `know`（看過線索才算「推得出」）。
+  - **提示**：SELECT 依「第一個還沒完成的環節」給 3 段漸進提示，每段評價時間 +30 秒。**計時與評價**：時限 15 / 20 / 25 分、標準 4 / 6 / 9 分；S（標準內且 0 提示）/ A（×1.5）/ B（×2.5）/ C；最佳紀錄每間存檔、選擇房間顯示。時間到 → 失敗畫面（A 重來 / B 標題）。
+  - **故事 / 教學**：老觀測員「朔叔」的開場、兩段過場、結局（名牌對話框）；第一間開頭教游標 / 轉身 / 提示，第一次拿到物品教物品欄與組合，每個特寫都有一段操作說明（≤ 2 行）。
+  - **美術**（`art.js`）：每面牆用小型繪圖指令畫在 NES 色號畫布上 → 每 16×16 區塊自動挑調色盤（四組 c1 都是牆色）→ 切 8×8 去重；每面牆 / 特寫一個 bank（在 CT.blank 裡重建，= 1 空白 + 畫面磁磚 + 物品圖示 + 11 數字 + 12 框線 + 字形池 ≤ 120）。12 面牆 + 5 種特寫 + 16 個物品圖示 + 標題 / 故事圖，全部原創（書房暖褐、工坊灰鐵、星室靛藍）。
+  - **聲音**（`song.js`）：BGM 3 首（標題「鎖孔裡的星」D 小調、第一二室「安靜的推理」G 多利安、第三室「穹頂之下」E♭ 利地安）+ 脫出 / 時間到 2 段 + 音效 12 個（`escape_` 前綴）。
+  - §6：密技（C / ★）= **直接解開目前卡住的環節**（訊息附第 3 段提示）；特寫中 = 直接解開這個機關；**時間到畫面 = 原地續關**（時間補滿、進度 / 提示保留）；標題 / 說明 / 故事無效；用過密技那間不留紀錄、goal false；START 暫停 = BGM pause / resume、計時停、HUD 顯示「暫停中 START 繼續」、物品欄位置顯示 `HOLD START+SELECT: MENU`；說明頁寫 `C/★ = CHEAT`；exit 停音樂（紀錄在脫出時已存）；`bestText` = ` 1/3 S`（通關數 + 第一室最佳評價，右對齊 6 字元）；backTile = 實心點（精靈 pal 3）。
+  - **機器人**：每次決策用 JS 解題器算最短路線的下一步 → 轉身（點箭頭）/ 拿起物品 / 移游標到熱點上「真的點得到」的點（避開被後面熱點蓋住的區域）→ 對準後停 12 幀 → A；特寫用各機關解法；讀訊息等 14 幀才按 A。
+- `cart5.html` 在 `cart5:games` 標記內插入 6 行；`glyphs.js` 只經 `tools/cjk_glyphs.py` 重產（確認工具掃描整個 games/cart5，別款的字不會被刪）。
+
+### 2. 驗證數字
+| 項目 | 結果 |
+|---|---|
+| `games/cart5/test_escape.py` | **85/85**（Python 獨立解題器：三間可解、全部可達狀態 36 / 25 / 35 個都能脫出 = 無死局、最短 10 / 10 / 12 步 = JS；環節 10 / 10 / 11、提示 3 段相異、密技逐環節可解；九燈最少 3 下 / 太陽系儀 甲2乙3丙1 與提示一致、管線 / 光路開局不通正解通；四把撥盤鎖答案都由線索推得（書背 + 彩虹、齒輪大小、黑板算式唯一解、望遠鏡顏色）；文字 ≤ 框、缺字 0；每面牆 × 每進度 + 特寫磁磚讓字形池 ≥ 80；12 面牆 lint；游標加速 / 微調、轉身兩種、拿物品 + 教學、用錯 / 組合、撥盤錯對、提示三段、時間到 + 原地續關、密技兩種、goal false、暫停、結算 / 存檔 / bestText / exit / backTile；機器人三間） |
+| `playthrough_cart.py --page cart5.html --game escape` | goal **3421 幀**（從標題 → 開場故事 → 第一室脫出），每線 **3**，overFrames **0**，VBlank 尖峰 **137**；`--hint` 同 |
+| 機器人第 2 / 3 室（test_escape） | 照解題路線用游標破關，每線 ≤ 3、overFrames 0、0 密技 0 提示 |
+| `tools/test_cart.py --page cart5.html` | 163/163 |
+| 截圖 nes_lint | `shots/agent_cart5-escape/` 3 張（書房東面 + 放大鏡游標 / 太陽系儀特寫 / 管線特寫）全 PASS（≤ 9 色） |
+
+### 3. 偏離
+1. 房間畫面是程式化像素畫（矩形 / 圓 / 點陣小圖指令）而非手繪點陣字串；調色盤放不下的區塊取最接近色（每畫面 ≤ 16 個近似區塊，測試盯著）。
+2. 每次轉身 / 狀態改變 / 進出特寫都在 `CT.blank` 裡整片重建 bank（等同真機關畫面換 CHR-RAM），訊息在重建後才開始打字。
+3. 拿著物品點錯地方時物品**不會自動放下**（方便連續試別處），B 或再按同一格才放下。
+4. 撥盤鎖在遊戲裡照樣可以亂猜；「要先看過線索」只約束解題器 / 機器人的路線。
+
+### 4. 跨檔需求
+- 給 C9-0（`games/cart5/cart.js` 圖示）：目前「天藍色門 + 黃鑰匙孔 + 鑰匙」與遊戲相符（第一室是木門、物品欄有銅鑰匙），可保留；若要更貼近可改成褐色木門。`bestText` 為 ` 0/3` ~ ` 3/3 S`。
+- 其餘無；engine / registry / shell / text.js / 其他卡都沒動。
+
+### 5. 留給後續
+- 可加第 4 間（例如「時光鐘樓」）與「無提示挑戰」模式、每間的隱藏收集品。
+- 物品可加「仔細看」（特寫旋轉物品找到隱藏線索）。
+- 可把每面牆的磁磚再壓（書房東面 130 塊最多），讓字形池更大、訊息一頁多放幾個字。
+
+## fix-r8-beat（R8，2026-11-13）
+
+### 1. 做了什麼（依 `docs/QA_REPORT.md` `# R8 qa-r8`）
+- **P2-1 rhythm 延遲 / 窗口**：① 判定與畫面一律用「玩家感知時間」`sj = songFrame − OFFSET`（畫面也延後 OFFSET 幀 ⇒ 看畫面與跟聲音的人對到同一時刻）；標題新增第 5 列 `OFFSET`（−4 ~ +12 幀，←→ 手調、存檔 `nes.cart4.rhythm.offset`、`?offset=` 覆寫），**預設 +4**（file:// ScriptProcessor 實測約 4.5 幀）。② OFFSET 列按 Ⓐ = **校正畫面**：節拍器每 30 幀嗶一聲（前 4 聲預備），跟著聲音按 Ⓐ 8 下（±14 幀內才收），取中位數 ⇒ Ⓐ 存、START 重來、Ⓑ 不存回標題；時間只用幀計數。③ 窗口改成每難度一組（`chart.js DIFFS[].win`）：EASY 4/8/12、**NORMAL 3/6/10**、HARD 維持 2/5/8；NORMAL drain 5 → **4**；ACC 權重 GOOD 40 → **50**；評價 B 70 → **65**、C 55 → 50；空按判定範圍 = GOOD + 8 幀。chart.js 的左右臂配額改用各難度實際 GOOD 窗口計（72 份譜面重新驗證全綠）。
+- **P2-2 rhythm EAR**：預告音 `rhythm_cue0..3` 改走 **p1、vol 13、8 幀**，四軌靠輪廓 + 音色分辨（↑ 上行琶音 50% / ↓ 下行琶音 50% / ← 低音 C4 嗡聲 12.5% / → 高音 E5 雙擊 25%），EAR 時播 **`rhythm_sN_ear`（p1 旋律音量減半、row 與原曲相同）**，命中音改 **`rhythm_tick`（雜訊、無音高）**；數拍第 1 小節依序播 4 個參考音（HUD 寫 `TONE ↑` …）；HARD 不開放 EAR（選 EAR 時難度只在 EASY / NORMAL 間切換，標題寫 `NO HARD`）。
+- **P3-6 SOUND CHECK**：選 EAR 開始前先進聲音檢查畫面——輪播 4 個預告音並寫出名稱、`HEAR IT? Ⓐ = YES  Ⓑ = BACK`、`NO SOUND? CHECK THE SILENT SWITCH AND VOLUME.`；按 Ⓑ 回標題，副標列改成 `NO SOUND? CHECK SILENT SW`。
+- **P2-3 reflex goal**：`GOAL_AVG` 20 → **24 幀（400 ms）**、新增 `GOAL_FALSE = 2`（偷跑 ≤ 2 次仍算）；標題 / 結算改寫 `GOAL: AVG 400MS, FALSE 2 MAX`，SIMPLE 說明加 `TOUCH +50MS`。
+- **P2-7 斜方向**：兩款 init 時 `NES.Touch.setWays(4)`、exit 時 `setWays(8)`（try 包住，API 缺席不報錯）；遊戲層也擋：rhythm 同一幀按下兩個以上方向 ⇒ 只判有音符的那一軌、其他軌**不算空按**；reflex CHOICE / ARROW 同一幀兩個方向 ⇒ **不判定**（等下一個單一方向）；rhythm 標題選單同幀兩方向不動作。
+- **P3-2**：rhythm 標題框線第 1 列 → 第 2 列、BLADE HUD 第 1~4 列 → 第 2~4 列（暫停 / 失敗訊息暫時蓋分數列）；reflex 標題框線第 1 → 2 列、測驗 HUD 收成第 2、3 列（TRY / FALSE 同列，ARROW 提示取代說明列）、背景星點從第 2 列起 ⇒ 兩款可見 y < 8 全空。
+- 機器人：rhythm 新增 `lead`（提早幾幀按，給濾鏡用）與 `?botclk=s`（以 songFrame 為基準 = 模擬跟聲音按）；在 calib / scheck 畫面也會自己走。
+
+### 2. 驗證數字
+| 項目 | 修前 | 修後 |
+|---|---|---|
+| 真人模型 rhythm（蒙地卡羅 1000 局，前 3 首 CROSS NORMAL 全 B；含 2% 換軌按錯、1% 分心） | 新手 σ5 看畫面 **1.2%**；新手 σ5 跟聲音（延遲 5 幀）**0%、FAILED 97%**；熟手 σ3.5 跟聲音 0%、FAILED 35% | 新手 σ5 看畫面 **100%**（ACC 中位 77）；新手 σ5 跟聲音（預設 OFFSET 4）**100%、0 FAILED**；熟手跟聲音 100%（ACC 86）；σ6 看畫面 90%；手機觸控 +3 幀未校正 60% → 校正後 100%；藍牙 +12 幀校正後 100% |
+| 真人濾鏡 `tools/human_filter.js` 實跑 rhythm | — | 新手 σ5 前 3 首 × 3 種子 **9/9 首 B**（ACC 75~81）；偏差 +5 σ3.5 跟聲音：OFFSET 5 → **A 89**、OFFSET 0 → B 71 |
+| 真人模型 reflex 單局過關率（ex-Gaussian + 系統延遲 + 5% 偷跑，20000 局） | 20 代鍵盤 73.8 / 40 代鍵盤 49.2 / 20 代 iPhone 42.4 / 40 代 iPhone 4.3 / 60 代鍵盤 3.8 % | **99.5 / 98.0 / 97.9 / 83.2 / 67.1 %**（60 代 3 局內 96%） |
+| 真人濾鏡 reflex（40 代鍵盤 ≈ lag 12 + N(7.4, 3.4) + 3% 分心） | — | 8 局 **7 局 goal**（平均 18~22 幀） |
+| EAR 實播（APU 狀態逐幀） | 預告音 vol 6 / 3 幀、旋律 vol 9~10、命中音同音高 | 預告音 APU 音量 14、每次連續 ≥ 8 幀（p1）；EAR 旋律最大 5、和聲 7；命中音全為 rhythm_tick |
+| `apu_render.py --game cart4/rhythm` | 9 首 63/63 | **15 首 105/105**（+6 首 EAR 版；EAR 版 p1 RMS 0.0263 → 0.0133） |
+| `games/cart4/test_rhythm.py` | 53/53 | **79/79** |
+| `games/cart4/test_reflex.py` | 50/50 | **59/59** |
+| `run_all.sh --quick` | — | **總結 PASS**（全部單元測試 + 9 入口 build --check + cjk_glyphs 1589 字缺 0） |
+| `playthrough_cart.py --page cart4.html --game rhythm` | 6077 幀、每線 6、over 0 | **6078 幀**、每線 **6**、overFrames **0**、尖峰 25 |
+| `--game reflex` | 984 幀、每線 2 | **985 幀**、每線 **2**、overFrames **0**、尖峰 25 |
+
+截圖：`shots/agent_fix-r8-beat/rhythm_calib.png`（校正畫面）、`rhythm_soundcheck.png`（SOUND CHECK）、`reflex_choice_hud.png`（HUD 從 y = 8 起）。
+
+### 3. 偏離
+1. OFFSET 預設 **+4**（QA 建議 +3）：brief 要求依實測 file:// 4~5 幀；而畫面同步延後 OFFSET 幀，所以看畫面的人不受預設值影響。
+2. 窗口只放寬 EASY / NORMAL，HARD 保留 2/5/8 當熟手挑戰（有 OFFSET 後系統性偏差已消除）。
+3. EAR 預告仍提前 1 拍（QA 二選一：提前 2 拍 **或** 限 EASY / NORMAL）——選了「HARD 不開放 EAR」，因提前 2 拍要同時記 4 顆，負擔更大。
+4. 蒙地卡羅模型比 QA 稍寬鬆（新手 σ5 修後 100% vs QA 估 93%），但同樣量到修前 ≈ 0%；另以濾鏡實跑交叉驗證。
+
+### 4. 跨檔需求
+- 無。只改 `games/cart4/{rhythm,reflex}/**`、`games/cart4/test_{rhythm,reflex}.py`。`NES.Touch.setWays` 由 fix-r8-shell 提供（目前已在 engine，測試驗 init = 4、exit = 8）。
+- 建議（總控 / engine，非必要）：qa-r8 P3-8 的 `nes.audioLatencyFrames()` 做好後，rhythm 可在沒有存檔 OFFSET 時用它當預設值。
+
+### 5. 留給後續
+- 校正目前只量聲音延遲；可再加「畫面延遲」校正（看閃光按）給高刷新率 / 投影機玩家。
+- EAR 可加「練習模式」（只出預告音、按對亮燈）。
+
+## fix-r8-brain（R8，2026-11-13）
+
+### 1. 做了什麼（`games/cart4/brain/**`、`games/cart4/test_brain.py`）
+- **P2-4 JUGGLE DRIFT**（`multi.js`）：第 1~3 級推力 24 → **14**、風力 5/7/9 → **4/5/6**、阻尼 `dv/16` → **`dv/12`**；撞到盡頭改成**彈回（BUMP）**：速度反向（≥ 96）、該格閃紅、HUD 寫 `BUMP! PULL BACK TO THE GLOW`，BUMP 窗內拉回亮區就沒事，**窗內再撞一次（`DRIFT HIT THE END TWICE!`）或沒拉回（`DRIFT STUCK AT THE END!`）才算失誤**；**每進入下一個 STAGE 回 1 心**（tick 換 STAGE 時 `C.heal(1)`，JUGGLE 不經 afterLevel）。OVERTIME（第 4、5 級、90 秒 goal 之後）依真人模型另調：風 11 / 13（同修前）、推力 18 / 20、阻尼 `dv/14`、BUMP 窗 50 幀（每級參數 `LV[].damp / bumpT`）。說明頁最後一列改 `NEW STAGE: TASK + HEART`。
+- **P2-7 SIGNAL 斜方向**：遊戲輸入層——↑↓ 的按下邊緣若同一幀也有 ←→ 的按下邊緣（觸控落進斜區）→ 不判定、不算錯；↑↓ 同時也不判；鍵盤「按住 → 推 DRIFT 再按 ↑」照常算數。觸控：`main.js` `touchWays(n)`（`NES.Touch && NES.Touch.setWays` 才呼叫，try 包住）——標題 / 說明 / TWIN / JUGGLE / TRACER `setWays(4)`、TILT（要斜向傾斜，`M.ways = 8`）`setWays(8)`、`exit` 設回 8。
+- **TWIN**（`dual.js`）：真人模型在第 6 級隕石 448 出現斷崖 ⇒ 第 6~8 級隕石速度 448/512/576 → **400/448/496**（−11~14%，仍逐級遞增、排距 ≥ 62 px）。
+- **機器人「傳出副本」**（量測準確度用，不影響 goal 判定）：TWIN 換道、TRACER 游標在手還沒反映到畫面前（≤ 40 幀）以「按下去之後的位置」思考，不再連按衝過頭；TRACER 游標停穩 6 幀才按 A；JUGGLE SIGNAL 同一格按過 90 幀（原 30）畫面沒反應才再按。修前在真人濾鏡下這三處會被延遲放大成「連按兩次」——TRACER 修前 2/3 局在第 3~4 級 `TIME UP / WRONG PLACE`、JUGGLE OVERTIME 的 SIGNAL 失誤，都是這個假象。
+- **P3-2 HUD / 標題不貼 y = 0**：HUD 在上方的三模式（JUGGLE / TRACER / TILT，`M.hudShift`）主捲動 y = −8（名稱表列 1~3 的 HUD 顯示在畫面列 2~4）、split 線 32 → 40（下半仍從名稱表列 4 起，屬性對齊不變）、精靈統一 +8（`C.oy`，core.js `C.spr` 套用）；場地最下列落在可見區最後一列（畫面列 28）。TWIN 的 HUD 本來就在下方（不動）。標題 / 說明頁外框改從名稱表列 2 起。
+- **P3-3 標題段落**：4 個模式一列一個（列 11/13/15/17，之間空列），副標只寫選中的那一項（列 19，↑↓ 換模式時跟著換），按鍵說明 / 回選單 / 密技三段各空一列。
+- **`test_brain.py` 加「真人模型」段**：直接讀 `tools/human_filter.js` 包在 `CT.current.bot` 外（`hum_run()`），每局記每級開始時的累計失誤、90 秒時的失誤分佈；`--quick` 略過。
+
+### 2. 驗證數字
+真人模型：A = lag 20 + 每次按下 N(3,3) + 換組 10~20 幀；B = A 但 lag 25 + 3% 分心 +30 幀；B' = lag 30 + 5% 分心；C = lag 25 + N(4,4)（不分心）。
+
+| 模式 | 模型 | 修前 | 修後 |
+|---|---|---|---|
+| JUGGLE 90 秒 | A × 6~10 局 | **0/6**，53~74 秒 GAME OVER，失誤 100% DRIFT | **10/10** 撐過，90 秒前 0 失誤 |
+| JUGGLE 90 秒 | B × 4~6 局 | **0/4**，29~52 秒 | **6/6** |
+| JUGGLE 90 秒 | B' × 3 局 | — | **3/3** |
+| JUGGLE 150 秒結算 | A × 4 | — | S / S / S（1 失誤）/ A（2） |
+| JUGGLE 150 秒結算 | B × 3、B' × 3 | — | C / C / GAME OVER（約 142 秒）；C / C / GAME OVER（約 142 秒）——OVERTIME 才有失誤（DRIFT 為主，SHIELD 次之） |
+| TWIN | A × 3~4 | 第 4~6 級 GAME OVER | 第 1~4 級 0 失誤；第 5 級約 1、第 6 級 2~5、第 7 級 1~5；GAME OVER 在第 6~7 級（共 8 級） |
+| TRACER | C+3% / B'（timing） | 2/3 局第 3~4 級 GAME OVER（機器人假象） | 6/6 局 8 級 S 0 失誤——時機模型量不到記憶難度（見 §3） |
+| TILT | C × 3 | S / A / B | S / A / B（0 / 1 / 5 失誤，第 1~2 張 0 失誤） |
+
+| 項目 | 結果 |
+|---|---|
+| `games/cart4/test_brain.py` | **96/96**（約 3.5 分鐘；`--quick` 83/83）：新增 DRIFT 參數 / 彈回 / 再撞或沒拉回失誤 / 每 STAGE 回心 / SIGNAL 斜方向不判 / 鍵盤雙手照算 / 標題外框列 2 + 模式空列 + 副標跟著換 / 說明頁列 0~1 空 / 三模式捲動 −8 + split 40 + 精靈 +8 / setWays 4·8·exit 8 + 沒 NES.Touch 不報錯；真人模型 6 條（JUGGLE A 3/3 goal、A 90 秒內 DRIFT ≤ 1、B 90 秒過但 OVERTIME 失誤 ≥ 2、TWIN 前 3 級 0 失誤 + 後段失誤、TRACER 前 2 級 0 失誤、TILT 前 2 張 0 失誤且打完） |
+| `playthrough_cart.py --page cart4.html --game brain` | goal **5585 幀**，每線 **2**，overFrames **0**，尖峰 105；`--hint` 5584 / 2 / 0；`--query lag=0 / 24 / 30` 全部 5585 / 2 / 0 |
+| `run_all.sh --quick` | **總結 PASS**（run_all 裡 test_brain 96/96；其他卡帶、build --check 九頁、cjk_glyphs 全綠） |
+| 截圖 lint | 標題 9 色、JUGGLE 13、TILT 15、TRACER 12，全 PASS（`shots/agent_fix-r8-brain/title.png`、`juggle.png`） |
+
+### 3. 偏離
+1. OVERTIME 沒照建議表「維持原值」：推力 16 + `dv/12` + BUMP 60 時模型 A 150 秒全 S（沒挑戰）；改 風 12/15 + `dv/16` + BUMP 40 又讓模型 A 在 140 秒 GAME OVER。最後取 風 11/13、推力 18/20、`dv/14`、BUMP 50 ⇒ 一般玩家 S~A、分心玩家 C 或 140 秒倒下。
+2. 第 1~3 級照建議值後，模型 A / B / B' 在 90 秒內都 0 失誤，比「≥ 70%」寬很多；沒再加難——真人還有模型沒算到的失誤（看錯風向、手忙腳亂按錯鍵），goal 留寬。
+3. 濾鏡用在 TILT 時，lag 30 + 5% 分心 + N(4,5) 會在第 2 張倒下：TILT 機器人每 6 幀換一次方向，`refr 4` 讓按鍵排隊越積越晚（12000 幀 2084 次按下），是濾鏡 × 高頻控制器的假象，測試改用 qa-r8 同款模型 C。TRACER 的難點是記憶，時機濾鏡量不到（機器人記憶完美），沿用 qa-r8「不用改」。
+4. 觸控四方向由遊戲在進入各畫面時自己設；registry 換遊戲時也會重設 8（fix-r8-shell）。
+
+### 4. 跨檔需求
+- 無。只改 `games/cart4/brain/{core,main,multi,dual,track,tilt}.js`、`games/cart4/test_brain.py`。`tools/human_filter.js` 只讀不改。
+
+### 5. 留給後續
+- 真人模型可加「記憶錯誤率」（TRACER 每步記錯機率、STEP 題加權），才量得到 TRACER 的難度曲線。
+- human_filter 的 `refr` 排隊對高頻控制器（TILT）過度懲罰，可改成「新按下取代還沒輸出的同組按下」。
+- JUGGLE 150 秒後的無盡模式 + 排行（沿用 cart4-brain 的留給後續）。
+
+## fix-r8-sound（R8，2026-11-13）
+
+### 1. 做了什麼（`games/cart4/{simon,tune}/**`、`test_simon.py`、`test_tune.py`；依 qa-r8）
+- **P2-6 B 組時間差**（simon OCTET / tune）：方向按下時 B 沒按著 ⇒ 先暫緩（`g.pend`），之後 **4 幀內（`B_GRACE`）B 一按下就判高音組**、時限到才判低音組（鍵音一起延後，≤ 67 ms）；B 先按 / 同幀照舊當幀判。tune 的節奏計時記「方向按下那一幀」，不受暫緩影響；tune 第 1~2 級（用不到高音組）不暫緩。暫緩中又按別的方向 ⇒ 先把前一下判低音組再接著暫緩新的。
+- **P2-7 斜方向**：兩款遊玩時 `NES.Touch.setWays(4)`（`touchWays()`：API 不在也不報錯），回標題 / `exit` 設回 8；輸入層 `dirEdge()` / `dirPressed()`：同一幀兩個方向一起按下 ⇒ 不判定（simon 輸入、tune 輸入 / HIGH-LOW 作答）。
+- **P3-2 / P3-3 版面**：simon 標題大字 ECHO 從第 2 列起、模式 / 說明 / 對照圖 / 操作各段之間空一列，遊玩 HUD 的模式名移到上方標題列（`STAR ECHO - CLASSIC`，右欄不再寫到第 31 欄）；tune 標題 STAR MELODY 從第 2 列起，`HINT ON/OFF (L/R)` 獨立一列（不再和 PUSH START 同列），鍵盤對照拆成 `NOTE` 唱名兩列 / `KEY` 方向一列 / `HOLD` 一列（只在高音組 4 根底下標 B，取代 `←B↓B…` + `B=HOLD`），標題管長縮短騰出空列；遊玩 HUD 改在第 2 列（模式 / EAR / 命）、第 3 列（LV / 分數），管長 8→5 列、下方空一列再接狀態列。
+- **P3-4 simon 曲線**：15+7 的最快展示改從第 16 步起（goal 15 步之前最快 19+8）；**每完成 5 的倍數步回 1 命**（上限 5，訊息 `LIFE+1`）。順手修：重開局時 `goodWait` 沒清，會把上一局最後一下的過關帶進新局（tune 的 `judgeWait` 同類，一起清）。
+- **P3-5 tune 節奏**：`RH_PCT` 0.30 → **0.35**；可以有 **1 個音距超出**（但 ≤ 2 倍容許；超出就拿不到 PERFECT，訊息 `CLOSE!`），離譜的（> 2 倍）或 2 個以上仍 RHYTHM OFF。
+- **P3-6 聲音檢查**：simon EAR、tune HINT OFF（任何模式）開局前先進 `SOUND CHECK` 畫面：由低到高輪播 4 個鍵音（同時亮對應的星標 / 星鐘管），`A = YES, START`、`B = NO, BACK`；B 回標題並在 PUSH START 那列交替顯示 `NO SOUND? CHECK SILENT / SWITCH AND VOLUME` 約 4 秒；畫面也寫 `NO SOUND? CHECK THE PHONE SILENT SWITCH AND VOLUME.`。確認過一次後，同一次進入不再問。
+- **P3-7 鍵音原創**：舊四音 A4 / C#5 / E5 / A5（A 大三和弦）→ **四度堆疊 G4 / C5 / F5 / A#5**（降 B 五聲音階子集，不含任何大 / 小三和弦，相鄰差 5 半音）；第二組 D5 / G5 / C6 / F6（同樣四度堆疊、與第一組交錯），八度閃爍音 D6 / G6 / C7 / F7 與任何一顆都不撞，機器人聽音辨位仍一對一。音色（占空比 / 包絡）不變。
+- 機器人：兩款在 SOUND CHECK 按 A；按高音組時像人一樣按住 B 到方向之後幾幀（simon 12 幀；tune 最多 4 幀、離下一個音 ≥ 6 幀）。測試鉤子 `dev.grace(n)`（0 = 舊版判定）、`dev.rhRule(pct, slack)`（tune，0.30/0 = 舊規則）、`dev.soundOk()`、`dev.inpTimes()`。
+
+### 2. 驗證數字
+| 項目 | 結果 |
+|---|---|
+| `test_simon.py` | **76/76**（原 51，+25：P2-6 B 晚 1/2/4 幀 → 高音組、5 幀 → 低音組、grace 0 對照組重現 qa-r8；斜方向不判定；setWays 4/8 + API 缺席不報錯；HUD / 標題空列；15 步前不到最快；第 5 步回命；SOUND CHECK 四條；三和弦檢查；真人濾鏡兩條） |
+| `test_tune.py` | **82/82**（原 60，+22：同上 P2-6 / P2-7 / P3-2 / P3-3 / P3-6，P3-5 單一音距超出過 / 離譜仍錯，蒙地卡羅與實機真人濾鏡） |
+| playthrough simon（含 `--hint`） | goal **7242 幀**（7241），每線 **2**，overFrames **0**，尖峰 48 |
+| playthrough tune（含 `--hint`） | goal **6103 幀**（6102），每線 **1**（2），overFrames **0**，尖峰 53 |
+| 真人濾鏡 simon CLASSIC（`tools/human_filter.js`：延遲 20 + 每下 N(3,3) + 3% 分心 +30 幀，3 種子） | 3/3 達成 goal（15 步） |
+| 真人濾鏡 simon OCTET（N(3,3) + 「和弦層」：50% 的 B 晚方向 1~3 幀，3 種子到 10 步） | 舊版（grace 0）**10 失誤 / 27 下（37%）、3 局都 GAME OVER** → 新版 **0 / 165 下（0%）** |
+| tune 節奏蒙地卡羅（真旋律產生器 + 真 `judgeRhythm`，每題 3000 次；第 5/6/7/8 級每題過關率） | 每下抖動 N(0,3) 幀：舊 70.5 / 64.1 / 52.8 / 42.2% → **新 94.5 / 92.0 / 87.0 / 81.4%**；抖動 2 幀 + 音距 10%：舊 87.5 / 83.4 / 77.4 / 73.2% → 新 99.0 / 98.9 / 97.8 / 97.2%。換算 goal 段（第 5、6 級共 4 題、3 命）：抖動 3 幀 舊 69% → **新 99.5%** |
+| tune 實機真人濾鏡（延遲 20 + N(3,3) + 50% B 晚 1~3 幀，5 種子；測試裡舊版只跑 3 種子省時間） | 舊版（舊規則 + grace 0）goal **0/5**（失誤 3,3,3,3,3、過到第 2~4 級）→ 新版 **5/5**（失誤 0,2,1,0,0） |
+| `run_all.sh --quick` | **總結 PASS**（全綠；cart5 也綠）。本卡兩個測試因真人濾鏡變長（各約 5~7 分鐘） |
+| 手機實測（`mobile_shot` / CDP 兩指，iPhone 13 橫向） | simon OCTET：方向先按 1 / 2 / 3 幀再按 B ⇒ 都判 → +B（tone 5）；tune 第 4 級：方向先 0~4 幀 ⇒ 高 DO，6 幀 ⇒ FA。十字鍵「右」往上偏 26° / 35° / 40° 點下 ⇒ 讀成 RIGHT、simon 正確前進（fix-r8-shell 的 setWays(4) 已生效；遊玩中 `getWays()` = 4、exit 後 8） |
+| 截圖 lint | simon 標題 / 遊玩 / SOUND CHECK、tune 標題 / 遊玩 / SOUND CHECK 全 PASS（≤ 11 色）；留 3 張在 `shots/agent_fix-r8-sound/` |
+
+### 3. 偏離
+- P2-6 選「暫緩判定」不是「回溯改判」：simon 不必撤銷 MISS、鍵音不會先響低音再改高音；代價是只按方向時鍵音晚 4 幀（67 ms）。說明頁沒有另寫 `HOLD B FIRST`（標題已改成 `OCTET: HOLD B + DIR` 與 `HOLD … B` 列；容錯後先後都可以）。
+- P3-4 兩案都做（降速曲線 + 每 5 步回命）；goal 仍是 15 步。
+- P3-5 的「容許 1 個」加了上限（≤ 2 倍容許），避免中間停一大段也算過。
+- `tools/human_filter.js` 會把「B + 方向」拆成兩個獨立延遲的按下（B 常在方向到之前就放開），量不了和弦；兩個測試在濾鏡外再包一層「和弦層」（`LATE_B_JS`：B 由這層決定，按住到方向按下後 3 幀；並以機率讓 B 晚 1~3 幀）。工具檔本身沒改。
+
+### 4. 跨檔需求
+- 無。沒有動 engine / registry / shell / 其他卡帶（`NES.Touch.setWays` 是 fix-r8-shell 加的，這邊只呼叫）。
+
+### 5. 留給後續
+- tune 低音組也可加對稱容錯：B 在方向之前 ≤ 2 幀才放開仍算高音組（真人濾鏡實機偶爾出現 B 放太晚 / 太早的 WRONG NOTE）。
+- `human_filter.js` 可加「和弦」選項（同一幀的多鍵一起延遲），以後 rhythm / brain 的組合鍵也能用。
+
+## fix-r8-memory（R8，2026-11-13）
+修 qa-r8 的 **P2-5**（flash 競速吱比太強 / 兩極）與 **P3-2**（cards / flash HUD 與標題貼頂）。只動 `games/cart4/{cards,flash}/main.js`、`games/cart4/test_cards.py`、`games/cart4/test_flash.py`。
+
+### 1. 修了什麼
+- **P2-5 吱比參數 + 抖動**（`flash/main.js` `CPUS`）：舊 16/200/30、11/230/22、6/250/12（step / acc / think，無抖動）→ **EASY 20/190/45、NORMAL 14/230/26、HARD 13/240/22，每步 ±3 幀抖動**（`cpuJit()`，用遊戲自己的 `rnd()`，`?seed=` 可重現）。起點用 QA 建議值（NORMAL 15/225/30、HARD 11/240/22），真人模型實測 NORMAL 一般玩家 81% 勝、HARD 0% ⇒ 依實測調成上值（見 §2）。
+- **真人模型用的機器人參數**（預設 = 舊行為，playthrough 不受影響）：`&mv=` 每格移動間隔（預設 6）、`&mvj=` 間隔抖動、`&dec=` 每按 A 後找下一目標的決策幀、`&forget=` 每個亮格記錯的百分比（從展示畫面讀到亮格時，以機器人自己的 PRNG `&hseed=` 記成另一個當下沒亮的格 ⇒ 之後點錯出局）。仍只讀畫面。
+- **P3-2 HUD 下移**：cards / flash 遊玩 HUD 從名稱表第 1~2 列 → **第 2~3 列**；flash 上框線 3 → 4（格子不動，5×5 頂在第 6 列）；cards 框線 3/25 → **5/26**、牌區整體下移 2 列（第 6~25 列，下移偶數列保持屬性 2×2 對齊；`cardRC` 改 `16 - 2H`）；兩款標題上框線 1 → 2、大字 3 → 4、副標 6 → 7。名稱表第 0~1 列（可見區 y < 8）全空。
+
+### 2. 真人模型勝率（5 分先勝整場；`tools/human_filter.js` 包機器人：按下延遲 N(3,3)、間隔 ≥ 4、3% 分心 +30）
+模型：熟手 lag 14 / mv 9±1 / dec 8 / forget 3%；一般 lag 18 / mv 11±2 / dec 12 / forget 5%；新手 lag 24 / mv 13±2 / dec 18 / forget 8%。
+
+| 對手 | 修前（16 場）熟手 / 一般 / 新手 | 修後（24 場）熟手 / 一般 / 新手 | 修後回合得分率（一般） |
+|---|---|---|---|
+| EASY | 100% / 100% / 81% | 100% / 100% / 100% | 94% |
+| NORMAL | 75% / 25% / 19% | 100% / **46%** / 4% | **52%** |
+| HARD | **0% / 0% / 0%** | 96% / **12.5%** / 0% | 33% |
+
+試過的其他組合（一般玩家）：NORMAL 15/225/30 → 81%、14/225/28 → 67%、15/230/24 → 88%；HARD 11/240/22 → 0%、12/235/24 → 0%、12/240/20 → 0%、13/235/22 → 12.5%。另試「你領先 ≥ 2 分時 HARD 加速 2~4 幀」的拉鋸，熟手勝率仍 92%、雜訊大於效果 ⇒ 不採用。
+
+### 3. 驗證數字
+| 項目 | 結果 |
+|---|---|
+| `games/cart4/test_flash.py` | **75 / 75 PASS**（64 → 75：HUD 第 0~1 列全空 ×2、吱比參數 / 抖動 ×2、真人模型 7 條：一般 vs EASY 8/8、vs NORMAL 3/8 回合 48%、vs HARD 1/8 回合 32%、熟手 vs HARD 6/6、新手 vs EASY 6/6、修前 HARD 參數對照 0/4 回合 5%、每線 ≤ 8 / over 0）；約 4 分鐘 |
+| `games/cart4/test_cards.py` | **58 / 58 PASS**（56 → 58：標題 / 四種盤面 HUD 第 2~3 列、牌區 6~25 列、屬性對齊） |
+| `playthrough_cart.py --page cart4.html --game cards` | goal 1305 幀、每線 4、overFrames 0、尖峰 49 |
+| `playthrough_cart.py --page cart4.html --game flash` | goal 2350 幀、每線 2、overFrames 0、尖峰 81 |
+| `run_all.sh --quick` | **總結 PASS**（全部測試 + 9 入口 build --check + cjk_glyphs --check 全綠；cart5 這次也全綠） |
+
+截圖：`shots/fix-r8-memory/{cards_title,flash_title,cards_6x5,flash_race_hard}.png`。
+
+### 4. 跨檔需求
+- 無。
+
+### 5. 留給後續
+- （已處理，見下行）熟手模型對 HARD 勝率 96%。
+- **總控追加（同日）第 4 級 MASTER**：`CPUS[3]` = **11/240/20、±3 抖動**；**不開密技打贏 HARD 一整場才解鎖**（`CT.save('flash','master',1)`，結算第 4 行顯示 `NEW RIVAL: ZIPPY MASTER!`）；未解鎖時標題 ←→ 只在 EASY~HARD 循環、紀錄列顯示 `WINS nnn  BEAT HARD→MASTER`，`?plvl=4&direct=1` 也夾回 HARD。EASY~HARD 數字與 goal 不變。熟手模型校準：11/245/18 → 0/20、10/245/18 → 0/20、12/245/18 → 13/20、12/245/16 → 18/30、11/235/22 → 24/30、**11/240/20 → 13/30、24 場複測 10/24（42%，回合 47%）**；一般 0/24（回合 14%）、新手 1/24。test_flash 75 → **82**（+ 4 級 CPU、未解鎖選不到 / direct 夾回、打贏 HARD 解鎖 + 結算字、解鎖後可選並開局 opt 3、密技贏不解鎖、熟手對 MASTER 4/8 回合 50%、一般對 MASTER 回合率 17% < HARD 32%）。截圖 `shots/fix-r8-memory/flash_title_locked.png`。 MASTER 後重驗：test_flash 完整 **82 / 82**、playthrough flash goal 2350 幀 / 每線 2 / over 0、`run_all.sh --quick` **總結 PASS**（fix-r9-type 已在 test_flash 加 `NES_QUICK` 略過真人模型 9 項 ⇒ quick 下顯示 73 / 73、47 秒；完整 run_all 照跑）。
+- 真人模型的回合時間主要受 `mv`（每格移動）影響；吱比 step 與人類每格幀數同量級時勝率對 1 幀很敏感（NORMAL 14 → 15 會從 46% 跳到 81%），之後若改游標連發（REP_DELAY / REP_EVERY）要重量。
+
+## qa-r9（R9，2026-11-13）
+- 驗收《星塵文創 6 合 1》（cart5）6 款 + CT.Text + cart1~4 迴歸 + 單檔版；報告在 `docs/QA_REPORT.md` 的 `# R9 qa-r9（2026-11-13）`，截圖 `shots/qa-r9/`（12 張）。沒有改程式、沒有 git。
+- 結果：**P1 × 1、P2 × 4、P3 × 10**。P1-1 escape 撥盤畫面字形池 120 磚不夠，第一室輸入 7142 時有一格數字變成空白；P2-1 quiz goal 3000 真人達成率 0%（建議 1200）；P2-2 quiz 對戰電腦普通 / 強真人勝率 3% / 0%；P2-3 paint 臨摹一個實心方塊就拿 A / B；P2-4 CT.Text 連續標點和 `——` 會被拆行，`—` 字形和「一」幾乎一樣（adventure 12 處，開場第 1 頁就有）。
+- 中文 1305 個字串、22,412 字：0 錯字、0 簡體字；題庫 216 題答案全對（3 題的誤答選項可以改）。迴歸：test_cart cart1~5 全過、test_touch 995 / 995、cart1~4 各進出 2 款正常；單檔版 build 到 scratchpad 實測正常（`dist/星塵文創6合1.html` 還沒產生，見 P3-8）。
+- fix-r9 分卡：escape（P1-1）/ quiz（P2-1、P2-2）/ paint（P2-3）/ text（P2-4）/ adventure / type / shell，細節見報告最後一節。
+
+## fix-r9-quiz（R9，2026-11-13）
+依 `docs/QA_REPORT.md` `# R9 qa-r9` 修 quiz 的 P2-1 / P2-2 / P3-9。只動 `games/cart5/quiz/{main,text_ui,text_bank}.js`、`games/cart5/test_quiz.py`（`glyphs.js` 經 `tools/cjk_glyphs.py` 重產）。
+
+### 1. 做了什麼
+- **真人讀題模型 `HUMAN`**（`quiz/main.js` 常數，`CT.Quiz.dev.consts.HUMAN`）：每題作答 = (orient + (題目字數 + 四選項字數) / cps + think[難度]) × e^N(0,0.25) 秒，再加游標每格 17 幀 + 按 A 15 幀；正確率依難度。4 型：快手 cps 12 / 正確率 95·85·70%、一般 cps 8 / 92·78·60%（≈ QA 的「讀題 3~5 秒」）、慢讀 cps 6 / 90·75·55%、小朋友 cps 5 / 85·60·40%。機器人改用同一模型作答（`?hum=0..3`，預設 0 快手；`?acc=` 仍可覆寫；游標每格 17 幀）。
+- **P2-1**：`GOAL_SCORE` 3000 → **1200**；說明頁第 2 頁加「拿到1200分就算過關！」、結算加一行 `GOAL 001200 [OK]`、標題 `GOAL 1200` 跟常數走。
+- **P2-2**：電腦三級 `{150,300,.55}/{100,220,.7}/{60,150,.85}` → **`{240,420,.55}/{210,350,.7}/{200,340,.8}`**（QA 建議的 {200,330,.7}/{140,260,.8} 在本模型下一般玩家 34% / 1%，故依模型網格搜尋再調：普通 210~350、高手 200~340 + 正確率 80%）。
+- **P3-9**：QA 指出的 3 題——企鵝「南半球｜北半球｜北極圈內｜北美洲」（題目改「地球的哪裡」）、裏海題加「一般認為」、冰山改「大部分體積在哪裡？水面下｜水面上｜水面上下各一半｜看冰山大小而定」。整份 216 題自查誤答，另改 10 題：冰融化（核反應 / 光合作用 → 燃燒反應 / 氧化作用）、鐵生鏽（「糖和鹽」鹽會加速生鏽 → 沙子）、非洲最高峰（阿特拉斯是山脈、富士山不在非洲 → 魯文佐里山 / 喀麥隆火山）、登月第一人（哥倫布 → 柯林斯）、木乃伊（埋在雪中 → 火化成灰）、造紙術（馬雅有樹皮紙易爭議 → 希臘）、哥倫布 1492（途經屬非洲的加那利群島 → 亞洲）、紅燈（倒退走 → 跟著別人走）、資源回收（果皮 / 剩菜在臺灣屬廚餘回收 → 用過的口罩 / 菸蒂）、急診室縮寫（OK / PE → OR / OPD）。正解都沒變。
+
+### 2. 驗證數字
+| 項目 | 修前 | 修後 |
+|---|---|---|
+| 限時連答 goal 達成率（模型 6000 局；快手 / 一般 / 慢讀 / 小朋友） | goal 3000：15 / **0** / 0 / 0% | goal 1200：**97 / 62 / 21 / 2%**（中位 2239 / 1330 / 960 / 750） |
+| 對戰勝率 一般玩家（新手 / 普通 / 高手） | 52 / **5** / **0.1%** | **93 / 43 / 9%** |
+| 對戰勝率 快手 / 小朋友 | 95·26·0.2 / 17·1·0% | 100·96·78 / 35·2·0% |
+| 實機交叉驗證（一般模型機器人 6 局） | — | 平均 1470 分 vs 模擬平均 1377（±20% 內） |
+| `games/cart5/test_quiz.py` | 87 | **94 / 94 PASS**（+ 真人模型 goal 達成率、舊門檻對照、對戰三級勝率、勝率遞減、實機交叉驗證、說明頁 / 結算寫出門檻；電腦參數兩條改新值；機器人 goal 門檻讀常數） |
+| `playthrough_cart.py --page cart5.html --game quiz` | goal 4090 幀 | goal **3934 幀**、每線 **1**、overFrames **0**、尖峰 **144** |
+| `cjk_glyphs.py --check` | — | OK（缺 0） |
+| `run_all.sh --quick` | — | **總結 PASS**（1145 秒；含 test_quiz、test_text、cjk_glyphs --check、5 卡 build --check，無 FAIL） |
+
+截圖：`shots/agent_fix-r9-quiz/01_title_goal1200.png`、`02_help_p2.png`、`03_result_goal.png`（皆 lint PASS）。
+
+### 3. 偏離
+- 對戰參數沒照 QA 建議值：同一套模型下 QA 值的「高手」一般玩家只剩 1%，未達 5~15% 目標，改為 210~350 / 200~340；高手和普通速度接近，差在正確率 80% 與題目偏中高級。代價：快手對高手勝率 78%（「高手」對讀得快的人不算難）。
+- 小朋友模型（cps 5）比 QA 的小朋友慢，goal 達成率 2%（QA 估 26%）；門檻仍照指示 1200。
+
+### 4. 跨檔需求
+- 無。
+
+### 5. 留給後續
+- 若要讓快手也覺得「高手」有挑戰，可比照 cart4 flash 加解鎖制第 4 級（例如 150~260 / 85%）。
+- 題目文字或選項大改後，test_quiz 的真人模型會自動用新字數重算；goal / 勝率超出範圍時就是該重調的訊號。
+
+## fix-r9-text（R9，2026-11-13）
+
+### 1. 做了什麼
+- **P2-4 CT.Text 斷行**（`games/cart5/text.js`）：`wrapSeg` 改成「斷行單位」排版——收尾標點（`，。、！？」』）》…` 等）與破折號 `—―─` 黏在前一個字後面、開頭標點（`「『（《`）黏在下一個字前面、英文單字一個單位 ⇒ `」。`、`？！`、`……`、`——` 不會被拆開，行首不會出現收尾標點 / 破折號（放不下就連前一字一起帶到下一行），行末不會留開頭標點；單位比整行寬才逐字硬切。開場第 1 頁「這裡是漂浮在雲海上的小／島——星港鎮。」。
+- **破折號字形**（`tools/cjk_glyphs.py` 新增 `OVERRIDE`）：`—`（U+2014）/ `―` 改成第 7~8 列滿寬 16 px、2 列粗的橫線（Noto 原本 12 px 細線 ≈「一」）；兩個 `—` 接成不斷的長線。`SPEC` 加 `ovr2`，`glyphs.js` 重產（1596 字）。
+- **P3-2 adventure**：① 壞結局卡片最後一行改「A：回到選擇前　B：回標題」——A 回到最後一個決策點（最後一次開指令選單時的 `g.snap`），**不算密技**，之後照樣能走到真結局 goal；B 回標題。結局內文的「按 C/★ 可以回到剛才的選擇」改成「還來得及，回到剛才再選一次吧。」。密技在壞結局仍可用（算密技）。② 自動存檔：每次回到指令選單時，若「地點 / 物品 / 旗標」與上次自動存的不同（進新地點、拿到東西、劇情推進）就存到 `auto` 格；標題「繼續遊戲」清單第一項「自動」（預設游標），讀取後顯示「讀取了自動存檔。」。
+- **P3-4 adventure 說明頁中文**：改成 2 頁（字形池 159 磚放不下一頁全部）：「操作說明 1／2」十字鍵 / A / B / START / 「按住 START+SELECT：回選單」/「A：下一頁」；「存檔 2／2」自動存檔說明 /「C／★：密技（立即提示）」/「B：返回」。A 翻頁、B 回標題；結局一覽的「B: 返回」改全形冒號。
+- `docs/ENGINE_API.md` §17.4 補斷行單位規則、§17.8 補字形覆寫。
+
+### 2. 驗證數字
+| 項目 | 結果 |
+|---|---|
+| `games/cart5/test_text.py` | **90 / 90**（+16：連續標點 / `」。」` / `——` / `……` 單元案例、「—」與「一」點陣差 18 px ≥ 16、滿寬、較粗、glyphs.js = 覆寫字形；adventure / escape / quiz 1245 條字串 × 26/24/22/20 欄 10005 行：行首標點 0、`——` 被拆 0、行末開頭標點 0、內容不增不減；26 欄 × 3 行逐頁排版頁首標點 0） |
+| `games/cart5/test_adventure.py` | **70 / 70**（說明 2 頁中文 + 沒有 HOLD/MENU/CHEAT + 兩頁 overflow 0；壞結局卡片文字、A 回到選擇前 runCheats 0 → 續走真結局 goal 達成、B 回標題、密技仍可回；自動存檔：換地點 / 拿東西存、沒進展不重存、重開頁面「繼續遊戲 → 自動」回到廣場） |
+| `test_escape.py` / `test_quiz.py` | 100 / 100、94 / 94（新斷行規則下不用改排版） |
+| `bash tools/run_all.sh --quick` | 全綠（exit 0） |
+| `playthrough_cart.py --page cart5.html --all` | 6 / 6 goal；adventure 5487 幀 / 每線 4 / over 0 / 尖峰 136；escape 3400 / 3 / 0 / 137；quiz 4272 / 1 / 0 / 144；words 1584 / 2 / 0 / 140；typing 4022 / 4 / 0 / 24；paint 2013 / 5 / 0 / 150 |
+| 截圖（lint 全 PASS） | `shots/agent_fix-r9-text/a_prologue_dash.png`（開場第 1 頁「島——星港鎮」破折號接成長線）、`b_bad_card.png`（霧中的港口卡片 A / B）、`c_help1.png`（說明第 1 頁中文） |
+
+### 3. 偏離
+- 破折號字形是 2 列粗（不是 1 列細線）：1 列滿寬時與「一」只差 1 列位置，畫面上仍容易看成「一」；2 列粗 + 滿寬才一眼分得出。
+- 說明頁拆成 2 頁（池 159 磚 ≈ 一頁 36 個不同全形字，中文說明一頁放不下）；「壞結局可以回到選擇前」沒寫進說明（卡片本身有寫）。
+- 自動存檔不是在 `goScene` 當下存，而是在回到指令選單時存（場景進入劇本跑完、狀態穩定，讀回不會漏事件）。
+
+### 4. 跨檔需求
+- 無。escape / quiz 在新斷行規則下測試全綠、不需調整排版；engine / registry / shell / 其他款程式都沒動。`glyphs.js` 由工具重產（掃描整個 games/cart5，別款的新字一起收）——之後任何 agent 改中文字串仍要重跑 `tools/cjk_glyphs.py`。
+
+### 5. 留給後續
+- 若要更像書籍排版，可加「標點懸掛」（行末多放一個收尾標點超出 1 格）減少整字被帶下行的參差；目前框右側留白欄足夠，但會壓到 ▼ 欄，所以沒做。
+- adventure 可在自動存檔時在位置欄短暫顯示「已自動存檔」小圖示。
+
+## fix-r9-escape（R9，2026-11-13）
+
+### 1. 做了什麼
+- **P1-1 撥盤鎖數字消失**（`escape/main.js` `build()`）：拿掉 `POOL_MAX = 120` 上限，字形池 = **256 − 本畫面已用磁磚**（撥盤特寫 203 磚、最擠的牆面 studyE6 也有 93 磚）。第一室撥 7142、第三室試錯後都不再出現空白格。
+- **全畫面溢位掃描**時另外抓到 2 個同類問題，一起修掉：① **對話中按暫停**：HUD 換成「暫停中 / START 繼續」再加上物品欄提示，會把對話框已經分好頁的字擠掉（overflow 5）。改成：沒在對話時，先清掉訊息框，在框裡印「START 繼續」、在物品欄位置印「長按 START+SELECT：回選單」；對話中就不新增任何字，只在剩餘時間左邊用精靈 `S_PAUSE` 畫暫停記號。② 舊的 120 上限下，太陽系儀操作和結算畫面也會溢位；改成全給池以後都是 0。
+- **P3-4**：說明頁和暫停畫面的英文都改成中文：「START：暫停」「長按 START+SELECT：回選單」「C/★：密技（直接解開，不留紀錄）」。時間到畫面改成「C/★：密技（原地續關）」，續關訊息改成「密技：原地續關！時間補滿了，進度都還在。」。刪掉沒用到的 `PRESS START`。結算評價改成 **32×32 徽章**（`Art.rankBadge`：8×8 字形放大 4 倍，黃字加紅色陰影，pal 2，放在名稱表第 8~11 欄 × 第 14~17 列）；最佳紀錄和選房畫面的評價改用全形 Ｓ／Ａ／Ｂ／Ｃ（`TX.rankBig`）。
+- **P3-5**：最左邊那排白點的原因是星空亂數 `sd * 1103515245` 超過 2^53 精度，低位元變成 0，所以 `x = sd % 256` 一直是 0。改用 `Math.imul` 的 32 位元 LCG，取高位元，x 範圍 4~251。朔叔移到 y = 86，腳底在 103，正好站在地面（地面從 104 開始）。原本浮在旁邊的金球改成放在腳邊地上的提燈（提把 + 燈罩）。
+- **P3-7**：說明頁從 7 頁合併成 **4 頁**：【目標】+【移動】、【調查】+【物品】、【組合】+【提示】、【評價】+ 按鍵。主題之間空一行。
+- `E.dev` 加了測試用的 `dialCells()`、`screen(kind)`、`pause(on)`。改完文字後已重跑 `tools/cjk_glyphs.py`。
+
+### 2. 驗證數字
+| 項目 | 結果 |
+|---|---|
+| `games/cart5/test_escape.py` | **101/101**（原本 85 項，新增 16 項）。撥盤 lock / sym / cab / gem 各撥 4 個不同值，再試錯一次（在錯誤訊息還顯示時檢查），最後撥正解。每一步都**讀 PPU 名稱表 + CHR 逐像素**，跟 `CT.GLYPHS` 比對，同時要求 overflow 0、池 ≥ 160。全部牆面 × 每個進度 × 四面，游標掃過每個熱點 / 物品格（空手和拿著物品各一次）、對話中暫停、每個特寫（含操作）、暫停、標題 / 選房 / 故事 / 結局 / 說明每頁 / 結算 / 時間到，overflow 0、缺字 0。另外驗說明頁 = 4 頁、沒有英文句子、評價徽章 ≥ 150 亮點（實測 360）、左 4 欄星點 0、朔叔腳底 y = 103 |
+| 反證 | 把池暫時改回 `min(120, …)`：撥盤 lock / cab 測到「７ 空白」（overflow 5 / 7），太陽系儀和結算也溢位，所以新測試確實抓得到原 bug |
+| 撥盤實測 | lock 依序撥 １４７０ / ３６９２ / ５８１４ / ７０３６、試錯、７１４２：overflow 全部 0，剩餘可用磚 63 → 31 |
+| `playthrough_cart.py --page cart5.html --game escape` | goal ✔ **3400 幀**，每線 **3**，overFrames **0**，尖峰 137 |
+| 截圖 nes_lint | 6 張全 PASS。`shots/agent_fix-r9-escape/` 收 3 張：01 標題 + 故事、02 撥盤 7142 + 暫停、03 結算徽章 + 說明第 4 頁 |
+
+### 3. 偏離
+- 對話中按暫停時，HUD 不改成「暫停中」，只顯示精靈暫停記號，BGM 照樣暫停。原因是對話框已經依「池 − 框外用字」分好頁，再加字一定會擠到它。
+
+### 4. 跨檔需求
+- 無。text.js / engine / registry / shell / 其他款都沒動。
+
+### 5. 留給後續
+- `CT.Text.box` 如果能加一個「保留 N 磚」的選項，對話中暫停也可以印中文提示。
+
+## fix-r9-paint（R9，2026-11-13）
+
+### 1. 做了什麼
+- **P2-3 臨摹評分太寬（修）**：`paint/core.js` 的 `score()` 改成 **64×64 格（2×2 px，格內有任一非紙像素 = 墨）、±1 格（≈ ±2 px）容差、`score = 100 × F1² × 顏色吻合率`**（原本 32×32 格 ±1 格 ≈ ±4 px、`F1^1.5 × (0.5 + 0.5 × 顏色)`）；門檻 **S 93 / A 85 / B 72 / C 55**（原 90 / 80 / 65 / 45）。新增 `C.PASS = 72`，`main.js` 的 goal 判定 / 音效 / 結算文字（`NEED 072 FOR RANK B`）全部改讀 `C.PASS`，不再寫死 65。
+- **機器人**：仍是「讀畫面上的範例縮圖 → 8×8 px 方塊 → BLOCK 工具、游標移動、人類節奏」，沒有降門檻；只把「格內紙色 < 10/16 就算有墨」改成 < 12/16（細線條的格子也畫），最低分那張（SUNNY）從 85 提到 91。
+- **P3-4 中文（做了一部分）**：畫布畫面的 `paint_cv` 要把圖樣表留給動態磁磚池（178 塊），不放中文；標題 / 說明 / 清單畫面用的 `paint_ui` 還有空位，烘進 **36 個固定中文字（142 塊，bank 111 → 253 / 256）**：標題「星塵畫室」、5 個模式名（自由畫 / 著色本 / 臨摹挑戰 / 快畫猜猜 / 遊戲說明，英文小字並列）、說明頁 4 個標題（操作 / 工具 / 顏色 / 模式）、「按住 START+SELECT 回選單」（標題 / 說明 / 清單三處）、清單標題與「塗滿每一區」。字形由新的 `paint/zh_gen.py` 離線產生（直接呼叫 `tools/cjk_glyphs.py` 的 `render()`，與 CT.Text 同一套 Noto 15px 點陣），寫進 `art.js` 的 `<zh:begin>…<zh:end>` 區；資料字串只有 ASCII（碼點 + 十六進位），中文只在註解，所以 **不會被 `cjk_glyphs.py` 掃進共用的 `glyphs.js`**。
+- 標題版面跟著重排（選項 3 列一組：中文 2 列高 + 英文小字在下排）；`UI_PAL` 第 2 組第 3 色 $21 → $30（條紋與第一個選項共用屬性列，否則「自由畫」上半變藍）。
+
+### 2. 驗證數字
+| 評分對照（8 張範例的範圍） | 修改前 | 修改後 |
+|---|---|---|
+| 外框位置一個實心方塊 | 49~85（A 1 張、B 3 張） | **25~65（全部 < B）** |
+| 只畫空心外框 | 1~32 | 0~8 |
+| 4×4 大方塊（32 px） | 66~87（8 張都 ≥ B） | **45~70（全部 < B）** |
+| 16 px 方塊 | 73~94 | 64~82（B 6 張、C 2 張） |
+| 8×8 方塊認真照抄（機器人策略） | 89~100 | **91~97（全部 ≥ A）** |
+| 模擬人畫（8×8、位移 ±3 px、漏 8%） | 87~100 | 85~94 |
+| 形狀對、只用一色 | 76~92（大多 A） | 53~85 |
+| 顏色全錯 | 54~62 | 4~13 |
+| 整張塗滿 | 33~62 | 14~39 |
+| 隨機亂畫 40 筆 | 44~64（大多 C） | **17~34（全部 D）** |
+| 整張位移 3 px | 100 | 96~100 |
+
+| 項目 | 結果 |
+|---|---|
+| `games/cart5/test_paint.py` | **72 / 72**（原 61；+7 評分、+4 中文） |
+| 機器人 8 張臨摹（遊戲內實跑） | 97 / 91 / 97 / 98 / 95 / 93 / 97 / 95，1062~2068 幀（時限 7212） |
+| `playthrough_cart.py --page cart5.html --game paint` | goal 達成 **2013 幀**、每線 **5**、overFrames **0**、VBlank 尖峰 **150**（臨摹 97 分 S） |
+| lint | 標題 / 說明 / 清單 PASS（8 / 2 / 5 色） |
+| `run_all.sh --quick` | **總結 PASS**（1160 秒；`cart5/test_paint.py` 72 / 72、`cjk_glyphs.py --check` 1596 字缺 0 多 0、`build.py --check cart5.html` PASS；沒有別人的檔紅） |
+
+截圖：`shots/agent_fix-r9-paint/title.png`、`help.png`、`list_book.png`。
+
+### 3. 偏離
+- P3-4 只中文化「標題、模式名、頁標題、回選單提示」，說明內文、畫布畫面 HUD、結算文字維持英文：`paint_ui` 只剩 3 塊空位（每個中文字平均 3.9 塊），畫布畫面的 bank 則完全沒有空間。
+- QA 建議「形狀對、只用一色」沒有另外設目標；新公式下 53~85（1 張 A），因為顏色吻合率直接相乘。
+
+### 4. 跨檔需求
+- 無。`zh_gen.py --check` 已包在 `test_paint.py` 裡，不需要改 `run_all.sh`。
+
+### 5. 留給後續
+- 改 `paint_ui` 的中文：編輯 `games/cart5/paint/zh_gen.py` 的 `WORDS` → 跑 `$PY games/cart5/paint/zh_gen.py`；bank 上限 256，現在 253，要加字得先拿掉別的字。
+- 舊存檔的臨摹最高分（`copyN` / `copyBest`）是舊公式算的，清單會用新門檻顯示等級；沒有做遷移。
+- 收工 `bash tools/run_all.sh --quick`：全綠（EXIT 0；`cart5/test_escape.py` 101/101、`cjk_glyphs.py --check` 1596 字缺 0、`test_touch` 995/995）。第一次跑到一半時 `tools/run_all.sh` 被其他 agent 改寫，bash 讀到半截報語法錯誤（不是測試失敗），重跑一次就全綠。
+
+## fix-r9-type（R9，2026-11-13）
+
+### 1. 做了什麼
+- **P3-3 typing / words 回選單後鍵盤手把鍵沒反應**（`games/cart5/typing/kbd.js` `Phys`）：新增 `Phys.release()`——無條件關掉收字、清佇列，並把 W A S D Z X / Enter / NumpadEnter / Shift 裡「目前是 0 / 空」的對應補回（保存值 → `NES.Input.DEFAULT_MAP`），**不靠 `remapped` 旗標**；`setActive(false)` 一律走 `release()`；typing / words 的 `exit` / 結算 / 回標題改呼叫 `Phys.release()`。`Phys.tick()` 只在目前遊戲是 owner 時才 remap。另加保險絲 `Phys.guard()`（100 ms `setInterval` + 每次 keydown）：目前遊戲已不是 owner 卻還留著 remap → 立刻還原（沒走 `exit` 的離開路徑也救得回來）。
+- **P3-6 手機直接點畫面鍵盤**（`kbd.js` 新增 `Tap` 與 `KB.hit(x, y, slack)`）：在**畫面 canvas 自己**掛 `pointerdown`（沒有 PointerEvent 才用 `touchstart`），只收 `pointerType` touch / pen，與 `Phys` 共用開關（打字狀態 + owner）；座標換成 NES 名稱表座標後排進佇列，遊戲在 `update()` 用 `Tap.drain()` 取、`KB.hit` 找最近的鍵（鍵面外擴 5 px 內）⇒ 游標跳過去 + 等同按 A。typing 三模式（含 aA / SPACE / DEL）、words STAR PROBE（字母 / DEL / GO）都能點；words STAR SHUFFLE 點上排字母 = 拿、點下排答案 = 退回。十字鍵游標照舊。**engine 沒改**：`engine/touch.js` 的十字鍵 / A / B / 浮動搖桿感應區是蓋在上面的 DOM，落在那些鍵上的手指到不了 canvas。說明頁 / 標題在觸控裝置把「PC: …」那行換成 `PHONE: TAP A KEY TO TYPE IT` 等（桌機照舊）。
+- **P3-1 選單圖示**（`games/cart5/cart.js`）：adventure → 深藍夜空 + 紅白燈塔 + 星；escape → 深紅褐牆 + 橘木門（黃門把）+ 黃鍵盤鎖；words → 深藍 / 玫瑰紅兩塊白字字磚 A / B，同一列對齊、上下置中（不再掉半格）；typing → 青色框與鍵 + 一顆金色亮鍵 + 白空白鍵；paint → 改成木頭色調色盤 + 橘 / 黃顏料；quiz 不變。調色盤：BG0 色 2 灰 $10 → 青 $1C、BG1 `[$07,$17,$28]`、BG2 `[$02,$15,$30]`。
+- **P3-10 選單說明**：副標改成 `WORDS+ART  CART-5`（`CART-5` 收在第 20 欄前，不再疊在第 24~27 欄 `BEST` 的正上方）。**下方兩行沒有對齊這一半沒修**（見 3. 偏離）。
+- **run_all 速度**：`tools/run_all.sh --quick` 會 `export NES_QUICK=1`；cart4 的 test_simon / tune / flash / rhythm / reflex 加 `QUICK` 判斷，NES_QUICK 時整段略過真人濾鏡 / 蒙地卡羅（印 `SKIP（NES_QUICK）…`），test_brain 沿用既有 `--quick` 並同樣認環境變數；測試內容只多一層縮排。另外 run_all 結果表每項加 `[秒數]`、最後印總耗時。
+
+### 2. 驗證數字
+| 項目 | 結果 |
+|---|---|
+| `games/cart5/test_typing.py` | **86 / 86**（+23：P3-3 暫停後 Enter+Shift 回選單、打字中直接 `CT.back`、保險絲、`release()` 補回被清掉的對應、回選單後 Z X W A S D Shift 遮罩立即讀得到、暫停中 Shift = SELECT；P3-6 `KB.hit` 31 鍵 × 5 點、觸控 context 點鍵打字 / 擊落、滑鼠點不算、鍵盤外不算 MISS、暫停中不收、十字鍵混用、aA 切大寫） |
+| `games/cart5/test_words.py` | **75 / 75**（+11：P3-3 兩條離開路徑；P3-6 探測點鍵 / DEL / GO、重組字點拿 / 點退、滑鼠不算） |
+| `playthrough_cart.py --page cart5.html --game typing` | goal 4174 幀、每線 4、overFrames 0、尖峰 25 |
+| `playthrough_cart.py --page cart5.html --game words` | goal 1540 幀、每線 2、overFrames 0、尖峰 140 |
+| `mobile_shot.py` iPhone 13 直向（390×664） | 點 b、a → `bat` typed 2、游標在 a、MISS 0；鍵盤 31 鍵中心點 `elementFromPoint` 全是 canvas（沒被覆蓋層蓋住）；words 直向點 6 鍵 + GO 送出一次探測 |
+| `mobile_shot.py` iPhone 13 橫向（750×342） | 點 b、a、t → 擊落 `bat`（killed 1），31 鍵同樣沒被蓋住 |
+| `run_all.sh`（完整） | **總結 PASS**、1240 秒；test_cart 928 / 928、test_touch 995 / 995、cart4 六款全項（brain 96 / flash 82 / reflex 59 / rhythm 79 / simon 76 / tune 82） |
+| `run_all.sh --quick` | **總結 PASS**、**904 秒**（單獨跑）；cart4 六款略過長項後 brain 83 / flash 73 / reflex 56 / rhythm 74 / simon 74 / tune 80 |
+| cart4 六款測試耗時 | 完整 441 秒 → quick 165 秒（flash 144 → 34、brain 96 → 17、tune 76 → 42、simon 62 → 31、rhythm 38 → 26、reflex 25 → 15） |
+
+修前的 `--quick` 量到 1548 秒，但那次和我自己開發中的測試同時跑、機器負載高，偏高；公平的對照是「完整 run_all 扣掉冒煙 ≈ 1235 秒 → 904 秒」。現在 quick 裡最慢的是 `tools/test_touch.py`（174 秒）、cart5 test_quiz（約 55~64 秒）、test_adventure（約 42~58 秒），不在本卡擁有檔內。
+
+截圖：`shots/agent_fix-r9-type/menu.png`（新圖示 + 副標）、`mobile_typing_portrait.png`、`mobile_typing_landscape.png`。
+
+### 3. 偏離
+1. **P3-3 沒能重現 QA 描述的症狀**：修前用 Playwright 真實按鍵（Esc 暫停 → 按住 Enter+Shift，兩種先後順序、typing 與 words）跑，回選單後對應都已還原、Z 讀得到。所以這次是把所有離開路徑加固（無條件 `release` + 保險絲）並補測試，而不是修到一個確認過的根因；QA 當時的觸發條件仍不明。
+2. **P3-10 下方兩行對齊沒修**：`A/START PLAY  SELECT NEXT`（第 4 欄）與 `HOLD START+SELECT = MENU`（第 3 欄）、以及 `BEST` 的位置都寫死在 `games/cart1/shell.js` 的 `drawMenu`，`cart.js` 沒有欄位可調，而 shell 不准動。只做了 cart.js 能做的那一半（`CART-5` 與 `BEST` 分開）。
+3. P3-6 沒用 engine 新 API，`engine/touch.js` 與 ENGINE_API §16 都沒動。
+4. WORD HUNT（找字盤）沒做觸控點格子，仍用十字鍵拉選。
+
+### 4. 跨檔需求
+- 給總控 / shell 擁有者（`games/cart1/shell.js` `drawMenu`）：P3-10 剩下的一半——下方兩行改成同一欄起（或置中），五張卡一起受惠；若要讓各卡自訂可加 `CART_CFG.hintCol`。
+- QA 若還能重現 P3-3，請附上按鍵順序與是否有觸控 / 手把同時輸入。
+
+### 5. 留給後續
+- WORD HUNT、paint 畫布、escape 游標可沿用 `CT.Typing.Kbd.Tap`（canvas 座標 → NES 座標）做「點哪裡游標跳哪裡」。
+- `--quick` 要再快，下一個目標是 `tools/test_touch.py`（9 頁 × 多組版面，174 秒）。

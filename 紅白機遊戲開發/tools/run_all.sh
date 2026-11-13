@@ -2,7 +2,7 @@
 # tools/run_all.sh — 一鍵跑全部檢查，最後印 PASS / FAIL 表
 #
 #   bash tools/run_all.sh              # 全部
-#   bash tools/run_all.sh --quick      # 略過截圖 / lint 抽查
+#   bash tools/run_all.sh --quick      # 略過截圖 / lint 抽查；並 export NES_QUICK=1（測試自己略過長時間的真人模型 / 蒙地卡羅）
 #   bash tools/run_all.sh --shots 12   # nes_lint 抽查的 PNG 張數（預設 8）
 #
 # 內容：① node --check 所有 engine/*.js 與 games/**/*.js
@@ -13,6 +13,7 @@
 # 結束碼：有任一 FAIL → 1（SKIP 不算失敗）
 
 set -u
+T_ALL=$(date +%s)
 cd "$(dirname "$0")/.." || exit 2
 ROOT="$PWD"
 PY="../卡比之星/.venv/bin/python"
@@ -20,7 +21,7 @@ QUICK=0
 NSHOTS=8
 while [ $# -gt 0 ]; do
   case "$1" in
-    --quick) QUICK=1 ;;
+    --quick) QUICK=1; export NES_QUICK=1 ;;   # fix-r9-type：cart4 test_simon / tune / flash / rhythm / reflex / brain 看這個略過長項
     --shots) shift; NSHOTS="${1:-8}" ;;
     *) echo "未知參數: $1"; exit 2 ;;
   esac
@@ -32,10 +33,11 @@ add() { NAMES+=("$1"); RESULTS+=("$2"); NOTES+=("$3"); }
 run() {  # run <名稱> <指令...>
   local name="$1"; shift
   local log; log="$(mktemp)"
+  local t0; t0=$(date +%s)
   if "$@" >"$log" 2>&1; then
-    add "$name" PASS "$(tail -n 1 "$log" | cut -c1-70)"
+    add "$name" PASS "[$(( $(date +%s) - t0 ))s] $(tail -n 1 "$log" | cut -c1-64)"
   else
-    add "$name" FAIL "$(tail -n 3 "$log" | tr '\n' ' ' | cut -c1-70)"
+    add "$name" FAIL "[$(( $(date +%s) - t0 ))s] $(tail -n 3 "$log" | tr '\n' ' ' | cut -c1-64)"
     echo "----- $name 失敗，輸出 -----"
     tail -n 25 "$log"
   fi
@@ -135,5 +137,6 @@ for i in "${!NAMES[@]}"; do
   [ "${RESULTS[$i]}" = FAIL ] && fail=1
 done
 printf -- "--------------------------------------------------------------\n"
+echo "總耗時：$(( $(date +%s) - T_ALL )) 秒$( [ "$QUICK" = 1 ] && echo '（--quick，NES_QUICK=1）')"
 if [ "$fail" = 0 ]; then echo "總結：PASS"; else echo "總結：FAIL"; fi
 exit "$fail"

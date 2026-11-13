@@ -12,8 +12,8 @@
  *    每幀處理到預算剩不到 17 byte 就停，其餘下一幀繼續 ⇒ 大範圍填色 / 復原 / 清除會分幀完成（pending / progress 給 HUD 畫進度條）。
  *    屬性（16×16 區）＝區內非紙像素「最多的那一組」（色 1 / 2 優先，只有線條色 3 時才看色 3）；其他組的像素以同色號顯示（NES 色彩衝突）。
  *    池子用完時退而求其次：找內容最接近的現有磁磚（Hamming 距離）暫代，該格記在 approx，有空位時自動重排。
- * 4) 存檔碼 / 分享碼：'SP1' + base64url( 調色盤 13 byte + RLE(碼, 長度−1) + CRC16 )。
- * 5) 臨摹評分：32×32 格（4×4 px）墨跡遮罩 F1（容許 1 格偏差）70% + 顏色吻合 30%。
+ * 4) 存檔碼 / 分享碼：'SP1' + base64url( 調色盤 13 byte + RLE（高 4 位元色碼 / 低 4 位元長度，15 = 變長數）+ CRC16 )；空白畫布 26 字。
+ * 5) 臨摹評分（fix-r9）：64×64 格（2×2 px）墨跡遮罩 F1（容許 1 格 ≈ 2 px 偏差）；分數 = 100 × F1² × 顏色吻合率；S 93 / A 85 / B 72 / C 55。
  * 6) 快畫猜猜：極座標輪廓 r(θ) 的 DFT 諧波（k = 2..5）+ 主軸細長比 + 中心有無墨 ⇒ LINE / CIRCLE / TRIANGLE / SQUARE / STAR / CROSS。
  */
 (function () {
@@ -348,8 +348,14 @@
   function encode(pix, pal13) {
     var bytes = [], i;
     for (i = 0; i < 13; i++) bytes.push(pal13[i] & 63);
+    // RLE：一個 byte = 高 4 位元色碼 + 低 4 位元（長度 − 1，1..15）；低位元 15 = 長度另以 7 位元變長數接在後面
     i = 0;
-    while (i < N) { var c = pix[i], n = 1; while (i + n < N && pix[i + n] === c && n < 256) n++; bytes.push(c, n - 1); i += n; }
+    while (i < N) {
+      var c = pix[i], n = 1; while (i + n < N && pix[i + n] === c) n++;
+      if (n <= 15) bytes.push((c << 4) | (n - 1));
+      else { bytes.push((c << 4) | 15); var v = n; while (v >= 128) { bytes.push((v & 127) | 128); v >>= 7; } bytes.push(v); }
+      i += n;
+    }
     var cr = crc16(bytes); bytes.push(cr >> 8, cr & 255);
     return 'SP1' + b64(bytes);
   }
@@ -362,52 +368,60 @@
     if (crc16(body) !== cr) return null;
     var pal = body.slice(0, 13), pix = new Uint8Array(N), p = 0, i;
     for (i = 0; i < 13; i++) if (pal[i] > 63 || pal[i] === 0x0D) return null;
-    for (i = 13; i + 1 < body.length; i += 2) {
-      var c = body[i], n = body[i + 1] + 1;
-      if (c > 12 || p + n > N) return null;
+    i = 13;
+    while (i < body.length) {
+      var c = body[i] >> 4, n = (body[i] & 15) + 1; i++;
+      if (n === 16) {
+        n = 0; var sh = 0, b;
+        do { if (i >= body.length || sh > 21) return null; b = body[i++]; n |= (b & 127) << sh; sh += 7; } while (b & 128);
+      }
+      if (c > 12 || n < 1 || p + n > N) return null;
       pix.fill(c, p, p + n); p += n;
     }
-    if (p !== N || ((body.length - 13) & 1)) return null;
+    if (p !== N) return null;
     return { pix: pix, pal: pal };
   }
 
   /* ================================================================ 臨摹評分 */
-  // 32×32 格：墨 = 非紙像素 ≥ 4 / 16；主色 = 格內最多的非紙碼
-  function cells32(pix) {
-    var ink = new Uint8Array(1024), dom = new Uint8Array(1024), cnt = new Int32Array(13);
-    for (var cy = 0; cy < 32; cy++) for (var cx = 0; cx < 32; cx++) {
+  // fix-r9（qa-r9 P2-3）：原本 32×32 格 + ±1 格容差 ≈ 容許 ±4 px，F1^1.5 × (0.5 + 0.5 × 顏色)，一個實心方塊就拿 A / B。
+  // 改為 64×64 格（2×2 px）：格內有任一非紙像素 = 墨、主色 = 格內最多的非紙碼；±1 格（≈ ±2 px）容差；
+  // 分數 = 100 × F1² × 顏色吻合率；門檻 S 93 / A 85 / B 72 / C 55（PASS = B）。
+  var SG = 64, SS = 2, SN = SG * SG;
+  function cellsG(pix) {
+    var ink = new Uint8Array(SN), dom = new Uint8Array(SN), cnt = new Int32Array(13);
+    for (var cy = 0; cy < SG; cy++) for (var cx = 0; cx < SG; cx++) {
       cnt.fill(0); var n = 0;
-      for (var y = 0; y < 4; y++) for (var x = 0; x < 4; x++) { var c = pix[(cy * 4 + y) * W + cx * 4 + x]; if (c) { cnt[c]++; n++; } }
-      var i = cy * 32 + cx;
-      if (n >= 4) { ink[i] = 1; var b = 1; for (var k = 2; k <= 12; k++) if (cnt[k] > cnt[b]) b = k; dom[i] = b; }
+      for (var y = 0; y < SS; y++) for (var x = 0; x < SS; x++) { var c = pix[(cy * SS + y) * W + cx * SS + x]; if (c) { cnt[c]++; n++; } }
+      var i = cy * SG + cx;
+      if (n) { ink[i] = 1; var b = 1; for (var k = 2; k <= 12; k++) if (cnt[k] > cnt[b]) b = k; dom[i] = b; }
     }
     return { ink: ink, dom: dom };
   }
   function near(m, i, want) {
-    var cx = i & 31, cy = i >> 5;
+    var cx = i % SG, cy = (i / SG) | 0;
     for (var dy = -1; dy <= 1; dy++) for (var dx = -1; dx <= 1; dx++) {
       var x = cx + dx, y = cy + dy;
-      if (x < 0 || y < 0 || x > 31 || y > 31) continue;
-      var j = y * 32 + x;
+      if (x < 0 || y < 0 || x >= SG || y >= SG) continue;
+      var j = y * SG + x;
       if (want === undefined ? m.ink[j] : (m.ink[j] && m.dom[j] === want)) return true;
     }
     return false;
   }
   function score(user, ref) {
-    var U = cells32(user), R = cells32(ref), nu = 0, nr = 0, hitU = 0, hitR = 0, colOk = 0, colN = 0;
-    for (var i = 0; i < 1024; i++) {
+    var U = cellsG(user), R = cellsG(ref), nu = 0, nr = 0, hitU = 0, hitR = 0, colOk = 0, colN = 0;
+    for (var i = 0; i < SN; i++) {
       if (U.ink[i]) { nu++; if (near(R, i)) hitU++; }
       if (R.ink[i]) {
-        nr++; if (near(U, i)) hitR++;
-        if (U.ink[i] || near(U, i)) { colN++; if (near(U, i, R.dom[i])) colOk++; }
+        nr++;
+        if (near(U, i)) { hitR++; colN++; if (near(U, i, R.dom[i])) colOk++; }
       }
     }
     if (!nu || !nr) return { score: 0, f1: 0, color: 0, prec: 0, rec: 0, rating: 'D' };
     var prec = hitU / nu, rec = hitR / nr, f1 = (prec + rec) ? 2 * prec * rec / (prec + rec) : 0, col = colN ? colOk / colN : 0;
-    var sc = Math.round(100 * (0.7 * f1 + 0.3 * col));
+    var sc = Math.round(100 * f1 * f1 * col);
     return { score: sc, f1: f1, color: col, prec: prec, rec: rec, rating: rating(sc) };
   }
-  var RATE = [['S', 90], ['A', 80], ['B', 65], ['C', 45], ['D', 0]];
+  var RATE = [['S', 93], ['A', 85], ['B', 72], ['C', 55], ['D', 0]], PASS = 72;
   function rating(sc) { for (var i = 0; i < RATE.length; i++) if (sc >= RATE[i][1]) return RATE[i][0]; return 'D'; }
 
   /* ================================================================ 著色本區域 */
@@ -499,7 +513,7 @@
   P.Core = {
     W: W, H: H, N: N, UNDO_MAX: UNDO_MAX, Model: Model, Disp: Disp, canvasSurface: canvasSurface, thumbSurface: thumbSurface,
     idxOf: idxOf, grpOf: grpOf, codeOf: codeOf, majority: majority, encode: encode, decode: decode, crc16: crc16,
-    score: score, rating: rating, RATE: RATE, regions: regions, classify: classify, SHAPES: SHAPES,
+    score: score, rating: rating, RATE: RATE, PASS: PASS, regions: regions, classify: classify, SHAPES: SHAPES,
     hueLum: hueLum, fromHueLum: fromHueLum, contrast: contrast, lumOf: lumOf, ellPts: ellPts
   };
 })();

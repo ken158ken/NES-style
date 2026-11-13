@@ -52,7 +52,7 @@
   var RUSH_TIME = 3606, RUSH_PENALTY = 180, RUSH_BONUS_CHEAT = 600;
   var MIX_ROUNDS = 10, MIX_TIME = 600, MIX_SHOW = 120, MIX_PEEK = 60, MIX_PEEK_COST = 150, MIX_MEM_FROM = 5;
   var RATE = { ink: [5000, 4000, 3000], rush: [15000, 10000, 6000], mix: [9500, 8000, 6000] };
-  var REP_DELAY = 12, REP_EVERY = 6, FLUSH_LIMIT = 140, MSG_ROW = 27, WORD_ROW = 6, BAR_ROW = 10, BAR_COL = 8;
+  var REP_DELAY = 12, REP_EVERY = 6, FLUSH_LIMIT = 140, MSG_ROW = 27, WORD_ROW = 7, BAR_ROW = 10, BAR_COL = 8;
   var HIDE = [0x0F, 0x0F, 0x0F];
   var PAL = {
     bd: 0x0F,
@@ -134,9 +134,10 @@
     });
   }
   function frame() {
-    for (var c = 0; c < 32; c++) { put(c, 3, art.t('BH')); put(c, 26, art.t('BHB')); }
-    for (var r = 4; r <= 25; r++) { put(0, r, art.t('BV')); put(31, r, art.t('BVR')); }
-    for (r = 4; r <= 25; r++) for (c = 1; c < 31; c++) put(c, r, bgTile(c, r));
+    // fix-r8-shell（qa-r8 P3-2）：HUD 改第 2~3 列（不貼 y = 0）⇒ 框頂下移到第 4 列、框內從第 5 列起
+    for (var c = 0; c < 32; c++) { put(c, 4, art.t('BH')); put(c, 26, art.t('BHB')); }
+    for (var r = 5; r <= 25; r++) { put(0, r, art.t('BV')); put(31, r, art.t('BVR')); }
+    for (r = 5; r <= 25; r++) for (c = 1; c < 31; c++) put(c, r, bgTile(c, r));
   }
   function big(col, row, word) {
     for (var i = 0; i < word.length; i++) {
@@ -199,7 +200,8 @@
   function enterTitle() {
     g.mode = 'title'; g.t = 0; g.run = null; g.paused = false;
     redraw(function () {
-      for (var c = 0; c < 32; c++) { put(c, 1, art.t('BHB')); put(c, 28, art.t('BH')); }
+      // fix-r8-shell（qa-r8 P3-2）：拿掉第 1 列（y = 0）的頂框，大字標題從第 2 列（y = 8）起；底框保留
+      for (var c = 0; c < 32; c++) put(c, 28, art.t('BH'));
       big(7, 2, 'HUE SENSE');
       for (c = 3; c < 13; c++) putA(c, 1, 3);
       // 標題兩側：四種色鍵形狀（紅● 藍■ | 黃★ 粉◆）
@@ -236,11 +238,11 @@
   function enterHelp() {
     g.mode = 'help'; g.t = 0;
     redraw(function () {
-      center(1, 'HOW TO PLAY');
-      text(2, 3, 'INK OR WORD: PRESS THE BUTTON');
-      text(2, 5, 'OF THE INK COLOR, NOT THE WORD');
-      text(2, 7, 'LV3+ ADDS PINK = B, WHITE = A.');
-      text(2, 9, 'EVERY COLOR HAS ITS OWN SHAPE.');
+      center(2, 'HOW TO PLAY');          // fix-r8-shell（qa-r8 P3-2）：從第 2 列起，不貼 y = 0
+      text(2, 4, 'INK OR WORD: PRESS THE BUTTON');
+      text(2, 6, 'OF THE INK COLOR, NOT THE WORD');
+      text(2, 8, 'LV3+ ADDS PINK = B, WHITE = A.');
+      text(2, 10, 'EVERY COLOR HAS ITS OWN SHAPE.');
       legend(6);
       text(1, 24, 'RUSH: A=SAME B=DIFF L/R=BRIGHT');
       text(1, 26, 'MIXER: L/R HUE U/D LIGHT A SET');
@@ -274,7 +276,7 @@
     var R = g.run;
     redraw(function () {
       frame();
-      if (R.kind === 'ink') { legend(INK_LV[R.lv][0]); for (var c = 0; c < 16; c++) putA(c, 3, 3); drawBar(0, 1); }
+      if (R.kind === 'ink') { legend(INK_LV[R.lv][0]); for (var c = 1; c < 15; c++) { putA(c, 3, 3); putA(c, 4, 3); } drawBar(0, 1); }   // fix-r8-shell：大字改第 7~8 列（跨屬性列 3 / 4）；不含第 0 / 15 屬性欄 ⇒ 左右框不被染色
       else drawBlocks();
       hud();
     });
@@ -298,8 +300,8 @@
     setPal(3, HIDE);
     for (var c = 1; c <= 30; c++) { put(c, WORD_ROW, 0); put(c, WORD_ROW + 1, 0); }
     big(col, WORD_ROW, name);
-    clearRow(4, 1, 30);
-    center(4, rule === 'INK' ? 'PRESS THE INK COLOR' : 'PRESS WHAT THE WORD SAYS');
+    clearRow(5, 1, 30);
+    center(5, rule === 'INK' ? 'PRESS THE INK COLOR' : 'PRESS WHAT THE WORD SAYS');
     R.phase = 'draw'; R.pt = 0;
   }
   function inkReveal() {
@@ -337,8 +339,8 @@
       setPal(3, HIDE);
       for (var c = 1; c <= 30; c++) { put(c, WORD_ROW, 0); put(c, WORD_ROW + 1, 0); }
       legend(INK_LV[lv][0]);
-      clearRow(4, 1, 30);
-      center(4, 'LEVEL ' + (lv + 1) + (lv === 2 ? '  B AND A JOIN IN!' : lv === 3 ? '  THE WORD MOVES!' : lv === 4 ? '  WATCH THE RULE!' : ''));
+      clearRow(5, 1, 30);
+      center(5, 'LEVEL ' + (lv + 1) + (lv === 2 ? '  B AND A JOIN IN!' : lv === 3 ? '  THE WORD MOVES!' : lv === 4 ? '  WATCH THE RULE!' : ''));
       AU.sfx('color_level');
       return;
     }
@@ -348,7 +350,7 @@
     var R = g.run, I = NES.Input, i;
     R.pt++;
     if (R.phase === 'ready') {
-      if (R.pt === 1) { clearRow(4, 1, 30); center(4, 'LEVEL ' + (R.lv + 1) + '  READY'); }
+      if (R.pt === 1) { clearRow(5, 1, 30); center(5, 'LEVEL ' + (R.lv + 1) + '  READY'); }
       if (R.pt % 40 === 1 && R.pt < 160) { clearRow(24, 1, 30); center(24, R.pt < 121 ? String(3 - Math.floor(R.pt / 40)) : 'GO!'); AU.sfx(R.pt < 121 ? 'color_tick' : 'color_go'); }
       if (R.pt >= 160) { clearRow(24, 1, 30); inkNewQ(); }
       return;
@@ -520,18 +522,18 @@
     if (R.kind === 'ink') {
       var h = '';
       for (var i = 0; i < INK_LIVES; i++) h += i < R.lives ? '^' : ' ';
-      text(1, 1, padR('INK OR WORD LV' + (R.lv + 1), 18) + star + 'SC ' + pad(R.score, 6) + ' ');
-      text(1, 2, padR('Q ' + pad(Math.min(R.qi + 1, 40), 2) + '/40  ' + h + '  COMBO ' + pad(R.combo, 2), 30));
+      text(1, 2, padR('INK OR WORD LV' + (R.lv + 1), 18) + star + 'SC ' + pad(R.score, 6) + ' ');
+      text(1, 3, padR('Q ' + pad(Math.min(R.qi + 1, 40), 2) + '/40  ' + h + '  COMBO ' + pad(R.combo, 2), 30));
       var Q = R.cur;
       if (Q && R.phase === 'ask') drawBar(Q.limit - Q.t, Q.limit);
       else if (R.phase !== 'fb') drawBar(0, 1);
     } else if (R.kind === 'rush') {
-      text(1, 1, padR('COLOR RUSH', 18) + star + 'SC ' + pad(R.score, 6) + ' ');
-      text(1, 2, padR('TIME ' + secText(R.time) + '  OK ' + pad(R.ok, 3) + '  COMBO ' + pad(R.combo, 2), 30));
+      text(1, 2, padR('COLOR RUSH', 18) + star + 'SC ' + pad(R.score, 6) + ' ');
+      text(1, 3, padR('TIME ' + secText(R.time) + '  OK ' + pad(R.ok, 3) + '  COMBO ' + pad(R.combo, 2), 30));
     } else {
-      text(1, 1, padR('HUE MIXER', 18) + star + 'SC ' + pad(R.score, 6) + ' ');
+      text(1, 2, padR('HUE MIXER', 18) + star + 'SC ' + pad(R.score, 6) + ' ');
       var Qm = R.cur;
-      text(1, 2, padR('ROUND ' + pad(Math.min(R.round + 1, MIX_ROUNDS), 2) + '/' + MIX_ROUNDS + '  TIME ' + (Qm && R.phase === 'ask' ? secText(MIX_TIME - Qm.t) : secText(MIX_TIME)), 30));
+      text(1, 3, padR('ROUND ' + pad(Math.min(R.round + 1, MIX_ROUNDS), 2) + '/' + MIX_ROUNDS + '  TIME ' + (Qm && R.phase === 'ask' ? secText(MIX_TIME - Qm.t) : secText(MIX_TIME)), 30));
     }
     var line;
     if (g.paused) line = 'PAUSE  HOLD START+SELECT: MENU';

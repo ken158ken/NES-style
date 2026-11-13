@@ -8,7 +8,7 @@
  *   K<碼>        鍵面字（色 1 底 + 色 3 字）、KE<n> 鍵盤框線（kbd.js 依版面切出）
  *   C<字><0..3>  16×16 字格（2×2 磚 = 1 屬性區塊 ⇒ 每格自己的調色盤：一般 / 拉選中 / 已找到 / 提示）：
  *                色 1 = 格面 14×14、色 3 = 2 倍大字（10×14）、四周 1 px 黑縫
- *   CE_*         空格面、CS_* 空槽（虛線框，重組字的答案位置）
+ *   EMPTY*       空格面、SLOT* 空槽（虛線框，重組字的答案位置）
  *   框線 / 星點 / 分隔線
  * 精靈（words_spr）：游標四角（鍵盤用 8×8、字格用同一組放在 16×16 四角）、錨點、回饋符號（★ 對位 / ◎ 在字裡 / · 不在）、
  *   閃光、回選單提示 DOT。
@@ -78,8 +78,8 @@
       var ch = LETTERS.charAt(i);
       slice16(cellLetter(K.glyph(ch))).forEach(function (t, j) { add('C' + ch + j, t); });
     }
-    slice16(cellFace(grid16())).forEach(function (t, j) { add('CE' + j, t); });
-    slice16(cellSlot()).forEach(function (t, j) { add('CS' + j, t); });
+    slice16(cellFace(grid16())).forEach(function (t, j) { add('EMPTY' + j, t); });
+    slice16(cellSlot()).forEach(function (t, j) { add('SLOT' + j, t); });
     add('ST1', ['........', '........', '........', '....1...', '........', '........', '........', '........']);
     add('ST2', ['........', '.2......', '........', '........', '........', '........', '......1.', '........']);
     add('HL', ['........', '........', '........', '22222222', '11111111', '........', '........', '........']);
@@ -112,8 +112,8 @@
       s: function (n) { return spr.index(n); },
       ch: function (c) { if (c === '★') c = '$'; if (c === ' ') return 0; if (c >= 'a' && c <= 'z') c = c.toUpperCase(); return T('N' + c.charCodeAt(0)); },
       key: function (c) { return T('K' + c.charCodeAt(0)); },
-      cell: function (ch) { var out = []; for (var j = 0; j < 4; j++) out.push(T(ch ? 'C' + ch.toUpperCase() + j : 'CE' + j)); return out; },
-      slot: function () { return [T('CS0'), T('CS1'), T('CS2'), T('CS3')]; }
+      cell: function (ch) { var out = []; for (var j = 0; j < 4; j++) out.push(T(ch ? 'C' + ch.toUpperCase() + j : 'EMPTY' + j)); return out; },
+      slot: function () { return [T('SLOT0'), T('SLOT1'), T('SLOT2'), T('SLOT3')]; }
     };
     return made;
   }

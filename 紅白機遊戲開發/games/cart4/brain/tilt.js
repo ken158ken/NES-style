@@ -142,6 +142,7 @@
   };
 
   var M = {
+    hudShift: true, ways: 8,
     key: 'TILT', name: 'TILT ROLL', short: 'TILT', sub: 'GRAVITY SENSE', song: 'brain_tilt',
     levels: 8, hearts: 5, levelSelect: true, pal: PAL, heartPerLevel: 1,
     finalMsg: 'BOARD 8 CLEAR! GRAVITY MASTER',
@@ -271,8 +272,8 @@
   function offs(s) { return { x: -((s.tx / 6) | 0), y: -((s.ty / 6) | 0) }; }
   M.draw = function () {
     var s = sub(), ppu = C.nes.ppu, o = offs(s);
-    ppu.scroll(0, 0);
-    ppu.split(TOP, { x: (o.x + 512) & 511, y: TOP + o.y, nt: 0 });
+    ppu.scroll(0, -C.SHIFT);                       // HUD 名稱表列 1~3 顯示在畫面列 2~4
+    ppu.split(TOP + C.SHIFT, { x: (o.x + 512) & 511, y: TOP + o.y, nt: 0 });
     var bx = (s.x >> 8) - 4 - o.x, by = (s.y >> 8) - 4 + TOP - o.y;
     var tile = 'BALL';
     if (s.fall > 0) tile = s.fall < 10 ? 'BALL1' : (s.fall < 20 ? 'BALL2' : null);

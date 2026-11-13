@@ -71,7 +71,7 @@ RUN = r"""
 # 畫面（indexFrame）與模型一致：每個畫布像素 = 屬性組的對應色（色號 0 = 底色）
 SCREEN_MATCH = r"""
 () => {
-  const S = CT.Paint.dev.S(), ppu = __nes.nes().ppu, C = CT.Paint.Core; __nes.render();
+  const S = CT.Paint.dev.S(), ppu = __nes.nes().ppu, C = CT.Paint.Core; S.cur.x = 148; S.cur.y = 36; __nes.step(1); __nes.render();
   const f = ppu.indexFrame; let bad = 0, first = null;
   for (let y = 0; y < 128; y++) for (let x = 0; x < 128; x++) {
     const code = S.model.pix[y * 128 + x], idx = C.idxOf(code);
@@ -120,12 +120,31 @@ def main():
     ok('音樂 4 首（標題 / 畫室 / 速寫 / 完成）+ 音效 ≥ 8', len(a['songs']) == 4 and a['sfx'] >= 8, (a['songs'], a['sfx']))
 
     # ---------------- 標題 / 說明 ----------------
-    rows = ev(page, '() => [12,14,16,18,20,23,25,27].map(r => CT.Paint.dev.rowText(r))')
+    rows = ev(page, '() => [8,11,14,17,20,22,25,27].map(r => CT.Paint.dev.rowText(r))')
     ok('標題：5 個選項 + 紀錄列 + 回選單提示 + 密技提示（隔行）', 'FREE DRAW' in rows[0] and 'QUICK GUESS' in rows[3] and 'HOW TO PLAY' in rows[4]
-       and 'GUESS 0000' in rows[5] and 'HOLD START+SELECT: MENU' in rows[6] and 'C/* = CHEAT' in rows[7], rows)
+       and 'GUESS 0000' in rows[5] and 'START+SELECT' in rows[6] and 'C/* = CHEAT' in rows[7], rows)
+    # fix-r9 P3-4：固定中文點陣（paint_ui）
+    zh = ev(page, """() => { const A = CT.Paint.Art, u = A.ui(), p = __nes.nes().ppu;
+        const at = (c, r, id) => u.zh(id).every((q, k) => p.getTile(0, c + 2*k, r) === q[0] && p.getTile(0, c + 2*k + 1, r) === q[1] && p.getTile(0, c + 2*k, r + 1) === q[2] && p.getTile(0, c + 2*k + 1, r + 1) === q[3]);
+        const out = { glyph: A.ZH_GLYPH, n: u.bank.tiles.length, title: at(12, 4, 'TITLE'),
+          modes: ['FREE', 'BOOK', 'COPY', 'GUESS', 'HELP'].every((id, i) => at(7, 7 + i * 3, id)), hold: at(4, 24, 'HOLD') && at(22, 24, 'MENU') };
+        CT.Paint.dev.help(0); __nes.step(1); out.help = at(7, 2, 'H_CTRL') && at(3, 20, 'HOLD');
+        CT.Paint.dev.list('book'); __nes.step(1); out.list = at(7, 2, 'BOOK') && at(4, 26, 'HOLD');
+        CT.Paint.dev.list('copy'); __nes.step(1); out.list2 = at(4, 2, 'COPY');
+        CT.Paint.dev.title(); __nes.step(1); return out; }""")
+    sys.path.insert(0, str(ROOT / 'tools'))
+    import cjk_glyphs
+    bad = [k for k, v in zh['glyph'].items() if cjk_glyphs.glyph_hex(chr(int(k[1:], 16))) != v]
+    ok('中文點陣與 tools/cjk_glyphs.py（Noto 15px）逐位元一致、%d 字' % len(zh['glyph']), not bad and len(zh['glyph']) >= 30, bad)
+    import subprocess
+    chk = subprocess.run([sys.executable, str(ROOT / 'games/cart5/paint/zh_gen.py'), '--check'], capture_output=True, text=True)
+    ok('zh_gen.py --check：art.js 的中文資料是最新的', chk.returncode == 0, chk.stdout.strip())
+    ok('paint_ui bank ≤ 256 塊（含中文）', zh['n'] <= 256, zh['n'])
+    ok('標題 / 說明 / 清單畫面中文：星塵畫室、5 個模式名、說明頁標題、按住…回選單、清單標題', zh['title'] and zh['modes'] and zh['hold'] and zh['help'] and zh['list'] and zh['list2'],
+       {k: v for k, v in zh.items() if k != 'glyph'})
     helps = ev(page, '() => { const out = []; for (let p = 0; p < 4; p++) { CT.Paint.dev.help(p); __nes.step(1); const t = []; for (let r = 2; r < 29; r++) t.push(CT.Paint.dev.rowText(r)); out.push(t); } return out; }')
     flat = [' '.join(h) for h in helps]
-    ok('說明 4 頁：操作含 HOLD START+SELECT: MENU 與 C/* = CHEAT', 'HOLD START+SELECT: MENU' in flat[0] and 'C/* = CHEAT' in flat[0], helps[0])
+    ok('說明 4 頁：操作含（按住）START+SELECT（回選單）與 C/* = CHEAT', 'START+SELECT' in flat[0] and 'C/* = CHEAT' in flat[0], helps[0])
     ok('說明：工具頁 10 種工具、調色頁教 16X16 屬性規則、模式頁 4 模式', all(w in flat[1] for w in ['PEN', 'ERASER', 'FILL', 'LINE', 'FRAME', 'BLOCK', 'OVAL', 'SIZE', 'UNDO', 'REDO'])
        and 'EACH 16X16 BLOCK SHOWS' in flat[2] and all(w in flat[3] for w in ['FREE DRAW', 'COLOR BOOK', 'COPY', 'QUICK GUESS']))
     ok('說明頁文字不貼邊（第 0 / 31 欄都空白）', all(r[0] == ' ' and r[31] == ' ' for h in helps for r in h))
@@ -136,9 +155,10 @@ def main():
     x0 = ps(page)['cur'][0]
     hold(page, RIGHT, 8)
     x8 = ps(page)['cur'][0]
-    hold(page, RIGHT, 12)
+    ev(page, '() => { CT.Paint.dev.S().cur.x = 40; }')
+    hold(page, RIGHT, 20)
     x20 = ps(page)['cur'][0]
-    ok('游標：按住前 8 幀 1 px/幀、之後 3 px/幀', x8 - x0 == 8 and x20 - x0 == 8 + 3 * 4 + 1 * 0 or (x8 - x0 == 8 and x20 - x8 >= 30), (x0, x8, x20))
+    ok('游標：按住前 8 幀 1 px/幀、之後 3 px/幀', x8 - x0 == 8 and x20 - 40 == 8 + 12 * 3, (x0, x8, x20))
     ev(page, '() => { const S = CT.Paint.dev.S(); S.cur.x = 80; S.cur.y = 96; }')
     hold(page, RIGHT | B, 1)
     f1 = ps(page)['cur'][0]
@@ -168,8 +188,8 @@ def main():
         const ln = S.model.pix.reduce((a, b) => a + (b ? 1 : 0), 0) - pen;
         NES.Input.inject(1, 1); __nes.step(2); NES.Input.inject(1, 1); __nes.step(2);
         return { pen, anch, ln, cancel: S.anchor, total: S.model.pix.reduce((a, b) => a + (b ? 1 : 0), 0), undo: S.model.undoS.length }; }""")
-    ok('筆：按住 A 移動畫出連續線（無斷點）', r['pen'] == 11, r)
-    ok('直線工具：A 定起點、A 定終點畫 41 px；同點兩下 = 取消', r['anch'] == [14, 68] and r['ln'] == 41 and r['cancel'] is None and r['total'] == 52 and r['undo'] == 2, r)
+    ok('筆：按住 A + → 10 幀（移 14 px）畫出 15 px 連續線（加速時也不斷）', r['pen'] == 15, r)
+    ok('直線工具：A 定起點、A 定終點畫 41 px；同點兩下 = 取消', r['anch'] == [14, 68] and r['ln'] == 41 and r['cancel'] is None and r['total'] == 56 and r['undo'] == 2, r)
 
     # ---------------- 面板：工具 / 色票 / 改色即時寫 PPU ----------------
     r = ev(page, """() => { const D = CT.Paint.dev, S = D.S(), ppu = __nes.nes().ppu;
@@ -250,8 +270,8 @@ def main():
         const bad = code.slice(0, 20) + (code[20] === 'A' ? 'B' : 'A') + code.slice(21);
         return { len: code.length, same, bad: C.decode(bad), junk: C.decode('hello'), blank: C.encode(new Uint8Array(16384), S.pal13).length }; }""")
     ok('分享碼：SP1 + base64url + CRC，往返一致；改 1 字 / 亂碼都拒收', r['same'] and r['bad'] is None and r['junk'] is None, r)
-    ok('空白畫布的分享碼很短（RLE，≤ 140 字）', r['blank'] <= 140, r['blank'])
-    r = ev(page, """() => { const D = CT.Paint.dev, S = D.S(); D.openMenu(); __nes.step(1);
+    ok('空白畫布的分享碼很短（變長 RLE，≤ 40 字）', r['blank'] <= 40, r['blank'])
+    r = ev(page, """() => { const D = CT.Paint.dev, S = D.S(); __nes.step(10); D.openMenu(); __nes.step(4);
         const items = D.menuItems(); const hud = D.rowText(2);
         const go = (name) => { while (D.menuItems()[S.menuSel] !== name && S.menuSel < 8) { NES.Input.inject(32, 1); __nes.step(2); } NES.Input.inject(1, 1); __nes.step(2); };
         NES.Input.inject(32, 1); __nes.step(2); NES.Input.inject(128, 1); __nes.step(2); NES.Input.inject(128, 1); __nes.step(2);
@@ -296,12 +316,44 @@ def main():
         for (let i = 0; i < 8; i++) { const ref = P.Pics.copy(i);
           const sh = new Uint8Array(16384); for (let y = 0; y < 128; y++) for (let x = 0; x < 125; x++) sh[y*128 + x + 3] = ref[y*128 + x];
           const wrong = ref.map(c => c ? (c % 3) + 1 : 0);
-          const half = ref.map((c, k) => (k >> 7) < 64 ? c : 0);
+          const half = new Uint8Array(16384).fill(1);
           out.push({ self: C.score(ref, ref).score, empty: C.score(new Uint8Array(16384), ref).score, shift: C.score(sh, ref).score,
                      wrong: C.score(wrong, ref).score, half: C.score(half, ref).score }); }
         return out; }""")
-    ok('臨摹：照抄 100 / 空白 0 / 位移 3 px 仍 ≥ B(65)', all(x['self'] == 100 and x['empty'] == 0 and x['shift'] >= 65 for x in r), r)
-    ok('臨摹：顏色全錯 < 照抄、只畫一半 < B', all(x['wrong'] < x['self'] and x['half'] < 65 for x in r), r)
+    ok('臨摹：照抄 100 / 空白 0 / 位移 3 px 仍 ≥ A(85)', all(x['self'] == 100 and x['empty'] == 0 and x['shift'] >= 85 for x in r), r)
+    ok('臨摹：顏色全錯 < B、整張塗滿同一色 < B（不能亂塗過關）', all(x['wrong'] < 72 and x['half'] < 72 for x in r), r)
+    # fix-r9 P2-3：偷懶畫法一律 < B，認真照抄 ≥ A，亂畫 < C
+    r = ev(page, """() => { const P = CT.Paint, C = P.Core, out = [];
+        let sd = 12345; const rnd = () => { sd = (sd * 1103515245 + 12345) & 0x7fffffff; return sd / 0x7fffffff; };
+        const blocks = (ref, bs, th, dx, dy, drop) => { const M = new C.Model(), n = 128 / bs;
+          for (let cy = 0; cy < n; cy++) for (let cx = 0; cx < n; cx++) { const cnt = [0, 0, 0, 0];
+            for (let y = 0; y < bs; y++) for (let x = 0; x < bs; x++) cnt[ref[(cy*bs + y)*128 + cx*bs + x]]++;
+            let b = 0; for (let k = 1; k < 4; k++) if (cnt[k] > cnt[b]) b = k;
+            if (b === 0 && cnt[0] < bs * bs * th) { b = 1; for (let k = 2; k < 4; k++) if (cnt[k] > cnt[b]) b = k; }
+            if (b && rnd() >= drop) M.box(cx*bs + dx, cy*bs + dy, cx*bs + bs - 1 + dx, cy*bs + bs - 1 + dy, b); }
+          return M.pix; };
+        const bbox = (ref) => { let x0 = 128, y0 = 128, x1 = -1, y1 = -1; const cnt = [0, 0, 0, 0];
+          for (let i = 0; i < 16384; i++) if (ref[i]) { const x = i & 127, y = i >> 7; x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); cnt[ref[i]]++; }
+          let b = 1; for (let k = 2; k < 4; k++) if (cnt[k] > cnt[b]) b = k; return [x0, y0, x1, y1, b]; };
+        for (let i = 0; i < 8; i++) { const ref = P.Pics.copy(i), o = {}, bb = bbox(ref);
+          let M = new C.Model(); M.box(bb[0], bb[1], bb[2], bb[3], bb[4]); o.solid = C.score(M.pix, ref).score;
+          M = new C.Model(); M.rect(bb[0], bb[1], bb[2], bb[3], bb[4], 3); o.frame = C.score(M.pix, ref).score;
+          o.big32 = C.score(blocks(ref, 32, 10 / 16, 0, 0, 0), ref).score;
+          o.b16 = C.score(blocks(ref, 16, 10 / 16, 0, 0, 0), ref).score;
+          o.b8 = C.score(blocks(ref, 8, 12 / 16, 0, 0, 0), ref).score;
+          o.human = C.score(blocks(ref, 8, 12 / 16, (rnd() * 7 | 0) - 3, (rnd() * 7 | 0) - 3, 0.08), ref).score;
+          M = new C.Model(); let x = 64, y = 64;
+          for (let k = 0; k < 40; k++) { const nx = rnd() * 128 | 0, ny = rnd() * 128 | 0; M.line(x, y, nx, ny, 1 + (rnd() * 3 | 0), 2); x = nx; y = ny; }
+          o.scrib = C.score(M.pix, ref).score; out.push(o); }
+        return { out, rate: C.RATE, pass: C.PASS }; }""")
+    o8 = r['out']
+    ok('臨摹門檻 S 93 / A 85 / B 72 / C 55（goal = B）', r['pass'] == 72 and [x[1] for x in r['rate'][:4]] == [93, 85, 72, 55], r['rate'])
+    ok('臨摹：外框位置畫一個實心方塊 → 8 張都 < B', all(x['solid'] < 72 for x in o8), [x['solid'] for x in o8])
+    ok('臨摹：只畫外框空心方塊 → 8 張都 < B', all(x['frame'] < 72 for x in o8), [x['frame'] for x in o8])
+    ok('臨摹：4×4 大方塊（32 px）→ 8 張都 < B', all(x['big32'] < 72 for x in o8), [x['big32'] for x in o8])
+    ok('臨摹：8×8 方塊認真照抄 → 8 張都 ≥ A', all(x['b8'] >= 85 for x in o8), [x['b8'] for x in o8])
+    ok('臨摹：模擬人畫（8×8 方塊、整體位移 ±3 px、8% 漏畫）→ 8 張都 ≥ B', all(x['human'] >= 72 for x in o8), [x['human'] for x in o8])
+    ok('臨摹：隨機亂畫 40 筆 → 8 張都 < C', all(x['scrib'] < 55 for x in o8), [x['scrib'] for x in o8])
     r = ev(page, """() => { const D = CT.Paint.dev; D.start('copy', 1); const S = D.S(); const t0 = S.timer;
         S.timer = 3; __nes.step(5); const ph = S.phase, res = S.res && S.res.rating;
         const c1 = CT.get('paint').cheat(); __nes.step(2);
@@ -360,7 +412,7 @@ def main():
           if (GAME.state().goal) break; }
         r.over = __nes.stats().budget.overFrames - o0; r.goal = GAME.state().goal; r.minGap = Math.min(...r.gaps.slice(1)); r.n = r.gaps.length;
         const s = GAME.state().s; r.res = s.paint && s.paint.res; delete r.gaps; return r; }""")
-    ok('機器人：著色本完成 1 張 + 臨摹 ≥ B（goal）', taps['goal'] and taps['res'] and taps['res']['score'] >= 65, taps)
+    ok('機器人：著色本完成 1 張 + 臨摹 ≥ B（goal）', taps['goal'] and taps['res'] and taps['res']['score'] >= 72, taps)
     ok('機器人：每線 ≤ 8、overFrames 0、VBlank 尖峰 ≤ 160', taps['ml'] <= 8 and taps['over'] == 0 and taps['peak'] <= 160, taps)
     ok('機器人人類節奏：任兩次按鍵（A/B/SELECT/START）間隔 ≥ 13 幀', taps['minGap'] >= 13, taps)
     if not QUICK:
@@ -369,7 +421,7 @@ def main():
               let f = 0; while (S.phase !== 'result' && f < 9000) { __nes.step(1); f++; }
               out.push([i, S.res && S.res.score, f]); }
             return out; }""")
-        ok('機器人策略（8×8 方塊臨摹）8 張範例都在時限內 ≥ B', all(x[1] is not None and x[1] >= 65 for x in sc), sc)
+        ok('機器人策略（8×8 方塊臨摹）8 張範例都在時限內 ≥ B', all(x[1] is not None and x[1] >= 72 for x in sc), sc)
 
     ok('全程無頁面錯誤', not errs, errs[:3])
     browser.close()

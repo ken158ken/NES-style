@@ -122,6 +122,90 @@ def inter(a, b):
             a['y'] + a['h'] > b['y'] + 0.5 and a['y'] < b['y'] + b['h'] - 0.5)
 
 
+# R8 fix-r8-shell（qa-r8 P2-7）：NES.Touch.setWays(4|8)
+#   以底座中心為原點、半徑 0.36 × 寬，逐角度「落指 → 讀 mask → 放開」（每點都是新觸控，沒有磁滯）。
+#   螢幕角度：0 = 右、90 = 下、270 = 上。參考答案用修前的公式（8 扇區 round(deg/45)）在 Python 算。
+_SEC8 = [128, 128 | 32, 32, 64 | 32, 64, 64 | 16, 16, 128 | 16]     # RIGHT, R+D, DOWN, L+D, LEFT, L+U, UP, R+U
+_SWEEP = [k * 5 + 1 for k in range(72)]                                # 1, 6, … 356：避開 22.5 / 45 的扇區邊界
+
+
+def _ref8(deg):
+    return _SEC8[int(round(deg / 45.0)) % 8]
+
+
+def _ref4(deg):
+    return _SEC8[(int(round(deg / 90.0)) % 4) * 2]
+
+
+def ways_check(pg, t, pad, ok):
+    import math
+    r = pad['w'] * 0.36
+
+    def at(deg):
+        a = math.radians(deg)
+        return pad['cx'] + math.cos(a) * r, pad['cy'] + math.sin(a) * r
+
+    def tap(deg):
+        x, y = at(deg)
+        t.down(0, x, y)
+        m = pg.evaluate('()=>NES.Touch.mask() & 240')
+        t.up(0)
+        return m
+
+    def sweep():
+        return {d: tap(d) for d in _SWEEP}
+
+    t.clear()
+    pg.evaluate('()=>__nes.step(1)')
+    ok('ways：預設 getWays() = 8', pg.evaluate('()=>NES.Touch.getWays()') == 8)
+    s8 = sweep()
+    bad = [(d, m, _ref8(d)) for d, m in s8.items() if m != _ref8(d)]
+    ok('ways：預設 8 方向逐點與修前公式一致（72 點）', not bad, bad[:6])
+    ok('ways：setWays(4) 回傳 4', pg.evaluate('()=>NES.Touch.setWays(4)') == 4)
+    s4 = sweep()
+    bad = [(d, m, _ref4(d)) for d, m in s4.items() if m != _ref4(d)]
+    ok('ways：4 方向逐點 = 最近正方向（72 點、扇區各 90°）', not bad, bad[:6])
+    single = [d for d, m in s4.items() if m not in (16, 32, 64, 128)]
+    ok('ways：4 方向永遠只輸出單一方向', not single, single[:6])
+    off = {}
+    for base, bit in ((270, 16), (0, 128), (90, 32), (180, 64)):
+        for dv in (25, 40, -25, -40):
+            m = tap(base + dv)
+            if m != bit:
+                off[(base, dv)] = m
+    ok('ways：4 方向偏 ±25° / ±40° 仍是正方向（上 / 右 / 下 / 左）', not off, off)
+    # 磁滯：按住「上」滑到偏右 50° 仍是上（≤ 45 + 6），滑到 60° 才換成右
+    x, y = at(270)
+    t.down(0, x, y)
+    m0 = pg.evaluate('()=>NES.Touch.mask() & 240')
+    x, y = at(320)
+    t.move(0, x, y)
+    pg.wait_for_timeout(60)      # pointermove 是 rAF 對齊派發
+    m1 = pg.evaluate('()=>NES.Touch.mask() & 240')
+    x, y = at(330)
+    t.move(0, x, y)
+    pg.wait_for_timeout(60)
+    m2 = pg.evaluate('()=>NES.Touch.mask() & 240')
+    t.up(0)
+    ok('ways：4 方向換扇區有磁滯（上 → 偏 50° 仍上 → 偏 60° 換右）', (m0, m1, m2) == (16, 16, 128), (m0, m1, m2))
+    # 手指按著時切換：8 方向偏 30° 是斜（UP|RIGHT），setWays(4) 當下立刻變單一 UP；切回 8 又變斜
+    pg.evaluate('()=>NES.Touch.setWays(8)')
+    x, y = at(300)
+    t.down(0, x, y)
+    h8 = pg.evaluate('()=>NES.Touch.mask() & 240')
+    pg.evaluate('()=>NES.Touch.setWays(4)')
+    h4 = pg.evaluate('()=>({t: NES.Touch.mask() & 240, i: (__nes.step(1), NES.Input.mask() & 240)})')
+    pg.evaluate('()=>NES.Touch.setWays(8)')
+    h8b = pg.evaluate('()=>NES.Touch.mask() & 240')
+    t.up(0)
+    ok('ways：按住中切換 8→4→8 立刻重算（斜 → 單一 UP → 斜，Input 也跟著）',
+       h8 == 144 and h4['t'] == 16 and h4['i'] == 16 and h8b == 144, (h8, h4, h8b))
+    ok('ways：setWays(8) 後逐點與修前一致（72 點）', sweep() == s8)
+    ok('ways：setWays(其他值) 一律當 8', pg.evaluate('()=>NES.Touch.setWays(3)') == 8)
+    t.clear()
+    pg.evaluate('()=>__nes.step(2)')
+
+
 def run_mobile(p, page_name, device, landscape, label, results):
     def ok(name, cond, detail=''):
         results.append({'name': '%s/%s %s' % (page_name, label, name), 'ok': bool(cond), 'detail': str(detail)})
@@ -252,9 +336,13 @@ def run_mobile(p, page_name, device, landscape, label, results):
         ok('全部放開：mask 0（inject 佇列已清、鍵盤取回控制權）',
            z['tm'] == 0 and z['im'] == 0, 'touch=%s input=%s' % (z['tm'], z['im']))
 
+        # ------------------------------------------- ②b R8 fix-r8-shell（qa-r8 P2-7）：setWays(4|8)
+        ways_check(pg, t, pad, ok)
+
         if page_name in CART_PAGES:
             # R5（qa-r5 P3-12）：兩指同按 SELECT + START 70 幀 ⇒ 回選單、游標停在剛玩的那款、放開後沒有黏鍵
             gid = pg.evaluate('()=>__nes.state().game')
+            pg.evaluate('()=>NES.Touch.setWays(4)')     # R8 fix-r8-shell：回選單時 CT.resetHW 要還原成 8
             se, st2 = R['select'], R['start']
             t.down(0, se['cx'], se['cy'])
             t.down(1, st2['cx'], st2['cy'])
@@ -272,6 +360,8 @@ def run_mobile(p, page_name, device, landscape, label, results):
             ok('cart1：游標停在剛玩的那款 %s' % gid, bk['sel'] == gid, bk)
             ok('cart1：放開後 mask 0、backdrop 回選單的 $0F（提示沒殘留）',
                bk['tm'] == 0 and bk['im'] == 0 and bk['bd'] == 0x0F, bk)
+            ok('cart：遊戲中 setWays(4) ⇒ 回選單後 CT.resetHW 還原 getWays() = 8',
+               pg.evaluate('()=>NES.Touch.getWays()') == 8, pg.evaluate('()=>NES.Touch.getWays()'))
 
         # ------------------------------------------------- ④ fix5：一鍵密技鍵
         pg.evaluate("""() => {

@@ -16,7 +16,9 @@
  *   ARROW  方向挑戰（15 次三級）：大箭頭出現，按「箭頭指的方向」。1~5 次在中央；6~10 次出現在上下左右（位置與方向衝突）；
  *          11~15 次另有「空心紅箭頭」= 按相反方向。
  * 稱號（平均幀）：≤ 12 PULSAR、≤ 15 COMET、≤ 18 METEOR、≤ 21 ROCKET、≤ 26 SATELLITE、其餘 MOONWALKER。
- * goal = SIMPLE 5 次平均 ≤ 20 幀（333 ms）且 0 偷跑、本次開機沒用過密技（門檻以機器人反應延遲 18 幀設計）。
+ * goal = SIMPLE 5 次平均 ≤ 24 幀（400 ms）且偷跑 ≤ 2 次、本次開機沒用過密技（fix-r8 qa-r8 P2-3：用人類反應時間模型
+ *   〔ex-Gaussian + 鍵盤 33 ms / 觸控 80 ms 系統延遲 + 5% 偷跑〕實測，20 / 40 代鍵盤與 20 代手機單局過關率 ≥ 90%）。
+ * 觸控 / 十字鍵斜方向（P2-7）：init 時 NES.Touch.setWays(4)；同一幀按下兩個方向 ⇒ 不判定（等下一個單一方向）。
  * 密技（C / ★）：測驗中 = 偷跑次數歸零、本次重來；結算畫面 = 原地續關（刪掉最差的一次、回去補測那一次）；標題無效。
  */
 (function () {
@@ -29,7 +31,7 @@
 
   var MODES = ['SIMPLE', 'CHOICE', 'COLOR', 'ARROW'];
   var CFG = {
-    SIMPLE: { n: 5, d0: 60, d1: 210, to: 90, desc: '5 TRIES', l1: 'Ⓐ WHEN THE LAMP TURNS GREEN', l2: 'PRESS EARLY = FALSE START' },
+    SIMPLE: { n: 5, d0: 60, d1: 210, to: 90, desc: '5 TRIES', l1: 'Ⓐ WHEN THE LAMP TURNS GREEN', l2: 'EARLY = FALSE. TOUCH +50MS' },
     CHOICE: { n: 10, d0: 40, d1: 120, to: 90, desc: '10 TRIES', l1: 'PRESS THE LIT DIRECTION', l2: 'WRONG DIRECTION = ERROR' },
     COLOR: { n: 12, d0: 40, d1: 110, to: 60, nogo: 45, desc: '12 TRIES', l1: 'Ⓐ ONLY ON THE TARGET COLOR', l2: 'COLORS ALSO HAVE SHAPES' },
     ARROW: { n: 15, d0: 30, d1: 90, to: 75, desc: '15 TRIES', l1: 'PRESS WHERE THE ARROW POINTS', l2: 'HOLLOW RED = OPPOSITE WAY' }
@@ -41,7 +43,8 @@
   var SHAPE_CH = ['●', '■', '▲', '✕', '◆'];
   var DIRS = ['U', 'D', 'L', 'R'], DIR_BTN = [BTN.UP, BTN.DOWN, BTN.LEFT, BTN.RIGHT], OPP = [1, 0, 3, 2];
   var TITLES = [[12, 'PULSAR'], [15, 'COMET'], [18, 'METEOR'], [21, 'ROCKET'], [26, 'SATELLITE'], [9999, 'MOONWALKER']];
-  var GOAL_AVG = 20, ANTICIP = 6;
+  var GOAL_AVG = 24, GOAL_FALSE = 2, ANTICIP = 6;
+  function setWays(n) { try { if (NES.Touch && NES.Touch.setWays) NES.Touch.setWays(n); } catch (e) { } }
   var POD = [[14, 4], [14, 18], [6, 10], [22, 10]];          // 四個艙的左上磚
   var ARW_POS = [{ x: 112, y: 32 }, { x: 112, y: 128 }, { x: 40, y: 80 }, { x: 184, y: 80 }], ARW_C = { x: 112, y: 80 };
   var PAL_BG0 = [0x01, 0x11, 0x21], PAL_POD = [0x10, 0x00, 0x3D], PAL_LIT = [0x30, 0x28, 0x0F], PAL_HUD = [0x01, 0x27, 0x30];
@@ -78,7 +81,7 @@
   function txt(row, col, s) { put(row, col, art.text(s)); }
   function clearSpr() { nes0.ppu.clearSprites(); if (g) g.sprUsed = 0; }
   function stars() {
-    for (var r = 1; r < 29; r++) for (var c = 0; c < 32; c++) {
+    for (var r = 2; r < 29; r++) for (var c = 0; c < 32; c++) {      // 從第 2 列起（可見 y ≥ 8，P3-2）
       var h = ((c * 2654435761) ^ (r * 40503)) >>> 0;
       if (h % 29 === 5) nes0.ppu.setTile(0, c, r, art.t('ST1')); else if (h % 53 === 9) nes0.ppu.setTile(0, c, r, art.t('ST2'));
     }
@@ -106,7 +109,7 @@
         ppu.setTile(0, x, 3, t[0]); ppu.setTile(0, x + 1, 3, t[1]); ppu.setTile(0, x, 4, t[2]); ppu.setTile(0, x + 1, 4, t[3]);
       }
       ppu.fillAttr(0, 0, 1, 16, 2, 2);
-      for (var c = 2; c < 30; c++) { ppu.setTile(0, c, 1, art.t('FR_H')); ppu.setTile(0, c, 25, art.t('FR_H')); }
+      for (var c = 2; c < 30; c++) { ppu.setTile(0, c, 2, art.t('FR_H')); ppu.setTile(0, c, 25, art.t('FR_H')); }
       txt(6, 6, 'STARDUST REACTION LAB');
       txt(19, 4, 'START PAUSE   C/★ = CHEAT');
       txt(21, 4, 'HOLD START+SELECT: MENU');
@@ -120,7 +123,7 @@
     txt(11, 3, padR(C.l1, 28));
     txt(13, 3, padR(C.l2, 28));
     txt(15, 3, padR('BEST AVG ' + (b ? ms(b) + 'MS  ' + titleOf(b) : '---'), 28));
-    txt(17, 3, padR(M === 'SIMPLE' ? 'GOAL: AVG 333MS OR LESS' : (M === 'CHOICE' ? 'KEYS: ↑ ↓ ← →' : (M === 'COLOR' ? 'KEYS: Ⓐ  HOLD STILL ON OTHERS' : 'KEYS: ↑ ↓ ← →')), 28));
+    txt(17, 3, padR(M === 'SIMPLE' ? 'GOAL: AVG 400MS, FALSE 2 MAX' : (M === 'CHOICE' ? 'KEYS: ↑ ↓ ← →' : (M === 'COLOR' ? 'KEYS: Ⓐ  HOLD STILL ON OTHERS' : 'KEYS: ↑ ↓ ← →')), 28));
   }
 
   /* ============================== 開局 ============================== */
@@ -202,10 +205,11 @@
   }
   function drawHud() {
     var M = MODES[g.msel], C = CFG[M], S = stats();
-    txt(1, 1, padR(M + ' TEST', 14) + 'TRY ' + pad(Math.min(C.n, g.trials.length + (g.ph === 'intro' ? 0 : 1)), 2) + '/' + pad(C.n, 2) + '   ');
-    var ins = M === 'COLOR' ? 'Ⓐ ONLY ON ' + SHAPE_CH[COLORS[g.target].sh] + ' ' + COLORS[g.target].id : C.l1;
-    txt(2, 1, padR(ins, 30));
-    txt(3, 1, padR(M === 'ARROW' && g.trials.length >= 10 ? 'HOLLOW RED = OPPOSITE' : (M === 'ARROW' && g.trials.length >= 5 ? 'IGNORE WHERE IT IS' : ''), 22) + 'FALSE ' + g.falses + ' ');
+    // fix-r8 P3-2：HUD 從名稱表第 2 列（可見 y = 8）開始，兩列收完（CHOICE 上方訊號艙從第 4 列起）
+    txt(2, 1, padR(M + ' TEST', 12) + 'TRY ' + pad(Math.min(C.n, g.trials.length + (g.ph === 'intro' ? 0 : 1)), 2) + '/' + pad(C.n, 2) + '  FALSE ' + g.falses + ' ');
+    var ins = M === 'COLOR' ? 'Ⓐ ONLY ON ' + SHAPE_CH[COLORS[g.target].sh] + ' ' + COLORS[g.target].id :
+      (M === 'ARROW' && g.trials.length >= 10 ? 'HOLLOW RED = OPPOSITE WAY' : (M === 'ARROW' && g.trials.length >= 5 ? 'POINTING WAY, NOT PLACE' : C.l1));
+    txt(3, 1, padR(ins, 30));
     var st;
     if (g.paused) st = 'PAUSE';
     else if (g.ph === 'intro') st = 'PRESS Ⓐ TO START';
@@ -225,8 +229,11 @@
   function relevant(I) {
     var M = MODES[g.msel];
     if (M === 'SIMPLE' || M === 'COLOR') return (I.pressed(BTN.A) || I.pressed(BTN.B)) ? 1 : 0;
-    for (var d = 0; d < 4; d++) if (I.pressed(DIR_BTN[d])) return 1 << d;
-    return 0;
+    // P2-7：同一幀按下兩個方向（觸控斜區 / 斜按）⇒ 不判定，等下一個單一方向
+    var got = 0, n = 0;
+    for (var d = 0; d < 4; d++) if (I.pressed(DIR_BTN[d])) { got = 1 << d; n++; }
+    if (n > 1) { g.diag = (g.diag || 0) + 1; return 0; }
+    return got;
   }
   function newWait() {
     var C = CFG[MODES[g.msel]];
@@ -330,7 +337,7 @@
     if (!g.cheated && S.n) {
       var pb = CT.load('reflex', 'avg_' + M, 0);
       if (!pb || S.avg < pb) { CT.save('reflex', 'avg_' + M, S.avg); g.newBest = true; }
-      if (M === 'SIMPLE' && g.falses === 0 && S.n === CFG.SIMPLE.n && S.avg <= GOAL_AVG && !sess.cheated) sess.goal = true;
+      if (M === 'SIMPLE' && g.falses <= GOAL_FALSE && S.n === CFG.SIMPLE.n && S.avg <= GOAL_AVG && !sess.cheated) sess.goal = true;
       sess.done[M] = { avg: S.avg, falses: g.falses, errs: S.errs + S.misses };
     }
     var ppu = nes0.ppu;
@@ -349,7 +356,7 @@
       txt(14, 4, 'BEST      ' + (S.n ? padL(ms(S.best), 3) + ' MS' : '---'));
       txt(16, 4, 'FALSE ' + g.falses + '   ERRORS ' + (S.errs + S.misses));
       txt(18, 4, 'TITLE  ' + (S.n ? titleOf(S.avg) : '---') + (g.newBest ? '  NEW BEST!' : ''));
-      if (M === 'SIMPLE') txt(20, 4, (sess.goal && !g.cheated ? 'GOAL CLEAR!  ' : 'GOAL: AVG 333MS 0 FALSE'));
+      if (M === 'SIMPLE') txt(20, 4, (sess.goal && !g.cheated ? 'GOAL CLEAR!  ' : 'GOAL: AVG 400MS, FALSE 2 MAX'));
       txt(22, 4, 'START TITLE   A AGAIN');
       txt(24, 4, 'C/★ = REDO THE WORST TRY');
     });
@@ -426,6 +433,7 @@
       ppu.flickerStep = 0;
       GAME.backTile = { tile: art.s('BACK'), pal: 2 };
       AU.init(nes);
+      setWays(4);                  // P2-7：本款只用四方向（API 不存在也不報錯；registry 換遊戲時會重設 8）
       if (!sess) sess = newSess();
       var lag = CT.query ? parseInt(CT.query('lag'), 10) : NaN;
       if (!isNaN(lag)) sess.bot.lag = lag;
@@ -443,7 +451,7 @@
       }
       if (g.mode === 'title') {
         g.t++;
-        if (I.pressed(BTN.LEFT) || I.pressed(BTN.UP)) { g.msel = (g.msel + 3) % 4; titleRows(); AU.sfx('reflex_move'); }
+        if ((I.pressed(BTN.LEFT) || I.pressed(BTN.UP)) && !(I.pressed(BTN.RIGHT) || I.pressed(BTN.DOWN))) { g.msel = (g.msel + 3) % 4; titleRows(); AU.sfx('reflex_move'); }
         else if (I.pressed(BTN.RIGHT) || I.pressed(BTN.DOWN)) { g.msel = (g.msel + 1) % 4; titleRows(); AU.sfx('reflex_move'); }
         else if ((I.pressed(BTN.START) || I.pressed(BTN.A)) && !I.held(BTN.SELECT)) { AU.sfx('reflex_ok'); startRun(); }
       } else if (g.mode === 'result') {
@@ -466,7 +474,7 @@
       return {
         mode: g.mode, game: MODES[g.msel], ph: g.ph, paused: g.paused, ft: g.ft, stimF: g.stimF, stimId: g.stimId, stim: g.stim,
         trials: g.trials.map(function (t) { return [t.res, t.rt]; }), n: S.n, avg: S.avg, best: S.best, avgMs: ms(S.avg), errs: S.errs, misses: S.misses, rej: S.rej,
-        falses: g.falses, target: g.mode === 'title' ? '' : COLORS[g.target].id, lit: g.lit, cheated: g.cheated, sessCheated: sess.cheated, continues: g.continues,
+        falses: g.falses, diag: g.diag || 0, target: g.mode === 'title' ? '' : COLORS[g.target].id, lit: g.lit, cheated: g.cheated, sessCheated: sess.cheated, continues: g.continues,
         musicPaused: !!(AU.state() && AU.state().paused), lag: sess.bot.lag, maxLine: g.maxLine, title: S.n ? titleOf(S.avg) : '', goal: GAME.goal()
       };
     },
@@ -476,13 +484,14 @@
         if (S.n >= CFG[M].n && (!pb || S.avg < pb)) CT.save('reflex', 'avg_' + M, S.avg);
       }
       AU.stop();
+      setWays(8);
     },
     cheat: function () { if (!g || g.mode === 'title' || (g.mode === 'play' && g.ph === 'intro')) return false; g.cheatReq = true; return true; },
     bot: function () { return botMask(); },
     goal: function () { return !!(sess && sess.goal && !sess.cheated); },
     bestText: function () { return bestFmt(CT.load('reflex', 'avg_SIMPLE', 0)); }
   };
-  RX.MODES = MODES; RX.CFG = CFG; RX.COLORS = COLORS; RX.GOAL_AVG = GOAL_AVG; RX.ANTICIP = ANTICIP;
+  RX.MODES = MODES; RX.CFG = CFG; RX.COLORS = COLORS; RX.GOAL_AVG = GOAL_AVG; RX.GOAL_FALSE = GOAL_FALSE; RX.ANTICIP = ANTICIP;
   RX.dev = {
     g: function () { return g; }, sess: function () { return sess; },
     start: function (mode) { g.msel = Math.max(0, MODES.indexOf(mode || 'SIMPLE')); startRun(); },

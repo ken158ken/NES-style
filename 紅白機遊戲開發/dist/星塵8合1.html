@@ -4327,6 +4327,7 @@
                 cheatButton: true },
       setLayout: function (o) { return this.layout; }, rects: function () { return {}; }, mask: function () { return 0; },
       cheat: function () { return false; }
+      , setWays: function (n) { return 8; }, getWays: function () { return 8; }   // R8 fix-r8-shell：無 DOM 時恆為 8
     };
     return;
   }
@@ -4342,6 +4343,11 @@
   var SEC = [BTN.RIGHT, BTN.RIGHT | BTN.DOWN, BTN.DOWN, BTN.LEFT | BTN.DOWN,
              BTN.LEFT, BTN.LEFT | BTN.UP, BTN.UP, BTN.RIGHT | BTN.UP];
   var DIRBITS = BTN.UP | BTN.DOWN | BTN.LEFT | BTN.RIGHT;
+  // R8 fix-r8-shell（qa-r8 P2-7）：十字鍵方向數。8 = 現狀（預設，45° 扇區）；4 = 只輸出單一正方向
+  //   （以手指角度最近的正方向，扇區各 90°、換扇區同樣 ±HYST 磁滯；只用偶數扇區 0/2/4/6）。
+  //   遊戲 init 時 NES.Touch.setWays(4)，registry 的 CT.resetHW 換遊戲時一律 setWays(8)。
+  var WAYS = 8;
+  var lastPt = null;              // 手指仍按著時的最後座標（setWays 中途切換時立刻重算）
 
   function clamp(v, a, b) { return v < a ? a : (v > b ? b : v); }
   function px(n) { return Math.round(n) + 'px'; }
@@ -4882,6 +4888,7 @@
     for (var i = 0; i < 8; i++) ticks[i].className = litTick(i, s) ? 'on' : '';
   }
   function sectorOf(ox, oy, len, dead) {
+    if (WAYS === 4) return sectorOf4(ox, oy, len, dead);
     if (len < dead) return -1;
     var deg = (Math.atan2(oy, ox) * 180 / Math.PI + 360) % 360;
     var near = Math.round(deg / 45) % 8;
@@ -4889,7 +4896,16 @@
     var diff = ((deg - curSec * 45 + 540) % 360) - 180;
     return (Math.abs(diff) <= 22.5 + HYST) ? curSec : near;
   }
+  function sectorOf4(ox, oy, len, dead) {
+    if (len < dead) return -1;
+    var deg = (Math.atan2(oy, ox) * 180 / Math.PI + 360) % 360;
+    var near = (Math.round(deg / 90) % 4) * 2;
+    if (curSec < 0 || (curSec & 1)) return near;
+    var diff = ((deg - curSec * 45 + 540) % 360) - 180;
+    return (Math.abs(diff) <= 45 + HYST) ? curSec : near;
+  }
   function padCalc(cx, cy) {
+    lastPt = { cx: cx, cy: cy };
     var r = pad.getBoundingClientRect();
     var ox = cx - (r.left + r.width / 2), oy = cy - (r.top + r.height / 2);
     var rad = Math.max(1, r.width / 2), len = Math.sqrt(ox * ox + oy * oy);
@@ -4905,6 +4921,7 @@
       ? 'translate(' + (Math.cos(a) * k).toFixed(1) + 'px,' + (Math.sin(a) * k).toFixed(1) + 'px)' : '';
   }
   function padRelease() {
+    lastPt = null;
     curSec = -1; setDirMask(0); setTickOn(-1); padKnob.style.transform = '';
     if (padFloat) {
       padFloat = null; placePad();
@@ -5108,6 +5125,15 @@
              left: !!(touchMask & BTN.LEFT), right: !!(touchMask & BTN.RIGHT) };
   };
   T.sector = function () { return curSec; };
+  // R8 fix-r8-shell（qa-r8 P2-7）：四方向 / 八方向十字鍵（n 只認 4，其他一律 8）；回傳套用後的值
+  T.setWays = function (n) {
+    var w = (n === 4) ? 4 : 8;
+    if (w === WAYS) return WAYS;
+    WAYS = w;
+    if (lastPt) { var lp = lastPt; curSec = -1; padCalc(lp.cx, lp.cy); }   // 手指還按著 ⇒ 依新規則立刻重算
+    return WAYS;
+  };
+  T.getWays = function () { return WAYS; };
   T.tickOn = function () { return tickOn; };
   T.floatZone = function () {
     return (zoneRect && T.layout.stickFloat)
@@ -5601,6 +5627,8 @@
     CT.blank(nes, function () {
       try { if (nes.music && nes.music.stop) nes.music.stop(); } catch (e) { }
       try { if (nes.music && nes.music.stopSfx) nes.music.stopSfx(); } catch (e) { }
+      // R8 qa P2-7：遊戲可用 NES.Touch.setWays(4) 改成四方向十字鍵；換遊戲時一律回預設 8 方向
+      try { if (NES.Touch && NES.Touch.setWays) NES.Touch.setWays(8); } catch (e) { }
       if (!ppu) return;
       if (ppu.split) ppu.split(null);
       if (ppu.scroll) ppu.scroll(0, 0);
@@ -16771,7 +16799,7 @@
     for (i = 0; i < S.slots.length; i++) drawSlot(ppu, i);
     if (S.slots.length <= 8) {
       text(ppu, 4, 25, 'A/START PLAY  SELECT NEXT');
-      text(ppu, 3, 26, 'HOLD START+SELECT = MENU');
+      text(ppu, 4, 26, 'HOLD START+SELECT = MENU');
     }
     rowPal(ppu, S.sel, 1);
   }

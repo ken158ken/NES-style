@@ -502,7 +502,7 @@
     for (i = 0; i < S.slots.length; i++) drawSlot(ppu, i);
     if (S.slots.length <= 8) {
       text(ppu, 4, 25, 'A/START PLAY  SELECT NEXT');
-      text(ppu, 3, 26, 'HOLD START+SELECT = MENU');
+      text(ppu, 4, 26, 'HOLD START+SELECT = MENU');
     }
     rowPal(ppu, S.sel, 1);
   }

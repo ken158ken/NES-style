@@ -37,7 +37,15 @@ FONT_SIZE = 15
 THRESHOLD = 90
 TOP = 5                 # 預設取樣起始列
 ALWAYS = '　▼▶■□…'      # 系統用：全形空白 / 翻頁 / 游標 / 結束 / 缺字框 / 刪節號
-SPEC = 'NotoSansCJK-Regular.ttc#3 (TC) %dpx th%d top%d' % (FONT_SIZE, THRESHOLD, TOP)
+# 字形覆寫（fix-r9-text，qa-r9 P2-4）：Noto 15px 的破折號「—」是第 8 列 x1~12 一條線，跟「一」（第 7 列 x1~14）幾乎一樣，
+# 「——」中間還留 4 px 空隙、看起來像「一一」。改成**滿寬 16 px**（x 0~15，左右不留字距）兩列粗的細長橫線，
+# 放在第 7~8 列（與「一」同高、但較粗且貼滿整格）⇒ 兩個「—」接成一條不斷的長線，單獨一個也比「一」長且粗。
+# 值 = 16 列 × 16 位元（左 = 高位元）；覆寫的字一樣只在資料裡用到時才收。
+OVERRIDE = {
+    '\u2014': [0] * 7 + [0xFFFF, 0xFFFF] + [0] * 7,     # — EM DASH
+    '\u2015': [0] * 7 + [0xFFFF, 0xFFFF] + [0] * 7,     # ― HORIZONTAL BAR（同破折號）
+}
+SPEC = 'NotoSansCJK-Regular.ttc#3 (TC) %dpx th%d top%d ovr%d' % (FONT_SIZE, THRESHOLD, TOP, len(OVERRIDE))
 
 # --------------------------------------------------------------------------------------------
 # 原創 8×8 半形字型（0x20~0x7E 共 95 字）：5×7 字身放在第 1~5 欄、第 0~6 列，第 7 列給 g j p q y 的下伸部。
@@ -161,7 +169,9 @@ def font():
 
 
 def render(ch):
-    """單一全形字 → 16 個 16 位元整數（第 0 列在前，左 = 高位元）。規格見檔頭。"""
+    """單一全形字 → 16 個 16 位元整數（第 0 列在前，左 = 高位元）。規格見檔頭；OVERRIDE 裡的字用手繪字形。"""
+    if ch in OVERRIDE:
+        return list(OVERRIDE[ch])
     from PIL import Image, ImageDraw
     H = 32
     im = Image.new('L', (20, H), 0)

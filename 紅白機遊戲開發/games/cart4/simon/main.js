@@ -10,8 +10,12 @@
  * 模式：CLASSIC 經典（光 + 聲）/ EAR 只聽聲音（展示時不亮燈）/ EYE 只看顏色（全程靜音）/
  *       REVERSE 倒著輸入 / OCTET 8 鍵（十字鍵 + 按住 B）。
  * 規則：3 條命；按錯或 6 秒沒按 = MISS（亮出正確的那顆、扣 1 命、同一串重放）；命用完 GAME OVER。
- *       goal = 經典模式完成 15 步（不開密技）。15 步之後可以繼續挑戰到 99 步。
- * 時間一律以幀計：展示亮燈 30/24/19/15 幀（序列越長越快）、間隔 12/10/8/7 幀；輸入逾時 360 幀（6.0 秒）。
+ *       每完成 5 的倍數步回 1 命（上限 5）。goal = 經典模式完成 15 步（不開密技）。15 步之後可以繼續挑戰到 99 步。
+ * 時間一律以幀計：展示亮燈 30/24/19/15 幀（序列越長越快；最快那段從第 16 步起，goal 前不到最快）、
+ *       間隔 12/10/8/7 幀；輸入逾時 360 幀（6.0 秒）。
+ * fix-r8（qa-r8）：OCTET 方向鍵比 B 早按 ≤ 4 幀仍判第二組（B_GRACE：方向按下後暫緩判定，B 一到立刻判高音組，
+ *       4 幀沒等到才判第一組）；同一幀兩個方向一起按下（觸控斜方向）不判定；遊玩中 NES.Touch.setWays(4)；
+ *       EAR（只靠聲音）開局前先 SOUND CHECK（提示 iPhone 靜音開關）；鍵音改成原創的四度堆疊（不是大三和弦）。
  * 聲音也是玩法：每顆音高 + 音色都不同（song.js 檔頭表），而且一律有視覺提示（EAR 模式例外，那是進階模式）；
  *       遊玩中 BGM 只用 tri + noi，鍵音固定走 p1、系統音效走 p2 ⇒ 鍵音和 BGM 同時響、互不搶聲道。
  * 網址：`cart4.html?game=simon&debug=1[&bot=1][&mode=0..4][&seed=N][&lag=N][&autostart=1]`
@@ -24,7 +28,7 @@
   var BTN = (NES.Input && NES.Input.BTN) || { A: 1, B: 2, SELECT: 4, START: 8, UP: 16, DOWN: 32, LEFT: 64, RIGHT: 128 };
 
   /* ============================== 常數 ============================== */
-  var NT_LIMIT = 140, GOAL_LEN = 15, MAX_LEN = 99, LIVES = 3, MAX_LIVES = 5;
+  var NT_LIMIT = 140, GOAL_LEN = 15, MAX_LEN = 99, LIVES = 3, MAX_LIVES = 5, LIFE_EVERY = 5, B_GRACE = 4, CHECK_STEP = 24;
   var INPUT_TIMEOUT = 360, PRESS_LIGHT = 14, READY_F = 120, INTRO_F = 45, GOOD_F = 50, MISS_F = 110;
   var MODES = [
     { id: 'classic', name: 'CLASSIC', keys: 4, light: true, sound: true, rev: false, key: 'best', mult: 1, desc: ['THE CHAIN GROWS BY ONE', 'EACH ROUND. LIGHT + SOUND'] },
@@ -51,7 +55,7 @@
   function showTiming(len) {
     if (len <= 5) return [30, 12];
     if (len <= 9) return [24, 10];
-    if (len <= 13) return [19, 8];
+    if (len <= 15) return [19, 8];      // goal（15 步）之前最快就是 19 + 8
     return [15, 7];
   }
 
@@ -120,21 +124,28 @@
       lit: -1, litT: 0, litVis: true, lives: LIVES, score: 0, best: 0, maxDone: 0,
       replayUsed: false, replays: 0, misses: 0, idle: 0, missKey: -1, goal: false, cleared15: false,
       cheats: 0, continues: 0, paused: false, msg: '', msgT: 0, musicBack: 0, seed: 0, goodWait: 0,
-      palNow: [-1, -1, -1, -1], bheld: false
+      palNow: [-1, -1, -1, -1], bheld: false, pend: null, lifeUps: 0,
+      soundOk: false, ct: 0, titleMsgT: 0
     };
   }
   function expectKey() { return g.m.rev ? g.seq[g.len - 1 - g.pos] : g.seq[g.pos]; }
 
   /* ============================== 流程 ============================== */
   function sfx(n) { Au.sfx(n); }
+  // 觸控十字鍵：遊玩中四方向（±45°、只輸出單一方向）；API 還沒有也不報錯
+  function touchWays(n) { try { if (NES.Touch && NES.Touch.setWays) NES.Touch.setWays(n); } catch (e) { } }
+  SM.touchWays = touchWays;
+  function soundOnly(m) { return m.sound && !m.light; }
   function startGame() {
     g.m = MODES[g.menu];
+    if (soundOnly(g.m) && !g.soundOk) { enterCheck(); return; }
+    touchWays(4);
     var seedQ = parseInt((CT.query && CT.query('seed')) || '', 10);
     g.seed = (isFinite(seedQ) && seedQ > 0) ? (seedQ >>> 0) : (((g.frames + 7) * 2654435761) >>> 0) || 0x1234567;
     g.seq = makeSeq(g.seed, g.m.keys);
     if (guardOn) g.seq = guardWrap(g.seq);
     g.len = 1; g.pos = 0; g.lives = LIVES; g.score = 0; g.maxDone = 0;
-    g.replays = 0; g.misses = 0; g.goal = false; g.cleared15 = false; g.cheats = 0; g.continues = 0;
+    g.replays = 0; g.misses = 0; g.goal = false; g.cleared15 = false; g.cheats = 0; g.continues = 0; g.pend = null; g.lifeUps = 0;
     g.paused = false; g.lit = -1; g.litT = 0; g.msg = ''; g.msgT = 0; g.musicBack = 0;
     g.best = CT.load('simon', g.m.key, 0);
     g.mode = 'play';
@@ -144,14 +155,28 @@
   }
   function toTitle() {
     saveBest();
-    g.mode = 'title'; g.paused = false;
+    touchWays(8);
+    g.mode = 'title'; g.paused = false; g.pend = null;
     CT.blank(nes0, function () { drawTitleScreen(); });
     Au.stop(); Au.play('simon_title');
+  }
+  // SOUND CHECK（只靠聲音的模式開局前）：由低到高輪播四個鍵音，A = 聽得到、B = 回標題（提示靜音開關 / 音量）
+  function enterCheck() {
+    g.mode = 'check'; g.ct = 0; g.lit = -1;
+    Au.stop();
+    CT.blank(nes0, function () { drawCheckScreen(); });
+  }
+  var CHECK_ORDER = [2, 3, 1, 0];          // ↓ ← → ↑（低 → 高）
+  function updateCheck() {
+    g.ct++;
+    if (g.ct % CHECK_STEP === 1) { var k = CHECK_ORDER[((g.ct / CHECK_STEP) | 0) % 4]; Au.tone(k, 16); g.checkKey = k; }
+    if (pressed(BTN.A) || (pressed(BTN.START) && !held(BTN.SELECT))) { g.soundOk = true; sfx('simon_ok'); startGame(); return; }
+    if (pressed(BTN.B)) { g.titleMsgT = 240; toTitle(); }
   }
   function setPhase(p) {
     g.phase = p; g.pt = 0;
     if (p === 'intro') { g.pos = 0; g.showI = 0; g.showOn = false; }
-    if (p === 'input') { g.pos = 0; g.idle = 0; }
+    if (p === 'input') { g.pos = 0; g.idle = 0; g.pend = null; g.goodWait = 0; }   // goodWait 也清掉（重開局時不會帶進上一局的過關）
   }
   function light(k, t, vis) { g.lit = k; g.litT = t; g.litVis = vis; }
 
@@ -207,12 +232,14 @@
     g.score = Math.min(999999, g.score + bonus);
     g.maxDone = Math.max(g.maxDone, g.len);
     if (g.maxDone > g.best) g.best = g.maxDone;
-    g.msg = 'GOOD! +' + bonus; g.msgT = GOOD_F;
+    var lifeUp = g.len % LIFE_EVERY === 0 && g.lives < MAX_LIVES;
+    if (lifeUp) { g.lives++; g.lifeUps++; }
+    g.msg = 'GOOD! +' + bonus + (lifeUp ? ' LIFE+1' : ''); g.msgT = GOOD_F;
     setPhase('good');
     if (g.len === GOAL_LEN && !g.cleared15) {
       g.cleared15 = true;
       if (g.m.id === 'classic' && g.cheats === 0) g.goal = true;
-      g.msg = 'ECHO MASTER! 15 STEPS'; g.msgT = 150;
+      g.msg = lifeUp ? 'ECHO MASTER! LIFE+1' : 'ECHO MASTER! 15 STEPS'; g.msgT = 150;
       Au.play('simon_clear'); g.musicBack = 70;
       g.pt = -40;
     } else sfx('simon_good');
@@ -231,6 +258,12 @@
 
   function held(b) { return NES.Input.held(b); }
   function pressed(b) { return NES.Input.pressed(b); }
+  // 這一幀按下的方向：剛好一個才算；同一幀兩個方向一起按下（觸控斜方向）= 不判定，等下一個單一方向
+  function dirEdge() {
+    var d = -1, n = 0;
+    for (var i = 0; i < 4; i++) if (pressed(DIR_BTN[i])) { d = i; n++; }
+    return n === 1 ? d : -1;
+  }
 
   function updateTitle() {
     g.blink++;
@@ -256,10 +289,24 @@
       case 'show': updateShow(); break;
       case 'input':
         if (g.goodWait > 0) { if (--g.goodWait === 0) roundClear(); break; }
+        if (g.pend) {
+          // OCTET：方向先到、B 晚到 ≤ B_GRACE 幀 ⇒ 仍是第二組（鍵音 / 判定延後到 B 到或時限到）
+          g.pend.t++;
+          var pd = g.pend.d, nd = dirEdge();
+          if (held(BTN.B)) { g.pend = null; press(pd + 4); break; }
+          if (nd >= 0 || g.pend.t >= B_GRACE) {
+            g.pend = null; press(pd);
+            if (nd >= 0 && g.phase === 'input' && !g.goodWait) g.pend = { d: nd, t: 0 };
+          }
+          break;
+        }
         if (pressed(BTN.SELECT) || (g.m.keys === 4 && pressed(BTN.B))) { replay(); break; }
-        var d = -1;
-        for (var i = 0; i < 4; i++) if (pressed(DIR_BTN[i])) { d = i; break; }
-        if (d >= 0) { press(d + (g.m.keys === 8 && held(BTN.B) ? 4 : 0)); break; }
+        var d = dirEdge();
+        if (d >= 0) {
+          if (g.m.keys === 8 && !held(BTN.B) && B_GRACE > 0) g.pend = { d: d, t: 0 };
+          else press(d + (g.m.keys === 8 && held(BTN.B) ? 4 : 0));
+          break;
+        }
         if (++g.idle >= INPUT_TIMEOUT) miss(expectKey());
         break;
       case 'good':
@@ -284,6 +331,7 @@
 
   /* ============================== 畫面 ============================== */
   function padPal(i) {
+    if (g.mode === 'check') return g.checkKey === i && (g.ct % CHECK_STEP) < 16 && (g.ct % CHECK_STEP) > 0 ? LIT[i] : DIM[i];
     if (g.mode !== 'play') return LIT[i];
     if (g.lit >= 0 && g.litVis && (g.lit & 3) === i && !g.paused) return g.lit >= 4 ? LIT2[i] : LIT[i];
     return DIM[i];
@@ -324,17 +372,18 @@
 
   function drawTitleScreen() {
     blankAll();
-    stars(23, 70, function (c, r) { return (r >= 1 && r <= 5) || (r >= 6 && r <= 28 && c >= 1 && c <= 30); });
-    text(4, 2, 'STARDUST');
-    bigText(13, 1, 'ECHO');
-    text(4, 4, 'FOLLOW THE STARS');
+    // fix-r8 P3-2 / P3-3：內容從名稱表第 2 列起（第 0、1 列留白不貼頂）；段落之間一律空一列
+    stars(23, 70, function (c, r) { return r <= 6 || (r >= 7 && r <= 28 && c >= 1 && c <= 30); });
+    text(4, 3, 'STARDUST');
+    bigText(13, 2, 'ECHO');
+    text(4, 5, 'FOLLOW THE STARS');
     // 對照圖：迷你十字（各自的調色盤）+ 方向 / 名稱 / 音高
     block(4, 16, 2, 2, 'M0_', 0); block(6, 18, 2, 2, 'M1_', 1); block(4, 20, 2, 2, 'M2_', 2); block(2, 18, 2, 2, 'M3_', 3);
     text(10, 16, 'UP    STAR    HIGH');
     text(10, 17, 'RIGHT MOON');
     text(10, 18, 'LEFT  COMET');
     text(10, 19, 'DOWN  PLANET  LOW');
-    text(10, 21, 'OCTET: B+DIR = 4 MORE');
+    text(10, 21, 'OCTET: HOLD B + DIR');
     text(2, 23, 'SELECT/B: WATCH AGAIN (-PTS)');
     text(2, 25, 'START PAUSE  C/$ = CHEAT');
     text(2, 26, 'HOLD START+SELECT: MENU');
@@ -345,12 +394,13 @@
   function drawTitleValues() {
     for (var i = 0; i < MODES.length; i++) {
       var m = MODES[i];
-      text(6, 6 + i, pad(m.name, 8));
-      text(15, 6 + i, 'BEST ' + num(CT.load('simon', m.key, 0), 2));
+      text(6, 7 + i, pad(m.name, 8));
+      text(15, 7 + i, 'BEST ' + num(CT.load('simon', m.key, 0), 2));
     }
     var m0 = MODES[g.menu];
-    text(4, 11, pad(m0.desc[0], 26)); text(4, 12, pad(m0.desc[1], 26));
-    text(11, 28, (g.blink >> 5) & 1 ? '          ' : 'PUSH START');
+    text(4, 13, pad(m0.desc[0], 26)); text(4, 14, pad(m0.desc[1], 26));
+    if (g.titleMsgT > 0) { g.titleMsgT--; text(2, 28, ctr(((g.titleMsgT >> 5) & 1) ? 'NO SOUND? CHECK SILENT' : 'SWITCH AND VOLUME', 28)); }
+    else text(2, 28, ctr((g.blink >> 5) & 1 ? '' : 'PUSH START', 28));
   }
 
   function drawPlayScreen() {
@@ -363,8 +413,24 @@
     put(CORE.c, CORE.r, A.t('CR_TL')); put(CORE.c + 5, CORE.r, A.t('CR_TR'));
     put(CORE.c, CORE.r + 5, A.t('CR_BL')); put(CORE.c + 5, CORE.r + 5, A.t('CR_BR'));
     text(2, 2, 'STAR ECHO');
-    text(HUDC, 4, 'MODE'); text(HUDC, 7, 'STEP'); text(HUDC, 10, 'SCORE'); text(HUDC, 13, 'BEST'); text(HUDC, 16, 'LIFE'); text(HUDC, 19, 'AGAIN');
+    text(HUDC, 7, 'STEP'); text(HUDC, 10, 'SCORE'); text(HUDC, 13, 'BEST'); text(HUDC, 16, 'LIFE'); text(HUDC, 19, 'AGAIN');
     renderPlay();
+    flush(ppu0, true);
+  }
+  function drawCheckScreen() {
+    blankAll();
+    stars(9, 50, function (c, r) { return r <= 1 || (r >= 3 && r <= 27 && c >= 1 && c <= 30); });
+    text(10, 3, 'SOUND CHECK');
+    text(4, 5, 'EAR MODE IS SOUND ONLY.');
+    // 中央一顆迷你十字：正在響的那顆跟著亮（這頁是檢查，所以可以看）
+    block(14, 8, 2, 2, 'M0_', 0); block(16, 10, 2, 2, 'M1_', 1); block(14, 12, 2, 2, 'M2_', 2); block(12, 10, 2, 2, 'M3_', 3);
+    text(4, 16, 'YOU SHOULD HEAR 4 NOTES,');
+    text(4, 17, 'LOW TO HIGH, OVER AND OVER.');
+    text(4, 19, 'HEAR THEM?');
+    text(6, 20, 'A = YES, START');
+    text(6, 21, 'B = NO, BACK');
+    text(4, 24, 'NO SOUND? CHECK THE PHONE');
+    text(4, 25, 'SILENT SWITCH AND VOLUME.');
     flush(ppu0, true);
   }
   function coreText() {
@@ -398,7 +464,7 @@
     var ct = coreText();
     text(CORE.c, CORE.r + 2, ctr(ct[0], 6));
     text(CORE.c, CORE.r + 3, ctr(ct[1], 6));
-    text(HUDC, 5, pad(g.m.name, 7));
+    text(13, 2, '- ' + pad(g.m.name, 7));            // 模式名放上方標題列（不再貼到第 31 欄）
     text(HUDC, 8, num(Math.min(g.len, 99), 2) + (g.m.id === 'classic' ? '/' + GOAL_LEN : '   '));
     text(HUDC, 11, num(g.score, 6));
     text(HUDC, 14, num(Math.max(g.best, g.maxDone), 2));
@@ -434,7 +500,7 @@
     if (g.mode === 'play' && g.bheld && !g.paused && g.phase === 'input') {
       ppu0.sprite(slot++, { x: CORE.c * 8 + 20, y: CORE.r * 8 + 4, tile: A.s('BADGE'), pal: 1 });
     }
-    if (g.mode === 'title') ppu0.sprite(slot++, { x: 3 * 8, y: (6 + g.menu) * 8, tile: A.s('CUR'), pal: 3 });
+    if (g.mode === 'title') ppu0.sprite(slot++, { x: 3 * 8, y: (7 + g.menu) * 8, tile: A.s('CUR'), pal: 3 });
     for (i = slot; i < 48; i++) ppu0.sprite(i, null);
   }
 
@@ -473,6 +539,7 @@
   function bot() {
     if (!bm) botReset();
     bm.t++;
+    if (g.mode === 'check') return (bm.t & 15) === 0 ? BTN.A : 0;     // 聽得到（機器人有讀 APU）
     if (g.mode === 'title') {
       var want0 = parseInt((CT.query && CT.query('mode')) || '0', 10) || 0;
       if (g.menu !== want0) return (bm.t & 7) === 0 ? BTN.DOWN : 0;
@@ -498,7 +565,7 @@
       var order = g.m.rev ? bm.mem.slice().reverse() : bm.mem;
       if (bm.idx >= order.length) return 0;
       var kk = order[bm.idx++], d = DIR_BTN[kk & 3];
-      if (kk >= 4) bm.q = [BTN.B, BTN.B | d, 0];
+      if (kk >= 4) { bm.q = [BTN.B, BTN.B | d]; for (var hb = 0; hb < 10; hb++) bm.q.push(BTN.B); bm.q.push(0); }   // 像人一樣按住 B 到方向放開之後
       else bm.q = [d, 0];
       bm.wait = Math.max(0, bm.lag - 1);
       return bm.q.shift();
@@ -547,17 +614,18 @@
     update: function (nes) {
       g.frames++;
       if (g.mode === 'title') updateTitle();
+      else if (g.mode === 'check') updateCheck();
       else updatePlay();
       Au.tick();
     },
     draw: function (nes) {
       if (g.mode === 'title') drawTitleValues();
-      else renderPlay();
+      else if (g.mode === 'play') renderPlay();
       setPalettes(false);
       flush(ppu0, false);
       drawSprites();
     },
-    exit: function (nes) { saveBest(); Au.stop(); },
+    exit: function (nes) { saveBest(); Au.stop(); touchWays(8); },
     get backTile() { if (!A) A = SM.Art.make(); return { tile: A.s('DOT'), pal: 0 }; },
     state: function () {
       if (!g) return null;
@@ -566,6 +634,7 @@
         lit: g.lit, litVis: g.litVis, lives: g.lives, score: g.score, best: g.best, maxDone: g.maxDone,
         replayUsed: g.replayUsed, replays: g.replays, misses: g.misses, idle: g.idle, goal: g.goal, cleared15: g.cleared15,
         cheats: g.cheats, continues: g.continues, paused: g.paused, msg: g.msgT > 0 ? g.msg : '', bheld: g.bheld,
+        pend: g.pend ? g.pend.d : -1, lifeUps: g.lifeUps, soundOk: g.soundOk, titleMsgT: g.titleMsgT,
         music: Au.current, lastSfx: Au.lastSfx, lastTone: Au.lastTone, toneCount: Au.toneCount,
         queue: pending(), ntWrites: ntWrites, ntPeak: ntPeak, frames: g.frames, seed: g.seed
       };
@@ -584,7 +653,9 @@
     phase: function (p) { setPhase(p); },
     press: function (k) { press(k); },
     timing: showTiming, expect: function () { return expectKey(); },
-    consts: { GOAL_LEN: GOAL_LEN, INPUT_TIMEOUT: INPUT_TIMEOUT, LIVES: LIVES, READY_F: READY_F, INTRO_F: INTRO_F, NT_LIMIT: NT_LIMIT },
+    consts: { GOAL_LEN: GOAL_LEN, INPUT_TIMEOUT: INPUT_TIMEOUT, LIVES: LIVES, MAX_LIVES: MAX_LIVES, LIFE_EVERY: LIFE_EVERY, B_GRACE: B_GRACE, READY_F: READY_F, INTRO_F: INTRO_F, NT_LIMIT: NT_LIMIT },
+    soundOk: function (v) { g.soundOk = !!v; },
+    grace: function (n) { B_GRACE = n | 0; },          // 測試用：0 = 舊版（方向按下那一幀就判組別）
     guard: function (on) { guardOn = !!on; guardReads = 0; }, guardReads: function () { return guardReads; },
     pending: pending, rank: rankOf, seeLit: function () { return seeLit(); }, hear: function () { return hearTone(); },
     flushAll: function () { CT.blank(nes0, function () { flush(ppu0, true); }); }

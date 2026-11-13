@@ -22,13 +22,18 @@
   var RH = CT.Rhythm = CT.Rhythm || {};
 
   var MODES = ['CROSS', 'DUO', 'ORBIT', 'BLADE'];
+  // win = [PERFECT, GREAT, GOOD]（幀，|按下 − 音符| ≤ 值）。fix-r8（qa-r8 P2-1）：σ 5 幀的新手模型用真人濾鏡實測後放寬；
+  //   NORMAL 3 / 6 / 10、EASY 再寬一級 4 / 8 / 12、HARD 維持原本 2 / 5 / 8（熟手挑戰）。drain = MISS 扣能量。
   var DIFFS = [
-    { id: 'EASY', grid: 4, gap: 26, T: 96, bladeT: 96, drain: 3 },
-    { id: 'NORMAL', grid: 2, gap: 11, T: 72, bladeT: 76, drain: 5 },
-    { id: 'HARD', grid: 1, gap: 7, T: 56, bladeT: 60, drain: 7 }
+    { id: 'EASY', grid: 4, gap: 26, T: 96, bladeT: 96, drain: 3, win: [4, 8, 12] },
+    { id: 'NORMAL', grid: 2, gap: 11, T: 72, bladeT: 76, drain: 4, win: [3, 6, 10] },
+    { id: 'HARD', grid: 1, gap: 7, T: 56, bladeT: 60, drain: 7, win: [2, 5, 8] }
   ];
-  var LATE = 8;                 // GOOD 窗口（幀）＝ 音符過了判定點還留在畫面上的幀數
-  var WIN = { PERFECT: 2, GREAT: 5, GOOD: 8 };
+  function winOf(diff) { var w = DIFFS[diff].win; return { PERFECT: w[0], GREAT: w[1], GOOD: w[2] }; }
+  function lateOf(diff) { return DIFFS[diff].win[2]; }   // GOOD 窗口 ＝ 音符過了判定點還留在畫面上的幀數
+  var WIN = winOf(1);           // NORMAL（goal 難度）的窗口，給測試 / 說明用
+  var LATE = lateOf(1);
+  var LATE_MAX = 12;            // 所有難度中最寬的 GOOD 窗口（精靈配額計算用上限）
   var LR_MAX = 6, BLADE_ROW_MAX = 3;
 
   var SEMI = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
@@ -61,7 +66,7 @@
 
   function build(trackIdx, mode, diff) {
     var tr = RH.TRACKS[trackIdx], song = RH.Audio.SONGS[tr.key], D = DIFFS[diff], sp = tr.speed;
-    var T = mode === 'BLADE' ? D.bladeT : D.T, first = tr.countIn * 16;
+    var T = mode === 'BLADE' ? D.bladeT : D.T, first = tr.countIn * 16, LATE = D.win[2];   // 畫面以「玩家感知時間」s − OFFSET 繪製 ⇒ 在畫面上的時間長度不受 OFFSET 影響
     var on = onsets(song), notes = [], lastT = -999, pm = null, tog = 0, side = 0, hTog = [0, 0];
     function lrCount(t) { var n = 0; for (var i = notes.length - 1; i >= 0 && notes[i].t > t - (T + LATE); i--) if (notes[i].lane >= 2) n++; return n; }
     function laneOk(lane, t, minF) { for (var i = notes.length - 1; i >= 0 && notes[i].t > t - minF; i--) if (notes[i].lane === lane) return false; return true; }
@@ -123,7 +128,7 @@
 
   // 驗證：全部 onset 對得上、間距、配額。回傳 {ok, problems[], n, maxLR, maxRow}
   function validate(ch) {
-    var tr = RH.TRACKS[ch.track], song = RH.Audio.SONGS[tr.key], on = onsets(song), rows = {}, probs = [], D = DIFFS[ch.diff];
+    var tr = RH.TRACKS[ch.track], song = RH.Audio.SONGS[tr.key], on = onsets(song), rows = {}, probs = [], D = DIFFS[ch.diff], LATE = D.win[2];
     on.forEach(function (o) { rows[o.row] = 1; });
     var maxLR = 0, maxRow = 0;
     ch.notes.forEach(function (n, i) {
@@ -144,6 +149,6 @@
     return { ok: !probs.length, problems: probs.slice(0, 5), n: ch.notes.length, maxLR: maxLR, maxRow: maxRow };
   }
 
-  RH.Chart = { MODES: MODES, DIFFS: DIFFS, WIN: WIN, LATE: LATE, LR_MAX: LR_MAX, BLADE_ROW_MAX: BLADE_ROW_MAX,
+  RH.Chart = { MODES: MODES, DIFFS: DIFFS, WIN: WIN, LATE: LATE, LATE_MAX: LATE_MAX, winOf: winOf, lateOf: lateOf, LR_MAX: LR_MAX, BLADE_ROW_MAX: BLADE_ROW_MAX,
     onsets: onsets, build: build, get: get, validate: validate, midiOf: midiOf };
 })();

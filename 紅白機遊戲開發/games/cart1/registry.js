@@ -54,6 +54,8 @@
     CT.blank(nes, function () {
       try { if (nes.music && nes.music.stop) nes.music.stop(); } catch (e) { }
       try { if (nes.music && nes.music.stopSfx) nes.music.stopSfx(); } catch (e) { }
+      // R8 qa P2-7：遊戲可用 NES.Touch.setWays(4) 改成四方向十字鍵；換遊戲時一律回預設 8 方向
+      try { if (NES.Touch && NES.Touch.setWays) NES.Touch.setWays(8); } catch (e) { }
       if (!ppu) return;
       if (ppu.split) ppu.split(null);
       if (ppu.scroll) ppu.scroll(0, 0);

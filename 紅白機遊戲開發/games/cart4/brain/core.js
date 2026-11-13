@@ -25,7 +25,10 @@
     HZ: 60.0988,
     want: new Int16Array(32 * 30), have: new Int16Array(32 * 30),
     wantA: new Int8Array(16 * 15), haveA: new Int8Array(16 * 15),
-    q: [], qa: [], peakQ: 0, sprN: 0, sprUsed: 0, _seed: 0x2468
+    q: [], qa: [], peakQ: 0, sprN: 0, sprUsed: 0, _seed: 0x2468,
+    // fix-r8（qa-r8 P3-2）：HUD 在上方的模式整片往下移 8 px（主捲動 y = −8、split 線 +8），HUD 不貼可見區 y = 0；
+    // 精靈跟著加 C.oy（main.js 每幀依模式設定）。
+    SHIFT: 8, oy: 0
   };
 
   C.seed = function (n) { C._seed = (n >>> 0) & 0x7fffffff; if (!C._seed) C._seed = 1; };
@@ -134,6 +137,7 @@
   C.sprBegin = function () { C.sprN = 0; };
   C.spr = function (x, y, tile, pal, flipH, flipV) {
     if (C.sprN >= OAM_MAX) return false;
+    y += C.oy;
     if (y > 239 || y < -7 || x < -7 || x > 255) return false;
     C.nes.ppu.sprite(C.sprN++, { x: x | 0, y: y | 0, tile: tile, pal: pal | 0, flipH: !!flipH, flipV: !!flipV });
     return true;

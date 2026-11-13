@@ -6,11 +6,15 @@
       重看一次（扣分不扣命、每回合一次）、倒著輸入、8 鍵（B + 方向）、暫停 BGM、密技（遊玩 +1 命 / 結束原地續關 /
       標題無效 / goal 失效）、§6 規則、機器人只讀畫面 / 聲音（延遲 0 / 14 / 24 幀都過 goal；EAR 純聽音也過 8 步）、
       每線 ≤ 8 精靈、overFrames 0。
+fix-r8（qa-r8）：OCTET 方向先按 B 晚到 ≤ 4 幀仍判第二組（P2-6）、同一幀兩方向（觸控斜方向）不判定 + setWays(4/8)（P2-7）、
+      HUD / 標題第 0~1 列留白與段落空列（P3-2 / P3-3）、goal 前不到最快 + 每 5 步回 1 命（P3-4）、EAR 開局前 SOUND CHECK（P3-6）、
+      鍵音不是大 / 小三和弦（P3-7）、真人濾鏡（tools/human_filter.js）下的 goal 與 OCTET 量測。
 作法：Playwright 開 `cart4.html?game=simon&debug=1&scale=1&mute=1`，`NES.Input.inject` + `CT.Simon.dev`。
 
 用法：../卡比之星/.venv/bin/python games/cart4/test_simon.py [-v]
 結束碼：0 全過 / 1 有失敗 / 2 環境錯誤
 """
+import os
 import pathlib
 import sys
 
@@ -19,6 +23,7 @@ from playwright.sync_api import sync_playwright
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 BASE = (ROOT / 'cart4.html').as_uri() + '?debug=1&scale=1&mute=1&game=simon'
 VERBOSE = '-v' in sys.argv
+QUICK = os.environ.get('NES_QUICK') == '1' or '--quick' in sys.argv   # run_all.sh --quick 設 NES_QUICK=1：略過長時間的真人模型 / 蒙地卡羅（完整 run_all 照跑）
 results = []
 A, B, SELECT, START, UP, DOWN, LEFT, RIGHT = 1, 2, 4, 8, 16, 32, 64, 128
 DIRS = [UP, RIGHT, DOWN, LEFT]
@@ -70,6 +75,73 @@ RUN = r"""
 """
 
 
+# ---------------- 真人模型（qa-r8 的 tools/human_filter.js）----------------
+# 在 CT.current.bot 外面包一層：機器人自己的 &lag= 當基本反應延遲；每次按下另加 N(mj, sj) 幀；換組（120 幀內）+U(sw0, sw1)；
+# lapse 機率分心 +lapseF 幀；兩次按下最少隔 refr 幀。P2-6 另加「兩手不同步」層（LATE_B_JS）：B 以機率 p 晚方向 1..maxL 幀。
+HUMAN_JS = (ROOT / 'tools' / 'human_filter.js').read_text(encoding='utf-8')
+LATE_B_JS = r"""
+window.__lateBInstall = function (o) {
+  // 「和弦」層（包在真人濾鏡外面）：真人濾鏡把每個鍵各自延遲，會把「B + 方向」拆散（B 放開了方向才到）；
+  // 人按和弦時會一直按住 B 直到方向按下、隨即放開。所以：濾鏡輸出 B 按下後，B 保持到方向按下後 3 幀（最多 40 幀）就放。
+  // 兩手不同步：以機率 o.p 讓 B 改成「方向按下後 1..o.maxL 幀」才出現（qa-r8：兩手同按常見差 1~2 幀，兩指觸控更大）。
+  var g = CT.current, inner = g.bot.bind(g), s = o.seed | 0 || 9, t = 0, prevIn = 0, prevDir = 0, open = -1, late = 0, hold = -1, lateAt = -1;
+  function rnd() { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; }
+  window.__lateB = { n: 0, late: 0 };
+  g.bot = function (nes) {
+    t++;
+    var m = inner(nes) | 0, bRise = (m & 2) && !(prevIn & 2), dir = m & 0xF0, dRise = dir && !prevDir;
+    prevIn = m; prevDir = dir;
+    if (bRise) { __lateB.n++; open = t; late = rnd() < o.p ? 1 + Math.floor(rnd() * o.maxL) : 0; if (late) __lateB.late++; hold = -1; lateAt = -1; }
+    if (open >= 0) {
+      if (dRise) { if (late) { lateAt = t + late; hold = lateAt + 4; } else hold = t + 3; open = -1; }
+      else if (t - open > 40) open = -1;
+    }
+    // B 完全由這層決定（濾鏡的 B 只用來偵測「要按和弦了」），和弦結束就放開，不會拖到下一個低音
+    var on = open >= 0 ? !late : (hold >= 0 && t <= hold && (lateAt < 0 || t >= lateAt));
+    return on ? (m | 2) : (m & ~2);
+  };
+};
+"""
+HUM_RUN = r"""
+(o) => {
+  const r = { f: 0, ml: 0, over0: __nes.stats().budget.overFrames | 0, maxLen: 0 };
+  for (let i = 0; i < o.n; i++) {
+    __nes.step(1); r.f++;
+    r.ml = Math.max(r.ml, __nes.stats().maxSpritesLine | 0);
+    const st = GAME.state().s; r.maxLen = Math.max(r.maxLen, st.maxDone | 0);
+    if (o.until === 'goal' && GAME.state().goal) break;
+    if (o.until === 'len' && st.maxDone >= o.len) break;
+    if (st.phase === 'over') break;
+  }
+  r.over = (__nes.stats().budget.overFrames | 0) - r.over0;
+  r.s = GAME.state().s; r.goal = GAME.state().goal;
+  return r;
+}
+"""
+
+
+def hum_run(page, query, seed, n, until='goal', ln=0, mj=3, sj=3, refr=4, lapse=0.03, grace=None, late=None):
+    fresh(page, '&bot=1&seed=%d&' % seed + query)
+    if grace is not None:
+        page.evaluate('(n) => CT.Simon.dev.grace(n)', grace)
+    page.evaluate('() => {' + HUMAN_JS + '}')
+    o = dict(groups={'1': 255}, swWin=120, refr=refr, lapseF=30, seed=seed * 7 + 3, mj=mj, sj=sj, sw0=10, sw1=20, lapse=lapse)
+    page.evaluate('(o) => { o.on = function () { var s = CT.current.state(); return s && s.mode === "play"; }; __humInstall(o); }', o)
+    if late:
+        page.evaluate('() => {' + LATE_B_JS + '}')
+        page.evaluate('(o) => __lateBInstall(o)', dict(p=late[0], maxL=late[1], seed=seed * 13 + 1))
+    r = page.evaluate(HUM_RUN, {'n': n, 'until': until, 'len': ln})
+    page.evaluate('() => CT.Simon.dev.grace(4)')
+    return r
+
+
+def rows_text(page):
+    return page.evaluate("""() => { const p = __nes.nes().ppu, A = CT.Simon.Art.make(); const rows = [];
+        for (let r = 0; r < 30; r++) { let s = ''; for (let c = 0; c < 32; c++) { const t = p.getTile(0, c, r); let ch = t ? '#' : ' ';
+          if (t) for (const k of 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+:/$=-().,?') if (A.ch(k) === t) { ch = k; break; } s += ch; } rows.push(s); }
+        return rows; }""")
+
+
 def main():
     try:
         pw = sync_playwright().start()
@@ -111,7 +183,15 @@ def main():
     ok('音高順序 ↓ < ← < → < ↑（兩組都是）', all(mid[g + 2] < mid[g + 3] < mid[g + 1] < mid[g + 0] for g in (0, 4)), mid)
     ok('四方向音色（占空比 + 包絡）兩兩不同、第二組加八度閃爍', len(set((k['duty'], k['kind']) for k in keys[:4])) == 4 and all(k.get('shimmer') for k in keys[4:]) and not any(k.get('shimmer') for k in keys[:4]), [(k['duty'], k['kind']) for k in keys])
     fr = page.evaluate("() => CT.Simon.Audio.toneFrames(4, 20).filter(f => f.note).map(f => f.note)")
-    ok('第二組鍵音逐幀在本音與高八度間切換（G#5 / G#6）', 'G#5' in fr and 'G#6' in fr, fr[:6])
+    ok('第二組鍵音逐幀在本音與高八度間切換（F6 / F7）', 'F-6' in fr and 'F-7' in fr, fr[:6])
+    # P3-7：四鍵（以及第二組）都不是大 / 小三和弦，也不是舊版 A 大三和弦；最小音程 ≥ 5 半音；八度閃爍音不撞任何一顆
+    def has_triad(ms):
+        pcs = set(m % 12 for m in ms)
+        return any(((r + 4) % 12 in pcs or (r + 3) % 12 in pcs) and (r + 7) % 12 in pcs for r in pcs)
+    g1, g2 = sorted(mid[:4]), sorted(mid[4:])
+    ok('P3-7 鍵音原創：兩組四音都不含大 / 小三和弦（舊版 A4/C#5/E5/A5 = A 大三和弦）', not has_triad(g1) and not has_triad(g2) and set(g1) != {69, 73, 76, 81}, (g1, g2))
+    ok('P3-7 第一組相鄰最小音程 ≥ 5 半音（比舊版 3 半音好分辨）、8 音 + 4 個閃爍八度共 12 個音高互不相同',
+       min(b_ - a_ for a_, b_ in zip(g1, g1[1:])) >= 5 and len(set(mid + [m + 12 for m in mid[4:]])) == 12, (g1, mid))
     play = page.evaluate("() => { const s = CT.Simon.Audio.SONGS.simon_play; const ch = {}; s.patterns.forEach(p => Object.keys(p).forEach(k => { if (p[k].some(r => r)) ch[k] = 1; })); return Object.keys(ch).sort(); }")
     ok('遊玩 BGM 只用 tri + noi（p1 留給鍵音、p2 留給系統音效）', play == ['noi', 'tri'], play)
 
@@ -123,7 +203,11 @@ def main():
     txt = '\n'.join(tt)
     ok('§6-5 標題寫著 HOLD START+SELECT: MENU', 'HOLD START+SELECT: MENU' in txt)
     ok('§6-6 標題寫著 C/★ = CHEAT', 'C/$ = CHEAT' in txt)
-    ok('標題有十字鍵對照（UP STAR / RIGHT MOON / LEFT COMET / DOWN PLANET / B+DIR）', all(w in txt for w in ['UP    STAR', 'RIGHT MOON', 'LEFT  COMET', 'DOWN  PLANET', 'B+DIR']))
+    ok('標題有十字鍵對照（UP STAR / RIGHT MOON / LEFT COMET / DOWN PLANET / HOLD B + DIR）', all(w in txt for w in ['UP    STAR', 'RIGHT MOON', 'LEFT  COMET', 'DOWN  PLANET', 'HOLD B + DIR']))
+    ok('P3-2 標題第 0、1 列全空（大字 ECHO 從第 2 列起，不貼可見區頂端）', not tt[0].strip() and not tt[1].strip() and 'STARDUST' in tt[3], tt[:4])
+    mr = [i for i, r in enumerate(tt) if 'BEST' in r]
+    dr = [i for i, r in enumerate(tt) if 'CHAIN GROWS' in r]
+    ok('P3-3 標題：模式清單與說明之間空一列', mr and dr and dr[0] - mr[-1] == 2 and not tt[mr[-1] + 1].strip(), (mr, dr))
     page.evaluate('() => CT.cheat()')
     ok('§6-1 標題按密技無效', S(page)['mode'] == 'title' and S(page)['cheats'] == 0)
 
@@ -133,7 +217,8 @@ def main():
     tap(page, UP)
     st = S(page)
     ok('開局 READY 倒數（%d 幀），期間按鍵無效' % c['READY_F'], st['phase'] == 'ready' and st['pos'] == 0 and st['lives'] == 3, st['phase'])
-    ok('展示節奏表（幀）：1~5 步 30+12、6~9 步 24+10、10~13 步 19+8、14+ 步 15+7', page.evaluate('() => [1,6,10,14].map(n => CT.Simon.dev.timing(n).join("+")).join(",")') == '30+12,24+10,19+8,15+7')
+    ok('展示節奏表（幀）：1~5 步 30+12、6~9 步 24+10、10~15 步 19+8、16+ 步 15+7', page.evaluate('() => [1,6,10,15,16].map(n => CT.Simon.dev.timing(n).join("+")).join(",")') == '30+12,24+10,19+8,19+8,15+7')
+    ok('P3-4 goal（%d 步）之前最快只到 19+8，最快 15+7 從第 16 步起' % c['GOAL_LEN'], page.evaluate('(n) => CT.Simon.dev.timing(n)[0]', c['GOAL_LEN']) == 19 and page.evaluate('(n) => CT.Simon.dev.timing(n)[0]', c['GOAL_LEN'] + 1) == 15)
     until(page, 'show')
     page.evaluate('() => __nes.step(3)')
     st = S(page)
@@ -216,6 +301,25 @@ def main():
         tap(page, DIRS[k0], 20)
     ok('OCTET：按住 B + 方向 = 第二組、只按方向 = 第一組（第 1 顆 k=%d 答對）' % k0, S(page)['maxDone'] == 1 and S(page)['lastTone'] == k0, (S(page)['maxDone'], S(page)['lastTone']))
 
+    # P3-6 EAR 開局前 SOUND CHECK：輪播四個鍵音；B = 回標題並提示靜音開關；A = 開始
+    page.evaluate('() => CT.Simon.dev.soundOk(false)')
+    start(page, 1, 51)
+    st = S(page)
+    t0 = st['toneCount']
+    page.evaluate('() => __nes.step(100)')
+    ck = rows_text(page)
+    ok('P3-6 EAR 開局 → 先進 SOUND CHECK（不是直接開始）、畫面寫 HEAR THEM? / A = YES / B = NO / SILENT SWITCH', st['mode'] == 'check' and 'SOUND CHECK' in '\n'.join(ck) and 'SILENT SWITCH' in '\n'.join(ck) and 'A = YES' in '\n'.join(ck), st['mode'])
+    ok('P3-6 SOUND CHECK 期間輪播四個鍵音（100 幀 ≥ 4 個）', S(page)['toneCount'] - t0 >= 4, S(page)['toneCount'] - t0)
+    tap(page, B, 4)
+    st = S(page)
+    ok('P3-6 SOUND CHECK 按 B → 回標題，並在標題提示 NO SOUND? CHECK SILENT / SWITCH AND VOLUME', st['mode'] == 'title' and st['titleMsgT'] > 0 and any('CHECK SILENT' in r or 'SWITCH AND VOLUME' in r for r in rows_text(page)), (st['mode'], st['titleMsgT']))
+    start(page, 1, 51)
+    tap(page, A, 2)
+    st = S(page)
+    ok('P3-6 SOUND CHECK 按 A → 開始 EAR；同一次進入後再開 EAR 不再問', st['mode'] == 'play' and st['gameMode'] == 'ear' and st['soundOk'], (st['mode'], st['gameMode']))
+    start(page, 0, 51)
+    ok('P3-6 CLASSIC（有亮燈）不需要 SOUND CHECK', S(page)['mode'] == 'play')
+
     # EAR：展示時不亮燈但有聲音；EYE：亮燈但沒聲音
     start(page, 1, 51)
     until(page, 'show')
@@ -226,6 +330,77 @@ def main():
     until(page, 'show')
     page.evaluate('() => __nes.step(3)')
     ok('EYE：展示時亮燈，但整局不發鍵音', page.evaluate('() => CT.Simon.dev.seeLit()') == page.evaluate('() => CT.Simon.dev.seq()[0]') and S(page)['toneCount'] == t0)
+
+    # ---------------- fix-r8 P2-6：OCTET 方向先按、B 晚到 ----------------
+    def octet_case(lead, grace=4, b_first=False):
+        start(page, 4, 43)
+        page.evaluate('(n) => CT.Simon.dev.grace(n)', grace)
+        until(page, 'input')
+        k0 = page.evaluate('() => CT.Simon.dev.expect()')
+        d = DIRS[k0 & 3]
+        if b_first:
+            page.evaluate('(d) => { NES.Input.inject(2, 1); __nes.step(1); NES.Input.inject(2 | d, 1); __nes.step(1); NES.Input.inject(2, 3); __nes.step(3); __nes.step(10); }', d)
+        else:
+            # 方向按 lead + 2 幀（人手按住），B 在方向按下後第 lead 幀才按下並按住 6 幀
+            page.evaluate('([d, L]) => { for (let i = 0; i < L; i++) { NES.Input.inject(d, 1); __nes.step(1); } for (let i = 0; i < 6; i++) { NES.Input.inject(2 | (i < 2 ? d : 0), 1); __nes.step(1); } __nes.step(10); }', [d, lead])
+        st = S(page)
+        page.evaluate('() => CT.Simon.dev.grace(4)')
+        return k0, st
+    k0, st = octet_case(0, b_first=True)
+    ok('P2-6 OCTET：B 先按再按方向 → 第二組（當幀判定）', st['lastTone'] == (k0 | 4), (k0, st['lastTone']))
+    for lead in (1, 2, 4):
+        k0, st = octet_case(lead)
+        ok('P2-6 OCTET：方向先 %d 幀、B 才按下 → 仍判第二組（B_GRACE 4 幀）' % lead, st['lastTone'] == (k0 | 4), (k0, st['lastTone'], st['phase']))
+    k0, st = octet_case(5)
+    ok('P2-6 OCTET：方向先 5 幀才按 B → 超過容錯，判第一組', st['lastTone'] == (k0 & 3), (k0, st['lastTone']))
+    k0, st = octet_case(2, grace=0)
+    ok('P2-6 對照組（grace 0 = 舊版）：方向先 2 幀 → 判成第一組（qa-r8 重現）', st['lastTone'] == (k0 & 3), (k0, st['lastTone']))
+    start(page, 4, 43)
+    until(page, 'input')
+    k0 = page.evaluate('() => CT.Simon.dev.expect()')
+    page.evaluate('(d) => { NES.Input.inject(d, 1); __nes.step(1); }', DIRS[k0 & 3])
+    t1 = S(page)
+    page.evaluate('() => __nes.step(5)')
+    t2 = S(page)
+    ok('P2-6 OCTET：只按方向 → 先暫緩（%d 幀內不出聲），時限到才判第一組' % 4, t1['pend'] == (k0 & 3) and t2['pend'] == -1 and t2['lastTone'] == (k0 & 3), (t1['pend'], t2['pend'], t2['lastTone']))
+
+    # ---------------- fix-r8 P2-7：觸控斜方向 ----------------
+    start(page, 0, 47)
+    until(page, 'input')
+    st0 = S(page)
+    tap(page, UP | RIGHT, 4)
+    st = S(page)
+    ok('P2-7 同一幀兩個方向一起按下（觸控斜方向）→ 不判定（不 MISS、不前進、不出鍵音）', st['phase'] == 'input' and st['pos'] == 0 and st['misses'] == st0['misses'] and st['toneCount'] == st0['toneCount'], (st['phase'], st['pos']))
+    k0 = page.evaluate('() => CT.Simon.dev.expect()')
+    tap(page, DIRS[k0], 4)
+    st = S(page)
+    ok('P2-7 接著按單一方向 → 正常判定', st['pos'] == 1 or st['phase'] in ('good', 'intro'), (st['phase'], st['pos'], st['lastTone']))
+    ways = page.evaluate("""() => { const log = []; const T = NES.Touch || (NES.Touch = {}); const old = T.setWays;
+        T.setWays = (n) => log.push(n);
+        CT.Simon.dev.start(0, 9); __nes.step(1); const inPlay = log.slice();
+        CT.get('simon').exit(__nes.nes()); const afterExit = log.slice();
+        T.setWays = undefined; let err = null; try { CT.Simon.dev.start(0, 9); __nes.step(2); CT.get('simon').exit(__nes.nes()); } catch (e) { err = String(e); }
+        T.setWays = old; return { inPlay, afterExit, err }; }""")
+    ok('P2-7 進入遊玩呼叫 NES.Touch.setWays(4)、exit 設回 8；API 不存在時不報錯', ways['inPlay'][-1:] == [4] and ways['afterExit'][-1:] == [8] and ways['err'] is None, ways)
+    fresh(page)
+
+    # ---------------- fix-r8 P3-4：每 5 步回 1 命 ----------------
+    start(page, 0, 53)
+    page.evaluate('() => CT.Simon.dev.setLen(5)')
+    until(page, 'input')
+    e = page.evaluate('() => CT.Simon.dev.expect()')
+    tap(page, DIRS[(e + 1) % 4], 2)
+    ok('（先 MISS 一次：命 3 → 2）', S(page)['lives'] == 2)
+    until(page, 'input', 400)
+    for k in page.evaluate('() => CT.Simon.dev.seq()'):
+        tap(page, DIRS[k], 3)
+    page.evaluate('() => __nes.step(20)')
+    st = S(page)
+    ok('P3-4 完成第 5 步 → 回 1 命（2 → 3），訊息 LIFE+1', st['lives'] == 3 and st['lifeUps'] == 1, (st['lives'], st['lifeUps'], st['msg']))
+
+    # P3-2 遊玩 HUD 不貼頂（第 0、1 列全空）、模式名不再寫到第 31 欄
+    pr = rows_text(page)
+    ok('P3-2 / P3-3 遊玩畫面第 0、1 列全空；模式名在上方標題列、右側 HUD 不超過第 30 欄', not pr[0].strip() and not pr[1].strip() and 'CLASSIC' in pr[2] and all(len(r.rstrip()) <= 31 for r in pr[3:]), [pr[2]] + [r for r in pr if len(r.rstrip()) > 31][:2])
 
     # §6-3 exit 存最高分
     start(page, 0, 61)
@@ -250,6 +425,30 @@ def main():
         fresh(page, '&bot=1&seed=33&mode=%d' % mode)
         r = page.evaluate(RUN, {'n': 6000, 'until': 'len', 'len': 8})
         ok('機器人 %s：0 失誤完成 8 步' % name, r['s']['maxDone'] >= 8 and r['s']['misses'] == 0 and r['ml'] <= 8 and r['over'] == 0, (r['f'], r['s']['maxDone'], r['s']['misses']))
+
+    if QUICK:
+        print('  SKIP（NES_QUICK）真人濾鏡 CLASSIC 3 種子 + OCTET 失誤率')
+    else:
+        # ---------------- 真人濾鏡（tools/human_filter.js） ----------------
+        hum = []
+        for sd in (21, 22, 23):
+            r = hum_run(page, 'lag=20', sd, 14000)
+            hum.append(r)
+        ok('真人濾鏡（延遲 20 + N(3,3) + 3%% 分心 +30 幀）：CLASSIC 3 / 3 種子達成 goal 15 步（%s 幀）' % [x['f'] for x in hum],
+           all(x['goal'] for x in hum) and all(x['ml'] <= 8 and x['over'] == 0 for x in hum), [(x['f'], x['s']['maxDone'], x['s']['misses']) for x in hum])
+        # OCTET：refr 0 ⇒ B 與方向各自延遲 N(3,3)，常常方向先到；比較舊版（grace 0）與新版（grace 4）的失誤
+        # 失誤率 = 失誤 / 輸入按鍵數（完成 n 步 = 按了 1+2+…+n 下，加上失誤那幾下）
+        oc = {}
+        for sj in (3,):
+            for gr in (0, 4):
+                ms_, pr_ = 0, 0
+                for sd in (31, 32, 33):
+                    r = hum_run(page, 'mode=4&lag=16', sd, 9000, until='len', ln=10, sj=sj, refr=0, lapse=0, grace=gr, late=(0.5, 3))
+                    ms_ += r['s']['misses']; pr_ += r['s']['maxDone'] * (r['s']['maxDone'] + 1) // 2 + r['s']['misses']
+                oc[(sj, gr)] = (ms_, pr_, round(100.0 * ms_ / max(1, pr_), 1))
+            print('  [量測] OCTET 真人濾鏡（N(3,%s) + 50%% 的 B 晚方向 1~3 幀）3 種子：舊版 失誤 %d / %d 下（%s%%）→ 新版 %d / %d 下（%s%%）' % ((sj,) + oc[(sj, 0)] + oc[(sj, 4)]))
+        ok('P2-6 真人濾鏡 OCTET：新版每下失誤率 ≤ 舊版 1/4（%s%% → %s%%）' % (oc[(3, 0)][2], oc[(3, 4)][2]),
+           oc[(3, 4)][2] * 4 <= oc[(3, 0)][2] and oc[(3, 0)][0] > 0, oc)
 
     ok('全程沒有頁面錯誤', not errs, errs[:3])
     browser.close()

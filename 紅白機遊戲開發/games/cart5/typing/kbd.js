@@ -13,6 +13,10 @@
  *   - 收字：a-z（Shift = 大寫）、空白、, . '、Backspace、Enter、Esc（= 暫停）。
  *   - 暫時把 input.js 預設對應的 W A S D Z X / Enter / Shift 從手把移除（`NES.Input.remap`，只在這些鍵都放開時才套用，
  *     避免「按著鍵時改對應 ⇒ 放開收不到」卡鍵）；離開打字狀態 / exit 立刻還原。方向鍵照常移游標。
+ *   - fix-r9-type P3-3：exit / 結算 / 回標題一律 `Phys.release()`（無條件補回被清掉的對應）；另有 100 ms 保險絲
+ *     `Phys.guard()`：目前遊戲已不是 owner 卻還留著 remap → 立刻還原（回選單後 Z / X / WASD / Shift 立即可用）。
+ *   - 觸控（fix-r9-type P3-6）：`Tap`——手機直接點畫面上的鍵就打那個字（canvas 自己的 pointerdown，只收 touch / pen；
+ *     與 Phys 同一個開關），遊戲 update 裡 `Tap.drain()` + `KB.hit(x, y)`；十字鍵游標照舊。
  *   - 打字狀態下 C 是字母不是密技（攔下 registry 的 C 鍵密技；密技改由 ★ 或「暫停畫面按 C」）。
  */
 (function () {
@@ -175,6 +179,17 @@
       spec: spec, keys: keys, rows: rows, byId: byId, edges: edges, edgeTiles: edgeTiles,
       rmin: rmin, rmax: rmax, cmin: cmin, cmax: cmax,
       move: move, path: path, labelAt: labelAt,
+      // fix-r9-type P3-6：NES 畫面座標（x 0~255、y 0~239，名稱表座標）→ 最近的鍵；鍵面外擴 slack px 內才算（預設 5）
+      hit: function (x, y, slack) {
+        var best = null, bd = 1e9, lim = slack === undefined ? 5 : slack;
+        keys.forEach(function (k) {
+          var x0 = k.c * 8, x1 = (k.c + k.w) * 8, y0 = k.r * 8, y1 = y0 + 8;
+          var dx = x < x0 ? x0 - x : (x >= x1 ? x - x1 + 1 : 0), dy = y < y0 ? y0 - y : (y >= y1 ? y - y1 + 1 : 0);
+          var d = Math.max(dx, dy);
+          if (d <= lim && d < bd) { bd = d; best = k; }
+        });
+        return best;
+      },
       // 所有鍵面要用到的字（大小寫兩種都收）
       faceChars: function () {
         var s = { ' ': 1 };
@@ -225,15 +240,35 @@
       if (Phys.installed || !window.addEventListener) return;
       Phys.installed = true;
       window.addEventListener('keydown', onKey, true);
+      // fix-r9-type P3-3 保險絲：任何離開路徑（registry 回選單 / 換卡 / 例外）漏掉 release 時，
+      // 只要目前的遊戲已不是 owner 就立刻還原手把對應（每 100 ms 檢查一次，與幀迴圈無關）。
+      if (window.setInterval) window.setInterval(Phys.guard, 100);
+    },
+    // 目前遊戲已不是 owner（回選單 / 換遊戲）卻還留著 remap → 還原
+    guard: function () {
+      if (!(Phys.remapped || Phys.active || Phys.wantRemap)) return false;
+      if (CT.current && CT.current.id === Phys.owner) return false;
+      Phys.release();
+      return true;
+    },
+    // fix-r9-type P3-3：無條件收工——關掉收字、清佇列，並把 REMAP_KEYS 裡「目前是 0 / 空」的對應強制還原
+    // （不靠 remapped 旗標；exit / 回選單 / 結算都走這條）
+    release: function () {
+      Phys.install();
+      Phys.active = false; Phys.wantRemap = false; Phys.queue.length = 0;
+      if (typeof Tap !== 'undefined') Tap.queue.length = 0;
+      Phys.restore(true);
     },
     // owner = 遊戲 id；只在 CT.current 是那款時收字
     setActive: function (on, owner) {
       Phys.install();
       on = !!on;
       if (owner) Phys.owner = owner;
+      if (!on) { Phys.release(); return; }                       // 關 = 一律無條件收工（P3-3）
       if (on === Phys.active) return;
       Phys.active = on;
       Phys.queue.length = 0;
+      Tap.install(); Tap.queue.length = 0;
       if (on) Phys.wantRemap = true;
       else { Phys.wantRemap = false; Phys.restore(); }
     },
@@ -241,6 +276,7 @@
     tick: function () {
       var I = NES.Input;
       if (!Phys.active || Phys.remapped || !Phys.wantRemap || !I || !I.remap) return;
+      if (!CT.current || CT.current.id !== Phys.owner) return;
       var live = I.liveMask ? I.liveMask() : 0;
       if (live & REMAP_BITS) return;
       var km = I.keymap ? I.keymap() : {}, obj = {};
@@ -249,19 +285,25 @@
       I.remap(obj);
       Phys.remapped = true;
     },
-    restore: function () {
+    // force = true：就算旗標說沒 remap，也把「目前是 0 / 空」的鍵補回原對應（保存值 → 預設對應）
+    restore: function (force) {
       var I = NES.Input;
-      if (!Phys.remapped || !I || !I.remap) { Phys.remapped = false; return; }
-      var obj = {};
-      REMAP_KEYS.forEach(function (k) { obj[k] = Phys.saved && Phys.saved[k] !== undefined ? Phys.saved[k] : (I.DEFAULT_MAP && I.DEFAULT_MAP[k]); });
-      I.remap(obj);
+      if (!I || !I.remap) { Phys.remapped = false; return; }
+      if (!Phys.remapped && !force) return;
+      var km = I.keymap ? I.keymap() : {}, obj = {}, n = 0;
+      REMAP_KEYS.forEach(function (k) {
+        if (!Phys.remapped && km[k]) return;                     // 強制模式：只補被清掉的鍵，不動別人自訂的對應
+        var v = Phys.saved && Phys.saved[k] ? Phys.saved[k] : (I.DEFAULT_MAP && I.DEFAULT_MAP[k]);
+        if (v) { obj[k] = v; n++; }
+      });
+      if (n) I.remap(obj);
       Phys.remapped = false; Phys.saved = null;
     },
     drain: function () { var q = Phys.queue.slice(); Phys.queue.length = 0; return q; }
   };
   function onKey(e) {
     if (!e || e.ctrlKey || e.altKey || e.metaKey) return;
-    if (!CT.current || CT.current.id !== Phys.owner) return;
+    if (!CT.current || CT.current.id !== Phys.owner) { Phys.guard(); return; }
     if (!Phys.active) {                      // 暫停中：只收 Esc（= 解除暫停）
       if (e.key === 'Escape' && !e.repeat && Phys.queue.length < 32) Phys.queue.push('\x1b');
       return;
@@ -279,6 +321,42 @@
     if (e.repeat && (out === '\n' || out === '\x1b')) return;
     if (Phys.queue.length < 32) Phys.queue.push(out);
     Phys.used++;
+  }
+
+  /* ============================== 觸控直接點鍵（fix-r9-type P3-6） ============================== */
+  // 只在「觸控」（pointerType touch / pen 或 touchstart）時收；跟 Phys 同一個開關（打字狀態 + owner 是目前遊戲）。
+  // 掛在畫面 canvas 自己身上：engine/touch.js 的十字鍵 / A / B / 浮動搖桿感應區都是蓋在上面的 DOM，
+  // 落在那些按鍵上的手指根本到不了 canvas ⇒ 不會跟觸控覆蓋層搶。座標換成 NES 名稱表座標（顯示裁掉上方 8 列 ⇒ +8）。
+  // 遊戲在 update() 裡 `Tap.drain()` 取 [{x, y}]，再用 `KB.hit(x, y)` 找鍵（落在幀邊界上 ⇒ 可重現）。
+  var Tap = {
+    el: null, queue: [], used: 0, installed: false,
+    install: function () {
+      if (Tap.installed || typeof document === 'undefined') return;
+      var n = CT.nes && CT.nes(), c = (n && n.canvas) || document.getElementById('nes') || document.querySelector('canvas');
+      if (!c || !c.addEventListener) return;
+      Tap.installed = true; Tap.el = c;
+      if (window.PointerEvent) c.addEventListener('pointerdown', onTap, false);
+      else c.addEventListener('touchstart', onTap, { passive: false });
+    },
+    // clientX / clientY（CSS px）→ NES 座標；畫面外回 null
+    toNes: function (cx, cy) {
+      var el = Tap.el, r = el && el.getBoundingClientRect ? el.getBoundingClientRect() : null;
+      if (!r || !(r.width > 0) || !(r.height > 0)) return null;
+      var x = Math.floor((cx - r.left) * 256 / r.width), y = Math.floor((cy - r.top) * 224 / r.height) + 8;
+      if (x < 0 || x > 255 || y < 8 || y > 231) return null;
+      return { x: x, y: y };
+    },
+    drain: function () { Tap.install(); var q = Tap.queue.slice(); Tap.queue.length = 0; return q; }
+  };
+  function onTap(e) {
+    var touch = e.touches ? true : (e.pointerType === 'touch' || e.pointerType === 'pen');
+    if (!touch) return;
+    if (!Phys.active || !CT.current || CT.current.id !== Phys.owner) return;
+    var p = e.touches ? e.touches[0] : e, pt = p && Tap.toNes(p.clientX, p.clientY);
+    if (!pt) return;
+    if (e.cancelable) e.preventDefault();
+    if (Tap.queue.length < 8) Tap.queue.push(pt);
+    Tap.used++;
   }
 
   /* ============================== 機器人人類節奏：方向 / A 都是「按 4 幀放 4 幀」 ============================== */
@@ -339,7 +417,7 @@
 
   TY.Kbd = {
     create: create, glyph: glyph, glyphTile: glyphTile, code: code, LOWER: LOWER, EXTRA: EXTRA, PRINTABLE: PRINTABLE,
-    Shadow: Shadow, Repeat: Repeat, REP_FIRST: REP_FIRST, REP_NEXT: REP_NEXT, Phys: Phys, Tapper: Tapper,
+    Shadow: Shadow, Repeat: Repeat, REP_FIRST: REP_FIRST, REP_NEXT: REP_NEXT, Phys: Phys, Tap: Tap, Tapper: Tapper,
     // 游標四角精靈圖（色 3 外框 / 色 2 內線）
     CORNERS: {
       CTL: ['3333....', '3222....', '32......', '32......', '........', '........', '........', '........'],

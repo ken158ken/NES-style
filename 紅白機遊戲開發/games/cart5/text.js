@@ -29,6 +29,7 @@
   var ASCII_DY = 4;                          // 半形 8×8 字身在 16 列行高裡往下移 4 列（與全形字身置中）
   var CLOSE_PUNCT = '，。、！？：；」』）》〉…～,.!?:;)]}%';
   var OPEN_PUNCT = '「『（《〈([{';
+  var DASH = '—―─';                           // 破折號：整串不拆、不放行首
   var PAUSE_PUNCT = '。！？…!?';
   var missingAll = [];
 
@@ -98,42 +99,56 @@
     return out;
   }
   function isWordCh(ch) { return /[A-Za-z0-9'_\-]/.test(ch); }
-  function wrapSeg(seg, cols) {
-    var lines = [], line = '', w = 0, i = 0, n = seg.length;
-    function push() { lines.push(line.replace(/ +$/, '')); line = ''; w = 0; }
+  // 斷行單位（不可拆的一串）：
+  //   · 收尾標點（CLOSE_PUNCT）黏在前一個單位後面 ⇒ 「」。」「！？」「……」不拆、行首不放收尾標點（避頭，連續標點會連同前一字一起帶到下一行）；
+  //   · 破折號 —（DASH）整串黏在前一個單位後面 ⇒ 「——」不拆、行首不放破折號；
+  //   · 開頭標點（OPEN_PUNCT）黏在下一個單位前面 ⇒ 行末不放「「（」（避尾）；
+  //   · 英文單字（含數字）一個字一個單位。
+  // 單位比一整行還寬時才逐字硬切（極端窄欄）。
+  function units(seg) {
+    var out = [], i = 0, n = seg.length, lead = '';
+    function add(u, glue) {
+      if (glue && out.length && out[out.length - 1] !== ' ' && !lead) out[out.length - 1] += u;
+      else { out.push(lead + u); lead = ''; }
+    }
     while (i < n) {
       var ch = seg.charAt(i);
-      if (ch === '\n') { push(); i++; continue; }
-      if (ch === ' ' && w === 0 && lines.length && line === '') { i++; continue; }  // 自動換行後的行首空白丟掉
-      // 英文單字：整個字一起放（放不下就換行；比一行還長才硬切）
+      if (OPEN_PUNCT.indexOf(ch) >= 0) { lead += ch; i++; continue; }
+      if (ch === ' ') { if (lead) { out.push(lead); lead = ''; } out.push(' '); i++; continue; }
       if (isWordCh(ch)) {
         var j = i; while (j < n && isWordCh(seg.charAt(j))) j++;
-        var word = seg.substring(i, j);
-        if (word.length > cols - w && w > 0 && word.length <= cols) push();
-        var k;
-        for (k = 0; k < word.length; k++) {
-          if (w + 1 > cols) push();
-          line += word.charAt(k); w++;
-        }
-        i = j; continue;
+        add(seg.substring(i, j), false); i = j; continue;
       }
-      var cw = widthOf(ch);
-      if (w + cw > cols) {
-        // 避頭：行首不放收尾標點 → 把上一行最後一個字一起帶下來
-        if (CLOSE_PUNCT.indexOf(ch) >= 0 && line.length > 1) {
-          var last = line.charAt(line.length - 1);
-          if (CLOSE_PUNCT.indexOf(last) < 0 && last !== ' ') {
-            line = line.substring(0, line.length - 1); w -= widthOf(last);
-            push(); line = last; w = widthOf(last);
-          } else push();
-        } else push();
-        if (ch === ' ') { i++; continue; }
-      }
-      // 避尾：開頭標點不放行末（後面放不下下一個字就先換行）
-      if (OPEN_PUNCT.indexOf(ch) >= 0 && w > 0 && w + cw + 2 > cols && i + 1 < n) push();
-      line += ch; w += cw; i++;
+      add(ch, CLOSE_PUNCT.indexOf(ch) >= 0 || DASH.indexOf(ch) >= 0);
+      i++;
     }
-    if (line.length || !lines.length) push();
+    if (lead) out.push(lead);
+    return out;
+  }
+  function wrapSeg(seg, cols) {
+    var lines = [], paras = seg.split('\n'), p;
+    for (p = 0; p < paras.length; p++) {
+      var us = units(paras[p]), line = '', w = 0, k, c, wrapped = false;
+      for (k = 0; k < us.length; k++) {
+        var u = us[k], uw = measure(u);
+        if (u === ' ') {                                   // 自動換行後的行首空白丟掉
+          if (w === 0 && wrapped) continue;
+          if (w + 1 > cols) { lines.push(line.replace(/ +$/, '')); line = ''; w = 0; wrapped = true; continue; }
+          line += u; w++; continue;
+        }
+        if (w + uw > cols && w > 0) { lines.push(line.replace(/ +$/, '')); line = ''; w = 0; wrapped = true; }
+        if (uw > cols) {                                   // 比一行還寬：逐字硬切
+          for (c = 0; c < u.length; c++) {
+            var cw = widthOf(u.charAt(c));
+            if (w + cw > cols && w > 0) { lines.push(line); line = ''; w = 0; wrapped = true; }
+            line += u.charAt(c); w += cw;
+          }
+          continue;
+        }
+        line += u; w += uw; wrapped = false;
+      }
+      lines.push(line.replace(/ +$/, ''));
+    }
     return lines;
   }
   // 一頁（一組行）需要的池磁磚數（同字只算一次）

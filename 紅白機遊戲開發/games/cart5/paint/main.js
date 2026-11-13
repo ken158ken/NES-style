@@ -37,11 +37,11 @@
   var TOOL_NAME = { pen: 'PEN', erase: 'ERASER', fill: 'FILL', line: 'LINE', rect: 'FRAME', box: 'BLOCK', oval: 'OVAL', size: 'SIZE', undo: 'UNDO', redo: 'REDO' };
   var GUESS_ROUNDS = 6, GUESS_TIME = 1503, GUESS_EVERY = 40, COPY_CHEAT = 1803, BOT_LAG = 12;
   var MODES = [
-    { key: 'free', name: 'FREE DRAW' }, { key: 'book', name: 'COLOR BOOK' }, { key: 'copy', name: 'COPY CHALLENGE' },
-    { key: 'guess', name: 'QUICK GUESS' }, { key: 'help', name: 'HOW TO PLAY' }
+    { key: 'free', name: 'FREE DRAW', zh: 'FREE' }, { key: 'book', name: 'COLOR BOOK', zh: 'BOOK' }, { key: 'copy', name: 'COPY CHALLENGE', zh: 'COPY' },
+    { key: 'guess', name: 'QUICK GUESS', zh: 'GUESS' }, { key: 'help', name: 'HOW TO PLAY', zh: 'HELP' }
   ];
   var SPR_PAL = [[0x0F, 0x16, 0x30], [0x07, 0x27, 0x38], [0x0F, 0x21, 0x30], [0x0F, 0x28, 0x30]];
-  var UI_PAL = { bd: 0x0F, bg: [[0x00, 0x10, 0x30], [0x07, 0x16, 0x28], [0x16, 0x2A, 0x21], [0x13, 0x24, 0x34]] };
+  var UI_PAL = { bd: 0x0F, bg: [[0x00, 0x10, 0x30], [0x07, 0x16, 0x28], [0x16, 0x2A, 0x30], [0x13, 0x24, 0x34]] };   // 第 2 組第 3 色 = 白：條紋與第一個選項共用屬性列（fix-r9）
   // 精靈槽
   var O_CUR = 0, O_ANCH = 1, O_PRE = 2, O_UND = 10, O_MARK = 11, O_MENU = 12;
 
@@ -65,6 +65,15 @@
   function putA(c16, r16, p) { if (c16 < 0 || c16 > 15 || r16 < 0 || r16 > 14) return; var k = r16 * 16 + c16; if (g.wantA[k] === p) return; g.wantA[k] = p; g.qa.push(k); }
   function text(col, row, s) { var t = ART.text(art, s); for (var i = 0; i < t.length; i++) put(col + i, row, t[i]); }
   function center(row, s) { text(16 - (s.length >> 1), row, s); }
+  // 固定中文（paint_ui 才有）：每字 2×2 格；混排時半形字放在下排（與中文字身底線對齊）。segs = ['#詞id' | 'ASCII', …]
+  function zhW(segs) { var w = 0; segs.forEach(function (sg) { w += sg.charAt(0) === '#' ? 2 * (ART.ZH_WORD[sg.slice(1)] || []).length : sg.length; }); return w; }
+  function zhLine(col, row, segs) {
+    if (col < 0) col = 16 - (zhW(segs) >> 1);
+    segs.forEach(function (sg) {
+      if (sg.charAt(0) !== '#') { for (var j = 0; j < sg.length; j++) put(col + j, row, 0); text(col, row + 1, sg); col += sg.length; return; }
+      art.zh(sg.slice(1)).forEach(function (q) { put(col, row, q[0]); put(col + 1, row, q[1]); put(col, row + 1, q[2]); put(col + 1, row + 1, q[3]); col += 2; });
+    });
+  }
   function clearRow(row, c0, c1) { for (var c = (c0 || 0); c <= (c1 === undefined ? 31 : c1); c++) put(c, row, 0); }
   function bud() { return nes0 && nes0.timing && nes0.timing.budget; }
   function flushMain(limit) {
@@ -110,15 +119,16 @@
       for (i = 0; i < L.length; i++) {
         if (L.charAt(i) === ' ') continue;
         var q = art.big(L.charAt(i));
-        put(c0 + i * 2, 4, q[0]); put(c0 + i * 2 + 1, 4, q[1]); put(c0 + i * 2, 5, q[2]); put(c0 + i * 2 + 1, 5, q[3]);
+        put(c0 + i * 2, 2, q[0]); put(c0 + i * 2 + 1, 2, q[1]); put(c0 + i * 2, 3, q[2]); put(c0 + i * 2 + 1, 3, q[3]);
       }
-      for (i = 2; i < 14; i++) putA(i, 2, 1);
-      center(7, 'PIXEL ART STUDIO');
-      for (i = 4; i < 28; i++) put(i, 9, art.t('STRIPE'));
-      for (i = 2; i < 14; i++) putA(i, 4, 2);
-      for (i = 0; i < MODES.length; i++) text(9, 12 + i * 2, MODES[i].name);
-      text(1, 23, padR(bestLine(), 30));
-      center(25, 'HOLD START+SELECT: MENU');
+      for (i = 2; i < 14; i++) putA(i, 1, 1);
+      zhLine(-1, 4, ['#TITLE']);
+      for (i = 4; i < 28; i++) put(i, 6, art.t('STRIPE'));
+      for (i = 2; i < 14; i++) putA(i, 3, 2);
+      // 選項：中文 2 列高（第 7 / 10 / 13 / 16 / 19 列起），英文小字放在下排；選項之間空一列
+      for (i = 0; i < MODES.length; i++) { zhLine(7, 7 + i * 3, ['#' + MODES[i].zh]); text(16, 8 + i * 3, MODES[i].name); }
+      text(1, 22, padR(bestLine(), 30));
+      zhLine(-1, 24, ['#HOLD', ' START+SELECT ', '#MENU']);
       center(27, 'C/* = CHEAT   B = HELP');
     });
     AU.play('paint_title');
@@ -143,27 +153,28 @@
   }
   function drawTitle() {
     hideSprites(0, 11);
-    sp(O_MENU, 7 * 8 - 2, (12 + g.sel * 2) * 8, 'BRUSH', 1);
+    sp(O_MENU, 5 * 8 - 2, (7 + g.sel * 3) * 8 + 4, 'BRUSH', 1);
   }
 
   var HELP = [
-    ['CONTROLS', ['D-PAD  MOVE THE CURSOR', '       HOLD = FAST', 'B HOLD  FINE 1 PIXEL STEPS', '', 'A  DRAW / PRESS A BUTTON', 'SELECT  JUMP CANVAS <> PANEL',
-      'SELECT+< >  UNDO / REDO', 'SELECT+{ }  NEXT TOOL', '', 'START  PAUSE MENU (SAVE)', 'HOLD START+SELECT: MENU', 'C/* = CHEAT']],
+    ['CONTROLS', ['D-PAD   MOVE (HOLD = FAST)', 'B HOLD  FINE 1 PIXEL STEPS', 'A       DRAW / PRESS BUTTON', 'SELECT  JUMP CANVAS <> PANEL',
+      'SELECT+< >  UNDO / REDO', 'SELECT+{ }  CHANGE TOOL', 'START   PAUSE MENU + SAVE', '', '%HOLD', 'C/* = CHEAT'], 'H_CTRL'],
     ['TOOLS', ['@pen|PEN     FREE HAND LINES', '@erase|ERASER  BACK TO PAPER', '@fill|FILL    FILL ONE AREA', '@line|LINE    A START  A END',
       '@rect|FRAME   HOLLOW BOX', '@box|BLOCK   SOLID BOX', '@oval|OVAL    OVAL IN A BOX', '@size|SIZE    PEN 1 2 3 PIXELS',
-      '@undo|UNDO    STEP BACK (24)', '@redo|REDO    STEP AGAIN']],
-    ['COLORS', ['4 ROWS X 3 COLORS + PAPER.', '', 'A ON A SWATCH PICKS IT.', 'A AGAIN EDITS IT:', '  < > HUE   { } LIGHT', '  A OK   B CANCEL', '',
-      'EACH 16X16 BLOCK SHOWS', 'ONE COLOR ROW. THE ROW', 'USED MOST THERE WINS.', '', 'BIG FILLS DRAW IN STEPS.']],
-    ['MODES', ['FREE DRAW: 4 SAVE SLOTS', '  AND SHARE CODES.', '', 'COLOR BOOK: FILL EVERY', '  AREA OF A PAGE.', '',
-      'COPY: 120 SECONDS TO COPY', '  THE PICTURE. B OR BETTER', '  CLEARS IT.', '', 'QUICK GUESS: DRAW THE', '  SHAPE. CPU GUESSES IT.']]
+      '@undo|UNDO    STEP BACK (24)', '@redo|REDO    STEP AGAIN'], 'H_TOOL'],
+    ['COLORS', ['4 ROWS X 3 COLORS + PAPER.', 'A ON A SWATCH PICKS IT.', 'A AGAIN EDITS IT:', '  < > HUE   { } LIGHT', '  A OK   B CANCEL', '',
+      'EACH 16X16 BLOCK SHOWS', 'ONE COLOR ROW. THE ROW', 'USED MOST THERE WINS.', 'BIG FILLS DRAW IN STEPS.'], 'H_COLOR'],
+    ['MODES', ['FREE DRAW: 4 SAVE SLOTS', '  AND SHARE CODES.', 'COLOR BOOK: FILL EVERY', '  AREA OF A PAGE.',
+      'COPY: 120 SECONDS TO COPY', '  THE PICTURE. B OR BETTER', '  CLEARS IT.', 'QUICK GUESS: DRAW THE', '  SHAPE. CPU GUESSES IT.'], 'H_MODE']
   ];
   function enterHelp(p) {
     g.mode = 'help'; g.helpPage = p; g.t = 0;
     var H = HELP[p];
     screen(ART.ui(), UI_PAL, function () {
-      center(2, H[0] + '  ' + (p + 1) + '/' + HELP.length);
+      zhLine(-1, 2, ['#' + H[2], '  ' + H[0] + ' ' + (p + 1) + '/' + HELP.length]);
       for (var i = 0; i < H[1].length; i++) {
         var s = H[1][i];
+        if (s === '%HOLD') { zhLine(3, 4 + i * 2, ['#HOLD', ' START+SELECT ', '#MENU']); continue; }
         if (s.charAt(0) === '@') {
           var bar = s.indexOf('|'), nm = s.slice(1, bar);
           put(3, 5 + i * 2, art.t(ART.TOOL_ICON[nm]));
@@ -187,17 +198,17 @@
     var arr = kind === 'book' ? PICS.BOOK : PICS.COPY;
     if (g.page >= arr.length) g.page = 0;
     screen(ART.ui(), UI_PAL, function () {
-      center(3, kind === 'book' ? 'COLOR BOOK' : 'COPY CHALLENGE');
+      zhLine(-1, 2, [kind === 'book' ? '#BOOK' : '#COPY', '  ' + (kind === 'book' ? 'COLOR BOOK' : 'COPY CHALLENGE')]);
       var done = CT.load('paint', 'pages', 0) | 0;
       for (var i = 0; i < arr.length; i++) {
         var right = '';
         if (kind === 'book') right = (done & (1 << i)) ? 'DONE*' : '';
         else { var b = CT.load('paint', 'copy' + i, -1); right = b < 0 ? '---' : pad(b, 3) + ' ' + C.rating(b); }
-        text(5, 6 + i * 2, (i + 1) + ' ' + padR(arr[i].name, 12) + ' ' + padL(right, 5));
+        text(5, 5 + i * 2, (i + 1) + ' ' + padR(arr[i].name, 12) + ' ' + padL(right, 5));
       }
-      center(23, kind === 'book' ? 'FILL EVERY AREA' : '120 SECONDS - B TO CLEAR');
-      center(25, 'A START   B BACK');
-      center(27, 'HOLD START+SELECT: MENU');
+      if (kind === 'book') zhLine(-1, 21, ['#FILLALL', '  FILL EVERY AREA']); else center(22, '120 SECONDS - B TO CLEAR');
+      center(24, 'A START   B BACK');
+      zhLine(-1, 26, ['#HOLD', ' START+SELECT ', '#MENU']);
     });
   }
   function updateList() {
@@ -207,7 +218,7 @@
     if (pressed(BTN.B)) { enterTitle(); return; }
     if (pressed(BTN.A) || pressed(BTN.START)) { AU.sfx('paint_pick'); startPaint(g.list, g.page); }
   }
-  function drawList() { hideSprites(0, 11); sp(O_MENU, 3 * 8, (6 + g.page * 2) * 8, 'BRUSH', 1); }
+  function drawList() { hideSprites(0, 11); sp(O_MENU, 3 * 8, (5 + g.page * 2) * 8, 'BRUSH', 1); }
 
   /* ================================================================ 畫布畫面 */
   function toolPos(i) { return [20 + 2 * (i % 5), 4 + 2 * ((i / 5) | 0)]; }
@@ -299,7 +310,7 @@
   }
   function drawHud(S) {
     if (S.paused) { text(1, 2, padR('PAUSE  HOLD START+SELECT: MENU', 30)); return; }
-    text(1, 2, padR(hudTitle(S), 18));
+    text(1, 2, padR(hudTitle(S), 19));
     text(20, 2, padR('START:MENU', 11));
     text(20, 8, padR(TOOL_NAME[S.tool] + (S.tool === 'pen' || S.tool === 'erase' || S.tool === 'line' || S.tool === 'rect' || S.tool === 'oval' ? ' ' + S.size + 'PX' : ''), 11));
   }
@@ -607,6 +618,7 @@
       if (!S.cheated) { CT.save('paint', 'pages', bits | (1 << S.page)); g.goalBook = true; }
       AU.stop(); AU.play('paint_done'); S.doneT = 200;
       msg(S, 'PAGE COMPLETE!', 240);
+      infoRow(S);
     }
     if (was !== done) infoRow(S);
   }
@@ -619,10 +631,10 @@
     if (!S.cheated) {
       if (r.score > best) CT.save('paint', 'copy' + S.page, r.score);
       if (r.score > CT.load('paint', 'copyBest', -1)) CT.save('paint', 'copyBest', r.score);
-      if (r.score >= 65) g.goalCopy = true;
+      if (r.score >= C.PASS) g.goalCopy = true;
     }
     AU.stop(); AU.play('paint_done');
-    AU.sfx(r.score >= 65 ? 'paint_ok' : 'paint_ng');
+    AU.sfx(r.score >= C.PASS ? 'paint_ok' : 'paint_ng');
     resultRows(S);
   }
   function resultRows(S) {
@@ -631,7 +643,7 @@
       var R = S.res, best = CT.load('paint', 'copy' + S.page, -1);
       text(1, 21, padR('SCORE ' + pad(R.score, 3) + '   RANK ' + R.rating, 30));
       text(1, 23, padR('SHAPE ' + pad(Math.round(R.f1 * 100), 3) + '  COLOR ' + pad(Math.round(R.color * 100), 3) + '  BEST ' + (best < 0 ? '---' : pad(best, 3)), 30));
-      text(1, 25, padR(R.score >= 65 ? (S.cheated ? 'NICE! (CHEAT - NO RECORD)' : 'CLEAR! WELL DONE') : 'NEED 065 FOR RANK B', 30));
+      text(1, 25, padR(R.score >= C.PASS ? (S.cheated ? 'NICE! (CHEAT - NO RECORD)' : 'CLEAR! WELL DONE') : 'NEED ' + pad(C.PASS, 3) + ' FOR RANK B', 30));
       text(1, 27, padR('A RETRY  B LIST  C/* MORE', 30));
     } else {
       var G = S.guess;
@@ -786,7 +798,7 @@
       if (st.wait !== undefined) { if (st.wait-- > 0) return 0; BOT.q.shift(); continue; }
       if (st.tap !== undefined) { if (!st.done) { st.done = 1; return st.tap; } BOT.q.shift(); return 0; }
       if (st.until) { if (!st.until()) return 0; BOT.q.shift(); continue; }
-      if (st.call) { BOT.q.shift(); st.call(); continue; }
+      if (st.call) { BOT.q.shift(); var rest = BOT.q; BOT.q = []; st.call(); BOT.q = BOT.q.concat(rest); continue; }
       if (st.move) {
         if (!S) { BOT.q.shift(); continue; }
         var m = botMoveMask(S, st.move[0], st.move[1]);
@@ -881,7 +893,7 @@
       cnt.fill(0);
       for (y = 0; y < 4; y++) for (x = 0; x < 4; x++) cnt[ref[(cy * 4 + y) * 64 + cx * 4 + x]]++;
       var b = 0; for (i = 1; i < 4; i++) if (cnt[i] > cnt[b]) b = i;
-      if (b === 0 && cnt[0] < 10) { b = 1; for (i = 2; i < 4; i++) if (cnt[i] > cnt[b]) b = i; }
+      if (b === 0 && cnt[0] < 12) { b = 1; for (i = 2; i < 4; i++) if (cnt[i] > cnt[b]) b = i; }
       cell[cy * 16 + cx] = b;
     }
     // 橫向合併成方塊，再往下合併同樣的方塊

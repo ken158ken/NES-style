@@ -182,6 +182,21 @@ def main():
     s = st(page)
     ok('標題：↓ 換模式、→ 換盤面', s['sel'] == 1 and s['lvl'][1] == 2, (s['sel'], s['lvl']))
 
+    # ---------------- fix-r8 P3-2：HUD / 標題不貼頂（名稱表第 0~1 列 = 可見區 y < 8 全空） ----------------
+    TOP0 = '() => { const p = __nes.nes().ppu; let n = 0; for (let r = 0; r < 2; r++) for (let c = 0; c < 32; c++) if (p.getTile(0, c, r)) n++; return n; }'
+    fresh(page)
+    step(page, 2)
+    ok('標題：名稱表第 0~1 列全空（框線第 2 列、大字第 4~5 列）', page.evaluate(TOP0) == 0 and page.evaluate(SCREEN)[7].strip().startswith('FLIP TWO'))
+    hud = []
+    for m, lv in ((0, 0), (0, 4), (1, 2), (2, 1)):
+        fresh(page)
+        start(page, m, lv)
+        page.evaluate('() => { for (let i = 0; i < 400 && GAME.state().s.run.phase !== "play"; i++) __nes.step(1); __nes.step(3); }')
+        sc = page.evaluate(SCREEN)
+        rc = page.evaluate('() => { const R = CT.Cards.dev.g().run, a = []; for (let i = 0; i < R.cards.length; i++) a.push(CT.Cards.dev.cardRC(i)[1]); return a; }')
+        hud.append((m, lv, page.evaluate(TOP0), sc[2][:12], sc[3][:6], min(rc), max(rc) + 3, all(r % 2 == 0 for r in rc)))
+    ok('遊玩 HUD 在第 2~3 列、第 0~1 列全空；牌區第 6~25 列（框線 5 / 26 之內）且屬性對齊', all(h[2] == 0 and h[3].strip() and h[4].strip() == 'SCORE' and h[5] >= 6 and h[6] <= 25 and h[7] for h in hud), hud)
+
     # ---------------- 發牌 / 預備 ----------------
     sizes = page.evaluate("""() => { const out = [];
       for (let lv = 0; lv < 5; lv++) { CT.Cards.dev.start(0, lv); const f = CT.Cards.dev.faces(), c = {}; f.forEach(x => c[x] = (c[x] || 0) + 1);

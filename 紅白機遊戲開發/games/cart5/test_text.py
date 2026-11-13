@@ -71,6 +71,73 @@ def offline():
     return cjk, asc
 
 
+# ============================================================ fix-r9-text（qa-r9 P2-4）：避頭尾 / 破折號
+DASH_GLYPH_MIN_DIFF = 16      # 「—」與「一」點陣至少差這麼多像素
+
+
+def cart5_strings(ids=('adventure', 'escape', 'quiz')):
+    """adventure / escape / quiz 各檔所有含中文的字串常值（解 \\n \\f \\uXXXX）"""
+    out = []
+    for gid in ids:
+        for f in sorted((ROOT / 'games/cart5' / gid).glob('*.js')):
+            for st in cjk_glyphs.js_strings(f.read_text(encoding='utf-8')):
+                st = st.replace('\\n', '\n').replace('\\f', '\f')
+                st = re.sub(r'\\u([0-9a-fA-F]{4})', lambda m: chr(int(m.group(1), 16)), st)
+                if re.search(r'[^\x00-\x7f]', st):
+                    out.append(st)
+    return out
+
+
+def dash_glyph(cjk):
+    one, dash = cjk_glyphs.render('一'), cjk_glyphs.render('—')
+    diff = sum(bin(a ^ b).count('1') for a, b in zip(one, dash))
+    ok('破折號「—」與「一」點陣差 %d px ≥ %d' % (diff, DASH_GLYPH_MIN_DIFF), diff >= DASH_GLYPH_MIN_DIFF, diff)
+    ok('破折號滿寬 16 px（兩個「—」接成一條線）', any(r == 0xFFFF for r in dash))
+    ok('破折號比「一」粗（≥ 2 列墨）', sum(1 for r in dash if r) >= 2 and sum(1 for r in one if r) == 1)
+    if '—' in cjk:
+        ok('glyphs.js 的「—」= 工具覆寫字形', cjk['—'] == ''.join('%04x' % r for r in dash), cjk['—'])
+
+
+def wrap_rules(page):
+    pure = page.evaluate("""() => ({
+      a: CT.Text.wrap('一二三四五六七八？！', 16)[0], b: CT.Text.wrap('一二三四五六七「八」。', 16)[0],
+      c: CT.Text.wrap('一二三四五六七——八', 16)[0], d: CT.Text.wrap('一二三四五六七……九', 16)[0],
+      e: CT.Text.wrap('一二三四五六——七', 16)[0], f: CT.Text.wrap('甲乙丙丁戊己庚，', 16)[0]
+    })""")
+    ok('連續收尾標點「？！」不拆、行首不放（前一字一起帶下去）', pure['a'] == ['一二三四五六七', '八？！'], pure['a'])
+    ok('「」。」連續標點不拆', pure['b'] == ['一二三四五六七', '「八」。'], pure['b'])
+    ok('「——」不拆、不放行首', pure['c'] == ['一二三四五六', '七——八'], pure['c'])
+    ok('「……」不拆、不放行首', pure['d'] == ['一二三四五六', '七……九'], pure['d'])
+    ok('「——」放得下就留在行末', pure['e'] == ['一二三四五六——', '七'], pure['e'])
+    ok('剛好放滿時收尾標點不被推走', pure['f'] == ['甲乙丙丁戊己庚，'], pure['f'])
+    strs = cart5_strings()
+    ok('掃到 adventure / escape / quiz 的中文字串 ≥ 800 條', len(strs) >= 800, len(strs))
+    res = page.evaluate("""(strs) => {
+      const CLOSE = '，。、！？：；」』）》〉…～,.!?:;)]}%—―', OPEN = '「『（《〈([{';
+      const r = { lines: 0, head: [], dash: [], tail: [], wide: [], lost: [] };
+      for (const cols of [26, 24, 22, 20]) for (const s of strs) for (const seg of s.split('\\f')) for (const para of seg.split('\\n')) {
+        const L = CT.Text.wrap(para, cols)[0]; r.lines += L.length;
+        if (L.join('').replace(/ /g, '') !== para.replace(/ /g, '')) r.lost.push([cols, para]);
+        for (let i = 0; i < L.length; i++) {
+          if (CT.Text.measure(L[i]) > cols) r.wide.push([cols, L[i]]);
+          if (i > 0 && CLOSE.indexOf(L[i][0]) >= 0) r.head.push([cols, L[i - 1], L[i]]);
+          if (i > 0 && /[—―]$/.test(L[i - 1]) && /^[—―]/.test(L[i])) r.dash.push([cols, L[i - 1], L[i]]);
+          if (i < L.length - 1 && OPEN.indexOf(L[i].slice(-1)) >= 0) r.tail.push([cols, L[i]]);
+        }
+      }
+      return r; }""", strs)
+    ok('全字串 26 / 24 / 22 / 20 欄逐行排版（%d 行）：0 處行首標點' % res['lines'], not res['head'], res['head'][:3])
+    ok('全字串：0 處「——」被拆', not res['dash'], res['dash'][:3])
+    ok('全字串：0 處開頭標點在行末', not res['tail'], res['tail'][:3])
+    ok('全字串：每行 ≤ 欄寬、內容不增不減', not res['wide'] and not res['lost'], (res['wide'][:2], res['lost'][:2]))
+    # 逐頁排版（adventure / escape / quiz 對話框：26 欄 × 3 行、池 159）：頁首也不放收尾標點
+    pg = page.evaluate("""(strs) => { let pages = 0, bad = [];
+      for (const s of strs) { const P = CT.Text.paginate(s, 26, 3, 156); pages += P.length;
+        for (let i = 1; i < P.length; i++) if ('，。、！？：；」』）》…—'.indexOf((P[i][0] || ' ')[0]) >= 0 && s.indexOf('\\f') < 0) bad.push(P[i - 1].concat(P[i])); }
+      return { pages, bad }; }""", strs)
+    ok('全字串逐頁排版（%d 頁）：0 頁以標點開頭' % pg['pages'], not pg['bad'], pg['bad'][:2])
+
+
 # ============================================================ 瀏覽器
 def fresh(page, query=''):
     page.goto(BASE + query)
@@ -102,7 +169,7 @@ RUN_UNTIL = """([cond, maxF, pressA]) => {
     __nes.step(1);
     frames++;
     const u = bud.used; if (u > peak) peak = u; if (u > bud.limit) over++;
-    const tb = G.T.stats().bytes; if (tb > tpeak) tpeak = tb;
+    const tb = G.T.stats().peak; if (tb > tpeak) tpeak = tb;
   }
   NES.Input.inject(0, 1);
   return { frames, peak, tpeak, over, overFrames: bud.overFrames, aPress, done: f(G) };
@@ -155,7 +222,7 @@ def browser(cjk, asc):
         ok('textdemo 不帶 ?game=textdemo 時不註冊（正式選單看不到）', page.evaluate("() => !CT.get('textdemo')"))
         ok('CT.Text / CT.GLYPHS 在 cart5.html 載入', page.evaluate("() => !!CT.Text && !!CT.GLYPHS && CT.GLYPHS.count > 300"))
         ok('glyphs.js / text.js 排在 cart5:games 標記最前面',
-           page.evaluate("""() => { const s = [...document.scripts].map(x => x.getAttribute('src') || '');
+           page.evaluate("""() => { const s = [...document.scripts].map(x => (x.getAttribute('src') || '').split('?')[0]);
               const i = s.indexOf('games/cart5/glyphs.js'), j = s.indexOf('games/cart5/text.js');
               const reg = s.indexOf('games/cart1/registry.js'); const others = s.filter(x => /games\\/cart5\\/(?!glyphs|text\\.js|cart\\.js)/.test(x)).map(x => s.indexOf(x));
               return reg < i && i < j && others.every(k => k > j); }"""))
@@ -278,6 +345,7 @@ def browser(cjk, asc):
         ok('\\n 換行、\\f 強制換頁', pure['w3'] == [['甲', '乙'], ['丙']], pure['w3'])
         ok('比一行還長的英文字才硬切', pure['w4'] == ['abcde', 'fghij', 'kl'], pure['w4'])
         ok('避尾：「 不放行末', not pure['w5'][0].endswith('「'), pure['w5'])
+        wrap_rules(page)
         # 在選單選「混排測試」
         page.evaluate("() => { const G = CT.get('textdemo').dev; G.menu.select(2); }")
         step(page, 1)
@@ -324,7 +392,7 @@ def browser(cjk, asc):
               if (s.phase === 'wait' || s.phase === 'end') { if (++waitT >= 13) { m = 1; waitT = 0; } } else waitT = 0;
               NES.Input.inject(m, 1); __nes.step(1); frames++;
               if (bud.used > peak) peak = bud.used; if (bud.used > bud.limit) over++;
-              const tb = T.stats().bytes; if (tb > tpeak) tpeak = tb;
+              const tb = T.stats().peak; if (tb > tpeak) tpeak = tb;
             }
           } catch (e) { err = String(e); }
           bud.strict = false;
@@ -378,6 +446,7 @@ def browser(cjk, asc):
 def main():
     try:
         cjk, asc = offline()
+        dash_glyph(cjk)
         browser(cjk, asc)
     except Exception as e:  # noqa
         import traceback

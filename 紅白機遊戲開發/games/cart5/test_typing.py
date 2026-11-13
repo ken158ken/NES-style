@@ -223,6 +223,62 @@ def main():
     tap(page, START)
     ok('解除暫停後音樂接續', not S(page)['paused'] and not page.evaluate('() => __nes.nes().music.isPaused()'))
 
+    # ---------------- fix-r9-type P3-3：任何離開路徑都還原手把對應，回選單後鍵盤手把鍵立即可用 ----------------
+    KM = '() => { const k = NES.Input.keymap(); return [k.KeyZ, k.KeyX, k.KeyW, k.KeyA, k.KeyS, k.KeyD, k.ShiftLeft, k.ShiftRight, k.Enter]; }'
+    KM_OK = ['A', 'B', 'UP', 'LEFT', 'DOWN', 'RIGHT', 'SELECT', 'SELECT', 'START']
+    PAD_KEYS = ['z', 'x', 'w', 'a', 's', 'd', 'Shift']
+    PAD_MASK = A | B | UP | LEFT | DOWN | RIGHT | SELECT
+
+    def pad_keys_mask():
+        for k in PAD_KEYS:
+            page.keyboard.down(k)
+        step(page, 1)
+        m = page.evaluate('() => NES.Input.mask()')
+        for k in PAD_KEYS:
+            page.keyboard.up(k)
+        step(page, 1)
+        return m
+
+    def relaunch_meteor():
+        page.evaluate('() => { CT.launch("typing"); __nes.step(2); }')
+        start(page, 0)
+        page.evaluate('() => { CT.Typing.dev.clearWords(); CT.Typing.dev.set("spawnT", -99999); }')
+        step(page, 2)
+        return page.evaluate('() => GAME.state().s.phys.remapped')
+
+    ok('P3-3 前提：METEOR 打字狀態已 remap', relaunch_meteor())
+    page.keyboard.press('Escape')
+    step(page, 2)
+    page.keyboard.down('Shift')
+    step(page, 2)
+    ok('P3-3 暫停中 Shift 讀得到 SELECT', page.evaluate('() => NES.Input.mask()') & SELECT, page.evaluate('() => NES.Input.mask()'))
+    page.keyboard.down('Enter')
+    step(page, 75)
+    ok('P3-3 PC 暫停後按住 Enter+Shift → 回選單', page.evaluate('() => CT.current === null'))
+    page.keyboard.up('Enter')
+    page.keyboard.up('Shift')
+    step(page, 2)
+    km = page.evaluate(KM)
+    ok('P3-3 回選單後手把對應全部還原（Z X W A S D Shift Enter）', km == KM_OK, km)
+    m = pad_keys_mask()
+    ok('P3-3 回選單後立刻按 Z X W A S D Shift → 手把遮罩全部讀得到（%d）' % m, m & PAD_MASK == PAD_MASK, m)
+
+    ok('P3-3 前提：重進 METEOR 打字狀態再 remap', relaunch_meteor())
+    page.evaluate('() => { CT.back(); __nes.step(2); }')
+    km = page.evaluate(KM)
+    ok('P3-3 打字中不暫停直接回選單（registry CT.back → exit）→ 對應立即還原、收字關閉', km == KM_OK and not page.evaluate('() => CT.Typing.Kbd.Phys.active'), km)
+    m = pad_keys_mask()
+    ok('P3-3 直接回選單後 Z X W A S D Shift 立即可用（%d）' % m, m & PAD_MASK == PAD_MASK, m)
+
+    ok('P3-3 前提：第三次進 METEOR 打字狀態再 remap', relaunch_meteor())
+    page.evaluate('() => { window.__keepCur = CT.current; CT.current = null; }')     # 模擬「沒走 exit 的離開路徑」
+    page.wait_for_timeout(350)
+    km = page.evaluate(KM)
+    ok('P3-3 保險絲：目前遊戲不是 owner 卻還留著 remap → 100 ms 級內自動還原', km == KM_OK and not page.evaluate('() => CT.Typing.Kbd.Phys.remapped'), km)
+    page.evaluate('() => { CT.current = window.__keepCur; CT.launch("typing"); __nes.step(2); }')
+    page.evaluate('() => { const I = NES.Input; I.remap({ KeyZ: 0 }); CT.Typing.Kbd.Phys.release(); }')
+    ok('P3-3 release() 不靠旗標：被清成 0 的對應一律補回預設', page.evaluate(KM) == KM_OK, page.evaluate(KM))
+
     # ---------------- SENTENCE ----------------
     start(page, 1, sLv=1, exact=False)
     st = S(page)
@@ -277,6 +333,67 @@ def main():
     ok('exit() 存最高分（中途離開）', page.evaluate('() => CT.load("typing", "best", 0)') == 4321 and page.evaluate('() => GAME.state().s.phys.active') is False)
     ok('bestText 顯示最高分 6 字元', page.evaluate('() => CT.get("typing").bestText()') == '004321')
     ok('全部畫面文字沒有超出 32 欄（無 text overflow 錯誤）', not [e for e in errs if 'overflow' in e], [e for e in errs if 'overflow' in e][:2])
+
+    # ---------------- fix-r9-type P3-6：觸控直接點畫面鍵盤 ----------------
+    hits = page.evaluate("""() => { const K = CT.Typing.dev.kb(), bad = [];
+        K.keys.forEach(k => { const cx = k.c * 8 + k.w * 4, cy = k.r * 8 + 4;
+          [[0, 0], [-(k.w * 4 + 3), 0], [k.w * 4 + 3, 0], [0, -7], [0, 7]].forEach(d => { const h = K.hit(cx + d[0], cy + d[1]); if (!h || h.id !== k.id) bad.push(k.id + '@' + d); }); });
+        return { n: K.keys.length, bad, far: K.hit(128, 40), gap: K.hit(4, 180) }; }""")
+    ok('KB.hit：每顆鍵的中心 / 左右外擴 3 px / 上下到鄰排中線前都對到自己；鍵盤外 = null', not hits['bad'] and hits['far'] is None and hits['gap'] is None, hits)
+    tctx = browser.new_context(has_touch=True, viewport={'width': 900, 'height': 900})
+    tp = tctx.new_page()
+    terrs = []
+    tp.on('pageerror', lambda e: terrs.append(str(e)))
+    fresh(tp)
+    KEYXY = """(id) => { const k = CT.Typing.dev.kb().byId[id], el = CT.Typing.Kbd.Tap.el, r = el.getBoundingClientRect();
+        return [r.left + (k.c * 8 + k.w * 4) * r.width / 256, r.top + (k.r * 8 + 4 - 8) * r.height / 224]; }"""
+
+    def ttap(key, after=1):
+        x, y = tp.evaluate(KEYXY, key)
+        tp.touchscreen.tap(x, y)
+        step(tp, after)
+    ok('觸控環境：NES.Touch.available', tp.evaluate('() => !!(NES.Touch && NES.Touch.available)'))
+    start(tp, 0)
+    tp.evaluate('() => { CT.Typing.dev.clearWords(); CT.Typing.dev.set("spawnT", -99999); CT.Typing.dev.set("cur", "g"); CT.Typing.dev.spawn("ant", 4, 6); }')
+    step(tp, 2)
+    ttap('a')
+    st = S(tp)
+    ok('觸控點 a 鍵 → 打出 a（鎖定 ant）、游標跳到 a', st['lock'] >= 0 and st['words'][st['lock']]['typed'] == 1 and st['cur'] == 'a', (st['lock'], st['cur']))
+    ttap('n'); ttap('t')
+    ok('觸控連點 n t → 擊落 ant', S(tp)['killed'] == 1, S(tp)['killed'])
+    used0 = tp.evaluate('() => CT.Typing.Kbd.Tap.used')
+    x, y = tp.evaluate(KEYXY, 'b')
+    tp.mouse.click(x, y)
+    step(tp, 1)
+    ok('滑鼠點畫面鍵盤不算（只在觸控時啟用）', tp.evaluate('() => CT.Typing.Kbd.Tap.used') == used0 and S(tp)['cur'] == 't', S(tp)['cur'])
+    m0 = S(tp)['misses']
+    r = tp.evaluate('() => { const r = CT.Typing.Kbd.Tap.el.getBoundingClientRect(); return [r.left + 128 * r.width / 256, r.top + 40 * r.height / 224]; }')
+    tp.touchscreen.tap(r[0], r[1])
+    step(tp, 1)
+    ok('點到鍵盤以外（落字區）不打字、不算 MISS', S(tp)['misses'] == m0 and S(tp)['cur'] == 't')
+    tap(tp, START)
+    used0 = tp.evaluate('() => CT.Typing.Kbd.Tap.used')
+    ttap('q')
+    ok('暫停中點鍵盤不收', S(tp)['paused'] and tp.evaluate('() => CT.Typing.Kbd.Tap.used') == used0 and S(tp)['cur'] == 't')
+    tap(tp, START)
+    tp.evaluate('() => { CT.Typing.dev.spawn("owl", 4, 6); }')
+    tap(tp, RIGHT)
+    c1 = S(tp)['cur']
+    ttap('o')
+    ok('十字鍵游標仍保留（t → y）+ 觸控混用（點 o 鎖定 owl）', c1 == 'y' and S(tp)['cur'] == 'o' and S(tp)['lock'] >= 0, (c1, S(tp)['cur']))
+    start(tp, 1, sLv=2, exact=True)
+    ttap('shift')
+    ok('SENTENCE：觸控點 aA 鍵 → 切大寫', S(tp)['upper'], S(tp)['upper'])
+    st = S(tp)
+    want = st['sent'][0][0]
+    tp.evaluate('() => CT.Typing.dev.set("upper", false)')
+    if want.isalpha() and want.isupper():
+        ttap('shift')
+    ttap(want.lower())
+    ok('SENTENCE：觸控打出第一個字（含大小寫）', S(tp)['sPos'] == 1 and S(tp)['sMiss'] == 0, (want, S(tp)['sPos'], S(tp)['sMiss']))
+    ok('觸控覆蓋層照常（十字鍵 / A / B 都有矩形、沒被本功能改動）', all(k in tp.evaluate('() => NES.Touch.rects()') for k in ('dpad', 'a', 'b')))
+    ok('觸控頁全程沒有頁面錯誤', not terrs, terrs[:3])
+    tctx.close()
 
     # ---------------- 機器人 ----------------
     for lag, cap in (('15', 9000), ('0', 9000), ('24', 11000)):

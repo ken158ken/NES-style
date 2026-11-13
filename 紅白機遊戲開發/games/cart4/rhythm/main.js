@@ -8,12 +8,18 @@
  * ★ 同步：譜面時間只看 APU driver —— songFrame = rowsPlayed × speed + rowFrame − 1（= 這一幀發聲的是全曲第幾幀），
  *   每顆音符的時間 = row × speed（chart.js 從曲子的 p1 / noi onset 推出）。不讀 Date.now / performance.now；
  *   暫停（driver.pause）時 rowsPlayed 不動 ⇒ 譜面也一起停；曲子結束（loop:false 自己 stop）後才改用每幀 +1 收尾。
- * ★ 判定窗口（幀，|按下那幀的 songFrame − 音符幀|）：PERFECT ≤ 2、GREAT ≤ 5、GOOD ≤ 8，過了 8 幀沒按 = MISS。
- *   空按（該軌前後 16 幀內沒有音符）能量 −1、不斷連擊；提早 9~16 幀的按鍵不判定也不扣（狂按會把能量按光）。
+ * ★ 判定窗口（幀，|按下那幀的 (songFrame − OFFSET) − 音符幀|）：NORMAL PERFECT ≤ 3、GREAT ≤ 6、GOOD ≤ 10（EASY 4 / 8 / 12、
+ *   HARD 2 / 5 / 8，chart.js DIFFS[].win），過了 GOOD 窗口沒按 = MISS。空按（該軌前後 GOOD + 8 幀內沒有音符）能量 −1、不斷連擊；
+ *   同一幀按下兩個方向（觸控斜方向）時不扣空按。
+ * ★ OFFSET（fix-r8 qa-r8 P2-1）：聲音要經過輸出緩衝才聽得到（file:// 約 4~5 幀、https 5~8 幀、藍牙更多），
+ *   判定與畫面都用「玩家感知時間」sj = songFrame − OFFSET（−4 ~ +12 幀，預設 +4，存檔 `offset`）。
+ *   標題 OFFSET 列 ←→ 手調，Ⓐ = 校正畫面（跟著節拍器嗶聲按 8 下，取中位數）。
  * 模式：CROSS 星十字（十字鍵 4 軌）/ DUO 雙星（B ← / A →，十字鍵左右也可）/ ORBIT 繞行（單鍵 A 或 B）/ BLADE 節拍武士（← 或 B 斬左、→ 或 A 斬右）。
  * 難度 EASY / NORMAL / HARD（密度 / 飛行時間 / 失誤扣能量）；SIGHT：FULL / FADE（音符飛到一半就隱形）/ EAR（看不到音符，
  *   每顆音符前一拍有該軌音高的預告音 —— 「只靠聲音」的進階模式）。四軌命中音各自音高（C6 / E6 / G6 / C7）。
- * 評價：ACC =（PERFECT×100 + GREAT×70 + GOOD×40）/ 音符數；S ≥ 95、A ≥ 85、B ≥ 70、C ≥ 55、其餘 D；能量歸零 = FAILED（F）。
+ * 評價：ACC =（PERFECT×100 + GREAT×70 + GOOD×50）/ 音符數；S ≥ 95、A ≥ 85、B ≥ 65、C ≥ 50、其餘 D；能量歸零 = FAILED（F）。
+ * EAR：預告音走 p1（上行 / 下行 / 低音單擊 / 高音雙擊，vol 13、8 幀）、旋律換成音量減半的 EAR 版、命中音改雜訊；
+ *   數拍第 1 小節把四個預告音各播一次當參考；開始前有 SOUND CHECK（聽不到 ⇒ 提示靜音開關 / 音量）；HARD 不開放 EAR。
  * goal = CROSS 模式 NORMAL 難度，前 3 首（STAR LINE / COMET PARADE / NEBULA FUNK）都拿到 B 以上，且整個過程沒用密技。
  * 密技（C / ★）：遊玩中 = 能量補滿；能量耗盡（FAILED 畫面）= 原地續關（driver.resume 從同一 row 接續、能量 60）；
  *   失敗後的結算畫面 = 同一首從頭重來；標題無效。用過密技 ⇒ 本次開機 goal() 一律 false。
@@ -28,12 +34,16 @@
   var AU = RH.Audio, CH = RH.Chart;
   var BTN = (NES.Input && NES.Input.BTN) || { A: 1, B: 2, SELECT: 4, START: 8, UP: 16, DOWN: 32, LEFT: 64, RIGHT: 128 };
 
-  var MODES = CH.MODES, DIFFS = CH.DIFFS, WIN = CH.WIN, LATE = CH.LATE;
+  var MODES = CH.MODES, DIFFS = CH.DIFFS;
+  var OFFSET_DEF = 4, OFFSET_MIN = -4, OFFSET_MAX = 12;   // 幀；預設 4 ≈ file:// ScriptProcessor 實測 4.5 幀
+  var CAL_P = 30, CAL_LEAD = 4, CAL_N = 8, CAL_MAXBEAT = 40, CAL_WIN = 14;
+  var CUE_NAME = ['RISING', 'FALLING', 'LOW BUZZ', 'DOUBLE BEEP'];
   var MODE_DESC = { CROSS: '4 GATES', DUO: 'B + A', ORBIT: '1 BUTTON', BLADE: 'SAMURAI' };
   var SIGHTS = ['FULL', 'FADE', 'EAR'];
   var SIGHT_DESC = ['SEE ALL', 'VANISH', 'LISTEN'];
   var RANKS = ['S', 'A', 'B', 'C', 'D', 'F'];
-  var RANK_MIN = [95, 85, 70, 55, 0];
+  var RANK_MIN = [95, 85, 65, 50, 0];
+  var ACC_W = [100, 70, 50];
   var GOAL_SONGS = 3, GOAL_RANK = 2;        // 前 3 首、B（索引 2）以上
   var ARM = 72, BLADE_D = 96;
   var GATE = [{ x: 128, y: 100 }, { x: 128, y: 164 }, { x: 100, y: 128 }, { x: 164, y: 128 }];
@@ -54,14 +64,24 @@
   function ms(f) { return Math.round(f * 1000 / 60.0988); }
   function hash(a, b) { var h = (a * 2654435761 ^ (b + 0x9E3779B9) * 40503) >>> 0; h ^= h >>> 15; h = Math.imul(h, 2246822519) >>> 0; h ^= h >>> 13; return h >>> 0; }
 
-  function newSess() { return { cheated: false, clr: {}, runs: 0, bot: { t: 0, lag: 12, jit: 3 } }; }
+  function newSess() { return { cheated: false, clr: {}, runs: 0, bot: { t: 0, lag: 12, jit: 3, lead: 0 } }; }
+  function clampOff(v) { v = v | 0; return v < OFFSET_MIN ? OFFSET_MIN : (v > OFFSET_MAX ? OFFSET_MAX : v); }
+  function loadOff() {
+    var q = CT.query ? parseInt(CT.query('offset'), 10) : NaN;
+    if (!isNaN(q)) return clampOff(q);
+    return clampOff(CT.load('rhythm', 'offset', OFFSET_DEF));
+  }
+  function offTxt(v) { return (v > 0 ? '+' : (v < 0 ? '-' : ' ')) + Math.abs(v) + 'F ' + ms(Math.abs(v)) + 'MS'; }
+  function winNow() { return CH.winOf(g.diff); }
+  function lateNow() { return CH.lateOf(g.diff); }
+  function setWays(n) { try { if (NES.Touch && NES.Touch.setWays) NES.Touch.setWays(n); } catch (e) { } }
   function newState() {
     return {
       mode: 'title', row: 0, msel: 0, song: 0, diff: 1, sight: 0, t: 0, paused: false,
-      chart: null, notes: [], head: 0, s: -1, sp: 6, T: 72, ended: false, post: 0,
+      chart: null, notes: [], head: 0, s: -1, sj: -1, off: OFFSET_DEF, sp: 6, T: 72, ended: false, post: 0,
       score: 0, combo: 0, maxCombo: 0, cnt: [0, 0, 0, 0], energy: ENERGY0, judge: '', judgeT: 0, dt: 0, cheated: false,
       fx: [], gateT: [0, 0, 0, 0], beat: -1, zanT: 0, zanSide: 1, zanH: 0, hurtT: 0, overT: 0, cdShown: '',
-      hud: {}, base: {}, sprUsed: 0, maxLine: 0, hidden: 0, failed: false, rank: -1, acc: 0, newBest: false, cued: 0, fails: 0, continues: 0
+      hud: {}, base: {}, sprUsed: 0, maxLine: 0, hidden: 0, failed: false, rank: -1, acc: 0, newBest: false, cued: 0, fails: 0, continues: 0, notice: '', refLane: -1, diag: 0, cal: null
     };
   }
 
@@ -111,10 +131,10 @@
         ppu.setTile(0, x, 3, t[0]); ppu.setTile(0, x + 1, 3, t[1]); ppu.setTile(0, x, 4, t[2]); ppu.setTile(0, x + 1, 4, t[3]);
       }
       ppu.fillAttr(0, 0, 1, 16, 2, 2);
-      for (var c = 2; c < 30; c++) { ppu.setTile(0, c, 1, art.t('FR_H')); ppu.setTile(0, c, 27, art.t('FR_H')); }
-      txt(6, 9, 'STARDUST RHYTHM');
-      txt(21, 4, 'START PAUSE   C/★ = CHEAT');
-      txt(23, 4, 'HOLD START+SELECT: MENU');
+      for (var c = 2; c < 30; c++) { ppu.setTile(0, c, 2, art.t('FR_H')); ppu.setTile(0, c, 28, art.t('FR_H')); }
+      txt(6, 3, g.notice ? padR(g.notice, 27) : '      STARDUST RHYTHM');
+      txt(22, 4, 'START PAUSE   C/★ = CHEAT');
+      txt(24, 4, 'HOLD START+SELECT: MENU');
       titleRows();
     });
     AU.play('rhythm_title');
@@ -122,25 +142,27 @@
   function bestKey(m, s, d) { return MODES[m] + '_' + s + '_' + d; }
   function titleRows() {
     var M = MODES[g.msel], T = RH.TRACKS[g.song];
-    txt(9, 3, (g.row === 0 ? '>' : ' ') + ' MODE   ' + padR(M, 7) + padR(MODE_DESC[M], 10));
-    txt(11, 3, (g.row === 1 ? '>' : ' ') + ' SONG   ' + (g.song + 1) + ' ' + padR(T.title, 15));
-    txt(13, 3, (g.row === 2 ? '>' : ' ') + ' LEVEL  ' + padR(DIFFS[g.diff].id, 7) + padR(T.bpm + 'BPM', 10));
-    txt(15, 3, (g.row === 3 ? '>' : ' ') + ' SIGHT  ' + padR(SIGHTS[g.sight], 7) + padR(SIGHT_DESC[g.sight], 10));
+    txt(8, 3, (g.row === 0 ? '>' : ' ') + ' MODE   ' + padR(M, 7) + padR(MODE_DESC[M], 10));
+    txt(10, 3, (g.row === 1 ? '>' : ' ') + ' SONG   ' + (g.song + 1) + ' ' + padR(T.title, 15));
+    txt(12, 3, (g.row === 2 ? '>' : ' ') + ' LEVEL  ' + padR(DIFFS[g.diff].id, 7) + padR(T.bpm + 'BPM', 10));
+    txt(14, 3, (g.row === 3 ? '>' : ' ') + ' SIGHT  ' + padR(SIGHTS[g.sight], 7) + padR(g.sight === 2 ? 'NO HARD' : SIGHT_DESC[g.sight], 10));
+    txt(16, 3, (g.row === 4 ? '>' : ' ') + ' OFFSET ' + padR(offTxt(g.off), 10) + padR(g.row === 4 ? 'Ⓐ=TEST' : '', 7));
     var k = bestKey(g.msel, g.song, g.diff), bs = CT.load('rhythm', 'sc_' + k, 0), br = CT.load('rhythm', 'rk_' + k, -1);
-    txt(17, 4, 'BEST ' + bestFmt(bs) + '   RANK ' + (br >= 0 ? RANKS[br] : '-'));
+    txt(18, 4, 'BEST ' + bestFmt(bs) + '   RANK ' + (br >= 0 ? RANKS[br] : '-'));
     var map = { CROSS: '↑ ↓ ← → = 4 STAR GATES', DUO: 'Ⓑ = LEFT GATE  Ⓐ = RIGHT', ORBIT: 'Ⓐ OR Ⓑ = TAP ON A MARK', BLADE: '←/Ⓑ CUT LEFT  →/Ⓐ RIGHT' }[M];
-    txt(19, 4, padR(map, 25));
+    txt(20, 4, padR(map, 25));
   }
 
   /* ============================== 開局 / 舞台 ============================== */
   function startRun(keepCheat) {
-    var keep = { row: g.row, msel: g.msel, song: g.song, diff: g.diff, sight: g.sight };
+    var keep = { row: g.row, msel: g.msel, song: g.song, diff: g.diff, sight: g.sight, off: g.off };
     var wasCheat = keepCheat ? g.cheated : false;
     g = newState();
     for (var k in keep) g[k] = keep[k];
     g.cheated = wasCheat;
     sess.runs++;
     g.mode = 'play';
+    if (g.sight === 2 && g.diff > 1) g.diff = 1;          // HARD 不開放 EAR
     var M = MODES[g.msel];
     g.chart = CH.get(g.song, M, g.diff);
     g.notes = g.chart.notes.map(function (n) { return { t: n.t, row: n.row, lane: n.lane, h: n.h, id: n.id, st: 0, d: 0, fxT: 0 }; });
@@ -148,7 +170,7 @@
     g.barF = 16 * g.sp;
     g.endS = g.chart.endRow * g.sp;
     buildStage();
-    AU.play(RH.TRACKS[g.song].key);
+    AU.play(g.sight === 2 ? RH.TRACKS[g.song].earKey : RH.TRACKS[g.song].key);
   }
   function buildStage() {
     var ppu = nes0.ppu, M = MODES[g.msel];
@@ -207,7 +229,7 @@
 
   /* ============================== HUD ============================== */
   function gauge() { var out = [], e = g.energy; for (var i = 0; i < 10; i++) { var v = e - i * 10; out.push(art.t(v >= 10 ? 'GA2' : (v >= 5 ? 'GA1' : 'GA0'))); } out.push(art.t('GAE')); return out; }
-  function accNow() { var j = g.cnt[0] + g.cnt[1] + g.cnt[2] + g.cnt[3]; return j ? Math.floor((g.cnt[0] * 100 + g.cnt[1] * 70 + g.cnt[2] * 40) / j) : 100; }
+  function accNow() { var j = g.cnt[0] + g.cnt[1] + g.cnt[2] + g.cnt[3]; return j ? Math.floor((g.cnt[0] * ACC_W[0] + g.cnt[1] * ACC_W[1] + g.cnt[2] * ACC_W[2]) / j) : 100; }
   function countdown() {
     var ci = RH.TRACKS[g.song].countIn, bar = Math.floor(g.s / g.barF), beat = Math.floor((g.s % g.barF) / (4 * g.sp));
     if (g.s < 0 || bar >= ci) return '';
@@ -224,12 +246,12 @@
     var bar = Math.max(0, Math.min(T.bars, Math.floor(Math.max(0, g.s) / g.barF) + 1));
     var dt = g.judgeT > 0 && g.judge !== 'MISS' && g.dt ? (g.dt < 0 ? 'EARLY ' + (-g.dt) + 'F' : 'LATE ' + g.dt + 'F') : '';
     if (M === 'BLADE') {
-      txt(1, 1, padR(T.title, 13) + padR(DIFFS[g.diff].id, 7) + 'BAR ' + pad(bar, 2) + '/' + pad(T.bars, 2));
-      txt(2, 1, 'SCORE ' + pad(g.score, 6) + '  COMBO ' + pad(g.combo, 3) + '      ');
-      put(3, 1, gauge());
-      txt(3, 13, padR(cd || j, 8) + padR(dt, 9));
+      // fix-r8 P3-2：HUD 從名稱表第 2 列（可見 y = 8）開始；暫停 / 失敗訊息暫時蓋掉分數列
+      txt(2, 1, padR(T.title, 13) + padR(DIFFS[g.diff].id, 7) + 'BAR ' + pad(bar, 2) + '/' + pad(T.bars, 2));
       var ml = msgLine();
-      if (ml) txt(4, 1, padR(ml, 30)); else txt(4, 1, padR('', 30));
+      txt(3, 1, ml ? padR(ml, 30) : padR('SCORE ' + pad(g.score, 6) + '  COMBO ' + pad(g.combo, 3), 30));
+      put(4, 1, gauge());
+      txt(4, 13, padR(cd || j, 8) + padR(dt, 9));
       return;
     }
     txt(2, 0, padR(T.title, 12));
@@ -239,7 +261,7 @@
     dim(2, 20, 'ENERGY'); put(3, 20, gauge());
     dim(5, 20, 'ACC'); txt(6, 20, padR(accNow() + '%', 5));
     dim(8, 20, 'BAR'); txt(9, 20, pad(bar, 2) + '/' + pad(T.bars, 2));
-    txt(21, 1, padR(cd || j, 8));
+    txt(21, 1, padR((g.refLane >= 0 ? 'TONE ' + ['↑', '↓', '←', '→'][g.refLane] : '') || cd || j, 8));
     dim(23, 1, padR(dt, 9));
     dim(21, 20, 'PERF ' + pad(g.cnt[0], 3)); dim(22, 20, 'GRT  ' + pad(g.cnt[1], 3));
     dim(23, 20, 'GOOD ' + pad(g.cnt[2], 3)); dim(24, 20, 'MISS ' + pad(g.cnt[3], 3));
@@ -255,6 +277,7 @@
     if (st && st.playing) { g.s = st.rowsPlayed * g.sp + st.rowFrame - 1; g.ended = false; }
     else if (st && st.paused) { /* 凍結 */ }
     else { g.ended = true; g.s++; }
+    g.sj = g.s - g.off;           // 玩家感知時間（扣掉聲音輸出延遲）：判定與畫面都用它
   }
   function laneMask(I) {
     var M = MODES[g.msel], p = function (b) { return I.pressed(b); }, out = [false, false, false, false];
@@ -263,7 +286,7 @@
     else out[0] = p(BTN.A) || p(BTN.B);
     return out;
   }
-  function grade(d) { var a = Math.abs(d); return a <= WIN.PERFECT ? 0 : (a <= WIN.GREAT ? 1 : (a <= WIN.GOOD ? 2 : 3)); }
+  function grade(d, diff) { var W = CH.winOf(diff === undefined ? (g ? g.diff : 1) : diff), a = Math.abs(d); return a <= W.PERFECT ? 0 : (a <= W.GREAT ? 1 : (a <= W.GOOD ? 2 : 3)); }
   var JNAME = ['PERFECT', 'GREAT', 'GOOD', 'MISS'];
   function applyJudge(n, q, d) {
     n.st = q < 3 ? 1 : 2; n.d = d; n.fxT = 14;
@@ -274,7 +297,7 @@
       g.score += [300, 200, 100][q] + Math.min(100, g.combo * 2);
       g.energy = Math.min(100, g.energy + [2, 1, 0][q]);
       g.gateT[n.lane] = 6;
-      AU.sfx('rhythm_hit' + n.lane);
+      AU.sfx(g.sight === 2 ? 'rhythm_tick' : 'rhythm_hit' + n.lane);
       if (MODES[g.msel] === 'BLADE') { g.zanT = 10; g.zanSide = n.lane === 2 ? 0 : 1; g.zanH = n.h; AU.sfx('rhythm_slash'); }
       if (g.fx.length < 4) g.fx.push({ n: n, t: 12 });
     } else {
@@ -285,19 +308,22 @@
     }
   }
   function judgeFrame() {
-    var I = NES.Input, want = laneMask(I), s = g.s, i, n;
+    var I = NES.Input, want = laneMask(I), s = g.sj, i, n, LATE = lateNow(), NEAR = LATE + 8;
+    // P2-7：同一幀按下兩個以上方向（觸控斜方向 / 十字鍵斜按）⇒ 只判有音符的那一軌，其他軌不算空按
+    var multi = (want[0] ? 1 : 0) + (want[1] ? 1 : 0) + (want[2] ? 1 : 0) + (want[3] ? 1 : 0) > 1;
+    if (multi) g.diag++;
     for (var L = 0; L < 4; L++) {
       if (!want[L]) continue;
       var hit = false, near = false;
       for (i = g.head; i < g.notes.length; i++) {
         n = g.notes[i];
-        if (n.t - s > 16) break;
+        if (n.t - s > NEAR) break;
         if (n.st || n.lane !== L) continue;
         near = true;
         if (n.t - s <= LATE && s - n.t <= LATE) { applyJudge(n, grade(s - n.t), s - n.t); hit = true; break; }
       }
-      // 空按（這一軌前後 16 幀內都沒有音符）：能量 −1、不斷連擊 ⇒ 狂按會把能量按光
-      if (!hit && !near) { g.energy = Math.max(0, g.energy - 1); g.empty = (g.empty || 0) + 1; }
+      // 空按（這一軌前後 GOOD + 8 幀內都沒有音符）：能量 −1、不斷連擊 ⇒ 狂按會把能量按光
+      if (!hit && !near && !multi) { g.energy = Math.max(0, g.energy - 1); g.empty = (g.empty || 0) + 1; }
       if (MODES[g.msel] === 'BLADE' && g.zanT <= 0) { g.zanT = 6; g.zanSide = L === 2 ? 0 : 1; }
     }
     for (i = g.head; i < g.notes.length; i++) {
@@ -305,11 +331,15 @@
       if (n.t - s > LATE) break;
       if (!n.st && s - n.t > LATE) applyJudge(n, 3, s - n.t);
     }
-    while (g.head < g.notes.length && g.notes[g.head].st && s - g.notes[g.head].t > LATE + 16) g.head++;
+    while (g.head < g.notes.length && g.notes[g.head].st && s - g.notes[g.head].t > NEAR) g.head++;
   }
   function earCues() {
     if (g.sight !== 2) return;
-    var lead = 4 * g.sp;
+    var lead = 4 * g.sp, bf = 4 * g.sp;
+    // 數拍第 1 小節（READY）：每拍播一個預告音當參考（↑ ↓ ← →），HUD 同時寫出是哪一個
+    if (g.s >= 0 && g.s < g.barF) {
+      if (g.s % bf === 0) { g.refLane = (g.s / bf) | 0; AU.sfx('rhythm_cue' + g.refLane); }
+    } else g.refLane = -1;
     for (var i = g.head; i < g.notes.length; i++) {
       var n = g.notes[i];
       if (n.t - lead > g.s) break;
@@ -362,11 +392,109 @@
     drawHud();
   }
 
+  /* ============================== 選單方向（P2-7） ============================== */
+  // 同一幀兩個方向一起按下 ⇒ 不算（等下一個單一方向）；只有一個 ⇒ 回那個方向
+  function oneDir(I) {
+    var got = 0, n = 0, D = [BTN.UP, BTN.DOWN, BTN.LEFT, BTN.RIGHT];
+    for (var i = 0; i < 4; i++) if (I.pressed(D[i])) { got = D[i]; n++; }
+    return n === 1 ? got : 0;
+  }
+
+  /* ============================== OFFSET 校正（P2-1） ============================== */
+  // 節拍器每 CAL_P 幀嗶一聲（先 4 聲預備），玩家跟著「聲音」按 Ⓐ；每下取「按下那幀 − 最近一拍」（±CAL_WIN 內才收），
+  // 收滿 8 下取中位數 ⇒ OFFSET。時間只用幀計數（不讀實際時鐘）；嗶聲在 tick 之前觸發 ⇒ 第 k 拍的發聲幀 = t0 + k × CAL_P。
+  function enterCalib() {
+    g.mode = 'calib';
+    g.cal = { t: -1, taps: [], res: null, beat: -1, ph: 'tap' };
+    AU.stop();
+    var ppu = nes0.ppu;
+    CT.blank(nes0, function () {
+      ppu.split(null); ppu.scroll(0, 0);
+      ppu.fillTiles(0, 0, 0, 32, 30, 0); ppu.fillAttr(0, 0, 0, 16, 15, 3);
+      clearSpr(); g.hud = {}; g.base = {};
+      ppu.setBgPalette(3, PAL_HUD);
+      for (var c = 3; c < 29; c++) { ppu.setTile(0, c, 2, art.t('FR_H')); ppu.setTile(0, c, 27, art.t('FR_H')); }
+      txt(4, 5, 'OFFSET CALIBRATION');
+      txt(7, 3, 'LISTEN TO THE BEEPS AND');
+      txt(9, 3, 'PRESS Ⓐ ON EVERY BEEP');
+      txt(11, 3, 'FOLLOW THE SOUND, NOT');
+      txt(12, 3, 'THE SCREEN. 8 TAPS.');
+      txt(24, 3, 'Ⓑ = BACK');
+      calibRows();
+    });
+  }
+  function calibRows() {
+    var C = g.cal, n = C.taps.length, dots = '';
+    for (var i = 0; i < CAL_N; i++) dots += i < n ? '★' : '.';
+    txt(15, 3, 'TAPS ' + dots + '  ' + n + '/' + CAL_N + '  ');
+    if (C.ph === 'tap') { txt(18, 3, padR(C.beat < CAL_LEAD ? 'GET READY...' : 'TAP Ⓐ WITH THE BEEP', 26)); txt(20, 3, padR('NOW ' + offTxt(g.off), 26)); txt(22, 3, padR('', 26)); }
+    else if (C.ph === 'done') { txt(18, 3, padR('RESULT ' + offTxt(C.res), 26)); txt(20, 3, padR('(WAS ' + offTxt(g.off) + ')', 26)); txt(22, 3, padR('Ⓐ = SAVE   START = RETRY', 26)); }
+    else { txt(18, 3, padR('NOT ENOUGH TAPS', 26)); txt(20, 3, padR('', 26)); txt(22, 3, padR('START = RETRY', 26)); }
+  }
+  function median(a) { var b = a.slice().sort(function (x, y) { return x - y; }), m = b.length >> 1; return b.length & 1 ? b[m] : (b[m - 1] + b[m]) / 2; }
+  function updateCalib() {
+    var I = NES.Input, C = g.cal;
+    if (I.pressed(BTN.B)) { AU.sfx('rhythm_move'); g.cal = null; enterTitle(); return; }
+    if (C.ph !== 'tap') {
+      if (C.ph === 'done' && I.pressed(BTN.A)) { g.off = clampOff(C.res); CT.save('rhythm', 'offset', g.off); AU.sfx('rhythm_ok'); g.cal = null; g.row = 4; enterTitle(); return; }
+      if (I.pressed(BTN.START) && !I.held(BTN.SELECT)) { enterCalib(); return; }
+      AU.tick(); return;
+    }
+    C.t++;
+    if (C.t % CAL_P === 0) {
+      C.beat = C.t / CAL_P;
+      if (C.beat >= CAL_MAXBEAT) { C.ph = 'fail'; calibRows(); AU.tick(); return; }
+      AU.sfx(C.beat % 4 === 0 ? 'rhythm_click_hi' : 'rhythm_click');
+      if (C.beat === CAL_LEAD) calibRows();
+    }
+    AU.tick();
+    if (I.pressed(BTN.A) && C.t >= CAL_LEAD * CAL_P - CAL_WIN) {
+      var k = Math.round(C.t / CAL_P), d = C.t - k * CAL_P;
+      if (k >= CAL_LEAD && Math.abs(d) <= CAL_WIN) {
+        C.taps.push(d);
+        if (C.taps.length >= CAL_N) { C.ph = 'done'; C.res = clampOff(Math.round(median(C.taps))); AU.sfx('rhythm_ok'); }
+        calibRows();
+      }
+    }
+  }
+
+  /* ============================== SOUND CHECK（P3-6，EAR 模式開始前） ============================== */
+  function enterSoundCheck() {
+    g.mode = 'scheck'; g.sct = 0;
+    AU.stop();
+    var ppu = nes0.ppu;
+    CT.blank(nes0, function () {
+      ppu.split(null); ppu.scroll(0, 0);
+      ppu.fillTiles(0, 0, 0, 32, 30, 0); ppu.fillAttr(0, 0, 0, 16, 15, 3);
+      clearSpr(); g.hud = {}; g.base = {};
+      ppu.setBgPalette(3, PAL_HUD);
+      for (var c = 3; c < 29; c++) { ppu.setTile(0, c, 2, art.t('FR_H')); ppu.setTile(0, c, 27, art.t('FR_H')); }
+      txt(4, 5, 'SOUND CHECK');
+      txt(6, 3, 'EAR MODE: NO NOTES SHOWN.');
+      txt(8, 3, 'LEARN THE 4 WARNING TONES:');
+      txt(10, 4, '↑ = RISING   ↓ = FALLING');
+      txt(12, 4, '← = LOW BUZZ');
+      txt(13, 4, '→ = DOUBLE BEEP');
+      txt(19, 3, 'HEAR IT?  Ⓐ = YES  Ⓑ = BACK');
+      txt(22, 3, 'NO SOUND? CHECK THE SILENT');
+      txt(23, 3, 'SWITCH AND VOLUME.');
+    });
+  }
+  function updateSoundCheck() {
+    var I = NES.Input;
+    if (g.sct % 40 === 0) { var L = (g.sct / 40) & 3; AU.sfx('rhythm_cue' + L); txt(16, 4, padR('NOW: ' + ['↑', '↓', '←', '→'][L] + ' ' + CUE_NAME[L], 22)); }
+    g.sct++;
+    AU.tick();
+    if (g.sct < 20) return;
+    if (I.pressed(BTN.A)) { AU.sfx('rhythm_ok'); g.notice = ''; startRun(); }
+    else if (I.pressed(BTN.B)) { g.notice = 'NO SOUND? CHECK SILENT SW'; enterTitle(); }
+  }
+
   /* ============================== 結算 ============================== */
   function rankOf(acc) { for (var i = 0; i < RANK_MIN.length; i++) if (acc >= RANK_MIN[i]) return i; return 4; }
   function enterResult() {
     var N = g.notes.length || 1;
-    g.acc = Math.floor((g.cnt[0] * 100 + g.cnt[1] * 70 + g.cnt[2] * 40) / N);
+    g.acc = Math.floor((g.cnt[0] * ACC_W[0] + g.cnt[1] * ACC_W[1] + g.cnt[2] * ACC_W[2]) / N);
     g.rank = g.failed ? 5 : rankOf(g.acc);
     g.mode = 'result'; g.overT = 0;
     var k = bestKey(g.msel, g.song, g.diff);
@@ -414,7 +542,7 @@
   function room(y, h, need) { for (var l = Math.max(0, y); l < y + h && l < 240; l++) if (lines[l] + need > 8) return false; return true; }
   function take(y, h, n) { for (var l = Math.max(0, y); l < y + h && l < 240; l++) lines[l] += n; }
   function visible(n) {
-    var dt = n.t - g.s;
+    var dt = n.t - g.sj;
     if (n.st === 1) return false;
     if (n.st === 2 && n.fxT <= 0) return false;
     if (g.sight === 2) return false;
@@ -422,7 +550,7 @@
     return true;
   }
   function notePos(n) {
-    var dist = ((n.t - g.s) * ARM / g.T) | 0, L = n.lane, G = GATE[L];
+    var dist = ((n.t - g.sj) * ARM / g.T) | 0, L = n.lane, G = GATE[L];
     if (L === 0) return { x: G.x, y: G.y - dist };
     if (L === 1) return { x: G.x, y: G.y + dist };
     if (L === 2) return { x: G.x - dist, y: G.y };
@@ -433,7 +561,7 @@
     return { x: C.x + ((C.r * SIN[a & 255]) >> 8), y: C.y - ((C.r * SIN[(a + 64) & 255]) >> 8) };
   }
   function bladePos(n) {
-    var dist = ((n.t - g.s) * BLADE_D / g.T) | 0;
+    var dist = ((n.t - g.sj) * BLADE_D / g.T) | 0;
     return { x: n.lane === 2 ? 110 - dist : 146 + dist, y: n.h ? 144 : 168 };
   }
   function drawSprites() {
@@ -460,7 +588,7 @@
         }
         for (i = g.head; i < g.notes.length; i++) {
           n = g.notes[i];
-          if (n.t - g.s > g.T) break;
+          if (n.t - g.sj > g.T) break;
           if (!visible(n)) continue;
           p = bladePos(n);
           if (n.st === 2) { if (room(p.y + 4, 8, 1)) { take(p.y + 4, 8, 1); add(p.x + 4, p.y + 4, art.s('MK_X'), 3); } continue; }
@@ -475,13 +603,13 @@
           take(fy, 8, 1); add(bp.x + 4, fy, art.s(f.t > 6 ? 'SPARK' : 'TWINK'), 3);
         }
       } else if (M === 'ORBIT') {
-        var sp = orbitPos(g.s), sx = sp.x - 8, sy = sp.y - 8;
+        var sp = orbitPos(g.sj), sx = sp.x - 8, sy = sp.y - 8;
         take(sy, 16, 2);
         for (i = 0; i < 4; i++) add(sx + (i & 1) * 8, sy + (i >> 1) * 8, art.s('SAT_' + i), 0);
         var look = g.barF - 12;
         for (i = g.head; i < g.notes.length; i++) {
           n = g.notes[i];
-          var dt = n.t - g.s;
+          var dt = n.t - g.sj;
           if (dt > look) break;
           if (n.st === 1 || (n.st === 2 && n.fxT <= 0)) continue;
           if (g.sight === 2 || (g.sight === 1 && dt < (look >> 1) && n.st === 0)) continue;
@@ -498,7 +626,7 @@
       } else {
         for (i = g.head; i < g.notes.length; i++) {
           n = g.notes[i];
-          if (n.t - g.s > g.T) break;
+          if (n.t - g.sj > g.T) break;
           if (!visible(n)) continue;
           p = notePos(n);
           var pal = n.lane;
@@ -536,7 +664,7 @@
   function drawBgFx() {
     var ppu = nes0.ppu, M = MODES[g.msel];
     if (M === 'BLADE') return;
-    var beat = g.s >= 0 ? Math.floor(g.s / (4 * g.sp)) : -1, on = g.s >= 0 && (g.s % (4 * g.sp)) < 6;
+    var beat = g.sj >= 0 ? Math.floor(g.sj / (4 * g.sp)) : -1, on = g.sj >= 0 && (g.sj % (4 * g.sp)) < 6;
     if (on !== g.coreOn) { g.coreOn = on; ppu.setBgPalette(2, on ? PAL_CORE_HI : PAL_CORE); }
     void beat;
     if (M === 'ORBIT') return;
@@ -559,21 +687,25 @@
       if (!tgt || B.t % 8) return 0;
       var cur = [g.msel, g.song, g.diff, g.sight], want = [tgt.msel, tgt.song, tgt.diff, tgt.sight], r = -1;
       for (var k = 0; k < 4; k++) if (cur[k] !== want[k]) { r = k; break; }
-      if (r < 0) return g.t > 30 ? BTN.START : 0;
+      if (r < 0) return g.row === 4 ? BTN.UP : (g.t > 30 ? BTN.START : 0);
       return g.row !== r ? BTN.DOWN : BTN.RIGHT;
     }
+    if (g.mode === 'calib') return B.t % 10 ? 0 : BTN.B;
+    if (g.mode === 'scheck') return (g.sct > 30 && B.t % 10 === 0) ? BTN.A : 0;
     if (g.mode === 'result') return (g.overT > 60 && B.t % 30 === 0) ? BTN.START : 0;
     if (g.mode === 'fail') return (g.overT > 40 && B.t % 30 === 0) ? BTN.START : 0;
     if (g.paused || g.mode !== 'play') return 0;
-    var M = MODES[g.msel], mask = 0, next = g.s + 1;
+    // 看到的是畫面（感知時間 sj）；lead = 提早幾幀按（給 test 的真人濾鏡用：濾鏡只能延後，所以先提早再加 N(lead+偏差, σ)）
+    //   clk = 's'（?botclk=s）：改用「聲音產生時間」songFrame 當基準 = 模擬「跟著聲音按」的人（聽到的延遲由濾鏡加上）
+    var M = MODES[g.msel], mask = 0, next = (B.clk === 's' ? g.s : g.sj) + 1, LATE = lateNow();
     for (var i = g.head; i < g.notes.length; i++) {
       var n = g.notes[i];
-      if (n.t - next > LATE + B.jit) break;
+      if (n.t - next > LATE + B.jit + B.lead) break;
       if (n.st) continue;
       var seen = g.sight === 2 ? n.t - 4 * g.sp : n.t - (M === 'ORBIT' ? g.barF - 12 : g.T);
       if (next - seen < B.lag) continue;
       var e = B.jit ? (hash(n.id, sess.runs) % (2 * B.jit + 1)) - B.jit : 0;
-      if (next !== n.t + e) continue;
+      if (next !== n.t + e - B.lead) continue;
       if (M === 'CROSS') mask |= [BTN.UP, BTN.DOWN, BTN.LEFT, BTN.RIGHT][n.lane];
       else if (M === 'DUO') mask |= n.lane === 2 ? BTN.B : BTN.A;
       else if (M === 'BLADE') mask |= n.lane === 2 ? BTN.LEFT : BTN.RIGHT;
@@ -607,11 +739,15 @@
       ppu.flickerStep = 0;
       GAME.backTile = { tile: art.s('BACK'), pal: 2 };
       AU.init(nes);
+      setWays(4);                  // P2-7：本款只用四方向（API 不存在也不報錯；registry 換遊戲時會重設 8）
       if (!sess) sess = newSess();
-      var lag = CT.query ? parseInt(CT.query('lag'), 10) : NaN, jit = CT.query ? parseInt(CT.query('jit'), 10) : NaN;
+      var lag = CT.query ? parseInt(CT.query('lag'), 10) : NaN, jit = CT.query ? parseInt(CT.query('jit'), 10) : NaN, lead = CT.query ? parseInt(CT.query('lead'), 10) : NaN;
       if (!isNaN(lag)) sess.bot.lag = lag;
       if (!isNaN(jit)) sess.bot.jit = jit;
+      if (!isNaN(lead)) sess.bot.lead = lead;
+      if (CT.query && CT.query('botclk') === 's') sess.bot.clk = 's';
       g = newState();
+      g.off = loadOff();
       var qm = CT.query ? CT.query('rmode') : null;
       if (qm) {
         var mi = MODES.indexOf(qm.toUpperCase());
@@ -619,6 +755,7 @@
         g.song = Math.max(0, Math.min(5, (parseInt(CT.query('song'), 10) || 1) - 1));
         g.diff = Math.max(0, Math.min(2, isNaN(parseInt(CT.query('diff'), 10)) ? 1 : parseInt(CT.query('diff'), 10)));
         g.sight = Math.max(0, Math.min(2, parseInt(CT.query('sight'), 10) || 0));
+        if (g.sight === 2 && g.diff > 1) g.diff = 1;
         startRun();
       } else enterTitle();
     },
@@ -632,20 +769,29 @@
       }
       if (g.mode === 'title') {
         g.t++;
-        var ch = false;
-        if (I.pressed(BTN.UP)) { g.row = (g.row + 3) % 4; ch = true; }
-        else if (I.pressed(BTN.DOWN)) { g.row = (g.row + 1) % 4; ch = true; }
-        else if (I.pressed(BTN.LEFT) || I.pressed(BTN.RIGHT)) {
-          var d = I.pressed(BTN.LEFT) ? -1 : 1;
+        var ch = false, dir = oneDir(I);
+        if (dir === BTN.UP) { g.row = (g.row + 4) % 5; ch = true; }
+        else if (dir === BTN.DOWN) { g.row = (g.row + 1) % 5; ch = true; }
+        else if (dir === BTN.LEFT || dir === BTN.RIGHT) {
+          var d = dir === BTN.LEFT ? -1 : 1;
           if (g.row === 0) g.msel = (g.msel + 4 + d) % 4;
           else if (g.row === 1) g.song = (g.song + 6 + d) % 6;
-          else if (g.row === 2) g.diff = (g.diff + 3 + d) % 3;
-          else g.sight = (g.sight + 3 + d) % 3;
+          else if (g.row === 2) g.diff = (g.diff + (g.sight === 2 ? 2 : 3) + d) % (g.sight === 2 ? 2 : 3);
+          else if (g.row === 3) { g.sight = (g.sight + 3 + d) % 3; if (g.sight === 2 && g.diff > 1) g.diff = 1; }
+          else { g.off = clampOff(g.off + d); CT.save('rhythm', 'offset', g.off); }
           ch = true;
         }
         if (ch) { titleRows(); AU.sfx('rhythm_move'); }
-        else if ((I.pressed(BTN.START) || I.pressed(BTN.A)) && !I.held(BTN.SELECT)) { AU.sfx('rhythm_ok'); startRun(); }
+        else if (g.row === 4 && I.pressed(BTN.A)) { AU.sfx('rhythm_ok'); enterCalib(); }
+        else if ((I.pressed(BTN.START) || I.pressed(BTN.A)) && !I.held(BTN.SELECT)) {
+          AU.sfx('rhythm_ok');
+          if (g.sight === 2) enterSoundCheck(); else startRun();
+        }
         AU.tick();
+      } else if (g.mode === 'calib') {
+        updateCalib();
+      } else if (g.mode === 'scheck') {
+        updateSoundCheck();
       } else if (g.mode === 'result') {
         g.overT++;
         if (g.overT > 30 && I.pressed(BTN.START) && !I.held(BTN.SELECT)) enterTitle();
@@ -655,7 +801,7 @@
     },
     draw: function () {
       if (g.mode === 'title') {
-        if ((g.t & 31) === 0) txt(25, 11, (g.t & 32) ? '          ' : 'PUSH START');
+        if ((g.t & 31) === 0) txt(26, 11, (g.t & 32) ? '          ' : 'PUSH START');
       } else if (g.mode === 'play' || g.mode === 'fail') {
         drawHud();
         drawBgFx();
@@ -666,7 +812,7 @@
       var st = AU.state();
       return {
         mode: g.mode, game: MODES[g.msel], song: g.song, songKey: RH.TRACKS[g.song].key, diff: DIFFS[g.diff].id, sight: SIGHTS[g.sight], row: g.row,
-        s: g.s, speed: g.sp, T: g.T, notes: g.notes.length, head: g.head,
+        s: g.s, sj: g.sj, offset: g.off, diag: g.diag, cal: g.cal ? { taps: g.cal.taps.slice(), res: g.cal.res, beat: g.cal.beat } : null, notice: g.notice, refLane: g.refLane, speed: g.sp, T: g.T, notes: g.notes.length, head: g.head,
         perfect: g.cnt[0], great: g.cnt[1], good: g.cnt[2], miss: g.cnt[3], combo: g.combo, maxCombo: g.maxCombo, score: g.score,
         energy: g.energy, acc: g.mode === 'result' ? g.acc : accNow(), rank: g.rank >= 0 ? RANKS[g.rank] : '', failed: g.failed, paused: g.paused,
         musicRow: st ? st.rowsPlayed : -1, musicPlaying: !!(st && st.playing), musicPaused: !!(st && st.paused), cued: g.cued,
@@ -674,8 +820,8 @@
         maxLine: g.maxLine, hidden: g.hidden, runs: sess.runs, lag: sess.bot.lag, jit: sess.bot.jit, goal: goalOk()
       };
     },
-    exit: function () { if (g && g.mode === 'play' && g.score > CT.load('rhythm', 'best', 0) && !g.cheated) CT.save('rhythm', 'best', g.score); AU.stop(); },
-    cheat: function () { if (!g || g.mode === 'title' || (g.mode === 'result' && !g.failed)) return false; g.cheatReq = true; return true; },
+    exit: function () { if (g && g.mode === 'play' && g.score > CT.load('rhythm', 'best', 0) && !g.cheated) CT.save('rhythm', 'best', g.score); AU.stop(); setWays(8); },
+    cheat: function () { if (!g || g.mode === 'title' || g.mode === 'calib' || g.mode === 'scheck' || (g.mode === 'result' && !g.failed)) return false; g.cheatReq = true; return true; },
     bot: function () { return botMask(); },
     goal: function () { return goalOk(); },
     bestText: function () { return bestFmt(CT.load('rhythm', 'best', 0)); }
@@ -685,7 +831,10 @@
     g: function () { return g; }, sess: function () { return sess; },
     start: function (mode, song, diff, sight) { g.msel = Math.max(0, MODES.indexOf(mode || 'CROSS')); g.song = song || 0; g.diff = diff === undefined ? 1 : diff; g.sight = sight || 0; startRun(); },
     grade: grade, rankOf: rankOf, notePos: notePos, orbitPos: orbitPos, bladePos: bladePos, ms: ms, bestFmt: bestFmt,
-    result: function () { enterResult(); }, resetSess: function () { sess = newSess(); }, setBot: function (lag, jit) { sess.bot.lag = lag; sess.bot.jit = jit; }
+    result: function () { enterResult(); }, resetSess: function () { sess = newSess(); },
+    setBot: function (lag, jit, lead) { sess.bot.lag = lag; sess.bot.jit = jit; if (lead !== undefined) sess.bot.lead = lead; },
+    setOffset: function (v) { g.off = clampOff(v); g.sj = g.s - g.off; }, calib: function () { enterCalib(); }, soundCheck: function () { enterSoundCheck(); },
+    title: function () { enterTitle(); }, OFFSET_DEF: OFFSET_DEF, ACC_W: ACC_W
   };
   if (CT.register) CT.register(GAME);
 })();

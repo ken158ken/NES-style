@@ -715,12 +715,15 @@ oam.end();                                                 // 排序 + 輪替 + 
 | `CHEAT_MS` | `number` | 防連按毫秒數（300） |
 | `mask()` | `() → int` | 觸控目前按著的 NES 八鍵遮罩 |
 | `dirs()` / `sector()` / `tickOn()` | | 方向狀態 / 目前扇區（-1 ＝ 死區）/ 亮著的刻度 |
+| `setWays(n)`（**R8 fix-r8-shell**） | `(4\|8) → 4\|8` | 十字鍵方向數。`8` ＝ 現狀（**預設**，8 扇區各 45°、±6° 磁滯，輸出可含斜方向）；`4` ＝ **只輸出單一正方向**：取手指角度最近的正方向（扇區各 90°，偏 ±44° 仍是正方向），換扇區同樣 ±6° 磁滯（按住滑動時偏過 51° 才換）。`4` 以外的值一律當 `8`。手指按著時切換會立刻依新規則重算 `mask()`。**四方向遊戲在 `init` 呼叫 `setWays(4)`**；`games/cart1/registry.js` 的 `CT.resetHW`（換遊戲 / 回選單）一律 `setWays(8)` 還原。無 DOM 的殼恆回 `8` |
+| `getWays()` | `() → 4\|8` | 目前的方向數 |
 | `floatZone()` / `padHome()` / `floating()` | | 浮動感應區矩形 / 底座原位 / 是否浮動中 |
 | `relayout()` / `releaseAll()` | | 手動重排 / 放掉所有按鍵 |
 | `buttons` / `el` / `overlapping` | | 按鍵 DOM / 覆蓋層根節點 / 這次排版有沒有壓到畫面 |
 
 ```js
 NES.Touch.setLayout({ side: 'left', stick: 'dpad', size: 1.2, opacity: 0.9 });
+NES.Touch.setWays(4);         // R8：四方向遊戲（simon / reflex / rhythm CROSS …）在 init 呼叫；換遊戲時 CT.resetHW 還原 8
 NES.Touch.setLayout({ cheatButton: false });   // 關掉 ★密技 鍵
 NES.Touch.rects().a;          // {x, y, w, h, cx, cy}
 NES.Touch.mask();             // 例如 129 = A|RIGHT
@@ -802,6 +805,8 @@ resize 會二次觸發（iOS 工具列收合延遲）、`?touch=1` / `?touch=0` 
 2. 浮動搖桿的感應區排在所有按鍵**之前**（同層後者疊在上面）⇒ 手指落在 A/B/START 上時永遠是按鍵優先。
 3. `tools/shot.py`（桌機、`?scale=1`、非觸控）不受影響：覆蓋層在非觸控環境預設隱藏，而且 shot.py 是 `canvas.toDataURL()` 不是頁面截圖。整頁截圖請用 `tools/mobile_shot.py`。
 4. 測試：`tools/test_touch.py`（**255 項**；fix5 每組多 10 項密技鍵檢查 + 桌機 1 項）。
+   R8 fix-r8-shell：每組多 10 項 `setWays` 檢查（預設 8 方向 72 點與修前公式逐點一致、4 方向 72 點 = 最近正方向且永遠單一方向、
+   偏 ±25° / ±40° 仍是正方向、磁滯、按住中切換立刻重算、切回 8 後逐點與修前一致）+ 卡帶頁回選單後 `getWays() = 8`（9 頁全部 **995 項**）。
 5. ★密技 鍵**不進 `NES.Input`**（`mask()` / `setExternal` 都不動）⇒ 按它不會打斷正在按的方向鍵，
    也不會被 `?debug=1` 的腳本注入干擾。
 
@@ -847,6 +852,7 @@ update(nes) { ...; T.update(); }    // 依建立順序跑各元件（讀手把�
 - 框 = 第 x~x+w−1 欄、第 y~y+h−1 列；文字從 (x+1+pad, y+1) 起，每行 `cols = w−2−2·pad` 欄（全形算 2）、`lines = ⌊(h−4)/pitch⌋+1` 行（h=8 ⇒ 3 行）。
 - `box.say(text, {name, speed, onPage(page, pages), onClose})`：第一次會畫框；`name` = 名牌（疊在框左上，佔第 y−3~y 列，所以 y ≥ 3）。
   文字：`\n` 換行、`\f` 強制換頁；自動斷行（英文整字換行、避頭「，。！？」」等不放行首、避尾「「（」不放行末）；**依框寬 + 池容量自動分頁，絕不截斷**。
+  斷行單位（fix-r9-text）：收尾標點黏在前一個字後面、破折號 `—` 整串黏在前一個字後面、開頭標點黏在下一個字前面 ⇒ `」。`、`？！`、`……`、`——` **不會被拆成兩行，行首不會出現收尾標點或破折號**（放不下就連前一個字一起帶到下一行）；只有一個單位比整行還寬時才逐字硬切。`test_text.py` 對 adventure / escape / quiz 全部字串在 26 / 24 / 22 / 20 欄逐行驗證。
 - 打字機：每 `speed` 幀一個字、空白不花時間、`。！？…` 後停 `pausePunct` 幀；寫入受預算限制（一幀最多兩個新字）。
 - 手把：**A** = 打字中 → 這頁立刻寫完（仍照預算分幀）；頁寫完 → 翻頁；最後一頁 → 關閉（`onClose`）。
   頁寫完時右下角內側（第 x+w−2 欄、第 y+h−2 列）閃 **▼**（還有下一頁）或 **■**（最後一頁）。
@@ -886,3 +892,4 @@ update(nes) { ...; T.update(); }    // 依建立順序跑各元件（讀手把�
   建議把故事 / 題庫放 `games/cart5/<id>/text_<名>.js`（字串陣列或物件），程式碼裡的中文字串一樣會被收到。
 - `$PY tools/cjk_glyphs.py` 重產；`--check` 只驗（缺字 / 多字 / 點陣與 Noto 不符 → exit 1，`run_all.sh` 會跑）；`--list` 列各檔用字與新字；`--render 字` 印點陣。
 - 遊戲裡別讓玩家輸入任意中文（字形只收資料裡出現過的字）。
+- **字形覆寫** `OVERRIDE`（fix-r9-text）：Noto 點陣不適合的字改用手繪 16×16。目前只有破折號 `—`（U+2014）/ `―`：第 7~8 列滿寬 16 px 兩列粗的橫線（Noto 原本是 12 px 細線，跟「一」幾乎一樣），兩個 `—` 會接成一條不斷的長線。`SPEC` 字串帶 `ovrN`；`test_text.py` 驗「—」與「一」點陣差 ≥ 16 px。

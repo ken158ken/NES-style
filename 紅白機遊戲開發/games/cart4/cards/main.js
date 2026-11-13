@@ -73,9 +73,10 @@
 
   /* ---------------- 名稱表影子 + 差異佇列（每幀 ≤ 140 byte） ---------------- */
   function bgTile(c, r) {
-    if (r === 3) return art.t('BH');
-    if (r === 25) return art.t('BHB');
-    if (r < 4 || r > 24) return 0;
+    // fix-r8 P3-2：HUD 從名稱表第 2 列起（第 1 列 = 可見區 y 0 會貼頂）⇒ 框線 5 / 26、牌區 6~25（下移 2 列保持屬性 2×2 對齊）
+    if (r === 5) return art.t('BH');
+    if (r === 26) return art.t('BHB');
+    if (r < 6 || r > 25) return 0;
     if (c === 0) return art.t('BV');
     if (c === 31) return art.t('BVR');
     if (c > 3 && c < 28) return 0;
@@ -115,7 +116,7 @@
       ppu.clearSprites(); g.sprUsed = 0;
     });
   }
-  function drawField() { for (var r = 3; r <= 25; r++) for (var c = 0; c < 32; c++) put(c, r, bgTile(c, r)); }
+  function drawField() { for (var r = 4; r <= 26; r++) for (var c = 0; c < 32; c++) put(c, r, bgTile(c, r)); }
   function big(col, row, word) {
     for (var i = 0; i < word.length; i++) {
       var ch = word.charAt(i), x = col + i * 2;
@@ -151,9 +152,9 @@
   function enterTitle() {
     g.mode = 'title'; g.t = 0; g.run = null; g.paused = false; g.spark = [];
     redraw(function () {
-      for (var c = 0; c < 32; c++) { put(c, 1, art.t('BHB')); put(c, 28, art.t('BH')); }
-      big(6, 3, 'STAR CARDS');
-      center(6, 'FLIP TWO  FIND THE PAIRS');
+      for (var c = 0; c < 32; c++) { put(c, 2, art.t('BHB')); put(c, 28, art.t('BH')); }
+      big(6, 4, 'STAR CARDS');
+      center(7, 'FLIP TWO  FIND THE PAIRS');
       for (var i = 0; i < GAMES.length; i++) text(3, titleRow(i), titleLine(i));
       center(15, padR(bestLine(g.sel, g.lvl[g.sel]), 28));
       text(3, 18, 'UP/DOWN MODE  L/R SIZE/CPU');
@@ -205,7 +206,7 @@
     AU.sfx('cards_go');
     return R;
   }
-  function cardRC(i) { var R = g.run, x = i % R.W, y = (i / R.W) | 0; return [16 - 2 * R.W + 4 * x, 14 - 2 * R.H + 4 * y]; }
+  function cardRC(i) { var R = g.run, x = i % R.W, y = (i / R.W) | 0; return [16 - 2 * R.W + 4 * x, 16 - 2 * R.H + 4 * y]; }
   function facePal(f) { return 1 + ((f / 6) | 0); }
   function drawCard(i, kind) {
     var R = g.run, p = cardRC(i), c0 = p[0], r0 = p[1], f = R.cards[i].f, cx, cy, t;
@@ -544,8 +545,8 @@
     else if (R.kind === 'time') { var sl = secs(R.timeF); top = padR('TIME ATTACK ' + SIZE_NAMES[R.sz], 20) + 'TIME ' + pad(sl, 3); }
     else { top = padR('YOU ' + pad(R.pp, 2) + '  PIPPO ' + pad(R.cp, 2), 21) + padL(MEM[R.lvl].name, 8); }
     sub = 'SCORE ' + pad(R.score, 6) + '  COMBO X' + pad(R.combo, 1) + '  ' + 'PAIR ' + pad(R.matched, 2);
-    text(1, 1, padR(top, 29) + cs);
-    text(1, 2, padR(sub, 30));
+    text(1, 2, padR(top, 29) + cs);
+    text(1, 3, padR(sub, 30));
     var line;
     if (g.paused) line = 'PAUSE  HOLD START+SELECT: MENU';
     else if (R.phase === 'deal') line = 'DEALING...';

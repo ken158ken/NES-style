@@ -81,33 +81,38 @@
   C.GOAL_FRAMES = GOAL_FRAMES;
 
   /* ---------------- 標題 ---------------- */
-  function titleRow(i) { return 10 + i * 3; }
+  // fix-r8（qa-r8 P3-2 / P3-3）：外框從名稱表列 2 起（不貼可見區 y = 0）；模式一列一個、之間空一列，副標只寫選中的那一項
+  function titleRow(i) { return 11 + i * 2; }
+  var TITLE_SUB_ROW = 19;
+  function drawTitleSub() { C.text(3, TITLE_SUB_ROW, C.padR('', 26)); var s = '- ' + modes()[g.sel].sub + ' -'; C.center(TITLE_SUB_ROW, s); }
   function modeLine(i) {
     var M = modes()[i];
     return (i + 1) + ' ' + C.padR(M.name, 11) + 'BEST ' + (gradeOf(M.key) < 5 ? GRADES[gradeOf(M.key)] : '-');
   }
+  // fix-r8（qa-r8 P2-7）：觸控十字鍵四方向 / 八方向。TILT 要斜向傾斜 → 8；其他（選單 / TWIN / JUGGLE 的 SIGNAL / TRACER 游標）→ 4。
+  // engine 沒有 setWays 也不能報錯；exit 設回 8。
+  function touchWays(n) { try { if (NES.Touch && NES.Touch.setWays) NES.Touch.setWays(n); } catch (e) { } }
   function enterTitle() {
+    touchWays(4);
     g.mode = 'title'; g.t = 0; g.run = null; g.sub = null; g.paused = false;
     C.redraw(function () {
-      C.frame(1, 1, 30, 27);
-      C.big(6, 3, 'STAR BRAIN');
-      C.center(6, 'SPLIT MIND TRAINING LAB');
-      C.center(8, 'BEST SCORE ' + C.pad(CT.load('brain', 'best', 0) | 0, 6));
-      for (var i = 0; i < modes().length; i++) {
-        C.text(6, titleRow(i), modeLine(i));
-        C.text(8, titleRow(i) + 1, modes()[i].sub);
-      }
-      C.text(4, 22, 'UP/DOWN MODE  A/START GO');
-      C.text(4, 24, 'HOLD START+SELECT: MENU');
-      C.text(4, 26, 'C/$ = CHEAT');
-      // 標題大字紫、模式清單青；選到的那一列橘
+      C.frame(1, 2, 30, 26);
+      C.big(6, 4, 'STAR BRAIN');
+      C.center(7, 'SPLIT MIND TRAINING LAB');
+      C.center(9, 'BEST SCORE ' + C.pad(CT.load('brain', 'best', 0) | 0, 6));
+      for (var i = 0; i < modes().length; i++) C.text(6, titleRow(i), modeLine(i));
+      drawTitleSub();
+      C.text(4, 21, 'UP/DOWN MODE  A/START GO');
+      C.text(4, 23, 'HOLD START+SELECT: MENU');
+      C.text(4, 25, 'C/$ = CHEAT');
+      // 標題大字紫、模式清單 + 副標青；選到的那一列橘
       C.fillA(1, 1, 14, 3, 1);
-      C.fillA(1, 5, 14, 6, 2);
+      C.fillA(1, 5, 14, 5, 2);
       selAttr(g.sel, 3);
     }, TITLE_PAL);
     AU.play('brain_title');
   }
-  function selAttr(i, p) { var r = titleRow(i); for (var c = 2; c < 15; c++) { C.putA(c, r >> 1, p); C.putA(c, (r + 1) >> 1, p); } }
+  function selAttr(i, p) { var r = titleRow(i); for (var c = 2; c < 15; c++) C.putA(c, r >> 1, p); }
 
   /* ---------------- 說明頁：規則 + 手把圖 + 起始等級 ---------------- */
   function enterHowto(m) {
@@ -115,7 +120,7 @@
     g.mode = 'howto'; g.t = 0; g.sel = m;
     g.howLv = M.levelSelect ? reachOf(M.key) : 0;
     C.redraw(function () {
-      C.frame(1, 1, 30, 27);
+      C.frame(1, 2, 30, 26);
       C.center(3, M.name);
       C.center(4, M.sub);
       for (var i = 0; i < M.rules.length; i++) C.text(3, 6 + i, M.rules[i]);
@@ -147,6 +152,7 @@
   function startRun(m, lv) {
     var M = modes()[m];
     g.runsTotal++;
+    touchWays(M.ways || 4);
     var qs = CT.query ? parseInt(CT.query('seed') || '', 10) : NaN;
     C.seed(isNaN(qs) ? (0x1357 + g.runsTotal * 7919 + m * 131) : qs);
     g.run = { m: m, key: M.key, lv: lv || 0, startLv: lv || 0, score: 0, hearts: M.hearts, hurts: 0, cheated: false, continues: 0, lvScores: [], stat: {} };
@@ -350,7 +356,7 @@
       if (g.mode === 'title') {
         g.t++;
         var d = (I.pressed(BTN.DOWN) || (I.pressed(BTN.SELECT) && !I.held(BTN.START))) ? 1 : (I.pressed(BTN.UP) ? -1 : 0);
-        if (d) { selAttr(g.sel, 2); g.sel = (g.sel + d + modes().length) % modes().length; selAttr(g.sel, 3); AU.sfx('brain_move'); }
+        if (d) { selAttr(g.sel, 2); g.sel = (g.sel + d + modes().length) % modes().length; selAttr(g.sel, 3); drawTitleSub(); AU.sfx('brain_move'); }
         if ((I.pressed(BTN.START) && !I.held(BTN.SELECT)) || I.pressed(BTN.A)) { AU.sfx('brain_ok'); enterHowto(g.sel); }
       } else if (g.mode === 'howto') {
         g.t++;
@@ -370,10 +376,12 @@
     },
     draw: function () {
       C.sprBegin();
+      C.oy = 0;
       if (g.mode === 'title') {
         if ((g.t & 15) < 12) C.spr(36, titleRow(g.sel) * 8, C.s('PTR'), 0);
       } else if (g.mode === 'ready' || g.mode === 'play' || g.mode === 'lvlend') {
         var M = modes()[g.run.m];
+        C.oy = M.hudShift ? C.SHIFT : 0;
         drawHud();
         M.draw(g.mode, g.paused);
         var bd = (g.flash > 0 && (g.flash & 4)) ? 0x06 : M.pal.bd;
@@ -391,7 +399,7 @@
         goal: !!g.goal, queue: C.q.length + C.qa.length, peakQ: C.peakQ, sprUsed: C.sprUsed, lag: g.bot.lag
       };
     },
-    exit: function () { saveBest(); AU.stop(); },
+    exit: function () { saveBest(); AU.stop(); touchWays(8); },
     cheat: function () {
       if (!g || g.mode === 'title' || g.mode === 'howto' || g.mode === 'result') return false;
       g.cheatReq = true; return true;
