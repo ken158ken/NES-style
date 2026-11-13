@@ -3681,3 +3681,499 @@ cruiser-r4 的「touch 255」補上註腳（現在 340），`tools/test_touch.py
    建議 R5 讓 `dev.*` 凡是吃「種類」的都走同一套 `kindOf` 式正規化。
 6. **W3 / W4 的魔王戰沒有做「精靈輪替可視化」的回歸**：現在只保證峰值 ≤ 8；
    若之後要加魔王的新招式，請先用 `test_w3` / `test_w4` ⑫ 的 `BOT_SPRLINE` 量一遍再合。
+
+## cart1-shell（R5，2026-11-13）
+
+### 1. 做了什麼
+- **`games/cart1/shell.js`（新，`CT.Shell = {init, update, draw, state, dev}`）**：
+  開機 logo「STARDUST WORKS」（16×16 星星從上方落下 + 鐘聲音效，150 幀或 A / START 跳過）→ 選單畫面：
+  原創 logo 字「星塵 8 合 1」（16×16 中文字，本體 / 上緣高光 / 右下陰影三色立體字）+ 「ACTION 8 IN 1 CART-1」+ 8 槽清單
+  （每槽原創 16×16 圖示 + 16×16 中文名 + 右側 BEST；未註冊 = 「?」圖示 + 「準備中」灰字，按 A 播錯誤音效不進入）。
+  ↑↓ / SELECT 移動（按住 18 幀後每 6 幀連發、上下繞圈）、A / START 進入（選中行閃 30 幀 → `CT.launch(id, {from:'shell'})`）；
+  選中行換 BG 調色盤 1（黃字），每次只寫兩列屬性（≤ 24 byte）。回選單（`init({from})`）不重播開機 logo，游標停在剛玩的那款。
+  選單 BGM `cart1_menu`（原創，F 大調 4 段 × 2 小節、四軌）+ 音效 `cart1_move / cart1_ok / cart1_ng / cart1_boot`。
+- **中文字**：離線用 Noto Sans CJK TC（SIL OFL）16px 點陣化成 16×16 位元圖（23 字 + logo 3 字；數字 8 / 1 手繪），
+  只建這次選單用得到的字（每字 4 磚，bank 目前 124~228 / 256）；表外的中文字 → 執行期 canvas 點陣化；
+  再不行（或英文 title）→ 8×8 字型顯示。最高分：`bestText()` 優先，否則 `CT.load(id,'best',0)`，≤ 8 字右對齊。
+- **START+SELECT 回選單回饋**：registry 沒有 overlay hook ⇒ shell.js 載入時包一層 `window.GAME.draw`，
+  在遊戲 draw 之後、render 之前，按住期間用 **OAM 62 / 63 兩個精靈**在畫面上方「從兩側往中間收攏」（進度 > 2/3 改快閃）；
+  磁磚取自目前遊戲精靈表裡最實心的一塊（8×16 模式取最實心的上下一對），放開後把 62 / 63 還原成遊戲原本的內容。
+- **`tools/playthrough_cart.py`（新）**：`--game <id> | --all [--max N] [--query] [--json]`，開 `?debug=1&bot=1&game=<id>`，
+  頁面內逐幀 `step(1)` + `stats()`，記每線精靈峰值（PPU considered，不靠輪替）/ overFrames / 預算尖峰 / 頁面錯誤，
+  直到 `goal()` 或上限；輸出每款 JSON 一行 + 表。未註冊 = SKIP；缺檔（別款還沒寫好的 script）只記 warnings。
+  結束碼 0 / 1 / 2 環境 / 3 未註冊。`run_game()` 可被測試 import（塞假遊戲自測）。
+- **`tools/test_cart.py`（新）**：容忍已註冊 0~8 款；切換契約用**只在測試中載入的假遊戲**
+  （`add_init_script` 在 registry 之前塞 `window.CT.games`，不碰 cart1.html）：一款 8×8 + 水平鏡像 + split + scroll + 整片名稱表，
+  一款 8×16 + `bestText()`。
+- **整合（Edit 插入）**：`tools/run_all.sh`（node --check 多掃 `games/*/*/*.js`、`build --check cart1.html`、非 quick 時 cart1 選單冒煙截圖）、
+  `tools/build.py`（`--src cart1.html` → `dist/星塵8合1.html`）、`tools/shot.py`（docstring 加 cart1 用法）、
+  `README.md`（遊戲表 + 操作一行）、`index.html`（遊戲入口連結）、`CLAUDE.md`（R5 一行）。
+
+### 2. 驗證數字
+| 項目 | 結果 |
+|---|---|
+| `tools/test_cart.py` | **99 / 99 PASS**（收工時已註冊 maze / blocks / pinball / racing 4 款 + 2 假遊戲；0 款時 55 項，每多一款 +11） |
+| 選單截圖 lint | PASS，11 色（假遊戲 10 槽版 15 色），每線精靈 ≤ 1 |
+| 開機 / 選單 / 切換 overFrames | 0（整片重畫都在 `CT.blank`；平常每幀 ≤ 28 byte） |
+| 假遊戲切換 | 3 次 launch + 2 次 back 後：名稱表 / 屬性表 / OAM / split / scroll / 精靈模式全無殘留 |
+| `playthrough_cart.py` 假遊戲 | goal 20 幀、maxLine 8、over 0；`--all --max 3000` 4 款可跑（blocks 2623 幀 goal） |
+| `bash tools/run_all.sh --quick` | 總結 PASS |
+截圖：`shots/agent_cart1-shell/menu.png`（4 款註冊時的選單）、`menu_fake.png`（10 槽版：假遊戲 + 最高分 / bestText）。
+
+### 3. 偏離
+1. **回選單提示不是 registry hook，而是 shell 包 `window.GAME.draw`**（registry 不准改）。代價：會短暫借用 OAM 62 / 63
+   （放開即還原）；該條掃描線（y = 16..23）若遊戲已有 7~8 個精靈，按住期間可能超過 8 個。
+2. **槽位表在 shell 內有一份預設 8 槽**（id / 名稱 / 圖示，照 LEGACY_MAP）：未註冊時也要畫「準備中」，registry 沒有槽位清單。
+   表外 id 的註冊遊戲接在後面（最多 10 列，第 9 列起不畫底部說明）。選單照各款的 `order` 排。
+3. **中文字是字型點陣化**（Noto Sans CJK TC，OFL），不是逐字手繪；logo 的 8 / 1 是手繪。
+4. 加了 `?boot=0`（跳過開機 logo 直達選單；測試 / 截圖用）。
+
+### 4. 跨檔需求（給總控）
+1. **registry.js `CT.resetHW` 的鏡像順序**：現在是先 `fillTiles/fillAttr(0/1)` 才 `mirroring('v')`；若前一款用了水平鏡像，
+   兩次 fill 打到同一張實體表，另一張的名稱表 / 屬性殘留會在切回垂直鏡像後露出（test_cart 用假遊戲實測：屬性表 1 殘留 240 格）。
+   建議把 `ppu.mirroring('v')` 移到 fill 之前。shell 這邊已自保（`clearScreen` 先切 'v' 再清兩張），走選單的正常流程不受影響；
+   只有「遊戲直接 `CT.launch` 另一款」會中。
+2. **建議 registry 加 overlay hook**（例如 `CT.onOverlay(fn)`，在 `GAME.draw` 的遊戲 draw 之後呼叫），shell 就不必包 `window.GAME.draw`；
+   也建議各款保留 OAM 62 / 63 給殼層（或由 registry 宣告 `CT.OAM_RESERVED = [62, 63]`）。
+3. **registry 的第一次開機路徑 `CT.Shell.init(nes, {})` 沒包 `CT.blank`**：shell 自己包了（巢狀安全），建議 registry 也包，跟 `CT.back` 一致。
+4. `tools/test_touch.py` 的 `PAGES` 還沒有 `cart1.html`（不是我的檔）；建議 qa-r5 / 總控把 cart1 加進去（選單整套只用十字鍵 + A / START，
+   回選單要兩指同時按 START 與 SELECT）。
+5. 各遊戲卡：`order` 請照 LEGACY_MAP 槽位（maze 1 / blocks 2 / brick 3 / pinball 4 / snake 5 / racing 6 / flyer 7 / tower 8），
+   `title` 若改了名而出現表外中文字，選單會走執行期點陣（能顯示但不保證每台機器一樣）——改名請通知 shell 卡補點陣表。
+   `bestText()` 超過 8 字會被截斷。
+
+### 5. 留給後續
+1. 收工時 brick / snake / flyer / tower 尚未註冊（選單顯示準備中），`playthrough_cart.py --all` 的完整驗收留給總控 / qa-r5。
+2. 選單沒有「操作說明 / 音量 / 清除紀錄」子畫面；SELECT 只當「下一格」。
+3. `dist/星塵8合1.html` 尚未產（簡報規定不跑 build）。cart1.html 的 stamp 也未跑。
+
+## cart1-grid（R5，2026-11-13）
+
+C5-1：合輯槽 1 `maze`《星塵迷宮》（舊 pacman）+ 槽 5 `snake`《星塵貪食蟲》（舊 snake + snake-game）。
+舊作只看玩法；名稱 / 角色 / 迷宮 / 場地 / 旋律 / 音效全部原創。`engine/`、`registry.js` 一行未改。
+
+### 1. 做了什麼
+- **檔案**：`games/cart1/maze/{chr,maps,song,main}.js`、`games/cart1/snake/{chr,stages,song,main}.js`、
+  `games/cart1/test_maze.py`、`games/cart1/test_snake.py`；`cart1.html` 在 `cart1:games` 標記內插入 8 行 script。
+- **星塵迷宮**：主角「小彗 Pip」（圓殼 + 護目鏡 + 頭頂閃星，不是張嘴造型）吃光星屑過關。
+  - 迷宮：4 張 27×23（NEBULA GATE / COMET YARD / RING VAULT / DEEP ORBIT），用自寫的「左右鏡射無死路產生器」
+    （奇數格點陣 → 隨機拆牆、保證連通與每格出口 ≥ 2）以固定種子產出後烘焙成字串；中央 7×5 星巢 + 環道、第 11 列左右隧道。
+    牆是程式產生的 16 種自動拼接磚，每張迷宮換牆色。
+  - 追兵（各自原創造型與 AI）：焰尾 FLARE（BFS 距離圖最短路追擊）/ 霧鏡 MIST（預判主角沿方向的下一個路口去堵）/
+    環星 ORBIT（繞象限巡邏、主角進 8 格內才追，每關換象限）/ 碎晶 SHARD（每個路口一半機率朝主角、一半亂選）；
+    散開 / 追擊波次（每關表不同，切換時掉頭）；受驚 = 灰色打叉眼、可吃（200 / 400 / 800 / 1600），被吃後只剩核心飛回巢再出巢。
+  - 成長：6 級速度表（主角 / 追兵 / 隧道 8.8 定點速度遞增、能量星時間遞減、出巢更快），四張循環；每關 2 次獎勵道具
+    （月岩 / 星鑽 / 火箭 / 星冠，100~2000 分）、10000 分加命、剩 20 顆時追兵加速。
+  - 流程：標題（大字 MAZE + 四追兵介紹）→ READY → 遊玩 → 死亡 / 過關閃牆 → GAME OVER → 標題；START 暫停；最高分 `CT.save('maze','best')`。
+  - **每線 ≤ 8 精靈從設計上解決**：所有角色都是單顆 8×8 精靈，OAM 固定配置 0 主角 / 1..4 追兵 / 5 獎勵 / 6..7 分數牌，
+    全畫面最多 8 顆 ⇒ 任何掃描線都不可能 > 8，`ppu.flicker = 'none'`（不靠輪替）。背景寫入一律走影子名稱表比對（沒變不寫）。
+  - 密技：+1 命 + 追兵全體受驚。機器人：每個決策點跑「逐追兵 BFS（第一步不能掉頭）」得到追兵到達時間，換算速度比後只走
+    「比追兵早 ≥ 2~3 格到」的安全格找最近的星屑 / 能量星（被逼近時）/ 受驚追兵；找不到就往安全度最高的格子走。
+- **星塵貪食蟲**：一節一節的星塵毛蟲（頭 4 向 / 身體兩種花紋依格子奇偶交錯 / 尾 4 向，全是背景磚）。
+  - 三模式：ENDLESS（空場地、每 5 顆加速一級 8 → 3 幀 / 格）/ STAGES 8 關（OPEN SKY / TWIN BARS / FOUR PILLARS /
+    CROSSROAD / SPIRAL / COMB / RINGS / STAR CORE：障礙、1~2 組傳送門、每關換底色、目標 8 → 16 顆、速度 8 → 5，3 命）/
+    VS CPU（競技場搶星、先吃滿 10 顆或對手撞毀贏一局、三戰兩勝、正面對撞 = 平手重打；電腦蟲第 1/2/3 局偷懶率 18/8/2%、速度 6/5/4）。
+  - 共通：每 5 顆冒出限時星鑽（+3 節 +50 分，最後 2 秒閃爍）、傳送門（頭走進 A 從 A' 同方向出來，出口被擋自動轉彎）、
+    可預排 2 個轉向 + 按住方向也會轉、不能直接掉頭、追自己正要讓開的尾巴不算撞。
+  - 兩條蟲用同一組背景調色盤的色 1（綠）/ 色 2（橘），屬性表 16×16 限制不影響；精靈只有選單游標 2 顆。
+  - 密技：+1 命 + 慢動作 10 秒（每格 +3 幀）。機器人 / 電腦蟲共用規劃器：含傳送門的 BFS 找星 → 模擬吃到後的蟲身，
+    能走回尾巴或可走面積 ≥ 身長才採用，否則選可走面積最大的方向。
+- 聲音（全部原創、只走 APU）：maze 6 首（title / start / stage / fright / clear / over）+ 8 音效；snake 5 首（title / play / vs / clear / over）+ 8 音效。
+
+### 2. 驗證數字
+| 項目 | maze | snake |
+|---|---|---|
+| 測試 | `test_maze.py` **59 / 59** | `test_snake.py` **54 / 54** |
+| `playthrough_cart.py --game <id>`（不開密技） | goal **14735 幀**（第 3 關清完；途中 3 死） | goal **4512 幀**（STAGES 過 3 關，0 死） |
+| 機器人全程每線精靈峰值（逐幀量） | **5**（OAM 同時最多 8 顆） | **2** |
+| 機器人全程 overFrames / VBlank 尖峰 | **0** / 13 byte | **0** / 24 byte |
+| 其他機器人實跑 | 第 3 關以後照樣能跑（RNG 固定、可重現） | STAGES 8 關全破 13101 幀 0 死；VS CPU 2-1 勝；ENDLESS 4390 分 |
+| 截圖 lint | 標題 / 遊玩 / 受驚 / 第 2 關全 PASS（≤ 10 色） | 標題 / 遊玩 / 第 8 關 / 對戰 PASS（≤ 7 色） |
+| 手機觸控（iPhone 13 直向、`mobile_shot.py`） | START 開局 + 搖桿左移 OK | 搖桿選單 → START → 搖桿轉向 OK |
+| `bash tools/run_all.sh --quick` | 本卡兩支 PASS（收工時總結 FAIL 只因他卡進行中的 `cart1/test_racing.py` 1 項） | 同左 |
+截圖（≤ 3 張）：`shots/agent_cart1-grid/maze_play.png`（第 2 關受驚）、`snake_stage8.png`、`snake_vs.png`。
+
+### 3. 偏離
+1. 迷宮是「自寫產生器 + 固定種子 → 烘焙字串」而不是逐格手畫；產出後由測試驗證鏡射 / 無死路 / 1 格寬 / 全連通 / 四張互異（任兩張 ≥ 40 格牆不同）。
+2. 第 1~3 關追兵速度比原先草案再放慢一點（chase 272 / 286 / 300 vs 主角 320 / 328 / 336），讓人與機器人都能穩定連過 3 張；第 4 關起照原曲線加速。
+3. 加了網址參數 `?level=N`（maze 直接開第 N 關）、`?mode=endless|stages|vs` / `?stage=N`（snake 直開），測試與截圖用。
+4. 標題 logo 用英文大字（MAZE / WORM，一個字型像素 = 一顆 8×8 磚），沒有畫中文標題字（選單的中文名由 shell 負責）。
+
+### 4. 跨檔需求（給總控）
+1. `tools/apu_render.py --game` 只認 `window.CR.SONGS`；cart1 各款的曲目在 `CT.<Id>.SONGS`，要離線渲染需工具支援 `--game cart1:maze` 之類（沒做，非必要）。
+2. 給 C5-0：maze 用 OAM 0..7、snake 用 OAM 0..1，與 shell 借用的 OAM 62 / 63 不衝突；兩款 `bestText()` 皆 6 字。
+
+### 5. 留給後續
+1. maze 機器人在第 1 關仍偶爾被兩隻追兵前後包夾（決策只看到達時間、沒看「逃生出口數」）；現在的參數是確定性可重現的一條通關線，調追兵參數後要重跑 `playthrough_cart.py --game maze` 確認。
+2. snake 的 VS CPU 只有一張競技場；可再加 2~3 張輪替。ENDLESS 沒有排行榜（只存最高分）。
+3. 兩款都沒有 Konami 秘技（簡報不強制）。
+
+## cart1-break（R5，2026-11-13）
+
+### 1. 做了什麼
+- **② `blocks` 星塵方塊**（`games/cart1/blocks/{art,audio,main}.js`，全域 `CT.Blocks`）：10×20 + 2 隱藏列、7 種方塊（盒內右旋算四向 + 8 段簡易踢牆）、
+  預覽 ×3、SELECT 暫存（每塊一次）、↑ 硬降（+2/格）/ ↓ 軟降（+1/格）、DAS 首延遲 12 / 重複 4（ARE 期間可充能）、
+  鎖定延遲 30 幀（最多 15 次重設）、7 袋亂數（16-bit xorshift，`?seed=` 可重現）、20 級重力表、消行 100/300/500/800 × 等級 + 連消加分。
+  兩模式：馬拉松（起始 1~10 級、每 10 行升級、150 行完走）/ 挑戰（開局 4 列垃圾、每 720→400 幀升一列、10 行一階段、50 行過關）。
+  演出：消行閃光 → 中央往兩側抹除星屑 → 收合；4 行 = 「NOVA!」+ 底色閃；連消 COMBO；堆到前 6 列換急版 BGM（音樂即 UI）。
+  畫面：盤面 / 暫存 / 預覽 / HUD 全走背景名稱表，**只有當前塊 4 格 + 影子 4 格是精靈**（每線最多 8）；一級只有 3 色，
+  七種方塊分 A / B / C 三款圖樣，升級換背景第 1 組 + 精靈第 0 組調色盤。標題：方塊拼的「BLOCKS」大字 + MODE / LEVEL / MUSIC 選單 + 操作說明。
+  密技「星塵炸彈」：盤面最底 4 列蒸發（不算行數）、挑戰模式重設升列計時。
+- **③ `brick` 星塵打磚塊**（`games/cart1/brick/{art,levels,audio,main}.js`，全域 `CT.Brick`）：10 回合原創磚陣（FIRST LIGHT … FORTRESS + 魔王 ECLIPSE CORE），
+  彩磚 6 款（3 組調色盤 × 2 款）、硬磚（2 下，第 6 回合起 3 下，有裂痕圖）、不壞磚；7 種膠囊 E 加長 / M 三球 / L 雷射（A 雙發）/ S 減速 / C 吸附 / P 加命 / G 防護欄。
+  球：1/256 px 定點 + `NES.SH.vel` 查表、每段 ≤ 2 px 先 x 後 y 碰撞（不穿磚）、拍子 8 區角度表、每 6 次接球加速（1.5~3.5 px/幀）。
+  第 10 回合魔王「蝕核」：背景磚 12×8（外殼 / 鉚釘 / 雙眼左中右閉 4 種神情 / 嘴），HP 24、被打閃白、瞄準星艇開火，半血後雙發。
+  流程：標題（可選已到過的回合）→ ROUND READY → 遊玩 → 回合突破 → … → 結尾曲；GAME OVER 可 A 接關 / B 回標題；2 / 6 / 12 萬分加命。
+  密技「補給艦」：命 +1 + 防護欄（魔王回合另延後開火）。
+- 兩款共用作法（各自一份、不互相依賴）：**影子名稱表 + 差異佇列**，每幀只寫 want ≠ have 的格子、上限 140 byte，
+  一次大量變動（消行整片下移、暫停隱藏盤面、一次清整關）自動分 2~3 幀；換畫面才在 `CT.blank` 內整片重畫。
+- 音樂全原創：blocks「星屑瀑布」（F 大調，speed 6）/「星屑瀑布·急」（speed 5）/「月面散步」（D 多利安，標題與 B 曲）/ 落幕 / 完走；
+  brick「星艇出擊」（G 混合利地安）/「蝕核」（E 弗里吉安）/ 發進 / 回合突破 / 墜落 / 黎明。音效 blocks 12 個、brick 11 個（只搶 p2 / noi）。
+- 測試 `games/cart1/test_blocks.py`（44 項）、`games/cart1/test_brick.py`（48 項）；`cart1.html` 標記內插入 7 行。
+
+### 2. 驗證數字
+| 項目 | 結果 |
+|---|---|
+| `playthrough_cart.py --game blocks` | ok：goal 2623 幀（40 行）、maxLine 4、overFrames 0、VBlank 尖峰 42 byte |
+| `playthrough_cart.py --game brick` | ok：goal 27954 幀（連過 5 回合、0 失命 0 接關）、maxLine 7、overFrames 0、尖峰 32 byte |
+| brick 機器人 6→10 回合（`&round=6`，非驗收） | 41875 幀打倒魔王；全程 maxLine 8、over 0（魔王回合曾失命 / 接關，加了閃火球後單跑第 10 回合 5813 幀、接關 1） |
+| `test_blocks.py` | 44 / 44（7 袋、DAS 12/4、鎖定 30、消 4 行演出 + 每幀 ≤ 140 byte、暫停整片隱藏分幀、等級換色、挑戰升列、完走、密技、bot） |
+| `test_brick.py` | 48 / 48（10 回合屬性限制逐格、硬 / 不壞磚、7 膠囊效果、一幀清整關分幀、最壞一線 ≤ 8、魔王開火 / 擊破、接關、bot） |
+| 手機（iPhone 13 橫向 mobile_shot） | blocks：START 開局、A 旋轉、SELECT 暫存；brick：START / A 發球 / 十字鍵移動 |
+| lint | 兩款標題 / 遊玩 / 魔王畫面 PASS（6~15 色） |
+| `bash tools/run_all.sh --quick` | 本卡全部 PASS（test_blocks 44/44、test_brick 48/48、node --check 101 檔、build --check cart1.html）；收工當下總結 FAIL 只因 `cart1/test_racing.py`（C5-4 進行中，非本卡檔） |
+截圖：`shots/agent_cart1-break/b_play.png`（方塊遊玩）、`k_play.png`（打磚塊雷射 + 膠囊）、`k_r10.png`（魔王）。
+
+### 3. 偏離
+1. DAS 用 12 / 4 幀（研究 13 記 NES 原作 16 / 6）：合輯走友善手感；常數集中在 `main.js` 頂端可調。
+2. 有 7 袋亂數、暫存、硬降、影子、踢牆（原作 NES 版沒有）——brief 指定要暫存 / 硬降，其餘同屬友善化。
+3. 中文標題沒有做點陣字（遊戲內標題用原創方塊 / 磚拼的英文大字 STARDUST BLOCKS / BRICK），中文名由 shell 選單顯示。
+4. goal 額外要求「本局未用密技」（與其他卡一致）。
+5. `apu_render.py --game` 不支援 cart1 子資料夾，曲目未做離線渲染（加分項）。
+
+### 4. 跨檔需求
+1. （已由 shell 卡處理：run_all 的 node --check 已涵蓋 `games/*/*/*.js`。）
+2. `tools/apu_render.py` 若要渲染合輯曲目，需支援讀 `CT.Blocks.Audio.SONGS` / `CT.Brick.Audio.SONGS`（兩款 audio.js 只依賴 engine/music.js，可單獨載入）。
+3. 兩款都沒碰 OAM 62 / 63（shell 回選單提示可用）；blocks 用 OAM 0~8、brick 用 0~19。
+
+### 5. 留給後續
+1. brick 魔王回合機器人仍會被火球打中（人玩閃得掉，火球 1.44 px/幀）；若 qa 要「機器人 0 死打魔王」需再加強閃避。
+2. blocks 沒有 2P / 對戰、沒有 B 型「預堆高度」選項；挑戰模式最高只到 5 階段。
+3. brick 沒有雙打、沒有回合密碼；第 7~9 回合的難度曲線只經機器人驗證，未經真人試玩。
+
+## C5-3 cart1-arcade（R5，2026-11-13）
+
+### 1. 做了什麼
+- **⑤ `pinball` 星塵彈珠台（STARDUST PINBALL，桌面「NEBULA LIGHTHOUSE」）**：`games/cart1/pinball/{phys,art,song,main}.js`
+  - 直向桌面 256×448 px（比一個畫面高）：上下兩張名稱表（mirroring 'h'）一次寫好；`scroll y=440` 顯示最底 3 列當狀態列，`split(32)` 下方用相機 y 捲動桌面。遊玩中只寫燈號磚 / 狀態列差異 / 保險桿閃光調色盤（尖峰 39 byte/幀）。
+  - 物理全 Q8 整數：每幀 8 子步、球速上限 9 px/幀（每子步 1.13 px < 接觸厚度 4.5 px）、擋板角度也在子步內推進（尖端每子步 0.9 px）、推出方向 = 球心 − 線段最近點；整數 isqrt。擋板只有 18 px 長（3 磚寬），兩支 + 球最多 7 個精靈 / 線。
+  - 桌面元件：S-T-A-R 4 條滾道（擋板可輪換已亮燈）→ 倍率 x2~x5；3 顆保險桿；3 片落下靶全倒 → 點亮 SAVE（救一次漏球）；3 片立靶 → 點亮星洞大獎；星洞會吸住球再吐出；兩組彈弓；每顆新球開局都有救球時間。任務組合 M1~M5（STAR / 保險桿 N 次 / 落下靶 / 立靶 / 星洞）全部完成 → RANK +1（門檻提高、救球時間縮短）。漏球時算 BONUS。3 顆球；B 可輕推台面，球卡住 4 秒會自動輕推。
+  - 美術：桌面「畫」進 2bpp 畫布，畫面與物理用同一份幾何資料，再切磚去重（244 磚以內）；燈號畫亮 / 滅兩種，各自佔用不重疊的磚格；擋板旋轉 8 個角度影格是程式生成的。音樂：BGM 3 首（標題 / 遊玩 / GAME OVER）+ 10 個音效。
+  - 密技：+1 顆球並點亮 SAVE。**goal = 同一局 3 球內 ≥ 30000 分且沒用密技。**
+- **⑥ `flyer` 星塵飛鳥（STAR SWALLOW）**：`games/cart1/flyer/{art,song,main}.js`
+  - 原創主角：星燕「琉璃」，藍色星燕，頭上有星冠、燕尾分叉，3 個振翅影格。障礙是浮空磚石柱，縫口是參差的岩牙，不是管口。下方是場景調色的「海」（雲海 / 晶湖 / 熔河 / 夜海 / 星河）。
+  - 5 個場景 × 每 10 道門換一次：速度 1.00 → 1.75 px/幀、縫 64 → 52 px；場景 2 起有移動縫、場景 3 起有上下陣風（預警 40 幀 + 風紋精靈）；50 道門以後無限循環。每 3 道門一顆星屑，集滿 5 顆換護盾。獎牌 10 / 20 / 30 / 40 / 50。
+  - 捲動走 `NES.SH.Scroller`（逐欄補，一欄 39 byte），`split(208)` 做狀態列。移動縫只重寫有變的柱緣磚，每道 ≤ 12 byte，柱緣精度 4 px。音樂：BGM 3 首 + 7 個音效。
+  - 密技：立刻給護盾 + 3 顆星屑。**goal = 同一局通過 50 道門且沒用密技。** `?gate=N` 可直接跳到第 N 道門（測試 / 截圖用）。
+- 兩款都有：標題 + 操作說明、START 暫停（START+SELECT 不會觸發暫停）、GAME OVER、最高分存檔（`CT.save`）、`bestText()`、機器人 `bot()`。
+
+### 2. 驗證數字
+| 項目 | pinball | flyer |
+|---|---|---|
+| 測試 | `test_pinball.py` **47/47** | `test_flyer.py` **38/38** |
+| 防穿模 / 一致性 | 擋板 1260 次落球（逐 px × 3 高度 × 5 揮動時機 × 2 水平速度）**0 次穿模**、殘留穿透 0；牆壁 400 次最高速亂射 **0 次逃出**；托球後再打 10/10 往上 | 名稱表可見欄 vs 邏輯世界**逐磚 0 差異**（跳關後、300 幀後各比一次） |
+| 機器人 `playthrough_cart.py` | goal **11765 幀**、每線精靈峰值 **7**、overFrames **0**、預算尖峰 39 | goal **4015 幀**、每線精靈峰值 **4**、overFrames **0**、預算尖峰 80 |
+| lint | 0 違規、色數 ≤ 17 | 0 違規、色數 ≤ 14 |
+| CHR | bg 244 / spr 43 | bg 136 / spr 21 |
+`bash tools/run_all.sh --quick`：我的兩支測試 PASS；總結 FAIL 只因 `cart1/test_racing.py` 1 項失敗（C5-4 進行中，不是我的檔）。
+截圖：`shots/agent_cart1-arcade/pinball_play.png`、`flyer_wind.png`、`flyer_over.png`。
+
+### 3. 偏離
+1. 飛鳥英文副標是「STAR SWALLOW」（主角是星燕）；選單用的中文名維持 `星塵飛鳥`，和 shell 的點陣表一致。
+2. 彈珠台 goal 分數自訂為 30000（brief 讓各卡自訂）。
+3. 彈珠台的擋板控制是 ← / A；發射用 ↓ 或 B 按住蓄力。球在場上時 B = 輕推台面（brief 沒有規定這個鍵）。
+4. 美術是程式化繪製後切磚（桌面、擋板角度、大字），不是逐磚手繪；星燕、獎牌、柱、地面則是手繪。
+
+### 4. 跨檔需求
+1. `tools/apu_render.py --game` 只認 `games/<game>/song.js` 加 `CR.SONGS`，沒辦法離線渲染 cart1 子資料夾的曲子。我的曲目在 `CT.Pinball.Audio.SONGS` / `CT.Flyer.Audio.SONGS`；如果要支援，請由工具擁有者加 `--cart1 <id>`。
+2. pinball 用 mirroring 'h'。shell 卡已回報 `CT.resetHW` 先 fill 再設 'v' 的殘留問題，pinball → 其他款時會碰到，建議總控照 shell 卡的建議修。
+
+### 5. 留給後續
+1. 彈珠台沒有坡道 / 多球（multiball），飛鳥沒有雙人模式。
+2. 手機觸控只做了按鍵對照（← / A / ↓ / B / START 全在 touch.js 上），沒有跑 `mobile_shot.py` 實測，留給 qa-r5。
+3. 飛鳥 50 道以後只是場景 5 無限循環，沒有額外結局畫面。
+
+## cart1-strategy（R5，2026-11-13）
+
+C5-4：⑦ `racing` 星塵賽車 + ⑧ `tower` 星塵塔防。舊作 `racing.html`（三線道閃避）/ `tower-defense.html`（格子塔防）只取玩法概念；
+名稱、賽道、車、敵人、地圖、旋律、標題字（16×16 點陣「星塵賽車」「星塵塔防」）全部原創。
+
+### 1. 做了什麼
+- **⑦ 星塵賽車**（`games/cart1/racing/{chr,tracks,song,main}.js`，全域只掛 `CT.Racing`）
+  - **俯視縱向捲軸**（不是偽 3D，見偏離 1）。名稱表 0 是 30 列的「賽道環」：垂直鏡像 'v' 時 y 捲動在 240 繞回同一張表，
+    往前開 = 往上捲、每幀最多露出 1 列（32 磚 + 16 屬性 = **48 byte**）。名稱表 1 第 26~28 列是 HUD，`split(208, {y:208, nt:1})`
+    切過去（只寫有變的字）。
+  - 3 條原創賽道 × 3 圈：STAR RING MEADOW（草原、寬路）/ RED SAND CANYON（赤砂、沙地補丁減速、落石）/ CRYSTAL ICE ROAD（冰面低抓地、
+    冰面補丁更滑）。賽道 = 分段內插（中心欄 / 半寬），路緣每列最多移 1 欄。道具全是背景磚：油漬（打滑旋轉）、角錐 / 落石（撞到減速）、
+    加速板、氮氣罐（+1，吃掉 = 改 1 個磚，下一圈重生）。
+  - 6 台車（玩家 + NOVA / ORBIT / COMET / PULSAR / QUASAR），名次即時排序；**氮氣（B）**、煞車（↓）、旋轉 / 撞車動畫（車頭四向：
+    上 / 右 = 旋轉 90° 的另一組磚 / 下 = flipV / 左 = flipH）。對手 AI 與 `?bot=1` 共用同一支「走廊模擬」路線規劃
+    （逐列推算橫移軌跡，掃到危險就重罰 + 遲滯防抖），對手極速逐條提高、輕度橡皮筋（領先 480 px 才放慢）。
+  - 大獎賽流程：標題（兩台車在路上追逐）→ 操作說明 → 賽道介紹 → 倒數 3-2-1-GO → 3 圈 → 結果（9/6/4/3/2/1 分）→ 前 3 名進下一條；
+    第 4 名以後用接關（3 次）重跑 → 三條都前 3 = 大獎賽冠軍畫面；沒接關 = GAME OVER。最高分 = 大獎賽總點數（`CT.save('racing','best')`）。
+  - **每線 ≤ 8 的設計保證**：精靈只有車（8×16 模式，一台 = 2 顆），`enforceBands()` 規定同一條掃描線最多 4 台車——第 5 台要擠進
+    同一帶時物理上被擋在後面（= 讓車），6 台 × 2 顆不可能超過 8。`flicker='none'`。
+  - 音樂：標題 / 比賽（A 小調 8 小節）/ 前三名 / 落敗 4 首 + 9 個音效（`racing_` 前綴）。密技：氮氣補滿 9 + 2 秒超級加速 + 接關 +1。
+    `?game=racing&track=1..3` 直開某條賽道。
+- **⑧ 星塵塔防**（`games/cart1/tower/{chr,maps,song,main}.js`，全域只掛 `CT.Tower`）
+  - 16×12 格（一格 16×16 = 一個屬性區塊，地圖從第 2 列起與屬性格線對齊），3 張原創地圖：GREEN GATE / RED MESA / FROST FIELD，各 10 波
+    （第 10 波魔王「星蝕王」16×8）；地圖二、三血量 ×1.6 / ×2.2、每波 +45%。前一張守完才解鎖下一張（存檔）。
+  - 3 種塔 × 3 級（蓋 + 2 次升級，外觀 = 塔頂（種類×等級）+ 塔座（等級）共 24 磚）：光針（單體子彈）/ 冰霜（範圍減速）/ 雷震（範圍傷害）。
+    4 種敵人 + 魔王：塵蟲 / 疾蛾（快）/ 甲蟲（護甲 2）/ 癒菇（幫隊友回血）。金錢 / 生命 20 / 賞金 / 每波獎金 / 賣塔退 60%。
+  - 操作：十字鍵游標（按住連發）、A 蓋 / 升級、B 點按換塔種、按住 B 賣塔、SELECT 準備時立刻開波 / 開打後**快轉 ×2**、START 暫停。
+  - **游標與射程預覽 = 屬性表換色**（游標格閃爍 + 射程範圍切到高亮調色盤 pal3），一格 1 byte，**不佔任何精靈**。
+  - **每線 ≤ 8 的設計保證**：敵人一律 8×8（魔王 16×8 = 同線 +1），在路上**排隊**（與前一隻路徑距離永遠 ≥ GAP 24 px，出怪口也要先空出
+    24 px）⇒ 每條掃描線能同時蓋到的敵人數有上界：`CT.Tower.bound(map)` 用貪婪法算「路徑弧長集合上兩兩相距 ≥ 24 的最多點數」，
+    三張圖 = **6 / 6 / 5**（地圖設計時就用這個數字調路線：橫向直路 ≤ 3 格、縱向蛇行 ≤ 4 條）；加魔王 ≤ 7。
+    子彈 / 火花 / 煙走**逐線配額器**：該幀那幾條線還有空位才畫，起點每幀輪替（遊戲自己做，PPU 層面永遠 ≤ 8，`flicker='none'`）。
+  - 背景寫入走佇列（每幀上限 120 byte，剩下的下一幀補）⇒ 蓋塔 / 升級 / 射程換色 / HUD 同一幀發生也不會超 160。
+  - 音樂：標題 / 守備（D 多利安 8 小節）/ 通關 / 失守 4 首 + 11 個音效（`tower_` 前綴）。密技：+300 金、生命 +10。`?game=tower&map=1..3` 直開。
+
+### 2. 驗證數字
+| 項目 | racing | tower |
+|---|---|---|
+| 測試 | `games/cart1/test_racing.py` **42/42** | `games/cart1/test_tower.py` **43/43** |
+| 機器人 `playthrough_cart.py --game <id>` | goal **9125 幀**（三條都第 1）、每線精靈峰值 **8**、overFrames **0**、VBlank 尖峰 56 byte | goal **7182 幀**（第 1 張圖 10 波、0 漏）、每線峰值 **6**、overFrames **0**、尖峰 77 byte |
+| 機器人穩定度 | 對手極速 ±20 掃描 × 3 條（21 種）全部第 1 名；冰道撞 / 滑 0 次 | 地圖 2 / 3 也守得住（剩 19 / 8 命），難度遞增 |
+| 每線上界壓力 | 6 台硬擠同一條線 → 第 5 台起被擋、PPU 每線 ≤ 8 | 三張圖滿載（24 隻同屏 + 魔王）：每線 **7 / 6 / 5**、0 隻被藏；16 座塔齊射每線 ≤ 7；同線 16 火花 → 畫 8、其餘輪替 |
+| VBlank | 賽道串流每幀 ≤ 48 byte | 佇列每幀 ≤ 120 byte |
+| lint | 標題 / 三條賽道 0 違規、≤ 11 色 | 標題 / 三張圖 0 違規、≤ 12 色 |
+| CHR | bg 154 / spr16 12 | bg 123 / spr 17 |
+| 離線渲染 | `apu_render.py --game cart1/racing` 28/28 | `--game cart1/tower` 28/28 |
+| 手機觸控 | iPhone 13 橫向：按住 A 起跑 | iPhone 13 橫向：十字鍵移游標、B 換塔種 |
+`bash tools/run_all.sh --quick`：**總結 PASS**（node --check 101 檔、全部 tools / games 測試含 cart1 八款 + test_cart 143、build --check 五入口）。截圖：`shots/agent_cart1-strategy/r_title.png`、`r_glacier.png`、`t_play.png`。
+
+### 3. 偏離
+1. **賽車用俯視捲軸，不是偽 3D**：`engine/ppu.js` 的 `split()` 每幀只有一個分割點（`_split` 單一物件），沒有逐掃描線捲動 / HBlank
+   中斷鏈，偽 3D 需要「每條線不同 x 位移」做不出來；engine 不准改 ⇒ 依 brief 改走俯視縱向捲軸。彎道靠路面左右平移（階梯狀路肩）表現。
+2. 賽車只做「氮氣」（brief 二選一），沒有漂移。
+3. 塔防的「快轉」用 SELECT（準備階段 = 立刻開下一波）；START+SELECT 組合仍歸 registry 回選單。
+
+### 4. 跨檔需求
+1. （給 engine 擁有者 / 總控，非必要）若之後要做真偽 3D 賽車，需要 PPU 支援「逐掃描線捲動表」（例如 `ppu.lineScroll(Int16Array(240))`，
+   模擬 HBlank 每線寫 $2005）。本輪不需要。
+2. shell 的回選單提示若畫精靈：racing 用 **8×16 精靈模式**（圖樣表 1 = `racing_spr16`）、tower 用 8×8；兩款 OAM 都從 0 號連續往上用
+   （racing 最多 12 顆、tower 最多 64 顆），`flicker='none'`。若 shell 要在遊戲畫面上加 2 顆精靈，請放在畫面最上方 8 線
+   （racing 車子 y ≥ 0 但頂端 8 線被裁；tower 第 0~15 線沒有任何遊戲精靈），就不會讓任何一線超過 8。
+
+### 5. 留給後續
+1. 賽車沒有雙人 / 計時賽模式、沒有漂移；對手不會用氮氣。
+2. 塔防沒有「空中」敵人（全部走路）、沒有第 4 種塔；地圖 3 張固定。
+3. 手機只驗了按鍵對應，沒做完整一局的觸控實測（留給 qa-r5）。
+
+## qa-r5（R5，2026-11-13）
+- 只驗收、不改程式。完整報告在 `docs/QA_REPORT.md` 末尾的 `# R5 qa-r5（2026-11-13）`，截圖 12 張在 `shots/qa-r5/`。
+- 結果：**P1 × 1**（maze 第 1 張迷宮與 Pac-Man 招牌畫面雷同）、**P2 × 2**（8 款 GAME OVER 時密技不能立刻續關；brick 膠囊字母與 Arkanoid 相同）、**P3 × 12**（暫停時 BGM 不一致、中途離開不存最高分、tower 沒有重打本波、blocks 觸控 UP 誤觸硬降、說明文字太擠、回選單提示磁磚、選單飛鳥圖示、test_touch 沒有 cart1 等）。
+- 已確認沒問題：8 款完整流程、手機兩指 START+SELECT 回選單（直向和橫向）、C 鍵在選單不會誤觸、回選單提示強制常駐跑完機器人全程每線 ≤ 8 且 overFrames 0、BGM 跟商業主題沒有相似之處。
+
+## fix-r5-break（R5，2026-11-13）
+
+### 1. 做了什麼
+- **P2-2 brick 原創化**：拿掉 E/L/S/C/P/M/G 字母膠囊，改為 8×8 圓形「能量星珠」+ 原創圖示（`brick/art.js` `ICONS` 疊在 `ORB` 上），
+  名稱也改成本作自訂：WING 雙箭頭（加長）/ TRIO 三點（三球）/ BEAM 閃電（雷射）/ TIME 沙漏（減速）/ GRAB 磁鐵（吸附）/ LIFE 心（加命）/ WALL 磚牆（防護欄）。
+  內部 id、`state().power`、`K.CAPS`、`dev.takeCap()` 全用新名。播報 `ROUND 01|READY` → `SECTOR 01|ENGAGE`、回合突破 `SECTOR nn|BREACHED`，
+  HUD `RD01` → `SEC01`、`POWER E` → `ORB WING`，標題 `START SECTOR` / `MAX SEC`。魔王造型保留（QA 同意）。
+- **§6-1 密技原地續關（P2-1 / P3-7）**：
+  blocks GAME OVER 按 C/★ → 底下 8 列蒸發、分數 / 行數 / 等級 / 暫存 / 預覽保留、BGM 重播、立刻接著出塊；完走（COMPLETE）與標題無效。
+  brick GAME OVER 按 C/★ → 同回合直接回 READY，磚陣（已打掉的不復原）/ 魔王血量 / 分數全保留，命補回 3 + 防護欄、不算 continues。
+  遊玩中密技照舊（blocks 星塵炸彈 4 列、brick 補給艦命 +1）。兩款 `goal()` 都要 `cheats === 0`，標題按密技回 false。一般 A 接關（分數歸零）保留。
+- **P3-4 blocks 觸控誤硬降**：硬降條件改為「UP 剛按下且沒按住左 / 右」（`blocks/main.js` updatePlay），UP+左右只會橫移；engine/touch.js 未動。
+- **P3-1**：兩款原本暫停就停 BGM，加測試確認。**P3-2**：兩款 `exit()` 先存最高分（blocks 依模式存 best / bestc；brick 非標題時 saveBest）。
+- **P3-5 / §6-5 / §6-6**：兩款標題重排，說明 / 選單每列之間空一列；寫上 `HOLD START+SELECT:MENU` 與 `C/★ CHEAT`（brick 另寫 `GAME OVER TOO`）。
+  blocks 標題選單起列常數 `TITLE_ROW = 10`、brick `TITLE_ROW = 11`。
+- **§6-4 backTile**：blocks `{tile: 精靈 BK_F 實心方塊, pal: 2}`、brick 新增精靈 `BACK` 小星 `{pal: 1}`；以 getter 提供（存取時 buildChr，冪等）。
+
+### 2. 驗證數字
+| 項目 | 結果 |
+|---|---|
+| `test_blocks.py` | 56 / 56（+12：續關 3、完走密技無效、UP+左右不硬降 3、暫停靜音、exit 存分、backTile、標題提示、行距） |
+| `test_brick.py` | 58 / 58（+10：續關 4、exit 存分、星珠名稱 / 圖示、SECTOR 播報、backTile、標題提示、行距；膠囊測試改新名） |
+| `playthrough_cart.py --game blocks` | ok：goal 2623 幀、maxLine 4、overFrames 0、尖峰 42 byte |
+| `playthrough_cart.py --game brick` | ok：goal 27954 幀、maxLine 7、overFrames 0、尖峰 32 byte |
+| lint | 兩款標題 PASS（8 / 7 色）、brick 遊玩（雷射 + 星珠）PASS |
+| `bash tools/run_all.sh --quick` | 本卡 + test_cart 163/163 全 PASS；總結 FAIL 只因 `cart1/test_maze.py`（maze 另一張 fix 卡進行中，非本卡檔） |
+截圖：`shots/agent_fix-r5-break/b_title.png`、`k_title.png`、`k_play.png`。
+
+### 3. 偏離
+1. blocks 續關清 8 列（遊玩中炸彈是 4 列）：堆滿時只清 4 列下一塊仍可能馬上再堆滿，8 列保證有喘息空間。
+2. brick 原地續關保留當下磚陣，而不是像 A 接關那樣重載整回合——符合「保留進度」。
+
+### 4. 跨檔需求
+- shell（總控 / shell 卡）：讀 `CT.current.backTile`（兩款都已提供）畫收攏提示；目前 shell `solidTile()` 尚未用它。
+
+### 5. 留給後續
+- blocks 暫停畫面盤面只寫 `PAUSE`，回選單提示放在標題；若要暫停畫面也寫，需另找空位（盤面 10 格寬）。
+
+## fix-r5-shell（R5，2026-11-13）
+
+### 1. 做了什麼
+- **P3-9 / §6-4 回選單提示改用 `backTile`**（`games/cart1/shell.js` overlay 重寫，刪掉 `solidTile()` 猜磚）：
+  - 遊戲註冊物件有 `backTile: {tile, pal}`（物件 / getter / 函式皆可；tile 0..255 整數、pal 0..3、pal 省略 = 0）⇒ OAM 62 / 63 用**遊戲指定的磚與調色盤**從 ±28 px 往中間收攏，進度 > 2/3 改成顯示 / 隱藏快閃；8×16 模式 tile 原樣交給 `ppu.sprite`（= 上下兩塊那組）。放開即還原 62 / 63（遊戲自己用的內容照樣備份 / 還原）。
+  - **沒填或不合法 ⇒ 不借任何精靈**，改閃 backdrop：原底色 ↔ `flashColor(原色)`（黑 → `$01` 深藍、其他提亮一階、最亮列壓暗；永不出 `$0D`），間隔隨進度 8 → 4 → 2 幀；只有變色那幀花 1 byte。按住期間遊戲自己改 backdrop ⇒ 備份跟著更新，放開後是遊戲的新值。
+  - 收工時 8 款都已由各 fix 卡填好 `backTile`（maze / blocks / brick / pinball / snake / racing / flyer / tower 全走 tile 模式）；backdrop 路徑由假遊戲 + 刪掉 backTile 的實機截圖驗證。
+  - **不快取**：每次畫提示都現讀 `CT.current.backTile`（pinball / flyer 在 init 的 Art.make() 後才寫、blocks / brick 用 getter；總控補充），執行中換掉下一幀就生效。
+  - `CT.Shell.dev` 多 `overlayMode()` / `overlayLastMode()` / `flashColor` / `backTileOf`（測試用）。
+- **P3-8 選單圖示**：飛鳥改成藍色星燕「琉璃」（星冠、燕尾分叉、白腹、黑眼，BG 調色盤 3 的 `$12` 藍 + 白 = 遊戲 `PAL_BIRD` 的身體 / 腹色）。逐一比對其他 7 個：
+  maze 舊圖示是「藍牆迷宮 + 有眼睛的追兵造型」⇒ 改成綠色單線抽象迷宮 + 中央白星 + 角落藍星屑（無黃色圓形、無追兵）；
+  racing 舊圖示是正面車 ⇒ 遊戲是俯視捲軸，改成俯視賽車 + 左側紅白路緣（同遊戲賽道路緣）；
+  blocks（四格塊）/ brick（磚 + 球 + 拍）/ pinball（保險桿 + 球 + 擋板）/ snake（綠蟲，同標題 WORM 綠）/ tower（塔 + 旗）與遊戲內一致，保留。
+- **P3-10**：選單底部 `HOLD START+SELECT = MENU` 仍在（截圖確認）；遊戲內提示由各款 fix 卡自寫。
+- **P3-12**：`tools/test_touch.py` `PAGES` 加 `cart1.html`（Edit 插入）：`MODE_JS` / `X_JS` 兩張頁面專屬表（cart1 = 選單 START 進遊戲、量目前遊戲 update 看到 RIGHT 的幀數），另加 cart1 專屬 4 項：兩指 SELECT+START 30 幀進度 0.5、滿 60 幀回選單、游標停在剛玩那款、放開 mask 0 且 backdrop 回 `$0F`。
+- **工具**：`playthrough_cart.py --hint`（全程把 `CT.backProgress` 固定 0.5，提示常駐 ⇒ 每線峰值含 OAM 62 / 63；qa-r5 的壓力法收進工具；結果多 `hint` 欄）。
+- `test_cart.py`：假遊戲 A 在 init 填 `backTile`（測試可用 `window.__zzBackTile` 換掉），假遊戲 B（8×16）不填 ⇒ 兩條路徑都驗；真遊戲串接時逐款驗「有 backTile ⇒ OAM 62 = 它；沒有 ⇒ backdrop 模式且不借 62」。
+
+### 2. 驗證數字
+| 項目 | 結果 |
+|---|---|
+| `tools/test_cart.py` | **167 / 167 PASS**（原 99 + 真遊戲增至 8 款；本卡新增 backTile 有 / 無 / 不合法 / 函式 / init 後才出現 / 執行中更換下一幀生效 / 快閃 / 還原 / backdrop 被遊戲改 / flashColor / backTileOf / 真遊戲逐款模式 / `--hint` 自測） |
+| `tools/test_touch.py` | **433 / 433 PASS**（340 + cart1 93；既有四頁無一紅） |
+| `playthrough_cart.py --all --hint` | 8 款全 OK、全部 hint = tile：maxLine maze 7 / blocks 4 / brick 7 / pinball 7 / snake 2 / racing 8 / flyer 4 / tower 6，overFrames 全 0 |
+| 截圖 lint | 選單 PASS 10 色、flyer 提示 PASS 9 色 / 每線 2、snake backdrop 閃爍 PASS |
+| `bash tools/run_all.sh --quick` | **總結 PASS**（node --check 101 檔、全部單元測試、五入口 build --check） |
+截圖：`shots/agent_fix-r5-shell/menu.png`（新圖示）、`flyer_backtile.png`（flyer 用自己的小星收攏）、`back_backdrop.png`（刪掉 backTile 時 snake 底色閃成 `$01`）。
+
+### 3. 偏離
+1. `backTile` 除了物件也接受函式 / getter（brick 用 getter 延遲建 CHR）——比 brief §6-4 寬，不影響只填物件的款。
+2. 有 backTile 時閃爍改成「顯示 / 隱藏」而不是換調色盤 0 / 1（遊戲的 pal 是它自己指定的，不能亂換）。
+3. `test_touch.py` 除了插入，還把 3 處 `__nes.state().mode/x` 改成 `MODE_JS.get(page, 原字串)` / `X_JS`——對既有四頁取的是原字串，行為不變。
+
+### 4. 跨檔需求
+- 無（registry / engine 未動）。
+
+### 5. 留給後續
+- backdrop 閃爍路徑目前沒有真遊戲在用（8 款都填了 backTile）；新卡帶的款若不填就會走它。
+- 總控 stamp / build 後 `dist/星塵8合1.html` 會帶新圖示與提示。
+
+## fix-r5-arcade（R5，2026-11-13）
+
+依 `docs/R5_BRIEF.md` §6 和 `docs/QA_REPORT.md` `# R5 qa-r5`，修 pinball / flyer。只改了 `games/cart1/pinball/**`、`games/cart1/flyer/**`、`test_pinball.py`、`test_flyer.py`。
+
+### 1. 做了什麼
+| 條目 | pinball | flyer |
+|---|---|---|
+| **P2-1 / §6-1 密技原地續關** | GAME OVER 按 C/★ → 直接回遊玩：球數補回 1/3、球停在發射桿、BGM 換回 `pinball_play`；**分數、任務進度 M1~M5、RANK、燈號、倍率都保留** | 墜落中（`dead`）或 GAME OVER 按 C/★ → `continueRun()`：在 `CT.blank` 內整片換回遊玩畫面，回到「上一道門出口後 12 px、離剛才那道門 71 px」的 GET READY，懸停高度對準那道門縫中央；**門數 / 下一道門 / 場景 / 星屑都保留**，另送護盾，BGM 回場景曲 |
+| 遊玩中密技（不變） | +1 顆球並點亮 SAVE | 護盾 + 3 顆星屑 |
+| **P3-7** | 標題按密技回 false。`goal()` 和 `state().goal` 都改成 `goalHit && !cheated`，所以用過密技的那局一律 false | 同左（`cheat()` 只有在 `title` 時無效） |
+| **P3-1 / §6-2 暫停靜音** | 兩款的 `Audio` 都加了 `pause()` / `resume()`：暫停時從 `state()` 記下目前的 orderIndex 再停 driver；恢復時 `play(song, {from})`，從同一小節接續（`nes.music` 是包裝 API，位置要從 `state()` 讀） | 同左 |
+| **P3-2 / §6-3 exit 存最高分** | `exit()` → `saveBest()`（只寫比舊值大的） | 同左（門數） |
+| **P3-5 行距** | 標題說明改成 7 行，行與行之間各空一列 | 標題說明 5 行加 BEST，各空一列；GAME OVER 結算也改成每行之間空一列（獎牌精靈對齊第 17 列） |
+| **§6-4 `backTile`** | init 時設 `GAME.backTile = {tile: BALL, pal: 0}`（銀色彈珠，8×8 模式） | `{tile: STAR, pal: 1}`（星屑實心 8×8），不會再畫成半邊翅膀 |
+| **§6-5 回選單提示** | 標題加一行 `HOLD START+SELECT: MENU`；暫停時狀態列顯示 `PAUSE  HOLD START+SELECT: MENU` | 同左 |
+| **P3-11** | — | `flyer_sky`（標題曲，場景 1~2 也用）第 1、2 小節改寫：開頭從 `D G B A G` 改成往下滑翔的 `G F# E D B D G` / `E D C E G E D`，不再跟 snake 標題雷同 |
+
+### 2. 驗證數字
+| 項目 | pinball | flyer |
+|---|---|---|
+| 測試 | `test_pinball.py` **59/59**（原 47 + 新 12） | `test_flyer.py` **55/55**（原 38 + 新 17） |
+| 新測項 | 續關（球 1/3、分數 / 任務 / RANK 保留、BGM）、續關後 goal false、續關後漏球照常扣球、標題密技無效、標題行距 0 相鄰、HOLD 字樣、暫停 120 幀 rowsPlayed 不動、恢復同小節、暫停列文字、exit 存分數 / 低分不蓋、backTile | 續關（GET READY、門數 / 場景 / 星屑 / 護盾 / BGM）、續關位置 71 px 和身後 12 px、懸停在縫中、續關後名稱表與世界逐磚 0 差異、按 A 接著飛、goal false、墜落中也可續關、標題無效、行距、HOLD 字樣、暫停靜音 / 恢復 / 暫停列、exit 存分數、backTile ≠ 翅膀、標題曲開頭 |
+| 機器人 `playthrough_cart.py` | goal **11765 幀**、每線峰值 **7**、overFrames **0**、預算尖峰 39 | goal **4015 幀**、每線峰值 **4**、overFrames **0**、預算尖峰 80 |
+| lint | 暫停畫面 0 違規、16 色 | 標題 0 違規、9 色；續關畫面 0 違規、11 色 |
+`bash tools/run_all.sh --quick`：我的兩支測試都 PASS。總結 FAIL 只有 `cart1/test_maze.py` 1 項（`§6-1 續關後 GAME OVER 字樣清掉…`），那是 fix-r5 grid 卡正在改的檔，不是我的。
+截圖：`shots/agent_fix-r5-arcade/titles.png`（兩款標題）、`flyer_continue.png`（GAME OVER → 密技續關）、`pinball_pause.png`（暫停列提示）。
+
+### 3. 偏離
+1. flyer 續關除了保留進度，還多送一個護盾（QA 建議「帶護盾重來」）；位置選在兩道門之間的空檔，不是 brief 字面上的「那道門前」，這樣才不會一出來就撞到上一道柱。
+2. 恢復播放是從暫停時那一小節的開頭重播（driver 只支援 `play(..., {from: orderIndex})`），不是精確到 row。
+3. pinball 續關沿用 GAME OVER 前的倍率和燈號，沒有歸零（brief 只要求保留分數與進度）。
+
+### 4. 跨檔需求
+1. **shell**：`backTile` 是在各款 `init` 時才寫進註冊物件（因為要等 `Art.make()` 算出精靈 index），shell 要在遊戲執行中讀 `CT.current.backTile`，不能在註冊當下快取。
+2. `maze` / `snake` 的 `Audio.play` 用 `d.playing`（flyer 原本也是，這次已改成讀 `state().playing`） 判斷是否已在播放，但 `nes.music` 是包裝 API，沒有 `playing` 欄位（要從 `state().playing` 讀）。目前不會出錯，只是每次都會重播。給 grid 卡參考。
+
+### 5. 留給後續
+1. 兩款暫停時只停 BGM，正在播的音效也一起停（`stopSfx`）；如果要讓暫停有一聲提示音，要另外加。
+2. flyer 續關次數沒有上限（依 R2c「不限次數」）。
+
+## fix-r5-strategy（R5，2026-11-13）
+
+依 `docs/R5_BRIEF.md` §6 與 `docs/QA_REPORT.md` `# R5 qa-r5`，修 ⑦ `racing` / ⑧ `tower`。只動 `games/cart1/racing/**`、`games/cart1/tower/**`、`test_racing.py`、`test_tower.py`。
+
+### 1. 做了什麼
+| 條目 | racing | tower |
+|---|---|---|
+| **P2-1 密技原地續關**（§6-1） | 失敗結算（第 4 名以後的結果畫面 / GAME OVER）按 C/★ → 立刻重跑**同一條賽道**（直接進倒數），之前的大獎賽積分保留、這場的點數不計、接關補回 3；比賽中按 = 氮氣 9 + 2 秒超級加速（原本的「接關 +1」拿掉） | 失守畫面按 C/★ → 從**失守那一波**重打：塔 / 金錢 / 分數回到該波開打那一刻（`startWave` 存快照）、生命補回 20、回到準備階段；遊玩中按 = +300 金 / 生命 +10 |
+| **P3-7 標題無效 / goal 檢查** | `cheat()` 只在 race / 失敗 result / over 有效，標題 / 說明 / 介紹 / 過關結算回 false 不累計；`goal()` 加 `cheats === 0`；從標題重開一局才歸零 | `cheat()` 只在 play / over 有效；新增 `g.clean[mi]`（沒用密技守完才設），`goal() = clean[0]`；新開一張圖（非重打）歸零 |
+| **P3-3 RETRY WAVE**（友善版） | — | 失守畫面：`A  RETRY WAVE nn`（快照同上、生命 = max(10, 開波時生命)、**不算密技**）/ `START  TITLE` / `C/★  RETRY + 20 LIVES` |
+| **P3-1 暫停靜音** | `setPause()`：暫停時記下目前曲目並 `Audio.stop()`，解除時重播（倒數中本來就無曲） | 同上（守備曲） |
+| **P3-2 exit 存最高分** | `exit()` → `saveBest()`（大獎賽點數） | `exit()` → `saveBest()`（分數） |
+| **P3-5 行距 / §6-6** | 說明頁重排：操作行每行之間空一列、加 `C/★ CHEAT`（`$` = 字型的星）；結果 / GAME OVER 畫面寫 `C/★ CHEAT = RETRY` | 說明頁重排同上（`B CHANGE / HOLD B SELL` 併一行、`START PAUSE  C/★ CHEAT`） |
+| **§6-4 backTile** | `backTile` getter → `{tile: Art.spr('BACK'), pal: 0}`：`racing_spr16` 新增 8×16 **實心星鑽**（菱形，上下兩塊合起來完整，tile 奇數 = 圖樣表 1），不會再變半台車 | `tower_spr` 新增 8×8 實心方塊 `BACK`（紅框金身白亮點），pal 0 |
+| **§6-5 回選單提示** | 說明頁 `HOLD START+SELECT: MENU` | 說明頁 `HOLD START+SELECT: MENU` |
+- `state()` 多 `cheats` / `retries`（tower 另有 `retryWave`）；`CT.Tower.dev.retry(full)` 測試鉤子。
+
+### 2. 驗證數字
+| 項目 | racing | tower |
+|---|---|---|
+| 測試 | `test_racing.py` **51/51**（+9：標題 / 說明密技無效、第 5 名密技重跑同賽道積分保留、GAME OVER 密技、過關結算密技無效、用密技冠軍 goal false + 重開歸零、暫停 driver 不前進 / 恢復、exit 存分、backTile、說明頁行距 + 兩行提示） | `test_tower.py` **54/54**（+11：用密技通關 goal false、標題密技無效、快照、A RETRY WAVE 還原塔 / 金錢 / 分數 / 生命 max(10,·)、失守畫面字樣、密技續關生命 20、續關通關 goal false、通關畫面密技無效、暫停靜音、exit 存分、backTile、說明頁） |
+| 機器人 `playthrough_cart.py --game <id>` | goal **9125 幀**、每線峰值 **8**、overFrames **0**、尖峰 56 byte | goal **7182 幀**、每線峰值 **6**、overFrames **0**、尖峰 77 byte |
+| lint | 說明頁 / backTile 實測畫面 0 違規 | 失守畫面 0 違規 |
+`bash tools/run_all.sh --quick`：本卡兩款與其他全部 PASS，**唯一 FAIL = `cart1/test_maze.py`**（「吃受驚追兵 / 連吃倍增」，maze 正由其他 fix agent 修改中、重跑時數字仍在變，與本卡無關）。
+截圖（≤ 3）：`shots/agent_cart1-strategy/r_howto.png`、`r_backtile.png`（比賽畫面上方兩顆 backTile 星鑽）、`t_over_retry.png`。
+
+### 3. 偏離
+1. racing 失敗時的密技續關**直接進倒數**（不經賽道介紹畫面），符合「立刻回到那條賽道」；這場的名次點數扣回（與一般接關同規則），避免用密技刷點。
+2. tower 的快照取在**開波那一刻**（準備階段蓋的塔都保留），重打時給完整準備時間（360 幀），可以調整布陣再開。
+3. 暫停解除後曲子從頭播（driver 沒有 pause / resume API，engine 不改；同 brick 的做法）。
+
+### 4. 跨檔需求
+1. （給 shell 擁有者）racing / tower 已提供 `backTile`（getter，launch 後讀即可）。racing 是 8×16 模式：`tile` 為奇數（bit0 = 圖樣表 1），shell 畫一顆 8×16 精靈即可；pal 0 在 racing 加速時會閃白（車身調色盤），可接受。
+
+### 5. 留給後續
+1. tower 的 RETRY 次數不限、也不扣分（友善版）；若之後要排行公平性可改成「重打後分數標記」。
+2. 選單 BEST 對 racing 是大獎賽點數，中途離開存的是「目前累計點數」。
+
+## fix-r5-grid（R5，2026-11-13）
+修 qa-r5 指給 maze / snake 的條目（`docs/QA_REPORT.md` `# R5 qa-r5`；規則 `docs/R5_BRIEF.md` §6）。只動 `games/cart1/maze/**`、`games/cart1/snake/**`、`test_maze.py`、`test_snake.py`；`engine/`、`registry.js`、`cart1.html` 未動，沒有跑 git / stamp / build。
+
+### 1. 做了什麼
+- **P1-1 maze 太像 Pac-Man → 重做視覺身分**
+  - 牆：外框雙線改成**實心星岩**（`chr.js` `wallTile`：岩身 + 上 / 左受光緣 + 岩面晶粒、外角削圓），四張圖各自主題色：NEBULA GATE 洋紅 `$14/$24`、COMET YARD 鏽橘 `$17/$27`、RING VAULT 綠 `$1A/$2A`、DEEP ORBIT 暗金 `$18/$28`，**四張都沒有藍色**。`maps.js` 的 `wall` 改成 `[岩身, 受光緣, 星屑色]`，拿掉 `flash`。
+  - 星屑：2×2 黃點改成十字閃光，顏色跟著地圖（淡綠 / 白 / 淡粉 / 淡青）。能量星從四個角落搬到內側第 3 欄 (3,5)/(23,5)/(3,17)/(23,17)，四張都一樣（鏡射、可達性、無死路測試照過）。
+  - 星巢：巢牆改畫成虛線力場 `NW0..15`，巢內鋪星砂 `NEST`，閘門改成鋸齒能量線，不再是「藍框 + 門」的盒子。
+  - 主角「小彗 Pip」：黃色圓殼改成**白身紅窗小火箭 + 橘色尾焰**，往下的造型是往右的轉置；命數圖示也改成小火箭。
+  - 追兵重新命名、配色、配對個性：**VEX 紫色海膽 = 追擊**、**MOSS 萊姆綠豆莢 = 包抄**、ORBIT 暗金帶環小行星 = 巡邏、SHARD 白色晶體 = 亂走（紅 / 粉 / 青 / 橘都不用）。舊的 FLARE 焰尾下緣是三道焰舌，看起來像裙擺，這個造型已經拿掉。受驚時一律變灰色、眼睛打叉。
+  - 開局字樣 `READY!`（底列黃字）改成 **`LIFT OFF!`**，位置移到上方橫幅（SCORE 與 BEST 中間）。PAUSE / GAME OVER 也寫在同一個位置。
+  - 過關：牆不再閃白，改成**牆色依序掃過 7 種星色**（`CLEAR_SWEEP`，每 10 幀換一次，每次 3 byte），掃到一半時橫幅寫 `SECTOR CLEAR`。
+  - 標題：大字改成紫色。角色表從「名字 + 一句個性」的直式清單改成**四隻一排、名字寫在正下方**，下面一行每 96 幀輪播一隻的說明，並有小星箭頭指著目前介紹的那隻。標題調色盤也拿掉藍色。
+- **§6-1 / P2-1 / P3-7 密技原地續關**
+  - maze：GAME OVER 時按密技 → 回到同一關，命數回到 3，保留分數和已經吃掉的星屑。遊玩中（play / ready / dying）按密技仍是 +1 命並讓追兵受驚。標題畫面按密技無效。
+  - snake：GAME OVER 時按密技 → ENDLESS 在原場地續玩並保留分數；STAGES 回到同一關，命數回到 3；VS 輸掉整場時撤銷剛輸的那一局，同一局重打。贏下整場的結束畫面和標題畫面按密技都無效。
+  - 兩款的 `goal()` 都要求 `cheats === 0`，所以用過密技續關的那一局不算達成。
+- **§6-2 / P3-1 暫停 = BGM 停**：`Audio.pause/resume`（兩款的 song.js）記住目前播到第幾小節（`orderIndex`）並停止 driver，音效照常播放；解除暫停時用 `play(song, {from})` 從同一小節接續。`nes.music` 是 `NES.Music` 的門面，`playing` / `orderIndex` 要從 `_default` 讀。
+- **§6-3 / P3-2 exit 存最高分**：maze 用 `saveBest()`（取 `max(best, score)`，只在比舊值大時寫入，GAME OVER、過關、回標題、exit 都呼叫）；snake 在 exit 時呼叫 `saveBests()`（標題畫面除外）。
+- **§6-4 backTile**：兩款都在精靈表加了實心小星 `BACK`，`get backTile()` 回傳 `{tile, pal: 0}`（做法同 brick 的 getter）。
+- **§6-5 / P3-10**：暫停時寫出 `HOLD START+SELECT: MENU`。maze 寫在底列第 27 列，snake 寫在場地第 12 列。snake 原本的字型沒有 `+`，已補上。
+- **P3-5 / P3-6**：maze 標題各段之間空一列，`PUSH START` 移到第 22 列（原本跟 BEST 黏在一起）；snake 的說明兩行改成第 22 / 24 列。兩款都寫 `C/★ = CHEAT`（字型補了 `★` 字形）。
+- **P3-11 標題曲開頭**：maze_title 前兩小節改成「4 度跳進 + 迴音」動機（A D · C D F · E C｜G C · B C E · D），snake_title 前兩小節改成「E D E G 鄰音繞 + 下行」（E D E G · E C D｜E C G A C B）。blocks / flyer 不屬於本卡，沒有動。
+
+### 2. 驗證數字
+| 項目 | maze | snake |
+|---|---|---|
+| 測試 | `test_maze.py` **82 / 82**（原 59，新增 23：視覺身分 9、LIFT OFF 位置 2、暫停靜音 / 接續 / 提示 5、續關 4、標題密技無效、exit 存分、backTile） | `test_snake.py` **70 / 70**（原 54，新增 16：行距、C/★、標題密技無效、backTile、暫停提示 / 靜音 / 接續、ENDLESS / STAGES / VS 續關、goal、exit 存分） |
+| `playthrough_cart.py --game <id>`（不開密技） | goal **15078 幀**（4 死），maxLine **6**，overFrames **0**，VBlank 尖峰 24 | goal **4512 幀**（0 死），maxLine **2**，overFrames **0**，尖峰 24 |
+| 截圖 lint | 標題 / 第 1~4 關 / 暫停全 PASS（≤ 11 色） | 標題 / 暫停 PASS |
+| `bash tools/run_all.sh --quick` | 總結 **PASS** | 同左 |
+
+截圖（`shots/agent_fix-r5-grid/`）：`maze_before_after.png`（第 1 關修前 / 修後）、`maze_title_before_after.png`、`snake_title_pause.png`。修後用 Read 看過：洋紅色實心岩牆、十字星屑、虛線力場星巢、白色火箭主角、紫 / 綠 / 暗金 / 白四隻追兵、上方橫幅 LIFT OFF!。招牌元素（藍雙線、黃豆、黃色圓主角、READY!、紅粉配色）都已拿掉，一眼看過去不會認成 Pac-Man。
+
+### 3. 偏離
+1. 能量星原本先放在 (7,7)/(7,15)，但機器人要 26692 幀才達成 goal，而且途中 GAME OVER 過一次，所以改放到第 3 欄 (3,5)/(3,17)：15078 幀、4 死。
+2. maze 的追兵沒有改 AI 演算法，只重新決定「哪個顏色 / 造型配哪個個性」，並改了名字。第一隻出巢的仍是追擊者（現在是紫色 VEX）。
+3. 迷宮「中央巢 + 左右隧道」的骨架沒有動，因為改骨架就要重新產生並驗證四張迷宮。這次改的是巢的畫法（力場 + 星砂），走道結構不變。
+
+### 4. 跨檔需求（給總控）
+1. `Audio.play()` 原本用 `d.playing` 判斷「同一首已經在播就不重播」，但 `nes.music` 是門面，`d.playing` 永遠是 undefined，所以實際上每次都會重播。行為沒有出錯，我只在新加的 pause/resume 裡改從 `_default` 讀。其他款如果也用 `nes.music.playing`，會遇到同樣的問題。
+
+### 5. 留給後續
+1. maze 機器人在第 1~3 關還是會死 4 次（被前後包夾），參數再調就要重跑 `playthrough_cart.py --game maze`。
+2. maze 星巢的位置和形狀四張共用（`inNest` 寫死 x 10..16、y 10..14）；之後如果要換骨架，要一起改。

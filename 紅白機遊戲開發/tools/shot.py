@@ -14,6 +14,7 @@ key：a b select start up down left right（NES 八鍵；逗號可多按）
 其他：--state 印 __nes.state()、--stats 印 __nes.stats()、--console 印全部 console、--url 換頁面
 入口頁：--url star.html（星塵勇者，--query "level=1-2"）/ cruiser.html（星塵巡航艦，?stage= / ?boss=）/
         mech.html（星塵機甲，--query "stage=frost&room=3" 或 "stage=blaze&boss=1"）
+        cart1.html（星塵 8 合 1，--query "game=maze" 直接開某款、"game=maze&bot=1" 機器人、"boot=0" 跳過開機 logo 直達選單）
 說明：頁面以 ?debug=1&scale=1 開啟 ⇒ canvas 是 256×224 原生尺寸，放大由本工具的 --scale 做（整數、無平滑）。
       debug 模式下 Timing 不自動跑，畫面只由 step/press/tap 推進 ⇒ 截圖可重現。
 """

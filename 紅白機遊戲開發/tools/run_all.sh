@@ -45,11 +45,11 @@ run() {  # run <名稱> <指令...>
 echo "== ① 語法檢查 node --check =="
 if command -v node >/dev/null 2>&1; then
   bad=""
-  for f in engine/*.js games/*/*.js; do
+  for f in engine/*.js games/*/*.js games/*/*/*.js; do
     [ -e "$f" ] || continue
     node --check "$f" >/dev/null 2>&1 || { bad="$bad $f"; echo "  語法錯誤: $f"; node --check "$f" 2>&1 | head -5; }
   done
-  n=$(ls engine/*.js games/*/*.js 2>/dev/null | wc -l)
+  n=$(ls engine/*.js games/*/*.js games/*/*/*.js 2>/dev/null | wc -l)
   if [ -z "$bad" ]; then add "node --check ($n 檔)" PASS ""; else add "node --check" FAIL "$bad"; fi
 else
   add "node --check" SKIP "沒有 node"
@@ -75,10 +75,12 @@ run "build.py --check game.html" "$PY" tools/build.py --check --src game.html
 run "build.py --check star.html" "$PY" tools/build.py --check --src star.html
 run "build.py --check cruiser.html" "$PY" tools/build.py --check --src cruiser.html
 run "build.py --check mech.html" "$PY" tools/build.py --check --src mech.html
+run "build.py --check cart1.html" "$PY" tools/build.py --check --src cart1.html
 
 if [ "$QUICK" = 0 ]; then
   echo "== ④ 冒煙截圖 shot.py =="
   run "shot.py 冒煙" "$PY" tools/shot.py --steps 10 --scale 3 --lint --out shots/run_all/smoke.png
+  run "shot.py 冒煙 cart1 選單" "$PY" tools/shot.py --url cart1.html --query "boot=0" --steps 20 --scale 3 --lint --out shots/run_all/cart1_menu.png
 
   echo "== ⑤ nes_lint.py 抽查截圖 =="
   if [ -f tools/nes_lint.py ]; then

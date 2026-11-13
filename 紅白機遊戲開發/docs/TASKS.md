@@ -545,3 +545,76 @@ W3 / W4 八關機器人全程每線精靈 **≤ 8**（3-1 是 7，其餘 8）不
 `--w3` 四關 0 死、`--all8` 八關 cleared（1-1 仍 1 死，R3 以來就是）、`--map` / `--cheat` 全過；
 cruiser `--chain` ending / 47610 / 0 死、mech `--all` 3821 / 0 死；
 credits 快轉 `overFrames = 0`（修前 1、peak 960）。
+
+### R5 合輯契約 — C5-0 cart1-shell（2026-11-13）
+
+**所有權**：新 `games/cart1/shell.js`、`tools/playthrough_cart.py`、`tools/test_cart.py`；Edit 插入 `tools/run_all.sh`
+（node --check 多掃 `games/*/*/*.js`、`build --check cart1.html`、cart1 選單冒煙）、`tools/build.py`（cart1 → `dist/星塵8合1.html`）、
+`tools/shot.py`（docstring）、`README.md`、`index.html`、`CLAUDE.md`。`registry.js` / `cart1.html` / `engine/` 未動。
+
+**殼層契約（給各遊戲卡）**：
+| 項目 | 規則 |
+|---|---|
+| 槽位 | shell 內建預設 8 槽（LEGACY_MAP 順序）；註冊的 `id` 對上就亮起，否則「準備中」。選單照 `order` 排 |
+| 名稱 | `title` 用 16×16 中文字顯示（≤ 6 字）；全英文 title 改用 8×8 字型 |
+| 最高分 | `bestText()`（≤ 8 字）優先，否則 `CT.load(id, 'best', 0)` |
+| 回選單 | START+SELECT 按住 60 幀（registry）；按住期間 shell 借用 **OAM 62 / 63** 畫收攏提示，放開即還原 |
+| 進入 | `init(nes, {from: 'shell'})`；回選單後游標停在剛玩的那款 |
+| 自測 | `?game=<id>&debug=1&bot=1`；`$PY tools/playthrough_cart.py --game <id>` |
+
+**驗收**：`tools/test_cart.py` ≥ 30 項全綠（收工 99 / 99；0 款註冊時 55 項）；選單 lint PASS；切換 overFrames 0；
+`bash tools/run_all.sh --quick` 本卡兩支 PASS。
+
+### R5 合輯 — C5-3 cart1-arcade（2026-11-13）
+
+**所有權**：`games/cart1/pinball/**`（phys / art / song / main）、`games/cart1/flyer/**`（art / song / main）、
+`games/cart1/test_pinball.py`、`games/cart1/test_flyer.py`；`cart1.html` 只在 `cart1:games` 標記內插入 7 行 script。
+`engine/` / `registry.js` 未動。全域只掛 `CT.Pinball` / `CT.Flyer`；CHR bank / 曲名 / 音效名一律 `pinball_` / `flyer_` 前綴。
+
+| 款 | 驗收 |
+|---|---|
+| ⑤ `pinball` 星塵彈珠台 | 直向桌面 256×448（上下兩張名稱表、mirroring 'h'，scroll y=440 狀態列 + split 32 捲動桌面）；物理 Q8 定點、每幀 8 子步、擋板角度子步內推進；**goal = 同一局 3 球內 ≥ 30000 分且未用密技**；`test_pinball.py` 47 項（含擋板 1260 次落球 0 穿模、牆壁 400 次最高速亂射 0 逃出） |
+| ⑥ `flyer` 星塵飛鳥（STAR SWALLOW） | 單鍵 A；5 場景 × 10 門（速度 / 縫 / 移動縫 / 陣風遞增）、星屑 5 顆換護盾、獎牌 10~50；`NES.SH.Scroller` 逐欄補 + 移動縫只改有變的磚；**goal = 同一局通過 50 道門且未用密技**；`test_flyer.py` 38 項（含名稱表 == 邏輯世界逐磚比對） |
+
+### R5 合輯 — C5-1 cart1-grid（2026-11-13）
+
+**所有權**：`games/cart1/maze/**`（chr / maps / song / main）、`games/cart1/snake/**`（chr / stages / song / main）、
+`games/cart1/test_maze.py`、`games/cart1/test_snake.py`；`cart1.html` 只在 `cart1:games` 標記內插入 8 行 script。
+`engine/` / `registry.js` 未動。全域只掛 `CT.Maze` / `CT.Snake`；CHR bank / 曲名 / 音效名一律 `maze_` / `snake_` 前綴。
+
+| 款 | 驗收 |
+|---|---|
+| ① `maze` 星塵迷宮 | 4 張原創迷宮（27×23，鏡射 / 無死路 / 1 格寬走道，自寫產生器固定種子烘焙）循環；4 隻原創追兵（焰尾 BFS 追擊 / 霧鏡 路口包抄 / 環星 象限巡邏 / 碎晶 半隨機）+ 散開 / 追擊波次；能量星受驚可吃（200→1600 連鎖）、隧道減速、每關 2 次獎勵、10000 分加命、6 級速度表。**每線 ≤ 8 精靈從設計上保證**：所有角色單顆 8×8，OAM 固定 8 槽（主角 / 追兵 ×4 / 獎勵 / 分數牌 ×2），`flicker='none'`。**goal = 同一局連過 3 張迷宮且未用密技**；`test_maze.py` 59 項 |
+| ⑤ `snake` 星塵貪食蟲 | 三模式：ENDLESS（每 5 顆加速）/ STAGES 8 關（障礙 + 傳送門，出口被擋自動轉彎，3 命）/ VS CPU（三戰兩勝、電腦蟲逐局變聰明）；蟲 / 星 / 牆全是背景磚（兩條蟲用同一組調色盤的色 1 / 色 2），精靈只有選單游標。**goal = 關卡制同一局過 3 關且未用密技**；`test_snake.py` 54 項 |
+
+**驗收（已達成）**：`playthrough_cart.py --game maze` goal 14735 幀 / maxLine 5 / over 0 / peak 13 byte；
+`--game snake` goal 4512 幀 / maxLine 2 / over 0 / peak 24 byte；兩支測試全綠；手機觸控（iPhone 13 直向）兩款都能開局 + 十字鍵操作；
+`bash tools/run_all.sh --quick` 本卡兩支 PASS。
+
+### R5 合輯 — C5-2 cart1-break（2026-11-13）
+
+**所有權**：`games/cart1/blocks/**`（art / audio / main）、`games/cart1/brick/**`（art / levels / audio / main）、
+`games/cart1/test_blocks.py`、`games/cart1/test_brick.py`；`cart1.html` 只在 `cart1:games` 標記內插入 7 行 script。
+`engine/` / `registry.js` 未動。全域只掛 `CT.Blocks` / `CT.Brick`；CHR bank / 曲名 / 音效名一律 `blocks_` / `brick_` 前綴。
+
+| 款 | 驗收 |
+|---|---|
+| ② `blocks` 星塵方塊 | 10×20（+2 隱藏列）、預覽 ×3、SELECT 暫存、↑ 硬降 / ↓ 軟降、DAS 12/4、鎖定延遲 30（15 次重設）、7 袋亂數、20 級重力表、每級換方塊三色；馬拉松（起始 1~10 級、150 行完走）/ 挑戰（4 列垃圾開局、定時升列、50 行過關）；消行閃光 + 中央抹除演出、4 行 NOVA! 閃底色、堆高換急版 BGM。盤面 / 暫存 / 預覽 / HUD 全是背景，**只有當前塊 4 + 影子 4 用精靈**；名稱表走影子表 + 差異佇列（每幀 ≤ 140 byte）。**goal = 同一局馬拉松消 40 行且未用密技**；`test_blocks.py` 44 項 |
+| ③ `brick` 星塵打磚塊 | 10 回合原創磚陣（一磚 16×8 = 一屬性格，同欄兩列同組調色盤，測試逐格驗）、硬磚 2/3 下、不壞磚、7 種膠囊（E 加長 / M 三球 / L 雷射 / S 減速 / C 吸附 / P 加命 / G 防護欄）、第 10 回合魔王「蝕核」（背景磚 12×8、HP 24、雙眼追視、瞄準火球、二階段雙發）；球 1/256 px 定點 + `NES.SH.vel` 查表、8 區拍子角度、分段碰撞。**每線 ≤ 8 靠規則保證**（能力互斥、多球不掉膠囊、魔王回合不掉 E/M）+ 逐線計數保險。**goal = 同一局連過 5 回合且未用密技**；`test_brick.py` 48 項 |
+
+**驗收（已達成）**：`playthrough_cart.py --game blocks` / `--game brick` 皆 ok（見 PROGRESS「cart1-break」驗證表）；兩支測試全綠；
+手機觸控（iPhone 13 橫向）兩款 START / 十字鍵 / A / SELECT 都能操作；`bash tools/run_all.sh --quick` PASS。
+
+### R5 合輯 — C5-4 cart1-strategy（2026-11-13）
+
+**所有權**：`games/cart1/racing/**`（chr / tracks / song / main）、`games/cart1/tower/**`（chr / maps / song / main）、
+`games/cart1/test_racing.py`、`games/cart1/test_tower.py`；`cart1.html` 只在 `cart1:games` 標記內插入 8 行 script。
+`engine/` / `registry.js` 未動。全域只掛 `CT.Racing` / `CT.Tower`；CHR bank / 曲名 / 音效名一律 `racing_` / `tower_` 前綴。
+
+| 款 | 驗收 |
+|---|---|
+| ⑦ `racing` 星塵賽車 | **俯視縱向捲軸**（PPU 只有單一 split，偽 3D 做不到 → brief 允許的二選一）：名稱表 0 = 30 列賽道環（'v' 鏡像 y 在 240 繞回），每幀串流 1 列 ≤ 48 byte；名稱表 1 = HUD（split 208）。3 條原創賽道 × 3 圈（草原 / 赤砂沙地 / 冰面低抓地）、6 台車即時名次、氮氣（B）、油漬 / 角錐 / 落石 / 加速板 / 氮氣罐（背景磚）、接關 3 次、大獎賽計分。**每線 ≤ 8 設計保證：同一掃描線最多 4 台車（第 5 台被擋在後面），一台 = 2 顆 8×16**。**goal = 三條賽道都前 3 完賽（大獎賽冠軍）且未用密技**；`test_racing.py` 42 項 |
+| ⑧ `tower` 星塵塔防 | 16×12 格、3 張原創地圖 × 10 波（第 10 波魔王）、3 種塔 × 3 級（光針 / 冰霜 / 雷震）、4 種敵人（塵蟲 / 疾蛾 / 甲蟲護甲 / 癒菇回血）+ 魔王、金錢 / 生命 / 賣塔、SELECT 快轉 ×2、地圖逐張解鎖。游標與射程預覽 = 屬性表換色（0 精靈）。**每線 ≤ 8 設計保證：敵人排隊間距 ≥ 24 px ⇒ 每線上界 `CT.Tower.bound()` 三圖 6/6/5（+魔王 1）；子彈 / 火花走逐線配額器**。背景寫入佇列每幀 ≤ 120 byte。**goal = 第 1 張圖守完 10 波且未用密技**；`test_tower.py` 43 項 |
+
+**驗收（已達成）**：`playthrough_cart.py --game racing` goal 9125 幀 / maxLine 8 / over 0 / peak 56 byte；
+`--game tower` goal 7182 幀 / maxLine 6 / over 0 / peak 77 byte；兩支測試全綠；`bash tools/run_all.sh --quick` 總結 PASS。

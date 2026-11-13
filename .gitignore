@@ -8,3 +8,5 @@ shots/
 # 系統
 .DS_Store
 Thumbs.db
+# 舊版網頁小遊戲參考（kenorganization/ken-ai-webgames，不進版控）
+紅白機遊戲開發/legacy/

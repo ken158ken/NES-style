@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """tools/test_touch.py — engine/touch.js（NES.Touch）與**四個**入口頁手機版面的自動測試
-（agent: nes-touch, R2；R4 mech-r1 把 mech.html 加進 PAGES ⇒ 255 → 340 項）
+（agent: nes-touch, R2；R4 mech-r1 把 mech.html 加進 PAGES ⇒ 255 → 340 項；R5 fix-r5-shell 加 cart1.html ⇒ 433 項）
 
 用法：
     ../卡比之星/.venv/bin/python tools/test_touch.py [--only cruiser] [--headed]
@@ -28,7 +28,18 @@ import sys
 from playwright.sync_api import sync_playwright
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-PAGES = ['game.html', 'star.html', 'cruiser.html', 'mech.html']
+PAGES = ['game.html', 'star.html', 'cruiser.html', 'mech.html', 'cart1.html']
+# R5 fix-r5-shell（qa-r5 P3-12）：cart1.html《星塵 8 合 1》—— __nes.state() 是 {game, s}，主角在各款裡不同：
+#   mode：還在選單（boot / menu）⇒ 'select'（再按 START）、launch 閃爍中 ⇒ 'ready'（等），已進遊戲 ⇒ 'play'；
+#   x   ：量「目前遊戲的 update 看到 RIGHT 被按住幾幀」（測試頁內包一層計數，不依賴各款主角欄位）。
+#   另驗兩指同按 START+SELECT 70 幀回選單（shell 契約）。
+MODE_JS = {'cart1.html': """()=>{ const s = __nes.state();
+  if (s.game) return 'play';
+  const m = s.s && s.s.mode; return m === 'launch' ? 'ready' : 'select'; }"""}
+X_JS = {'cart1.html': """()=>{ const g = window.CT && CT.current; if (!g) return 0;
+  if (!g.__ttWrap) { const u = g.update; g.__ttWrap = true; g.__ttRight = 0;
+    g.update = function (nes) { if (NES.Input.held(NES.Input.BTN.RIGHT)) g.__ttRight++; return u.call(g, nes); }; }
+  return g.__ttRight; }"""}
 # (裝置, 是否橫向, 標籤)
 DEVS = [('iPhone 13', True, 'iPhone13橫'), ('Pixel 5', False, 'Pixel5直')]
 KEYS = ('dpad', 'a', 'b', 'select', 'start', 'cheat', 'fs')      # fix5：第 7 顆 ★密技
@@ -153,7 +164,7 @@ def run_mobile(p, page_name, device, landscape, label, results):
         pg.evaluate('()=>__nes.step(3)')
         t.up(0)
         pg.evaluate('()=>__nes.step(12)')
-        mode = pg.evaluate('()=>__nes.state().mode')
+        mode = pg.evaluate(MODE_JS.get(page_name, '()=>__nes.state().mode'))
         # mech.html（R4）：標題 START → 選關 → START → READY 倒數 → play；其他兩款一步到 play。
         for _ in range(3):
             if mode == 'play':
@@ -165,10 +176,10 @@ def run_mobile(p, page_name, device, landscape, label, results):
                 pg.evaluate('()=>__nes.step(120)')
             else:
                 break
-            mode = pg.evaluate('()=>__nes.state().mode')
+            mode = pg.evaluate(MODE_JS.get(page_name, '()=>__nes.state().mode'))
         ok('觸控 START → 進入遊戲（mode=play）', mode == 'play', 'mode=%s' % mode)
 
-        x0 = pg.evaluate('()=>__nes.state().x')
+        x0 = pg.evaluate(X_JS.get(page_name, '()=>__nes.state().x'))
         pad = R['dpad']
         t.down(0, pad['cx'] + pad['w'] * 0.36, pad['cy'])
         pg.evaluate('()=>__nes.step(30)')
@@ -176,6 +187,8 @@ def run_mobile(p, page_name, device, landscape, label, results):
                                    tm: NES.Touch.mask(), sec: NES.Touch.sector(),
                                    dirs: NES.Touch.dirs(), x: __nes.state().x,
                                    mask: NES.Input.maskToString()})""")
+        if page_name in X_JS:
+            res['x'] = pg.evaluate(X_JS[page_name])
         ok('搖桿推右 30 幀：NES.Input.held(RIGHT) = true', res['held'], 'mask=%s' % res['mask'])
         ok('搖桿推右：扇區 0（正右）且 dirs.right', res['sec'] == 0 and res['dirs']['right'],
            'sector=%s dirs=%s' % (res['sec'], res['dirs']))
@@ -210,6 +223,27 @@ def run_mobile(p, page_name, device, landscape, label, results):
         z = pg.evaluate('()=>({tm: NES.Touch.mask(), im: NES.Input.mask()})')
         ok('全部放開：mask 0（inject 佇列已清、鍵盤取回控制權）',
            z['tm'] == 0 and z['im'] == 0, 'touch=%s input=%s' % (z['tm'], z['im']))
+
+        if page_name == 'cart1.html':
+            # R5（qa-r5 P3-12）：兩指同按 SELECT + START 70 幀 ⇒ 回選單、游標停在剛玩的那款、放開後沒有黏鍵
+            gid = pg.evaluate('()=>__nes.state().game')
+            se, st2 = R['select'], R['start']
+            t.down(0, se['cx'], se['cy'])
+            t.down(1, st2['cx'], st2['cy'])
+            pg.evaluate('()=>__nes.step(30)')
+            mid = pg.evaluate('()=>({p: CT.backProgress(), m: NES.Input.mask()})')
+            ok('cart1：兩指 SELECT+START 按住 30 幀 ⇒ 回選單進度 0.5、mask 含兩鍵',
+               0.4 < mid['p'] < 0.6 and (mid['m'] & 12) == 12, mid)
+            pg.evaluate('()=>__nes.step(40)')
+            t.clear()
+            pg.evaluate('()=>__nes.step(3)')
+            bk = pg.evaluate("""()=>{ const s = __nes.state();
+              return { game: s.game, mode: s.s && s.s.mode, sel: s.s && s.s.slots[s.s.sel].id,
+                       tm: NES.Touch.mask(), im: NES.Input.mask(), bd: __nes.nes().ppu.backdrop }; }""")
+            ok('cart1：按滿 60 幀回選單（CT.current = null、mode menu）', bk['game'] is None and bk['mode'] == 'menu', bk)
+            ok('cart1：游標停在剛玩的那款 %s' % gid, bk['sel'] == gid, bk)
+            ok('cart1：放開後 mask 0、backdrop 回選單的 $0F（提示沒殘留）',
+               bk['tm'] == 0 and bk['im'] == 0 and bk['bd'] == 0x0F, bk)
 
         # ------------------------------------------------- ④ fix5：一鍵密技鍵
         pg.evaluate("""() => {

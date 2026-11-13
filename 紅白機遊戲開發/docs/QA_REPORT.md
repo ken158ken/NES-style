@@ -1133,3 +1133,57 @@ grep -rniE "mario|luigi|bowser|goomba|koopa|nintendo|famicom|toad|peach|yoshi|pi
 | **cruiser-r4** | 九隻連戰 9/9 互異、rank 升降與 `?rank=0` 回歸、七關隱藏獎勵、結局 → 名單 → 3 字母 → 排行 → 第二輪**整條流程實玩走通**，`--chain` 的數字與宣告一模一樣。只有 **P2-3** 一幀 960 byte 的快轉需要包起來。 |
 | **mech-r1** | R1 就交出 14 間房全綠、四向換房單幀 45 byte、兩關 0 死、武器剋制環 ×10、選單真凍結、C 鍵密技與手機觸控都在 —— 以「第三款新遊戲的第一輪」來說完成度很高，本輪**沒有找到任何 P2 以上的缺陷**。只要把 P3-1 的 PROGRESS 說法更正即可。 |
 | **總控** | R4 可以收。commit 前務必跑 **`$PY tools/stamp.py`**：`star.html` 新增的 **16 支**腳本（W4 6 + W3 6 + icons2x / password / subweapon / worldmap）、`cruiser.html` 的 4 支、`mech.html` 的**全部**都還沒有 `?v=` 戳記；另外 `mech.html` 目前是 untracked，`dist/` 三個入口也都還沒重產。 |
+
+# R5 qa-r5（2026-11-13）
+
+## 摘要
+- 範圍：《星塵 8 合 1》`cart1.html` 選單 + 8 款。**沒有重跑**總控已經確認的 run_all 和 `playthrough_cart --all`。這次只看 agent 自評沒有涵蓋的部分：玩家流程、手機觸控、回選單提示用的 OAM 62/63、密技、原創性、BGM 旋律比對，還有「人類反應延遲」下的難度。
+- 結論：**不需要擋版的功能性缺陷**。8 款都能走完整條流程：選單 → 標題 → 遊玩 → 暫停 → 結束 → 按住 START+SELECT 回選單 → 進下一款，過程沒有卡死、畫面殘留或頁面錯誤，回選單後選單 BGM 也有恢復。**手機上兩指同按 START+SELECT 回選單可以做到**（iPhone 13 直向和橫向，8 款全部回得來）。
+- 缺陷：**P1 × 1（maze 原創性）、P2 × 2、P3 × 12**。
+- 硬限制：機器人全程**強制開著回選單提示**（把 `CT.backProgress` 固定成 0.5）跑完 8 款，每線峰值 maze 5 / blocks 4 / brick 7 / pinball 7 / snake 2 / racing 8（車子自己就佔 8，跟提示無關）/ flyer 4 / tower 6，overFrames 全部是 0。另外統計提示所在的帶狀區（y16 起 8 或 16 線）裡**遊戲自己的精靈**：racing / brick / maze 是 0，flyer 是 1。所以在機器人走過的路線上，提示不可能讓任何一款超線。brick 人為壓力測試（加長 + 三球 + 雷射連發）：每線峰值 6，`stat.dropLine` 0。
+- 密技：C 鍵在選單完全不會誤觸（`CT.current = null`），8 款遊玩中都有效。racing / tower 在**標題畫面**也會觸發，但開局會重設，沒有實害。
+
+### 方法（重現用）
+1. 腳本放 scratchpad，沒有新增工具檔。用 Playwright 開 `cart1.html?debug=1&scale=1&mute=1`，逐幀 `__nes.step`，每幀讀 `__nes.stats()` 和 `GAME.state()`，音樂狀態讀 `nes.music.state()`。
+2. 觸控測試沿用 `tools/mobile_shot.py` 的 `Touch`（CDP 多點），座標取自 `NES.Touch.rects()`。
+3. 「人類節奏」的做法：把 `CT.current.bot` 包一層 12 幀（200 ms）的延遲佇列。另外做了閒置、隨機和最小策略測試，再搭配參數推算。
+4. 旋律比對：在 pulse1 / pulse2 上逐幀擷取 note-on，算音程序列，拿去跟 Korobeiniki、Pac-Man 開場、SMB 地上 / 地下、Zelda、Ode to Joy、DQ 序曲等常見主題比對（允許移調）。
+
+## 缺陷表
+
+| 編號 | 遊戲 | 重現步驟 | 預期 vs 實際 | 建議修法 | 證據 |
+|---|---|---|---|---|---|
+| **P1-1** | maze | 選單 → 星塵迷宮 → START，看第 1 張迷宮 NEBULA GATE | 預期：brief §1-4「不用其…配色」，整體觀感不能讓人看成某款商業遊戲。實際：第 1 張迷宮的整體視覺就是 Pac-Man 的招牌畫面：**黑底 + 深藍 / 淺藍雙線牆**（`maps.js` wall `[0x01,0x21]`）、黃色豆點、四角能量道具、中央帶門的巢、巢下方黃字 **`READY!`**、左下殘機、右下關卡，過關時牆**閃白**。追兵的顏色和個性配對也幾乎照抄：**紅 = 直追（Blinky）、粉 = 預判堵前方（Pinky）**、青；標題畫面「名字 + 一句個性」的角色表也是原作的格式。迷宮配置本身是程式產生的，屬於原創 | 1) 地圖 0 改掉藍色雙線牆（例如紫 / 青綠單線或有紋理的星雲牆），四張圖都不要用藍牆；2) `READY!` 換成原創字樣（例如 `LIFT OFF!` / `GO!`），位置也一起改；3) 追兵配色避開紅 / 粉 / 青 / 橘這組，個性和顏色重新配對；4) 過關閃爍不要閃白（例如換成星色漸層）；5) 標題角色表改成別的版式（例如圖示一排 + 下方輪播說明） | `shots/qa-r5/04_maze_map0_trade_dress.png`、`02_titles.png`（左上） |
+| **P2-1** | 全部 8 款 | 任一款打到 GAME OVER → 按 C（或 ★密技） | 預期：依使用者在 R2c 定下的規則（memory `feedback-famicom-difficulty`：「GAME OVER 輸入續關」為標配），在 GAME OVER 時按密技要**立刻續關**。實際：maze / blocks / pinball / snake / flyer 的 `cheat()` 在結束畫面直接回傳 false，什麼都不做；brick 是命 +1，但還是要按 A 接關，而且分數歸零；racing 只多一次接關，畫面仍停在 over；tower 是生命 +10，但畫面停在 over，按 START 回標題 | 各款在 over（或 crash 後的最終狀態）時，`cheat()` 改成「原地續關」：maze / snake 回到同一關並補命；blocks 用星塵炸彈清 4 列後繼續；pinball 補 1 球；flyer 從同一道門、帶護盾重來；tower 回到本波開始時的狀態並補生命；racing / brick 直接接關不扣分 | 程式路徑：`maze/main.js:489`、`blocks/main.js:624`、`pinball/main.js:489`、`snake/main.js:637`、`flyer/main.js:573`、`tower/main.js:702,722`、`racing/main.js:711`、`brick/main.js:572,720` |
+| **P2-2** | brick | 標題畫面 / 遊玩時吃膠囊；打到第 10 回合 | 預期：不使用商業作品的招牌元素。實際：膠囊字母 **E 加長 / L 雷射 / S 減速 / C 吸附 / P 加命**，字母和功能五個都和 Arkanoid 完全一樣；再加上 `ROUND 01 READY` 這種回合播報，以及最終關「大臉魔王」，三者疊起來的聯想很強。磚陣、球拍和魔王造型本身都是原創 | 膠囊改用**圖像**（例如放大鏡 / 三點 / 閃電 / 沙漏 / 磁鐵 / 心 / 盾）或另一套字母；回合播報改成原創字樣（例如 `SECTOR 01`）。魔王造型可以保留 | `05_brick_capsule.png`、`06_brick_boss.png`、`02_titles.png`（第 3 張） |
+| P3-1 | maze / pinball / snake / racing / flyer / tower | 遊玩中按 START 暫停，等 2 秒 | 預期：紅白機慣例是暫停時 BGM 也停（blocks / brick 就是這樣做）。實際：這 6 款暫停時 BGM 照常播放（`rowsPlayed` 120 幀內 +20），8 款行為不一致 | 暫停時 `Audio.stop`（或 `NES.Music.stop`），恢復時重播；或者至少把旋律聲道關靜音 | t13 / t14 實測數字（見上方「方法」） |
+| P3-2 | 全部 8 款 | 遊玩中拿到分數 → 按住 START+SELECT 回選單 | 預期：選單上的 BEST 反映剛才拿到的分數。實際：沒有任何一款在 `exit()` 裡存最高分。只有 maze 會在過關時存，其他款都要等 GAME OVER 或通關，中途離開分數就沒了。例如 pinball 打到 4750 分後離開，選單仍顯示 `0000000` | 各款 `exit()` 呼叫自己的 saveBest（只寫比舊值大的） | t5 實測 |
+| P3-3 | tower | 第 1 張圖只蓋 2 座光針後一直開波 | 預期：使用者偏好友善版。實際：大約第 5 波失守後只能回標題，**整張圖從第 1 波重來**，沒有「重打本波」的選項。10 波加起來要好幾分鐘，在後面幾波失守的懲罰很重 | GAME OVER 畫面加「A：RETRY WAVE n」，在波次開始時存一份快照（塔、金錢、生命取 max(10, 原值)） | t18 實測：第 5 波 lives 0 → over → title |
+| P3-4 | blocks（觸控） | 手機上拇指按十字鍵左 / 右時往上偏超過 22.5° | 預期：左右移動不會誤觸硬降。實際：`touch.js` 是 8 向判定，25° 就成了 UP+LEFT，而 blocks 的 **UP = 硬降**，會直接把方塊砸下去 | blocks 只在「UP 剛按下而且沒有按住左右」時才硬降（觸控時要求 UP 單獨按）；不要改 engine | t17 實測：0~20° 為 LEFT，25~45° 為 UP+LEFT |
+| P3-5 | blocks / brick / pinball / flyer / snake；racing、tower 的說明頁 | 看標題 / 說明畫面 | 說明文字一行緊接一行沒有空行，8×8 字的上下筆畫黏在一起（例如 `A B ROTATE / UP DROP DOWN SOFT / SELECT HOLD START PAUSE`），不好讀 | 行與行之間空一列，或拆成兩欄、分兩頁 | `02_titles.png`、`03_first_screen.png` |
+| P3-6 | maze / snake | 看標題 | 寫的是 `C = CHEAT` / `C CHEAT`，手機上沒有 C 鍵，對應的是 ★密技 | 改成 `C/★ CHEAT`，或乾脆不寫 | `02_titles.png` |
+| P3-7 | racing / tower | 讀程式 | 另外 6 款的 `goal()` 都要求 `cheats === 0`，這兩款沒有；`cheat()` 也沒有檢查模式，在標題畫面也會觸發（播音效、累加計數） | `goal()` 加上 `&& g.cheats === 0`；`cheat()` 限制只在遊玩 / 結束時有效 | `racing/main.js:733,739`、`tower/main.js:722,730` |
+| P3-8 | 選單（shell） | 看選單第 7 槽 | 星塵飛鳥的圖示是**橘色圓胖小鳥**，跟遊戲裡的藍色星燕「琉璃」不一致，而且橘色圓鳥反而更像 Flappy Bird | 圖示改成藍色星燕的 16×16 剪影 | `01_menu.png` |
+| P3-9 | 回選單提示（shell） | racing / flyer 遊玩中按住 START+SELECT | 提示用的磁磚是「精靈表裡最實心的一塊」，在 8×16 模式的 racing 會變成**半台車**，flyer 會變成**翅膀的一半**，看起來像畫面出錯（其他款看起來正常） | registry 契約加一個可選欄位 `backTile`（由各款指定，總控改），或者 shell 改用 BG 文字「HOLD…」閃爍 | `09_back_overlay_strip.png` |
+| P3-10 | 全部（說明） | 進任一款的標題 / 暫停畫面 | 「按住 START+SELECT 回選單」這件事只寫在選單底部，遊戲裡完全看不到，第一次玩的人很難發現 | 由 shell 在暫停時顯示一行提示（shell 能知道目前在暫停嗎？不能的話就請各款在暫停畫面加一行 `HOLD START+SELECT = MENU`） | `08_pause_sheet.png` |
+| P3-11 | maze / blocks、snake / flyer（BGM） | 擷取標題曲 pulse1 | 跟商業主題**沒有**相似之處（最長相同音程 ≤ 7，全部是音階走句）。但**卡帶內部有雷同**：maze 和 blocks 的標題曲開頭 10 個音完全一樣（D E F A G F E D C A），snake 和 flyer 的標題曲開頭也幾乎一樣（D G B A G …） | maze 或 blocks 其中一款改寫開頭動機；snake / flyer 同理 | t16 擷取的音高序列 |
+| P3-12 | 工具 | `tools/test_touch.py` | `PAGES` 只有 game / star / cruiser / mech，**沒有 cart1.html** | 加入 cart1.html。這次手動實測已確認兩指 START+SELECT、★ 和直 / 橫向都可用 | `tools/test_touch.py:31` |
+
+## 實測紀錄（沒有發現問題的項目）
+- **玩家流程**：8 款都從選單進入（游標停在剛玩的那款），標題 / 說明 → START → 遊玩 → 暫停（暫停時按 A / B / 方向，狀態都不會變）→ 恢復 → 按住 START+SELECT 70 幀 → 選單，選單 BGM 有恢復。這段流程連續走完 8 款，沒有殘留也沒有頁面錯誤。只按住 START+SELECT 40 幀就放開時，**沒有任何一款**被誤暫停，blocks 也不會誤觸暫存、tower 不會誤開波（各款都用 `!held(SELECT)` 擋住了）。GAME OVER 後：maze / snake 會自動回標題並播標題曲；blocks / brick / flyer / tower 停在結束畫面等按鍵，這是正常行為。最高分在結束時有寫入，選單也有正確顯示：maze 001960、blocks 0007148、brick 005460、snake 000020、flyer 006 GATE、tower SC14480。
+- **觸控**（iPhone 13 直向 390×664 / 橫向 750×342）：8 款都用觸控走到遊玩並做出核心動作：maze 移動吃豆、blocks 移動 / 旋轉 / 暫存 / 硬降 / 軟降、brick 球拍移動、pinball 拉桿發射 + 兩邊擋板、snake 轉向、racing 經過說明 → 介紹 → 倒數後油門、flyer 振翅、tower 進入地圖。START 暫停在 8 款都有效（snake 的 READY 期間不接受暫停，這是設計）。**兩指同按 SELECT+START 70 幀，8 款 × 兩個方向全部回到選單**；放開後 mask 是 0，沒有黏鍵。橫向時 SELECT / START 上下疊在同一欄（間距 6 px），一根拇指壓不到兩顆，需要兩根手指，可以接受。
+- **難度（人類節奏）**：maze 第 1 關追兵 / 主角速度比 0.85，比原作的 0.94 寬鬆；完全不按大約 13 秒才第一次死。blocks DAS 12/4、7 袋、影子、暫存，都偏友善。brick 初速 1.75 px/幀、拍寬 32，再加上 GAME OVER 可以接關。flyer 縫高 64 px、碰撞框 10×8、第一道門在 320 px 外，開場有 5 秒空檔，節奏友善。racing 延遲 12 幀的機器人仍拿下第 1 條賽道的第 1 名。pinball 每顆新球都有救球。tower 開局 100 金（3 座光針），只蓋 2 座撐到第 4 波。前 1~2 分鐘沒有明顯不合理的地方；唯一偏硬的是 P3-3。
+- **原創性（P1-1 / P2-2 以外）**：blocks 的名稱、配色和曲子都是原創，類型慣例（HOLD / NEXT / 影子）可以接受。pinball 的桌面和元件是原創。snake 是原創。racing 是俯視視角，車和賽道沒有對應到特定作品。flyer 用磚石柱 + 岩牙縫 + 藍色星燕，**沒有沿用綠色水管的造型**。tower 的路線和塔是原創。BGM 全部 17 首擷取下來，跟商業主題都沒有相似之處。
+
+## 各款簡評
+| 款 | 簡評 |
+|---|---|
+| **選單 shell** | 開機、選單、回選單、游標記憶、BEST 顯示都穩定；回選單提示在 8 款都沒有超線（強制常駐跑完機器人全程）。要改的是 P3-8 圖示、P3-9 提示磁磚，以及 P3-10 讓玩家能發現回選單的方法。 |
+| **maze** | 玩起來很順，AI 四種個性分得清楚，難度也比原作寬鬆，**但第 1 張迷宮的觀感就是 Pac-Man**（P1-1）。這部分要在發佈前改掉，改調色盤和字樣就能解決大半。 |
+| **blocks** | 手感、演出和友善化都做得好，暫停時把盤面藏起來的處理也正確。手機上要處理 UP 硬降誤觸（P3-4），說明頁太擠（P3-5）。 |
+| **brick** | 10 回合加魔王、三球 + 雷射的壓力測試每線只到 6，處理得很乾淨；暫停時有停 BGM。膠囊字母要換（P2-2）。 |
+| **pinball** | 兩張名稱表做直向桌面加 split 狀態列，物理穩定；拉桿和擋板在觸控上都按得到。只有 P3 等級的一致性問題（暫停 BGM、中途離開不存分數）。 |
+| **snake** | 三種模式都有，預排轉向很友善。READY 期間 START 被忽略，這是設計。主要是 P2-1（結束時密技續關）。 |
+| **racing** | 俯視捲軸的做法合理，車子自己就把每線用到 8，但沒有超線，提示帶狀區裡沒有車。標題的 PUSH START 每 16 幀閃一次，沒有問題。要補的是 P3-7 密技 / goal 的一致性。 |
+| **flyer** | 世界觀和角色明確是原創，節奏也友善。要改的是選單圖示（P3-8）和標題曲開頭跟 snake 雷同（P3-11）。 |
+| **tower** | 屬性表做游標和射程顯示、逐線配額，設計很漂亮；最小策略在第 5 波失守後要整張重打（P3-3），建議做友善版的重打本波。 |
